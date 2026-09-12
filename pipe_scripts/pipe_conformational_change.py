@@ -73,57 +73,121 @@ def resolve_atoms(atoms: str) -> Optional[str]:
 
 def align_and_compute_rmsd(ref_obj: str, target_obj: str, selection: str,
                            alignment_method: str,
-                           atoms: str = "all") -> Dict[str, Any]:
+                           atoms: str = "all",
+                           pairing: str = "sequence",
+                           cycles: int = 5,
+                           cutoff: float = 2.0,
+                           frame: str = None) -> Dict[str, Any]:
     """
-    Align target structure to reference and return RMSD from PyMOL.
+    Superpose target on reference and return RMSD over `selection`.
 
-    Args:
-        ref_obj: Reference PyMOL object name
-        target_obj: Target PyMOL object name (will be aligned to reference)
-        selection: Selection specification, or None/"all" for whole structure
-        alignment_method: "align", "super", or "cealign"
-        atoms: Atom specification ("all", "CA", "backbone", or "CA+CB" etc.)
+    Three things here are not PyMOL's defaults, because PyMOL's defaults answer a
+    different question than "did this structure fold the way it was designed":
 
-    Returns:
-        Dictionary with RMSD and num_aligned_atoms from PyMOL's alignment
+    * `pairing` decides how atoms are put into correspondence. "sequence" uses
+      align/super/cealign, which pair by sequence similarity and silently drop
+      residues they cannot match — right for homologues, wrong for a design and the
+      refold of an inverse-folded sequence, where the sequences differ BY DESIGN.
+      "ordered" (cmd.fit matchmaker=-1) pairs the Nth atom with the Nth atom.
+    * `cycles` is PyMOL's outlier rejection. At its default of 5 the reported RMSD
+      describes only the atoms that survived, so a badly-folded region can be trimmed
+      away until what remains fits well. Measured on real designs: a segment 11.4 A
+      from its design reported 1.89 A after refinement discarded 95 of 200 atoms.
+    * `frame` superposes on one selection and measures another in that frame. A
+      segment allowed its own superposition can fit itself well while sitting in
+      completely the wrong place: one such segment scored 11.4 A on its own best fit
+      and 18.9 A once the cores were aligned.
+
+    Returns RMSD both after and before refinement, so a large gap between them is
+    visible in the output rather than silent.
     """
-    # Create selection strings
-    if selection is None or selection == "all":
-        ref_sel = f"{ref_obj}"
-        target_sel = f"{target_obj}"
+    def _sel(obj, sele):
+        base = obj if (sele is None or sele == "all") else _sele_to_pymol(obj, sele)
+        names = resolve_atoms(atoms)
+        return f"({base}) and name {names}" if names else base
+
+    ref_sel = _sel(ref_obj, selection)
+    target_sel = _sel(target_obj, selection)
+
+    # Superpose on `frame` when given, otherwise on the measured selection itself.
+    fit_ref = _sel(ref_obj, frame) if frame else ref_sel
+    fit_tgt = _sel(target_obj, frame) if frame else target_sel
+
+    n_before = cmd.count_atoms(fit_tgt)
+    residues = cmd.count_atoms(fit_tgt + " and name CA")
+
+    if pairing == "sequence":
+        if alignment_method == "align":
+            r = cmd.align(fit_tgt, fit_ref, cycles=cycles, cutoff=cutoff)
+            rmsd, n_after, rmsd_before, n_before = r[0], r[1], r[3], r[4]
+            residues = r[6]
+        elif alignment_method == "super":
+            r = cmd.super(fit_tgt, fit_ref, cycles=cycles, cutoff=cutoff)
+            rmsd, n_after, rmsd_before, n_before = r[0], r[1], r[3], r[4]
+            residues = r[6]
+        elif alignment_method == "cealign":
+            r = cmd.cealign(fit_ref, fit_tgt)
+            rmsd = rmsd_before = r["RMSD"]
+            n_after = n_before = r["alignment_length"]
+        else:
+            raise ValueError(f"Unknown alignment method: {alignment_method}")
+    elif pairing in ("ordered", "identifier"):
+        mm = -1 if pairing == "ordered" else 0
+        if cmd.count_atoms(fit_tgt) != cmd.count_atoms(fit_ref) and pairing == "ordered":
+            raise ValueError(
+                f"pairing='ordered' needs the same atom count on both sides, got "
+                f"{cmd.count_atoms(fit_tgt)} vs {cmd.count_atoms(fit_ref)}. The structures "
+                f"do not share an atom order — use pairing='sequence' or fix the inputs.")
+        rmsd = cmd.fit(fit_tgt, fit_ref, matchmaker=mm, cycles=cycles, cutoff=cutoff)
+        # cmd.fit reports no post-rejection count and does not narrow the selection,
+        # so how many atoms its cycles actually rejected is not observable here --
+        # unlike cmd.align, which returns it. n_after therefore equals n_before by
+        # construction and atoms_dropped_pct is 0 in this mode; do not read it as
+        # evidence that nothing was rejected.
+        rmsd_before = cmd.fit(fit_tgt, fit_ref, matchmaker=mm, cycles=0) if cycles else rmsd
+        n_after = cmd.count_atoms(fit_tgt)
     else:
-        ref_sel = _sele_to_pymol(ref_obj, selection)
-        target_sel = _sele_to_pymol(target_obj, selection)
+        raise ValueError(f"Unknown pairing: {pairing}")
 
-    # Apply atom name filter
-    atom_names = resolve_atoms(atoms)
-    if atom_names:
-        ref_sel = f"({ref_sel}) and name {atom_names}"
-        target_sel = f"({target_sel}) and name {atom_names}"
+    # With a frame, the fit above moved the target; now measure the requested
+    # selection where it landed, without refitting it.
+    if frame:
+        mm = -1 if pairing in ("sequence", "ordered") else 0
+        if mm == -1:
+            # matchmaker=-1 pairs the Nth atom with the Nth atom. The count guard
+            # in the 'ordered' branch above covers the FRAME selections, not these
+            # measured ones, so without this a mismatched selection is paired
+            # positionally across two structures that differ by design -- and
+            # rms_cur answers 0.000 on unequal counts rather than raising, which is
+            # indistinguishable from a perfect superposition.
+            n_tgt = cmd.count_atoms(target_sel)
+            n_ref = cmd.count_atoms(ref_sel)
+            if n_tgt != n_ref:
+                raise ValueError(
+                    f"selection has {n_tgt} atoms in the target and {n_ref} in the "
+                    f"reference, and pairing={pairing!r} pairs them by position. Use "
+                    f"pairing='identifier' to pair by chain/residue/atom name, or "
+                    f"narrow `selection` to a region both structures share.")
+        rmsd = cmd.rms_cur(target_sel, ref_sel, matchmaker=mm)
+        rmsd_before = rmsd
+        n_after = n_before = cmd.count_atoms(target_sel)
+        residues = cmd.count_atoms(target_sel + " and name CA")
 
-    if alignment_method == "align":
-        # Returns: [RMSD_after, atoms_after, cycles, RMSD_before, atoms_before, score, residues_aligned]
-        result = cmd.align(target_sel, ref_sel)
-        rmsd = result[0]
-        num_atoms = result[1]
-    elif alignment_method == "super":
-        # Same return format as align
-        result = cmd.super(target_sel, ref_sel)
-        rmsd = result[0]
-        num_atoms = result[1]
-    elif alignment_method == "cealign":
-        # Returns: {'RMSD': float, 'alignment_length': int, ...}
-        result = cmd.cealign(ref_sel, target_sel)
-        rmsd = result['RMSD']
-        num_atoms = result['alignment_length']
-    else:
-        raise ValueError(f"Unknown alignment method: {alignment_method}")
+    dropped = 100.0 * (1 - n_after / n_before) if n_before else 0.0
+    if dropped >= 10.0:
+        print(f"  ! refinement dropped {dropped:.0f}% of atoms "
+              f"({n_before} -> {n_after}); RMSD {rmsd_before:.2f} -> {rmsd:.2f} A. "
+              f"The reported RMSD describes only the atoms that survived.")
 
-    print(f"  - Aligned using: {alignment_method}, RMSD: {rmsd:.3f}, atoms: {num_atoms}")
+    print(f"  - pairing={pairing}, cycles={cycles}, RMSD={rmsd:.3f}, atoms={n_after}")
 
     return {
         'RMSD': rmsd,
-        'num_aligned_atoms': num_atoms
+        'num_aligned_atoms': n_after,
+        'RMSD_before': rmsd_before,
+        'num_atoms_before': n_before,
+        'num_residues_aligned': residues,
+        'atoms_dropped_pct': round(dropped, 1),
     }
 
 
@@ -162,7 +226,11 @@ def load_selection_from_table(table_path: str, column_name: str) -> Dict[str, st
 
 def analyze_conformational_change(ref_path: str, target_path: str, selection: str,
                                   alignment_method: str,
-                                  atoms: str = "all") -> Optional[Dict[str, Any]]:
+                                  atoms: str = "all",
+                                  pairing: str = "sequence",
+                                  cycles: int = 5,
+                                  cutoff: float = 2.0,
+                                  frame: str = None) -> Optional[Dict[str, Any]]:
     """
     Analyze conformational change between reference and target structures.
 
@@ -194,7 +262,8 @@ def analyze_conformational_change(ref_path: str, target_path: str, selection: st
         print(f"  - Atoms: {atoms}")
 
         # Align and get RMSD from PyMOL
-        metrics = align_and_compute_rmsd(ref_obj, target_obj, selection, alignment_method, atoms)
+        metrics = align_and_compute_rmsd(ref_obj, target_obj, selection, alignment_method,
+                                         atoms, pairing, cycles, cutoff, frame)
 
         # Clean up PyMOL objects
         cmd.delete(ref_obj)
@@ -222,6 +291,10 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
 
     selection_config = config_data['selection']
     alignment_method = config_data['alignment_method']
+    pairing = config_data.get('pairing', 'sequence')
+    cycles = config_data.get('cycles', 5)
+    cutoff = config_data.get('cutoff', 2.0)
+    frame_config = config_data.get('frame')
     atoms = config_data.get('atoms', 'all')
     output_csv = config_data['output_csv']
 
@@ -230,6 +303,9 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
     print(f"Target structures: {len(target_ds.ids_expanded)}")
     print(f"Selection: {selection_config}")
     print(f"Alignment method: {alignment_method}")
+    print(f"Pairing: {pairing} | cycles: {cycles} | cutoff: {cutoff}")
+    if frame_config:
+        print(f"Frame: {frame_config.get('value', frame_config.get('column_name'))}")
     print(f"Atoms: {atoms}")
 
     # Initialize PyMOL in headless mode
@@ -283,6 +359,25 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
             )
     else:
         target_to_sele_id = None
+
+    # Per-structure frame selections, mapped to target ids the same way: a frame
+    # column typically lives on a design-level table while the targets are the
+    # per-sequence folds derived from it.
+    frame_selections = {}
+    target_to_frame_id = None
+    if frame_config and frame_config['type'] == 'table_column':
+        frame_selections = load_selection_from_table(frame_config['table_path'],
+                                                     frame_config['column_name'])
+        if len(frame_selections) == 1:
+            single_frame_value = next(iter(frame_selections.values()))
+            for target_id in target_ids:
+                frame_selections[target_id] = single_frame_value
+        else:
+            target_to_frame_id = get_mapped_ids(
+                source_ids=target_ids,
+                target_ids=list(frame_selections.keys()),
+                unique=True
+            )
 
     # Determine if reference is single or multiple
     use_single_reference = len(reference_ds.ids_expanded) == 1
@@ -345,7 +440,20 @@ def analyze_all_conformational_changes(config_data: Dict[str, Any]) -> None:
             continue
 
         # Analyze conformational change
-        metrics = analyze_conformational_change(ref_path, target_path, selection, alignment_method, atoms)
+        frame_sel = None
+        if frame_config:
+            if frame_config['type'] == 'fixed':
+                frame_sel = frame_config['value']
+            else:
+                frame_key = (target_to_frame_id.get(target_id, target_id)
+                             if target_to_frame_id else target_id)
+                frame_sel = frame_selections.get(frame_key)
+                if frame_sel is None:
+                    print(f"Warning: no frame selection for {target_id}; skipping")
+                    continue
+        metrics = analyze_conformational_change(ref_path, target_path, selection,
+                                                alignment_method, atoms,
+                                                pairing, cycles, cutoff, frame_sel)
 
         if metrics is None:
             continue

@@ -82,7 +82,8 @@ class PocketGen(BaseConfig):
     """
 
     TOOL_NAME = "PocketGen"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "pocketgen"
 
     # ------------------------------------------------------------------
     # Install
@@ -101,17 +102,18 @@ class PocketGen(BaseConfig):
         Verification: env exists + torch + rdkit + esm import + checkpoint
         file present.
         """
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("PocketGen", "")
         parent_dir = os.path.dirname(repo_dir)
         ckpt_path = os.path.join(repo_dir, "checkpoints", "pocketgen.pt")
 
-        env_check = cls._env_exists_check("pocketgen", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -d "{repo_dir}/utils" ] && [ -d "{repo_dir}/models" ]'
         ckpt_check = f'[ -f "{ckpt_path}" ]'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {env_check} && {ckpt_check} \\
-   && {cls._env_run("pocketgen", env_manager)}python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
     echo "PocketGen already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -123,13 +125,13 @@ if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/zaixizhang/PocketGen.git "{repo_dir}"
 fi"""
 
-        remove_block = cls._env_remove_block("pocketgen", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("pocketgen", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
 
         ckpt_block = f"""# Fetch pretrained checkpoint (~hundreds of MB) from Google Drive.
 mkdir -p "$(dirname {ckpt_path})"
 if [ ! -f "{ckpt_path}" ]; then
-    {cls._env_run("pocketgen", env_manager)}gdown --id {POCKETGEN_CKPT_GDRIVE_ID} -O "{ckpt_path}"
+    {cls._env_run(env, env_manager)}gdown --id {POCKETGEN_CKPT_GDRIVE_ID} -O "{ckpt_path}"
 fi"""
 
         return f"""echo "=== Installing PocketGen ==="
@@ -138,7 +140,7 @@ fi"""
 {remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create pocketgen environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
@@ -146,7 +148,7 @@ fi
 
 # Verify installation
 if {repo_check} && {ckpt_check} \\
-   && {cls._env_run("pocketgen", env_manager)}python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, rdkit, esm" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PocketGen installation complete ==="
 else

@@ -297,6 +297,10 @@ def extract_ligands_from_structures(config_data: Dict[str, Any],
     absent from a given structure routes that pair to the failed table; the other
     structures still produce their ligands.
     """
+    # One template for every carved copy: they are all the same molecule, so the
+    # SMILES is unambiguous. Empty means downstream tools perceive bonds instead.
+    template_smiles = str(config_data.get("template_smiles", "") or "")
+
     # Local import so the download paths don't pay for it.
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from biopipelines.biopipelines_io import load_datastream, iterate_files
@@ -334,7 +338,8 @@ def extract_ligands_from_structures(config_data: Dict[str, Any],
             successful.append({
                 'id': cid, 'format': carved_fmt, 'code': code,
                 'lookup': '', 'source': 'extract',
-                'ccd': '', 'cid': '', 'cas': '', 'smiles': '', 'name': '', 'formula': '',
+                'ccd': '', 'cid': '', 'cas': '', 'smiles': template_smiles,
+                'name': '', 'formula': '',
                 'file_path': out_path, 'structures.id': sid,
             })
     print(f"  extracted {n_ok} ligand(s), {len(failed)} missing")

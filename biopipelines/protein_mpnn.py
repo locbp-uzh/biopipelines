@@ -11,7 +11,7 @@ import json
 from typing import Dict, List, Any, Union, Tuple
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string, resolve_table_reference
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -19,7 +19,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string, resolve_table_reference
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -32,7 +32,11 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.3"
+    # protein_mpnn_run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    # Upstream calls this env "mlfold"; we share RFdiffusion's SE3nv to spare one.
+    ENV_NAME = "SE3nv"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
@@ -46,7 +50,7 @@ class ProteinMPNN(BaseConfig):
         parent_dir = os.path.dirname(repo_dir)
         biopipelines = folders.get("biopipelines", "")
 
-        pmpnn_env = ConfigManager().get_environment("ProteinMPNN") or "mlfold"
+        pmpnn_env = cls._install_env(env_manager)
         rfd_env   = ConfigManager().get_environment("RFdiffusion")
 
         # Skip when the repo exists AND `import torch` works inside the
@@ -217,8 +221,8 @@ fi
 
         # Store parameters
         self.num_sequences = num_sequences
-        self.fixed = fixed
-        self.redesigned = redesigned
+        self.fixed = resolve_table_reference(fixed, "fixed")
+        self.redesigned = resolve_table_reference(redesigned, "redesigned")
         self.chain = chain
         self.sampling_temp = sampling_temp
         self.model_name = model_name
@@ -286,6 +290,7 @@ fi
         script_content += self.activate_environment(name="biopipelines")
         script_content += self._generate_script_prepare_inputs()
         script_content += self.activate_environment()
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_proteinmpnn()
         script_content += self.activate_environment(name="biopipelines")
         script_content += self._generate_script_create_table()
@@ -402,7 +407,7 @@ with open(sys.argv[5], 'w') as out:
 
     echo "  [run]  $struct_id"
     set +e
-    {self.container_prefix()}python {self.pmpnn_py} --jsonl_path "$SUBSET_JSONL" --fixed_positions_jsonl "$SUBSET_FIXED" --out_folder {self.pmpnn_out_folder} {pmpnn_options} > "$SUBSET_LOG" 2>&1
+    {self.container_prefix()}python {self.pmpnn_py} --jsonl_path "$SUBSET_JSONL" --fixed_positions_jsonl "$SUBSET_FIXED" --out_folder {self.pmpnn_out_folder} {pmpnn_options} {self.extra_args_bash()} > "$SUBSET_LOG" 2>&1
     rc=$?
     set -e
     if [ $rc -ne 0 ]; then

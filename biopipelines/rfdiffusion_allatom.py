@@ -73,7 +73,10 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.3"
+    # RFdiffusion-AllAtom's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
+    FORWARD_UNKNOWN_KWARGS = "hydra"
+    ENV_NAME = "SE3nv"
 
     # Typed builder for the guiding potential, e.g.
     #   RFdiffusionAllAtom.GuidingPotential.ligand_ncontacts(weight=3, r_0=8, d_0=4)
@@ -82,6 +85,7 @@ class RFdiffusionAllAtom(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         repo_dir = folders.get("RFdiffusionAllAtom", "")
         parent_dir = os.path.dirname(repo_dir)
         biopipelines = folders.get("biopipelines", "")
@@ -90,7 +94,7 @@ class RFdiffusionAllAtom(BaseConfig):
         # Importable-rfdiffusion probe: the env merely existing is not enough —
         # the AllAtom extras layer on top of the rfdiffusion package, which
         # RFdiffusion.install() puts into SE3nv. Test the real precondition.
-        se3nv_ready = f'{cls._env_run("SE3nv", env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1'
+        se3nv_ready = f'{cls._env_run(env, env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1'
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && [ -f "{repo_dir}/RFDiffusionAA_paper_weights.pt" ] && {se3nv_ready}; then
     echo "RFdiffusion-AllAtom already installed, skipping. Use force_reinstall=True to reinstall."
@@ -123,7 +127,7 @@ fi
 
 # Layer the AllAtom-specific deps into the shared SE3nv env (declarative).
 if [ -f "{pip_reqs}" ]; then
-    {cls._env_run("SE3nv", env_manager)}pip install -r "{pip_reqs}"
+    {cls._env_run(env, env_manager)}pip install -r "{pip_reqs}"
 else
     echo "WARNING: {pip_reqs} not found; skipping AllAtom extra deps."
 fi
@@ -187,7 +191,7 @@ fi
         Initialize RFdiffusion-AllAtom configuration.
 
         Args:
-            ligand: Ligand as a compounds stream (Ligand(code="ZIT") or any
+            ligand: Ligand as a compounds stream (Ligand(codes="ZIT") or any
                     compounds-producing tool). The 3-letter residue code is
                     read from the stream's `code` column at runtime and passed
                     to RFdiffusion-AllAtom's inference.ligand= hydra flag.
@@ -267,9 +271,9 @@ fi
 
         # AllAtom-specific parameters — ligand is a compounds stream; the
         # residue code is resolved from its `code` column at runtime. A bare
-        # string is shorthand for an internal Ligand(code=...).
+        # string is shorthand for an internal Ligand(codes=...).
         self.ligand_stream: DataStream = resolve_basic_input(
-            ligand, Ligand, "compounds", "code", allow_none=False)
+            ligand, Ligand, "compounds", "codes", allow_none=False)
         self.ppi_design = ppi_design
         self.ppi_hotspot_residues = ppi_hotspot_residues or []
         self.ppi_binder_length = ppi_binder_length
@@ -295,7 +299,7 @@ fi
         self.substrate_stream: Optional[DataStream] = None
         if substrate is not None and not isinstance(substrate, str):
             self.substrate_stream = resolve_basic_input(
-                substrate, Ligand, "compounds", "code")
+                substrate, Ligand, "compounds", "codes")
 
         # Normalize the per-PDB selection args (literal broadcast or table-column
         # reference). inpaint_str defaults to None here -> treat as unset.
@@ -334,7 +338,7 @@ fi
             raise ValueError("num_recycles must be at least 1")
 
         if not self.ligand_stream or len(self.ligand_stream) == 0:
-            raise ValueError("ligand (a compounds stream, e.g. Ligand(code=...)) is required and must not be empty")
+            raise ValueError("ligand (a compounds stream, e.g. Ligand(codes=...)) is required and must not be empty")
 
         # A column reference is keyed by input-PDB id, so it needs PDBs.
         # Only literal selections are interpolated raw into bash; table
@@ -435,6 +439,7 @@ fi
         # under container_prefix when a container is set; host-side helpers
         # below run under the activated env either way.
         script_content += self.activate_environment()
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
@@ -551,7 +556,7 @@ LIGAND_CODE={Resolve.stream_item(self.ligand_json, '$LIGAND_ID', column='code')}
 echo "Output folder: {self.output_folder}"
 
 cd {repo_dir}
-{self.container_prefix()}python {self.inference_py_file} {aa} {common}
+{self.container_prefix()}python {self.inference_py_file} {aa} {common} {self.extra_args_bash()}
 
 """
 
@@ -588,6 +593,7 @@ for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
         "inference.input_pdb=$INPUT_PDB"
         "inference.output_prefix={structures_dir}/$STRUCT_ID"
         {common_array}
+        {self.extra_args_bash()}
     )
     if [ -n "$INPAINT_SEL" ]; then
         AA_OPTIONS+=("contigmap.inpaint_seq=['$INPAINT_SEL']")
@@ -708,7 +714,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.3"
 
     # Lazy path descriptors
     #   prepared_pdb    — the single output PDB, lives in structures/.

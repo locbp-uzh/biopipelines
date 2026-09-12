@@ -37,6 +37,33 @@ def check_file_exists(file_path: str) -> bool:
         return len(glob.glob(file_path)) > 0
     return os.path.exists(file_path) and (os.path.isfile(file_path) or os.path.isdir(file_path))
 
+def _resolve_lazy_pairs(template: str, ids: List[str]) -> List[Tuple[Optional[str], str]]:
+    """Pair each on-disk file a lazy pattern actually covers with the id it carries.
+
+    A glob cannot express the bracket contract — a bracket is an optional, repeatable
+    suffix group, so ``design_1[_<#>]`` covers ``design_1`` and ``design_1_5_7`` but not
+    ``design_10_5``. Globbing alone reported COMPLETE off a sibling id's files, so the
+    glob is used only to enumerate candidates and ``select_ids`` decides which count.
+
+    With no candidate on disk the wildcard pair is kept, so an absent output still reads
+    as incomplete rather than as nothing-expected.
+    """
+    glob_ids = id_patterns.glob_from_lazy_ids(ids)
+    pairs: List[Tuple[Optional[str], str]] = []
+    for gid in glob_ids:
+        pattern_path = template.replace('<id>', gid)
+        prefix, _, suffix = pattern_path.partition('*')
+        candidates = []
+        for path in sorted(glob.glob(pattern_path)):
+            middle = path[len(prefix):len(path) - len(suffix)] if suffix else path[len(prefix):]
+            candidates.append((gid.replace('*', middle), path))
+        # One select_ids over every candidate, not one call per file.
+        covered = set(id_patterns.select_ids(ids, [c for c, _p in candidates]))
+        matched = [(c, p) for c, p in candidates if c in covered]
+        pairs.extend(matched or [(gid, pattern_path)])
+    return pairs
+
+
 def check_files_exist(file_list: List[str]) -> Tuple[bool, List[str]]:
     """
     Check if all files in a list exist.
@@ -90,11 +117,7 @@ def extract_id_file_pairs(category_data) -> List[Tuple[Optional[str], str]]:
             if is_complete:
                 return [(eid, template.replace('<id>', eid)) for eid in expanded_ids]
             else:
-                # Lazy patterns: replace [...] with '*' then expand <..> slots.
-                # The glob_id is both the substitution and the owner id (its
-                # deterministic prefix is what an excused upstream id matches).
-                glob_ids = id_patterns.glob_from_lazy_ids(ids)
-                return [(gid, template.replace('<id>', gid)) for gid in glob_ids]
+                return _resolve_lazy_pairs(template, ids)
         return [(None, f) for f in files]
     elif isinstance(category_data, list):
         return [(None, f) for f in category_data]
@@ -204,7 +227,7 @@ def _filter_expected_missing(missing_pairs: List[Tuple[Optional[str], str]],
     """
     if not expected_missing_ids:
         return [p for (_oid, p) in missing_pairs], []
-    from biopipelines.id_map_utils import map_table_ids_to_ids
+    from biopipelines.id_map_utils import DEFAULT_ID_MAP, map_table_ids_to_ids
     expected_set = set(expected_missing_ids)
     unexpected = []
     expected = []
@@ -212,7 +235,7 @@ def _filter_expected_missing(missing_pairs: List[Tuple[Optional[str], str]],
         if owner_id is None:
             unexpected.append(path)
             continue
-        ancestors = map_table_ids_to_ids(owner_id, {"*": "*_<S>"})
+        ancestors = map_table_ids_to_ids(owner_id, DEFAULT_ID_MAP)
         is_expected = any(a in expected_set for a in ancestors)
         (expected if is_expected else unexpected).append(path)
     return unexpected, expected
@@ -372,6 +395,41 @@ def check_expected_outputs(expected_outputs: Dict[str, Any],
                 all_exist = False
 
     return all_exist, missing_by_category
+
+def tally_declared_outputs(expected_outputs: Dict[str, Any]) -> Tuple[int, int]:
+    """(found, declared) over every declared output path, for the summary line.
+
+    Independent of excusal: every generated tool script exits 0, so a step that
+    ran and produced nothing still reports COMPLETED. Stating the raw count is
+    what makes that visible in the log without failing the run.
+    """
+    declared = 0
+    found = 0
+    for category, value in expected_outputs.items():
+        if category in _RESERVED_TOP_LEVEL_KEYS:
+            continue
+        for _owner_id, path in extract_id_file_pairs(value):
+            declared += 1
+            if check_file_exists(path):
+                found += 1
+
+    tables = expected_outputs.get('tables')
+    table_files = []
+    if isinstance(tables, dict):
+        for _name, info in tables.items():
+            if isinstance(info, dict) and 'path' in info:
+                table_files.append(info['path'])
+            else:
+                table_files.append(str(info))
+    elif isinstance(tables, list):
+        table_files = tables
+    for path in table_files:
+        declared += 1
+        if check_file_exists(path):
+            found += 1
+
+    return found, declared
+
 
 def create_status_file(output_folder: str, tool_name: str, status: str, details: Dict[str, Any] = None) -> str:
     """
@@ -536,15 +594,18 @@ def main():
         expected_outputs = expected_outputs['output_structure']
 
     success, missing_by_category = check_expected_outputs(expected_outputs, args.tool_name, args.output_folder)
+    found, declared = tally_declared_outputs(expected_outputs)
 
     if success:
-        print(f"Required outputs found for {args.tool_name}")
+        print(f"Required outputs found for {args.tool_name}: "
+              f"{found} of {declared} declared outputs found")
         if not args.check_only:
             status_file = create_status_file(args.output_folder, args.tool_name, "COMPLETED")
             print(f"Created completed status file: {os.path.basename(status_file)}")
         sys.exit(0)
     else:
-        print(f"Missing outputs for {args.tool_name}:")
+        print(f"Missing outputs for {args.tool_name}: "
+              f"{found} of {declared} declared outputs found")
         for category, files in missing_by_category.items():
             print(f"  {category}:")
             for file_path in files:

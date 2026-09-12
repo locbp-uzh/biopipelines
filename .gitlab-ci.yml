@@ -12,7 +12,9 @@ stages:
     - python -m pip install --upgrade pip
     - python -m pip install -e ".[test]"
   script:
-    - pytest tests/ -v
+    # -m overrides the local addopts deselect: CI has network, so it runs those;
+    # tool_parameters stays out because it needs a GPU.
+    - pytest tests/ -v -m "not tool_parameters"
   rules:
     # Run on every push to any branch, and on merge requests.
     - if: '$CI_PIPELINE_SOURCE == "push"'
@@ -32,6 +34,11 @@ pytest:py312:
   <<: *pytest-template
   variables:
     PYTHON_VERSION: "3.12"
+
+pytest:py313:
+  <<: *pytest-template
+  variables:
+    PYTHON_VERSION: "3.13"
 
 mirror-to-github:
   stage: deploy

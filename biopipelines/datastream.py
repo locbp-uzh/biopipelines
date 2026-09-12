@@ -18,7 +18,15 @@ import pandas as pd
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Set, Iterator, Tuple, Union
 
-from . import id_patterns
+# A pipe script loads this chain standalone via sys.path, where a relative import has no package.
+try:
+    from . import contract_enforcement
+    from . import id_patterns
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(__file__))
+    import contract_enforcement
+    import id_patterns
 
 
 @dataclass
@@ -96,6 +104,9 @@ class DataStream:
 
     def __post_init__(self):
         """Validate DataStream after initialization."""
+        # Above the early returns below, so pattern and shared-file streams are checked too.
+        contract_enforcement.check_stream(self.name, self.files, self.format,
+                                          self.ids, self.map_table)
         # Shared-file form: files is a non-empty str — no length check, the
         # one path covers all ids by design.
         if self.is_shared_file:
@@ -228,37 +239,37 @@ class DataStream:
         expanded_ids = self.ids_expanded
         if self.is_shared_file:
             for item_id in expanded_ids:
-                yield DataStream(
+                yield self._inherit_producer(DataStream(
                     name=self.name,
                     ids=[item_id],
                     files=self.files,
                     map_table=self.map_table,
                     format=self.format,
                     _runtime_mode=self._runtime_mode
-                )
+                ))
             return
 
         expanded_files = self.files_expanded
         if expanded_files:
             for item_id, item_file in zip(expanded_ids, expanded_files):
-                yield DataStream(
+                yield self._inherit_producer(DataStream(
                     name=self.name,
                     ids=[item_id],
                     files=[item_file],
                     map_table=self.map_table,
                     format=self.format,
                     _runtime_mode=self._runtime_mode
-                )
+                ))
         else:
             for item_id in expanded_ids:
-                yield DataStream(
+                yield self._inherit_producer(DataStream(
                     name=self.name,
                     ids=[item_id],
                     files=[],
                     map_table=self.map_table,
                     format=self.format,
                     _runtime_mode=self._runtime_mode
-                )
+                ))
 
     def chunks(self, count: Optional[int] = None, *, size: Optional[int] = None) -> List['DataStream']:
         """Split into groups, for fanning a stream across parallel tasks.
@@ -280,8 +291,8 @@ class DataStream:
         are dropped, so asking for more chunks than items yields fewer.
 
         Lazy ids split on their deterministic outer axis and keep their
-        ``[...]`` suffix, so ``prot_<0..9>[_<N><A V>]`` chunks into groups of
-        ``prot_N[_<N><A V>]`` whose runtime fan-out is still deferred. An id
+        ``[...]`` suffix, so ``prot_<0..9>[_<#><A V>]`` chunks into groups of
+        ``prot_N[_<#><A V>]`` whose runtime fan-out is still deferred. An id
         that is lazy at the top level has no such axis and raises.
         """
         if (count is None) == (size is None):
@@ -317,7 +328,7 @@ class DataStream:
     def _records_stream(self) -> 'DataStream':
         if self.is_lazy and not self._runtime_mode:
             if self.map_table and os.path.exists(self.map_table):
-                return DataStream(
+                return self._inherit_producer(DataStream(
                     name=self.name,
                     ids=self.ids.copy(),
                     files=self.files if isinstance(self.files, str) else self.files.copy(),
@@ -325,7 +336,7 @@ class DataStream:
                     format=self.format,
                     metadata=self.metadata.copy(),
                     _runtime_mode=True,
-                )
+                ))
             raise ValueError(
                 f"Cannot iterate records for lazy DataStream '{self.name}' before "
                 "its map_table is materialized."
@@ -382,53 +393,54 @@ class DataStream:
                 sliced_files = self.files
             else:
                 sliced_files = self.files_expanded[index] if self.files_expanded else []
-            return DataStream(
+            return self._inherit_producer(DataStream(
                 name=self.name,
                 ids=sliced_ids,
                 files=sliced_files,
                 map_table=self.map_table,
                 format=self.format,
                 _runtime_mode=self._runtime_mode
-            )
+            ))
 
         # Integer indexing — try O(1) expand_at for single-pattern case
         n = len(self)
         if index < 0 or index >= n:
             raise IndexError(f"Index {index} out of range for DataStream with {n} items")
 
-        if len(self.ids) == 1 and self.has_patterns():
+        # can_expand, not has_patterns: expand_at on a lazy id fabricates an id matching no row.
+        if len(self.ids) == 1 and id_patterns.can_expand(self.ids[0]):
             item_id = id_patterns.expand_at(self.ids[0], index)
         else:
             item_id = self.ids_expanded[index]
 
         if self.is_shared_file:
-            return DataStream(
+            return self._inherit_producer(DataStream(
                 name=self.name,
                 ids=[item_id],
                 files=self.files,
                 map_table=self.map_table,
                 format=self.format,
                 _runtime_mode=self._runtime_mode
-            )
+            ))
 
         if self.files_expanded:
-            return DataStream(
+            return self._inherit_producer(DataStream(
                 name=self.name,
                 ids=[item_id],
                 files=[self.files_expanded[index]],
                 map_table=self.map_table,
                 format=self.format,
                 _runtime_mode=self._runtime_mode
-            )
+            ))
         else:
-            return DataStream(
+            return self._inherit_producer(DataStream(
                 name=self.name,
                 ids=[item_id],
                 files=[],
                 map_table=self.map_table,
                 format=self.format,
                 _runtime_mode=self._runtime_mode
-            )
+            ))
 
     def __bool__(self) -> bool:
         """DataStream is truthy if it has any items."""
@@ -523,7 +535,7 @@ class DataStream:
 
         if self.is_shared_file:
             new_ids = [i for i in expanded_ids if i in keep_ids]
-            return DataStream(
+            return self._inherit_producer(DataStream(
                 name=self.name,
                 ids=new_ids,
                 files=self.files,
@@ -531,7 +543,7 @@ class DataStream:
                 format=self.format,
                 metadata={**self.metadata, '_filtered': True, '_original_count': len(self)},
                 _runtime_mode=self._runtime_mode
-            )
+            ))
 
         expanded_files = self.files_expanded
 
@@ -544,7 +556,7 @@ class DataStream:
                 if expanded_files:
                     new_files.append(expanded_files[i])
 
-        return DataStream(
+        return self._inherit_producer(DataStream(
             name=self.name,
             ids=new_ids,
             files=new_files,
@@ -552,7 +564,20 @@ class DataStream:
             format=self.format,
             metadata={**self.metadata, '_filtered': True, '_original_count': len(self)},
             _runtime_mode=self._runtime_mode
-        )
+        ))
+
+    def _inherit_producer(self, derived: 'DataStream') -> 'DataStream':
+        """Carry the producing tool onto a stream derived from this one.
+
+        Dataflow edges are recovered by walking ``_producer``, so a filtered,
+        sliced or chunked stream that drops it makes the run page state that
+        the two steps are not wired when they are. ``StandardizedOutput``
+        already does this for its own derivations.
+        """
+        producer = getattr(self, '_producer', None)
+        if producer is not None:
+            derived._producer = producer
+        return derived
 
     def to_dict(self) -> Dict[str, Any]:
         """

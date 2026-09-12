@@ -3,9 +3,9 @@
 # Each entry maps a tool class to:
 #   - files: wrapper module + pipe scripts whose changes count as
 #     "wrapper changes" for version-bump purposes. The pre-commit hook
-#     (scripts/check_tool_version_bumps.py) refuses any commit that
-#     modifies one of these files without bumping `current` (and
-#     mentioning the tool under [unreleased] in CHANGELOG.md).
+#     (versions/check_tool_edits.py) refuses any commit that modifies one
+#     of these files without bumping `current` (and mentioning the tool
+#     under [unreleased] -> ### Tools in versions/CHANGELOG.md).
 #   - current: the wrapper's TOOL_VERSION value (must match the literal
 #     in the wrapper's class body).
 #   - history: append-only list of {version, date, note} entries.
@@ -28,15 +28,27 @@ ADMETAI:
   files:
   - biopipelines/admet_ai.py
   - pipe_scripts/pipe_admet_ai.py
-  current: "1.0"
-  history: []
+  current: "2.0"
+  history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 AiZynthFinder:
   files:
   - biopipelines/aizynthfinder.py
   - pipe_scripts/pipe_aizynthfinder.py
-  current: "1.2"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      A lazy bracket that means a number now says `<#>` instead of `<N>`. Inside a bracket the token was already behaving as a wildcard -- the content is discarded, since a value unknown at configuration time cannot be narrowed there -- while outside a bracket `<N>` is the one-element set containing the letter N. Writing `<N>` for a number was therefore a lie that only happened to work. No behavioural change: the compiled regex is identical.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.0'
     date: '2026-07-23'
     note: Initial AiZynthFinder retrosynthesis wrapper.
@@ -54,8 +66,12 @@ AF2BIND:
   files:
   - biopipelines/af2bind.py
   - pipe_scripts/pipe_af2bind.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -65,23 +81,43 @@ Aggrescan3D:
   files:
   - biopipelines/aggrescan3d.py
   - pipe_scripts/pipe_aggrescan3d.py
-  current: "1.0"
-  history: []
+  current: "2.1"
+  history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs onto the `aggrescan` binary, in both the serial and the parallel run block.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 AlphaFold:
   files:
   - biopipelines/alphafold.py
   - pipe_scripts/pipe_alphafold_confidence.py
   - pipe_scripts/pipe_alphafold_msas.py
-  current: "1.0"
-  history: []
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `msas` map_table records the alignment path under `file`, not `msa_file`.
+  - version: '1.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs onto `colabfold_batch`. The framework has not typed every upstream option and AlphaFold's surface is large, so an advanced user can now reach one directly instead of being told the kwarg was unknown.
 
 APBS:
   files:
   - biopipelines/apbs.py
   - pipe_scripts/pipe_apbs.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -101,12 +137,31 @@ BayesianAdjuster:
   current: "1.0"
   history: []
 
+BindingData:
+  files:
+  - biopipelines/binding_data.py
+  - pipe_scripts/pipe_binding_data.py
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Records queried_utc and chembl_release on both output tables. These are snapshots of databases that grow with every release, so two runs months apart legitimately disagree and nothing in the output distinguished them; a reported affinity could not be traced to what produced it.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Percent-encodes the SMILES ChEMBL's similarity and substructure endpoints take in the URL path. It was interpolated raw, and requests keeps '#' and '/' in its safe set, so 'C#N' truncated at the '#' -- everything after it, threshold included, became a client-side fragment and was never sent, leaving a similarity search for plain carbon -- and 'C/C=C/C' split into extra path segments. Adds a User-Agent identifying the lab, a ~3/s rate limit and retry-with-backoff on 429/503, so a throttled batch is retried rather than recorded as a batch of compounds with no known binder. An unrecognised BindingDB payload and an unparseable affinity value now raise or report no relation instead of being laundered into a scientific negative.
+
 BioEmu:
   files:
   - biopipelines/bioemu.py
   - pipe_scripts/pipe_bioemu.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -120,37 +175,98 @@ Boltz2:
   - pipe_scripts/pipe_boltz_msa_copy.py
   - pipe_scripts/pipe_boltz_postprocessing.py
   - pipe_scripts/pipe_boltz_results.py
-  current: "1.0"
-  history: []
+  current: "2.4"
+  history:
+  - version: '2.4'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `msas` map_table records the alignment path under `file`, not `msa_file`; the MSA copy and config steps read the canonical name.
+  - version: '2.3'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs onto `boltz predict`.
+  - version: '2.2'
+    date: '2026-09-04'
+    note: >-
+      Post-processing stops parsing ids itself. `_prov_index` re-implemented the parent-suffix rule with `rpartition('_')` and an `isdigit()` guard to relate a per-sample structure id to the '<base>' key combinatorics uses for provenance; the shared `get_mapped_ids` ladder already answers that as its parent tier, so the local copy is gone and all three provenance sites call it. The lookup is now batched once per table instead of once per row per stream, a non-digit suffix resolves as a child rather than silently losing its provenance columns, and a mixed-tier lookup is reported by the id_match_consistency check, which the local copy could never do.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.1'
+    date: '2026-07-29'
+    note: >-
+      pipe_boltz_config_unified.py now declares and honours --single-sequence.
+      The wrapper emitted the flag whenever single_sequence=True, but the pipe
+      script's parser never declared it, so argparse rejected the invocation,
+      no YAML configs were written, and Boltz2 folded ZERO inputs while
+      post-processing still reported success. Honouring it sets msa: empty on
+      every protein chain, which is Boltz's single-sequence mode.
 
 BoltzGen:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen.py
   - pipe_scripts/pipe_boltzgen_config.py
-  current: "1.0"
-  history: []
+  current: "2.1"
+  history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      No behavioural change. BoltzGen and BoltzGenImport share `biopipelines/boltzgen.py`, and the version moves because the file did when the import step stopped comparing an id_map pattern against a single literal spelling.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 BoltzGenImport:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen_import.py
-  current: "1.0"
-  history: []
+  current: "2.1"
+  history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Stops comparing an id_map pattern against one literal spelling. The import step matched `id_map == "*_<N>"` exactly, so the same pattern written with the canonical `<#>` class would have silently taken the generic branch instead of the recursive-numeric one; it now accepts either digit spelling from `id_map_utils.DIGIT_CLASSES`. The hard-coded defaults and the CLI default move from the retired `<S>` to `<?>`. No behavioural change for a pattern already written the old way.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 BoltzGenMerge:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen_merge.py
-  current: "1.0"
-  history: []
+  current: "2.1"
+  history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      No behavioural change. BoltzGenMerge shares `biopipelines/boltzgen.py` with BoltzGen and BoltzGenImport, and the version moves because the file did.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 CABSflex:
   files:
   - biopipelines/cabsflex.py
   - pipe_scripts/pipe_cabsflex.py
-  current: "1.0"
-  history: []
+  current: "2.1"
+  history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs onto the `CABSflex` binary, in both run blocks.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 CompoundLibrary:
   files:
@@ -166,8 +282,16 @@ ConformationalChange:
   files:
   - biopipelines/conformational_change.py
   - pipe_scripts/pipe_conformational_change.py
-  current: "1.0"
-  history: []
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Type-checks cycles and cutoff. bool is an int subclass, so cycles=True passed the old isinstance check and silently meant one cycle; cutoff had no type check at all and a string reached a comparison, raising an opaque TypeError rather than a named error.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Adds pairing (sequence/ordered/identifier), cycles, cutoff and frame, plus RMSD_before, num_atoms_before, num_residues_aligned and atoms_dropped_pct so a refined RMSD says how much of the selection it describes. A frame measurement under positional pairing now checks that the measured selection has the same atom count on both sides: the existing guard covered the frame selections only, and rms_cur answers 0.000 rather than raising on a mismatch, which reads as a perfect superposition.
 
 Consensus:
   files:
@@ -192,8 +316,16 @@ DiffDock:
   - biopipelines/diffdock.py
   - pipe_scripts/pipe_diffdock_build_csv.py
   - pipe_scripts/pipe_diffdock_postprocess.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Documentation only. `pipe_diffdock_build_csv.py`'s header claimed the `complex_name` it emits "matches" the pair-ID rule; it now states why a flat `<protein>+<ligand>` product *is* that rule here, and names `predict_single_output_id` as where the join must move if a bundled axis ever becomes meaningful. No behavioural change; the version moves because the mapped file did. A predict-versus-produce mismatch was ruled out by measurement: the constructor refuses a Bundle/Each wrapper, so both axes are always iterated.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -223,15 +355,27 @@ DNAEncoder:
   files:
   - biopipelines/dna_encoder.py
   - pipe_scripts/pipe_dna_encoder.py
-  current: "1.0"
-  history: []
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Treats a degenerate base as able to complete a forbidden site. _matches tested whether the generated base was literally in the site's IUPAC set, so the NNN emitted for an X residue matched nothing and was judged incapable of creating a site -- the optimistic reading of an unknown base. Both sides are now compared as sets, so a window that COULD be the site once synthesised is rejected.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Adds exclude_sites: recognition sequences to keep out of the coding DNA, matched in both orientations and written in IUPAC. Codons are redrawn from the same frequency-thresholded pool, so exclusion does not push the sequence toward rare codons, and a site straddling a codon boundary is caught by checking a window around each placed codon. One un-encodable sequence now costs its own row instead of aborting the batch.
 
 DSSP:
   files:
   - biopipelines/dssp.py
   - pipe_scripts/pipe_dssp.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -243,8 +387,20 @@ DynamicBind:
   - pipe_scripts/pipe_dynamicbind_build_csv.py
   - pipe_scripts/pipe_dynamicbind_movie.py
   - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "1.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs onto `run_single_protein_inference.py`. It had been listed as having no upstream command line, which was wrong: its wrapper emits one directly.
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Documentation only. `pipe_dynamicbind_postprocess.py`'s header now records why the hand-composed `<protein>+<ligand>` pair id is the framework's product for this tool, and where the join must move if a bundled axis ever becomes reachable. No behavioural change; the version moves because the mapped file did. A predict-versus-produce mismatch was ruled out by measurement: the constructor refuses a Bundle/Each wrapper, so both axes are always iterated.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -262,8 +418,16 @@ ESMFold:
   - biopipelines/esmfold.py
   - pipe_scripts/pipe_esmfold_inference.py
   - pipe_scripts/pipe_esmfold_postprocessing.py
-  current: "1.2"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.3'
+    date: '2026-09-02'
+    note: >-
+      Declare the empty `compounds` placeholder as `csv` rather than `sdf`, per the Ligand Contract: compounds carries chemistry in its map_table and never coordinate files. The `sdf` spelling came from the developer manual's tool template, which has been corrected. No runtime effect — the placeholder is empty — but the declaration now passes contract_enforcement.check_compounds_format.
   - version: '1.2'
     date: '2026-07-09'
     note: >-
@@ -278,13 +442,37 @@ ESMFold2:
   - biopipelines/esmfold2.py
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
-  current: "1.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: reads an upstream `msas` map_table through the canonical `file` column.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.5'
+    date: '2026-08-31'
+    note: >-
+      No behavioural change. The eight-line comment above the missing-table propagation call was collapsed to one line during branch integration, per the repository's rule that a comment states the non-obvious why in a single line; the rationale it carried lives in the 1.3 entry above and in the commit history. The version moves only because the wrapper file did.
   - version: '1.0'
     date: '2026-07-05'
     note: >-
       Initial ESMFold2 wrapper: all-atom biomolecular complex prediction (EvolutionaryScale, github.com/evolutionaryscale/esm). Folds proteins / ssDNA / dsDNA / ssRNA / dsRNA / ligands with Bundle/Each combinatorics, per-protein-chain a3m MSA recycling, and inference-time scaling (num_loops / num_diffusion_samples / num_seeds, best-of-N by ipTM/pLDDT). Emits an mmCIF structures stream and a confidence table (plddt, ptm, iptm, optional max_pae). Cluster and Colab share one code path; Colab-verified on A100 across the full usage matrix.
+  - version: '1.2'
+    date: '2026-07-29'
+    note: >-
+      Exposes the two StructurePredictionInput constraints the wrapper was dropping: modifications (per-residue CCD substitution on a polymer chain, so SEP/TPO/PTR fold as real phospho-residues rather than their unmodified parents) and covalent_bonds (CovalentBond between entities). Both are addressed by chain id and 1-indexed residue position, matching the rest of the framework, and are written to _configuration/constraints_config.json for the inference script to convert. Covalent bonds are given as atom NAMES, matching Boltz2's bond-constraint interfaces; the inference script resolves each name to the index upstream indexes by, which requires enumerating atoms with the bonds already declared (leaving atoms are stripped only then) and therefore runs as a patch-up pass over placeholder indices. Resolving against the unmodified residue instead would be silently wrong: OG is atom 3 of SEP but atom 5 of SER, and atom 5 of SEP is the backbone O. Upstream silently drops a covalent bond whose chain or atom index does not resolve — every such failure now raises. No pocket parameter: upstream defines PocketConditioning and round-trips it through StructurePredictionInput, but build_feature_tensors zeroes pocket_feature unconditionally and never reads input.pocket (esm 3.3.0), so it would be accepted and discarded; measured on a GH200, pocket_feature is all-zero and identical with and without it. A pocket= kwarg raises rather than being swallowed by BaseConfig. Verified against esm 3.3.0 on Daint: SEP yields P/O1P/O2P/O3P where the SER control has no phosphorus, and a declared covalent bond takes token_bonds from 88 to 90 edges. Version 1.1 is skipped: it is claimed by an unrelated in-flight missing-table fix on another branch.
 
+  - version: '1.3'
+    date: '2026-07-29'
+    note: >-
+      generate_script now emits the missing-table propagation step it already declared. get_output_files() adds the `missing` table as soon as any input carries an upstream missing manifest, but the matching _generate_missing_table_propagation() call was absent, so tables/missing.csv was never written and the completion check stamped _FAILED on every ESMFold2 step whose structures, compounds and confidence outputs were all correct -- silently, in any pipeline with a filterable upstream. The emit is guarded by the same condition as the declaration so the two cannot drift apart. Developed as 1.1 before 1.2 merged; it lands as 1.3.
+  - version: '1.4'
+    date: '2026-08-05'
+    note: >-
+      Adds glycans=[[CCD, ...]], one ligand chain per glycan given as an ordered list of CCD codes, carried on the constraints payload rather than the compounds axis (glycans are not combinatorial, and Ligand caps a CCD code at 5 characters so it cannot express a multi-residue chain). Upstream bonds none of the residues, so the glycosidic linkages and the protein attachment must still be declared through covalent_bonds -- which is also what makes upstream strip the anomeric O1, so an undeclared linkage is chemically wrong rather than merely unbonded. Chain ids are now assigned by entity type (polymers first, ligands last) instead of in call order, which followed whether an axis iterated rather than what it held: ESMFold2(proteins=Bundle(a, b), ligands=lig) gave the ligand chain A and moved the protein letters whenever a ligand was added or removed, silently repointing any covalent_bonds/modifications constraint written against them. The ligand branch now gates on the compounds table's format column before trusting a CCD code, so a SMILES compound is no longer folded as CCD entry LIG (a real entry, C15H11N3) with confidence, ipTM and PAE reported for the wrong molecule.
 ExtractMetrics:
   files:
   - biopipelines/extract_metrics.py
@@ -296,8 +484,16 @@ FPocket:
   files:
   - biopipelines/fpocket.py
   - pipe_scripts/pipe_fpocket.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-05'
+    note: >-
+      The pocket metrics never reached the tables. fpocket indents every metric line with a tab, so splitting the raw line on its first tab read an empty key and stored the whole line under it: `druggability`, `volume` and `n_alpha_spheres` came out blank in `pockets.csv` and `top_druggability`/`top_volume` were reported as 0 for every structure, while the row counts and the pocket PDBs looked correct. The key normalization was wrong independently -- it replaced spaces before stripping the colon, so `Druggability Score :` became `druggability_score_` and would have missed the lookup even with the tab fixed. Measured on a cluster run of 1ubq, whose pocket 1 fpocket scores at druggability 0.235 and volume 550.097.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -307,8 +503,12 @@ Frame2Seq:
   files:
   - biopipelines/frame2seq.py
   - pipe_scripts/pipe_frame2seq.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -318,15 +518,31 @@ Fuse:
   files:
   - biopipelines/fuse.py
   - pipe_scripts/pipe_fuse_queries.py
-  current: "1.0"
-  history: []
+  current: "1.3"
+  history:
+  - version: '1.3'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '1.2'
+    date: '2026-09-02'
+    note: >-
+      Renames its `name` parameter to `construct_name`. `name` is framework-reserved as the job name, so the tool captured it and the job name was silently lost; both are now set independently. `name` remains a deprecated alias for the construct label.
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      A lazy slot no longer crashes the query builder. Slot ids were expanded with `expand_ids` behind a `contains_pattern` guard, which answers "is this a pattern" rather than "can this be expanded now", so a lazy `[...]` id passed the guard and raised `LazyPatternError`. Slot ids are now partially expanded and the map_table rows the pattern covers are selected with `select_ids`, making the rows the source of truth for both the sequence lookup and the product axes.
 
 GEMS:
   files:
   - biopipelines/gems.py
   - pipe_scripts/pipe_gems.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -336,20 +552,117 @@ Gnina:
   files:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
-  current: "1.1"
+  - pipe_scripts/pipe_vina_backend.py
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-09-11'
+    note: >-
+      a zero-length `autobox_ligand` stream is accepted instead of raising "must be DataStream ... got DataStream". The type check and the type error hung off a length test, so an upstream filtered to nothing failed as a type error naming the type it had.
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs to the `gnina` binary. Gnina builds its argv in the pipe script rather than in the wrapper's bash, so the tokens travel in the config JSON as a list and the pipe script appends them to the command it hands to subprocess.run -- no shell, so nothing re-parses them.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.8'
+    date: '2026-08-31'
+    note: >-
+      tool_overrides.gnina no longer applies to the Vina backend. The block configures CUDA modules and LD_LIBRARY_PATH for the GPU binary; Vina is CPU-only conda-forge software in its own env, so loading GNINA's CUDA stack into its step is noise at best and a library conflict at worst. A Vina pose whose bond orders could not be restored from the input template is tagged bond_orders_restored=false rather than written out as an all-single-bond skeleton indistinguishable from a good one.
+  - version: '1.7'
+    date: '2026-08-31'
+    note: >-
+      Resolves every receptor's autobox reference in one provenance-aware pass instead of one get_mapped_ids call per protein with no map_table. Without the map_table an upstream rename has no string relation to match on (Panda_1 vs design_3), so the lookup found nothing and every receptor silently fell back to its own crystal HETATM. Extracted as resolve_autobox_references so the behaviour is testable.
+  - version: '1.6'
+    date: '2026-08-31'
+    note: >-
+      A receptor whose PDBQT conversion fails is recorded in missing.csv instead of disappearing from every output table: docking mode previously wrote that manifest from upstream rows alone. Stops defaulting backend and scoring when reading the config, since the wrapper always writes both -- a malformed config now crashes rather than silently docking with GNINA.
+  - version: '1.5'
+    date: '2026-08-31'
+    note: >-
+      No change to Gnina's own behaviour; the version moves because the shared pipe_vina_backend.py did. See the Vina entry.
+  - version: '1.4'
+    date: '2026-08-31'
+    note: >-
+      No change to Gnina's own behaviour; the version moves because the shared pipe_vina_backend.py did. See the Vina entry.
+  - version: '1.3'
+    date: '2026-08-31'
+    note: >-
+      No change to Gnina's own behaviour. _validate_vina_backend, a Gnina-class method the Vina subclass calls, no longer compares the CNN parameters against hard-coded copies of Gnina's defaults; the version moves because the shared wrapper file did.
+  - version: '1.2'
+    date: '2026-07-28'
+    note: >-
+      New backend="gnina"|"vina" parameter selecting the docking engine, plus a scoring parameter for Vina's force field. Under backend="vina" the CNN parameters are rejected and the cnn_* columns are absent from the output tables.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
       Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
+
+Vina:
+  files:
+  - biopipelines/gnina.py
+  - pipe_scripts/pipe_gnina.py
+  - pipe_scripts/pipe_vina_backend.py
+  current: "2.2"
+  history:
+  - version: '2.2'
+    date: '2026-09-11'
+    note: >-
+      same `autobox_ligand` correction as Gnina, whose wrapper file it shares.
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs to the `vina` binary, by the same config-JSON route as Gnina, whose pipe script drives it.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.6'
+    date: '2026-08-31'
+    note: >-
+      See the Gnina entry: the CUDA overrides no longer reach this backend, and an unrestored pose is tagged rather than silently emitted with PDBQT's single-bond perception.
+  - version: '1.5'
+    date: '2026-08-31'
+    note: >-
+      No behavioural change; the version moves because the shared pipe_gnina.py did. See the Gnina entry.
+  - version: '1.4'
+    date: '2026-08-31'
+    note: >-
+      Honours autobox_add in score and minimize mode. The value was read from the config and never passed, so box_args always used its own 4.0 default and the user's setting was silently discarded.
+  - version: '1.3'
+    date: '2026-08-31'
+    note: >-
+      Refuses to dock in a box that does not reach the receptor. With no explicit box and no crystal ligand, box_args falls back to the INPUT ligand's coordinates -- nothing has been docked at that point. That is correct when the ligand was carved from this receptor, where its coordinates are the crystal pose, and meaningless when RDKit embedded it from SMILES, since such a conformer is centred on the origin while the receptor sits wherever its crystallographers left it. The run now raises with both extents named instead of returning scores for empty space.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Warns when it boxes on the docked ligand's own coordinates. With no explicit box and no crystal ligand in the receptor, box_args falls back to the ligand being docked; that is only meaningful if the ligand was carved from this receptor, since a conformer generated from SMILES sits in an arbitrary frame and the box then lands away from the protein. The GNINA branch warns in the same situation and this one was silent, so the result was a plausible score for a pocket Vina never searched.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Reads Gnina's CNN parameter defaults from its signature instead of hard-coded copies. 85d3134 moved cnn_score_threshold's default to 0.0 while the check still compared against 0.5, so the inherited value read as an offender and every Vina(...) raised at construction; the tool could not be used at all.
+  - version: '1.0'
+    date: '2026-07-28'
+    note: >-
+      AutoDock Vina docking: Gnina with backend="vina" locked, its own env and install. CPU-only, no CNN scoring. The docking route on aarch64, where GNINA's prebuilt x86-64 binary cannot run.
 
 LASErMPNN:
   files:
   - biopipelines/lasermpnn.py
   - pipe_scripts/pipe_lasermpnn.py
   - pipe_scripts/pipe_lasermpnn_bfactor.py
-  current: "1.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs into the existing free-form `--run-options` channel, each token shlex-quoted so a value containing a space stays one argument through the `shlex.split` on the far side.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.0'
     date: '2026-07-04'
     note: >-
@@ -359,21 +672,76 @@ Ligand:
   files:
   - biopipelines/ligand.py
   - pipe_scripts/pipe_ligand.py
-  current: "1.1"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '1.3'
+    date: '2026-09-02'
+    note: >-
+      Renames the code-only construction parameter from `code` to `codes`, since the singular was one letter away from it and silently handed back a chemistry-free stub when confused. `code` remains a deprecated alias. Adds `Compound` as another name for this tool, matching the `compounds` stream it emits; outputs keep the original name, so a `Compound(...)` step still writes `001_Ligand/`.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Adds template_smiles to the carve path (structures= plus codes=), so a carved ligand's compounds stream carries real chemistry in its smiles column instead of leaving every downstream consumer to perceive bond orders from coordinates. templated_ligand_mol also disables RDKit proximityBonding when the source PDB declares CONECT records, trusting the declared bonds.
   - version: "1.1"
     date: "2026-07-27"
     note: >-
       Add execution-time PubChem PUG-View chemical-vendor enrichment for an
       existing compounds stream, preserving filtered ids and input columns.
 
+LigandAtomSelector:
+  files:
+  - biopipelines/ligand_atom_selector.py
+  - pipe_scripts/pipe_ligand_atom_selector.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-03'
+    note: >-
+      The documented `(TableInfo, "column")` column-reference form now binds. It was refused by the parameter's own validator even though the signature and the tool page advertise it; the value is normalized through the shared `resolve_table_reference` before validation, so the tuple and the `tool.tables.x.col` attribute form produce the identical `TABLE_REFERENCE:path:column`.
+
 LigandMPNN:
   files:
   - biopipelines/ligand_mpnn.py
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
-  current: "1.1"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-09-04'
+    note: >-
+      The `run.py` command is emitted as a bash array instead of through `eval`, the last such site in the tree. The position resolver now prints NUL-separated argv tokens rather than a flag-plus-quoted-value line, which is what the `eval` existed to split, so a residue list containing a space survives as one argument without a second parse.
+  - version: '2.4'
+    date: '2026-09-03'
+    note: >-
+      The documented `(TableInfo, "column")` column-reference form now binds. Only a `TableReference` was recognised, so a tuple fell through to `json.dump` and raised `TypeError: Object of type TableInfo is not JSON serializable` from `generate_script` — after the whole pipeline had been configured. `fixed` and `redesigned` are normalized through the shared `resolve_table_reference`, which accepts a literal selection, a `TableReference`, a `(TableInfo, column)` tuple or a `(path, column)` pair, and refuses anything else at construction time naming the parameter.
+  - version: '2.3'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.2'
+    date: '2026-09-02'
+    note: >-
+      Constructs its internal code-only `Ligand` with `codes=` rather than the now-deprecated `code=`. The bare-string `ligand="LIG"` shorthand is the documented form, so the deprecation notice it triggered named a call the user never made.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Forwards constructor keywords it does not type onto the upstream command line, so an advanced user can reach an option the wrapper never curated. Declares `FORWARD_UNKNOWN_KWARGS` with its upstream CLI dialect — hydra `key=value` for the RFdiffusion family, argparse `--key value` for the MPNN family — and every forwarded key and value is validated at construction time through the same denylist as any other freeform string, then emitted double-quoted and echoed into the step log so a forwarded flag is visible rather than silent. A leftover key within the similarity cutoff of a real parameter name is reported as a probable misspelling naming the candidate, and still forwarded rather than dropped.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.3'
+    date: '2026-08-31'
+    note: >-
+      Validates the packer parameters. packs_per_design reaches the generated bash and the <1..N> output id pattern, so a zero, a negative or a string surfaced as a broken pattern or a silently empty result instead of a named error at construction; the two packer booleans are type-checked rather than coerced.
+  - version: '1.2'
+    date: '2026-08-07'
+    note: >-
+      Added pack_side_chains, packs_per_design and pack_with_ligand_context, exposing upstream's side-chain packer. When enabled the tool gains a structures stream; without it LigandMPNN emits sequence only, so downstream structures keep the input rotamers under the new residue identities.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -382,16 +750,52 @@ LigandMPNN:
 Load:
   files:
   - biopipelines/load.py
-  current: "1.0"
-  history: []
+  current: "1.4"
+  history:
+  - version: '1.4'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: refuses a map_table whose file column is a retired per-tool spelling instead of recovering a stream with no files from it.
+  - version: '1.3'
+    date: '2026-09-04'
+    note: >-
+      Matching ids to filenames now inverts the declared `<id>` file template instead of guessing from the basename. Wave 3 made exact basenames claim first, which covers `<id>.pdb` only; the three shipped suffixed templates (`<id>_best.pdb`, `<id>_A3D.csv`, `<id>_RMSF.csv`) never produce a basename equal to an id, so every id still fell through to substring matching -- measured, `design_1` was handed `design_10_best.pdb` while `design_1_best.pdb` went unused, and ids came back renamed to `design_1_A3D`. New `id_patterns.id_from_file_pattern` and `glob_from_file_pattern` provide the inverse and the candidate glob. A one-id templated stream also stopped taking the "already matched" shortcut, which reported it recovered without checking disk.
+  - version: '1.2'
+    date: '2026-09-02'
+    note: >-
+      Load recovers a partially-completed output folder instead of failing or answering wrongly. A declared-but-absent `missing.csv` — what a step killed mid-write leaves behind — raised `FileNotFoundError` and denied the user every id that step did produce; it is now reported and excuses nothing. Without a map_table the glob fallback matched `design_10` to `design_1.pdb` by substring and reported `design_1` twice, so exact basenames now claim first and one file serves one id. A readable map_table with zero rows is an answer, not an unresolved template. New `recovery` / `recovery_summary()` / `recovered_nothing` state what was recovered and what was not, and the step's `_COMPLETED`/`_FAILED` marker is read and surfaced. Also sets the derived job name via `name`, the key BaseConfig actually reads; it was passed as `job_name`, which was parked in `.params` and discarded, so every Load ran with an unnamed job.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Reads a map_table with dtype=str and keep_default_na=False. Since the map became authoritative for stream ids, type inference renamed them -- a zero-padded 0001 loaded as 1 while its file stayed 0001.pdb, so every downstream join on id silently missed -- and it blanked real NA/nan strings. The rebasing path wrote that damage to disk. Path rebasing now matches whole path components, so a row pointing at a sibling run (Job_001_retry when Job_001 moved) is left alone, and it raises instead of silently keeping the old map when the rebased copy cannot be written.
 
 MMseqs2:
   files:
   - biopipelines/mmseqs2.py
   - pipe_scripts/pipe_mmseqs2_sequences.py
   - pipe_scripts/mmseqs2_client.sh
-  current: "1.1"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `msas` map_table declares one file column, the canonical `file`; it previously declared both `msa_file` and `file` and wrote only the former.
+  - version: '1.5'
+    date: '2026-09-02'
+    note: >-
+      No behavioural change; the version moves because the shared `mmseqs2.py` did. See the MMseqs2Server entry.
+  - version: '1.4'
+    date: '2026-08-31'
+    note: >-
+      submission_in_progress judges staleness from the lockdir, the same artifact acquire_submit_lock uses. Reading the marker's mtime instead left one state nobody could act on -- marker gone, lockdir present -- where every client saw no submission in progress, failed to acquire because the directory existed, and submitted nothing for the full 3h TTL.
+  - version: '1.3'
+    date: '2026-08-31'
+    note: >-
+      Behaves as a guest on the public ColabFold MSA server: sends a User-Agent identifying the lab, reads the submit response's status so a RATELIMIT or MAINTENANCE reply (both of which carry a ticket id) stops the run instead of polling a ticket that was never queued, and backs off with jitter rather than at a fixed 5s. A batch in which every sequence fails now exits non-zero; it previously wrote an empty MSA table at exit 0, which passed the completion check and let every downstream fold run single-sequence with nothing saying so.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Corrects the 1.1 note, which describes behaviour this release removed. Alignments are paired by the query header inside each returned chunk, not by an integer alias parsed from the tar member name, and server_url no longer requires output_format="a3m" -- the step always declares and emits .csv, converting a3m on arrival, so output_format now selects only the wire format requested from the search. No behavioural change in this bump.
   - version: '1.1'
     date: '2026-07-27'
     note: Map remote-server alignments to queries by parsed integer alias, not by
@@ -402,29 +806,81 @@ MMseqs2Server:
   files:
   - biopipelines/mmseqs2.py
   - pipe_scripts/mmseqs2_server_gpu.sh
-  current: "1.0"
-  history: []
+  current: "1.5"
+  history:
+  - version: '1.5'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: same `msas` schema correction as MMseqs2, whose wrapper file it shares.
+  - version: '1.4'
+    date: '2026-09-02'
+    note: >-
+      Arms the cleanup trap before claiming the submission lock. The trap was registered after the ~271 s index load because `cleanup()` was defined below it, so a server dying in that window left its lockdir for the full 3 h TTL and suppressed every client's server — the 'died before ready' case cleanup's own comment claimed to handle. Deleting a peer's advertisement is now gated on the server having gone ready, which the earlier trap would otherwise have caused, and cleanup propagates the real exit code instead of a hardcoded 0, which would have turned every pre-ready failure into a reported success.
+  - version: '1.3'
+    date: '2026-08-31'
+    note: >-
+      No behavioural change; the version moves because the shared mmseqs2.py did. See the MMseqs2 entry.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      No behavioural change; the version moves because the shared mmseqs2.py did. Also registered in config.daint.yaml's environment block, which had omitted it and MMseqs2 despite documenting the CPU server on Daint in detail -- both worked there only via the implicit biopipelines fallback.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Both server scripts release the submission lock however they exit. The GPU script trapped cleanup on SIGINT/SIGTERM but not EXIT, so under set -e a server dying during install or index load leaked the lock for its full 3h TTL. Both also removed the marker file before the lockdir, and a failed rmdir then left clients seeing no submission in progress and no acquirable lock -- every one of them logging that another client was submitting, and submitting nothing, until the TTL expired. The lockdir is now released first, so a failed rmdir leaves a marker that makes clients wait rather than no-op.
 
 Mock:
   files:
   - biopipelines/mock.py
   - pipe_scripts/pipe_mock.py
-  current: "1.0"
-  history: []
+  current: "1.5"
+  history:
+  - version: '1.5'
+    date: '2026-09-04'
+    note: >-
+      A lazy bracket that means a number now says `<#>` instead of `<N>`. Inside a bracket the token was already behaving as a wildcard -- the content is discarded, since a value unknown at configuration time cannot be narrowed there -- while outside a bracket `<N>` is the one-element set containing the letter N. Writing `<N>` for a number was therefore a lie that only happened to work. No behavioural change: the compiled regex is identical.
+  - version: '1.4'
+    date: '2026-09-04'
+    note: >-
+      The static pattern agrees too. Recording only a per-axis mode was too coarse for `Bundle(Each(a), b)`, where the `Each` iterates while the bare sources ride along on every row: `get_mode` reports the outer wrapper as a bundle and hides the inner `Each`, so predict gave ['a1+b1', 'a2+b1'] while produce gave ['a1+a2+b1']. The axis metadata now records which streams iterate, which are static and which side of the id the static part lands on, and streams are identified by index rather than name because two in one axis may share one. All six axis shapes -- bare, Each, pure Bundle, both static orderings, and multi-axis -- now agree.
+  - version: '1.3'
+    date: '2026-09-04'
+    note: >-
+      Provenance is recorded while ids are composed instead of recovered by splitting them. `_rebuild_runtime_provenance` split the parent id on `+` and gave part i to axis i, but a bundled axis contributes several `+`-joined parts and the composer hoists it ahead of the iterated axes, so with Bundle(compounds) and Each(structures) the structures column was assigned a ligand id and the rest shifted behind it -- silently, into the column downstream joins on. Each axis's contribution is now kept from composition, matching the config-time declaration exactly including the per-member `<axis>.<n>` bundle columns. The positional path remains only as the fallback for a config written before axis metadata existed.
+  - version: '1.2'
+    date: '2026-09-04'
+    note: >-
+      Mock produces the ids it declares. `_collect_datastreams` flattened Bundle/Each away, so the config JSON carried no per-axis mode and the runtime composed ids with its own cartesian product over every axis: a bundled axis iterated instead of contributing one prefix, giving four outputs against two declared and a FAILED marker. The config now records each axis's mode and streams, and `pipe_mock.py` calls the framework's `predict_single_output_id` rather than its own loop. Configs written before this keep working, treating one stream as one iterated axis.
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      Declares `USER_STREAM_NAMES = True`. Mock's stream names come from the user's `streams={...}` dict, so the framework's stream-name registry check cannot know them in advance and would report a documented feature. The format checks still apply. One declarative line; no change to generated scripts or outputs.
 
 MSA:
   files:
   - biopipelines/msa.py
   - pipe_scripts/pipe_msa.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `msas` map_table records the converted alignment under `file`, not `msa_file`.
 
 Mutagenesis:
   files:
   - biopipelines/mutagenesis.py
   - pipe_scripts/pipe_mutagenesis.py
-  current: "1.0"
-  history: []
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `msas` map_table records the per-mutant alignment under `file`, not `msa_file`.
+  - version: '1.1'
+    date: '2026-09-04'
+    note: >-
+      A lazy bracket that means a number now says `<#>` instead of `<N>`. Inside a bracket the token was already behaving as a wildcard -- the content is discarded, since a value unknown at configuration time cannot be narrowed there -- while outside a bracket `<N>` is the one-element set containing the letter N. Writing `<N>` for a number was therefore a lie that only happened to work. No behavioural change: the compiled regex is identical.
 
 MutationComposer:
   files:
@@ -437,16 +893,32 @@ MutationProfiler:
   files:
   - biopipelines/mutation_profiler.py
   - pipe_scripts/pipe_mutation_profiler.py
-  current: "1.0"
-  history: []
+  current: "2.0"
+  history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 NeuralPLexer:
   files:
   - biopipelines/neuralplexer.py
   - pipe_scripts/pipe_neuralplexer_postprocess.py
   - pipe_scripts/pipe_neuralplexer_stage.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      Forwards unrecognized constructor kwargs onto `neuralplexer-inference`. Its flags are dash-spelled, which the key allowlist refused until this release; `**{"num-steps": 40}` now reaches the command.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Writes PDB terminator records at full width. A bare 'END' makes a third-party parser that reads a fixed column raise IndexError on a file this pipeline produced -- Aggrescan3D reads line[21] unconditionally. Same fix as PoseBusters 1.1.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -468,8 +940,32 @@ OpenMM:
   files:
   - biopipelines/openmm.py
   - pipe_scripts/pipe_openmm.py
-  current: "1.1"
+  current: "3.2"
   history:
+  - version: '3.2'
+    date: '2026-09-11'
+    note: >-
+      `install()` no longer raises on a non-venv environment manager. The antechamber check built its PATH from `get_conda_env_root()`, which is defined only when `machine.env_manager.name` is `venv`, so a forced install raised `KeyError: venv_root is required` on the cluster, colab, container and local variants alike — every shipped config except daint. The check now uses the env run prefix there, as the tool's own runtime PATH helper already did.
+  - version: '3.1'
+    date: '2026-09-03'
+    note: >-
+      The documented `(TableInfo, "column")` column-reference form now binds. It was refused by the parameter's own validator even though the signature and the tool page advertise it; the value is normalized through the shared `resolve_table_reference` before validation, so the tuple and the `tool.tables.x.col` attribute form produce the identical `TABLE_REFERENCE:path:column`.
+  - version: '3.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Pass the ligand chemistry through instead of declaring an empty `compounds` placeholder. OpenMM accepts `ligand=` and its runtime reuses the input stream's residue codes (resolve_ligand_codes) rather than assigning its own, so the compounds stream is unchanged and belongs on the output — declaring it empty silently dropped the ligand chemistry, and a consumer testing `ligand.streams.compounds` (as BoltzGen does) saw nothing. The placeholder's format is also corrected from `sdf` to `csv` per the Ligand Contract.
+  - version: '1.3'
+    date: '2026-08-31'
+    note: >-
+      Excludes the covalently linked pair from the nonbonded terms, as a real bonded pair is. The restraint added a harmonic bond to an already-built system without touching NonbondedForce, so two heavy atoms held at 0.18 nm still saw each other through full Lennard-Jones and Coulomb -- a large spurious repulsion that dominated the reported energies and pulled the minimised geometry away from the adduct. The tether still supplies no angle or torsion terms across the junction and both molecules stay chemically saturated, which the docs now state precisely.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Added ligand, ligand_charge_method, ligand_forcefield, covalent_anchor, covalent_k, covalent_length, covalent_max_distance, mobile_selection and frozen_selection. A bound ligand is parameterised from OpenFF/GAFF with AM1-BCC or NAGL charges rather than perceived from the PDB, charges are cached across poses of the same molecule, and mobile_selection / frozen_selection zero the mass of everything else so atoms are held immovable rather than merely restrained. Both selections accept a per-structure table column reference. Adds n_mobile_atoms and n_frozen_atoms to the energies table.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -479,8 +975,12 @@ P2Rank:
   files:
   - biopipelines/p2rank.py
   - pipe_scripts/pipe_p2rank.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -490,8 +990,20 @@ Panda:
   files:
   - biopipelines/panda.py
   - pipe_scripts/pipe_panda.py
-  current: "1.1"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-09-04'
+    note: >-
+      A lazy bracket that means a number now says `<#>` instead of `<N>`. Inside a bracket the token was already behaving as a wildcard -- the content is discarded, since a value unknown at configuration time cannot be narrowed there -- while outside a bracket `<N>` is the one-element set containing the letter N. Writing `<N>` for a number was therefore a lie that only happened to work. No behavioural change: the compiled regex is identical.
+  - version: '1.3'
+    date: '2026-09-04'
+    note: >-
+      No behavioural change. The grain depth calculation spelled its id_map inline as the retired `*_<S>` class; it now uses `id_map_utils.DEFAULT_ID_MAP`, so the pattern has one definition and does not need migrating again.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      A pooled value-based stream keeps its content: its table is copied to the map_table path, which IS its content table, rather than to tables/, and the runtime file-map builder skips value-based streams instead of overwriting them with an id/file map. The guard around the pool-target computation now reports what it caught rather than emptying the targets silently, which would re-introduce this loss with the regression test still passing.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -501,16 +1013,40 @@ PDB:
   files:
   - biopipelines/pdb.py
   - pipe_scripts/pipe_pdb.py
-  current: "1.0"
-  history: []
+  current: "1.4"
+  history:
+  - version: '1.4'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `structures` map_table records the per-id file under `file`, not `file_path`.
+  - version: '1.3'
+    date: '2026-09-11'
+    note: >-
+      `chain="all"` declares its lazy ids as `<id>[_<?>]`, not `<id>[_<chain>]`. Under the 1.4.0 notation a slot inside a bracket is a literal value set, so `[_<chain>]` matched the literal text `_chain` and nothing else; the per-chain ids the tool actually produces were never selected. `[_<?>]` is the segment class the declaration always meant.
+  - version: '1.2'
+    date: '2026-09-02'
+    note: >-
+      Adds `Structure` as another name for this tool, matching the `structures` stream it emits and the fact that it accepts mmCIF as well as PDB. Outputs keep the original name, so a `Structure(...)` step still writes `001_PDB/`.
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      Lazy upstream ids no longer crash the fetch. `pdb_ids`, `custom_ids` and `upstream_files` were expanded with `expand_ids` behind an "is this a pattern" guard and raised `LazyPatternError` on a `[...]` id; they are now partially expanded, leaving the upstream map_table to make them concrete. The upstream-map override also fires when an id is still lazy, not only when the row and id counts differ — with one lazy pattern and one upstream row the counts agreed, so the pattern was never resolved and the fetch failed.
 
 PLACER:
   files:
   - biopipelines/placer.py
   - pipe_scripts/pipe_placer_driver.py
   - pipe_scripts/pipe_placer_postprocess.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      `bonds=` no longer dies on a NameError. `pipe_placer_driver.py` called `json.load` to read the bonds JSON without importing `json`, so every run using the covalent-bond tethering the wrapper documents crashed on a name the module never bound. Investigated alongside this for a predict-versus-produce mismatch and found none: the constructor accepts only a DataStream or StandardizedOutput, so a Bundle/Each wrapper is refused before any id is predicted, both axes are always iterated, and the driver's flat product is exactly what the framework composes -- verified equal for every reachable combination including the no-ligand degradation to a bare structure id. The composition moved into a named `compose_output_id`, the single place to switch to `predict_single_output_id` if that guard ever widens.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -520,15 +1056,31 @@ PLIP:
   files:
   - biopipelines/plip.py
   - pipe_scripts/pipe_plip.py
-  current: "1.0"
-  history: []
+  current: "2.2"
+  history:
+  - version: '2.2'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Constructs its internal code-only `Ligand` with `codes=` rather than the now-deprecated `code=`. The bare-string `ligand="LIG"` shorthand is the documented form, so the deprecation notice it triggered named a call the user never made.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 PLM_Sol:
   files:
   - biopipelines/plm_sol.py
   - pipe_scripts/pipe_plm_sol.py
-  current: "1.2"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.2'
     date: '2026-07-08'
     note: >-
@@ -551,8 +1103,12 @@ PocketGen:
   - pipe_scripts/pipe_pocketgen_driver.py
   - pipe_scripts/pipe_pocketgen_postprocess.py
   - pipe_scripts/pipe_pocketgen_stage.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -562,29 +1118,61 @@ Pool:
   files:
   - biopipelines/pool.py
   - pipe_scripts/pipe_pool.py
-  current: "1.0"
-  history: []
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: resolves a content stream's file column as `file` alone; the (`file_path`, `file`) probe that existed only to accommodate PDB is gone.
+  - version: '1.1'
+    date: '2026-09-04'
+    note: >-
+      A lazy bracket that means a number now says `<#>` instead of `<N>`. Inside a bracket the token was already behaving as a wildcard -- the content is discarded, since a value unknown at configuration time cannot be narrowed there -- while outside a bracket `<N>` is the one-element set containing the letter N. Writing `<N>` for a number was therefore a lie that only happened to work. No behavioural change: the compiled regex is identical.
 
 PoseBusters:
   files:
   - biopipelines/posebusters.py
   - pipe_scripts/pipe_posebusters.py
-  current: "1.0"
-  history: []
+  current: "2.2"
+  history:
+  - version: '2.2'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Constructs its internal code-only `Ligand` with `codes=` rather than the now-deprecated `code=`. The bare-string `ligand="LIG"` shorthand is the documented form, so the deprecation notice it triggered named a call the user never made.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Writes PDB terminator records at full width. A bare 'END' or 'TER' line makes a third-party parser that reads a fixed column (Aggrescan3D reads line[21] unconditionally) raise IndexError on a file this pipeline produced.
 
 PoseChange:
   files:
   - biopipelines/pose_change.py
   - pipe_scripts/pipe_pose_change.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-08-31'
+    note: >-
+      Pairs ligand atoms by identity rather than by order: atom name first, an RDKit graph match when names are absent or duplicated, and a raise when neither works instead of falling back to positional pairing. Two files listing the same atoms in a different order previously produced a large meaningless RMSD. Adds heavy_only for the case where one side crossed a format that drops hydrogens, and rmsd_pairing recording which rule was used. ligand_rmsd values differ from every earlier run.
 
 Prodigy:
   files:
   - biopipelines/prodigy.py
   - pipe_scripts/pipe_prodigy.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -594,8 +1182,16 @@ ProLIF:
   files:
   - biopipelines/prolif.py
   - pipe_scripts/pipe_prolif.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -606,8 +1202,24 @@ ProteinMPNN:
   - biopipelines/protein_mpnn.py
   - pipe_scripts/pipe_pmpnn_fixed_positions.py
   - pipe_scripts/pipe_pmpnn_table.py
-  current: "1.1"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-09-03'
+    note: >-
+      The documented `(TableInfo, "column")` column-reference form now binds. Only a `TableReference` was recognised, so a tuple fell through to `json.dump` and raised `TypeError: Object of type TableInfo is not JSON serializable` from `generate_script` — after the whole pipeline had been configured. `fixed` and `redesigned` are normalized through the shared `resolve_table_reference`, which accepts a literal selection, a `TableReference`, a `(TableInfo, column)` tuple or a `(path, column)` pair, and refuses anything else at construction time naming the parameter.
+  - version: '2.2'
+    date: '2026-09-02'
+    note: >-
+      Forwards constructor keywords it does not type onto the upstream command line, so an advanced user can reach an option the wrapper never curated. Declares `FORWARD_UNKNOWN_KWARGS` with its upstream CLI dialect — hydra `key=value` for the RFdiffusion family, argparse `--key value` for the MPNN family — and every forwarded key and value is validated at construction time through the same denylist as any other freeform string, then emitted double-quoted and echoed into the step log so a forwarded flag is visible rather than silent. A leftover key within the similarity cutoff of a real parameter name is reported as a probable misspelling naming the candidate, and still forwarded rather than dropped.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Declares SE3nv as its environment name rather than mlfold. Every config already mapped ProteinMPNN to SE3nv — deliberately shared with RFdiffusion to spare an environment — and no mlfold spec has ever existed in environments/, so the old literal named a file that could not be found. Upstream's own name is recorded as a comment. Only pip mode reads this attribute and that path was already non-functional, so no working behaviour changes.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -617,22 +1229,58 @@ PyMOL:
   files:
   - biopipelines/pymol.py
   - pipe_scripts/pipe_pymol.py
-  current: "1.0"
-  history: []
+  current: "2.1"
+  history:
+  - version: '2.1'
+    date: '2026-09-09'
+    note: >-
+      Resolves a `Save` filename against `_extras/` instead of the renders stream folder, so the session lands where the tool declares it. The pipe script joined a relative filename onto `output_folder`, which the wrapper sets to `stream_folder("renders")` — so any explicit `Save()`, the default `"session.pse"` included, wrote to `renders/` while the completion check looked for `_extras/<session>.pse` and marked the step FAILED with every operation successful and both artifacts on disk. `Save`'s default is now `None`, meaning the tool's own `session` name, and the wrapper declares the filename the caller actually passed (one entry per `Save` op), so the declared path and the written path cannot disagree. An absolute filename is still honored verbatim.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
 
 RBSDesigner:
   files:
   - biopipelines/rbs_designer.py
   - pipe_scripts/pipe_rbs_designer.py
-  current: "1.0"
-  history: []
+  current: "2.0"
+  history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      Declares its value-based `sequences` stream as `csv` rather than `dna`. The stream carries `files=[]` with its content in the map_table, which the contract defines as csv; `format="dna"` was the only occurrence of that value in the repo and nothing dispatched on it, so consumers are unaffected. Every sibling tool emitting a value-based sequences stream already declared csv.
 
 RCSB:
   files:
   - biopipelines/rcsb.py
   - pipe_scripts/pipe_rcsb_search.py
-  current: "1.1"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-09-11'
+    note: >-
+      Map-table file column renamed to the canonical `file`: its `structures` map_table records the per-id file under `file`, not `file_path`; the upstream-map read follows.
+  - version: '1.4'
+    date: '2026-09-07'
+    note: >-
+      The lazy whole-id pattern for a compounds-driven search is spelled `[<?>]` rather than `[<hits>]`. A slot inside a bracket is a literal value set now, like everywhere else, so a bare word no longer falls through to the segment wildcard -- `[<hits>]` would have matched only the literal text `hits`. `[<?>]` compiles to the same regex the old spelling did, so selection is unchanged.
+  - version: '1.3'
+    date: '2026-07-28'
+    note: exists() emits no value key. Both query builders wrote one
+      unconditionally and the API's schema rejects it on exists, so every
+      exists() call failed with HTTP 400. RCSB.Attribute's value is now
+      optional.
+  - version: '1.2'
+    date: '2026-07-28'
+    note: Add StructureAttribute.BindingAffinity (Value, Type) plus the
+      BindingAffinityType enum, so measured-affinity filters are expressible.
+      Only the two API-searchable fields are exposed; unit, symbol,
+      provenance_code, reference_sequence_identity and comp_id reject queries.
   - version: '1.1'
     date: '2026-07-27'
     note: Runtime compounds-stream search shares the configuration-time request
@@ -644,8 +1292,12 @@ RDKit:
   files:
   - biopipelines/rdkit_descriptors.py
   - pipe_scripts/pipe_rdkit_descriptors.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
   - version: '1.1'
     date: '2026-07-14'
     note: >-
@@ -655,15 +1307,31 @@ ReMap:
   files:
   - biopipelines/remap.py
   - pipe_scripts/pipe_remap.py
-  current: "1.0"
-  history: []
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-09-04'
+    note: >-
+      The lazy renumber pattern was a bare slot, not a bracket. `f"{onto}_<N>"` is not lazy at all: `<N>` outside a bracket is the one-element set containing the letter N, so the branch declared the single literal id `onto_N`, count 1, which matched none of the real `onto_1..onto_n` -- the pattern_selection check had been reporting that it covered nothing. It now emits `f"{onto}_[<#>]"`, the same spelling Pool and Panda already use for a flat renumber.
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      A lazy pattern now *selects* the map_table rows it covers via `resolve_pattern_ids` instead of taking every row in the table, which is what the manual's "the map_table is the source of truth, the pattern is the selector" already specified. A lazy `files` entry no longer raises `LazyPatternError`: it is partially expanded and keeps its brackets. The remaining "is this a pattern" guards were switched to `can_expand` / `can_expand_ids`, the question they were already relying on positionally.
 
 Reduce:
   files:
   - biopipelines/reduce.py
   - pipe_scripts/pipe_reduce.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.2'
+    date: '2026-09-02'
+    note: >-
+      Declare the empty `compounds` placeholder as `csv` rather than `sdf`, per the Ligand Contract: compounds carries chemistry in its map_table and never coordinate files. The `sdf` spelling came from the developer manual's tool template, which has been corrected. No runtime effect — the placeholder is empty — but the declaration now passes contract_enforcement.check_compounds_format.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -673,8 +1341,28 @@ RFDAA_PrepareLigand:
   files:
   - biopipelines/rfdiffusion_allatom.py
   - pipe_scripts/pipe_rfdaa_prepare_ligand.py
-  current: "1.1"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.2'
+    date: '2026-09-02'
+    note: >-
+      No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. See the RFdiffusionAllAtom entry — this class types no upstream passthrough of its own.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Writes PDB terminator records at full width, for the same reason as NeuralPLexer 1.2: a bare 'END' breaks any downstream parser that reads a fixed column.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -684,8 +1372,20 @@ RFdiffusion:
   files:
   - biopipelines/rfdiffusion.py
   - pipe_scripts/pipe_rfdiffusion_table.py
-  current: "1.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-09-08'
+    note: >-
+      Types `contigmap.length`, which the upstream config has always carried and the wrapper did not expose. It constrains the total output length while each diffused segment keeps its own range, so a two-linker contig can admit an asymmetric split without admitting the degenerate one: `4-1/.../1-4` with the total pinned to five accepts (1,4) and (4,1) and rejects (1,1) and (4,4). Reachable before only through the untyped-keyword passthrough added in 2.1, which gave no validation and no record in the step config.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Forwards constructor keywords it does not type onto the upstream command line, so an advanced user can reach an option the wrapper never curated. Declares `FORWARD_UNKNOWN_KWARGS` with its upstream CLI dialect — hydra `key=value` for the RFdiffusion family, argparse `--key value` for the MPNN family — and every forwarded key and value is validated at construction time through the same denylist as any other freeform string, then emitted double-quoted and echoed into the step log so a forwarded flag is visible rather than silent. A leftover key within the similarity cutoff of a real parameter name is reported as a probable misspelling naming the candidate, and still forwarded rather than dropped.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -697,8 +1397,32 @@ RFdiffusion3:
   - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
   - pipe_scripts/pipe_rfdiffusion3_postprocess.py
   - pipe_scripts/pipe_rfdiffusion3_table.py
-  current: "2.0"
+  current: "3.4"
   history:
+  - version: '3.4'
+    date: '2026-09-11'
+    note: >-
+      drops its private copy of the contig normalization for the shared `resolve_table_reference`. The copy read `value[0].info.path`, so the documented `(path, "column")` pair raised `AttributeError` instead of resolving.
+  - version: '3.3'
+    date: '2026-09-07'
+    note: >-
+      Reads the postprocess PYTHONPATH shim from `tool_overrides.rfdiffusion3.postprocess_pylibs` instead of the `RFDIFFUSION3_POSTPROCESS_PYLIBS` environment variable, so the Daint case -- postprocess running inside the RFD3 container, where the activated venv resolves to the container interpreter and biopython is not importable -- is configured rather than exported into the job. Docstrings also construct the internal code-only ligand as `Ligand(codes=...)`; they said `Ligand(hetatm_code=...)`, announced in the changelog and never shipped, so the call raises.
+  - version: '3.2'
+    date: '2026-09-02'
+    note: >-
+      Accepts `contigs` as a first-class synonym for `contig`, the spelling its three sibling wrappers use. Previously `RFdiffusion3(contigs=...)` was accepted, left `contig` empty, discarded the motif specification, and generated unconditioned de-novo backbones. Also corrects docstring examples and two validation hints that showed a `Ligand` combination the constructor rejects outright.
+  - version: '3.1'
+    date: '2026-09-02'
+    note: >-
+      Forwards constructor keywords it does not type onto the upstream command line, so an advanced user can reach an option the wrapper never curated. Declares `FORWARD_UNKNOWN_KWARGS` with its upstream CLI dialect — hydra `key=value` for the RFdiffusion family, argparse `--key value` for the MPNN family — and every forwarded key and value is validated at construction time through the same denylist as any other freeform string, then emitted double-quoted and echoed into the step log so a forwarded flag is visible rather than silent. A leftover key within the similarity cutoff of a real parameter name is reported as a probable misspelling naming the candidate, and still forwarded rather than dropped.
+  - version: '3.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '2.1'
+    date: '2026-08-31'
+    note: >-
+      contig accepts a (TableInfo, column) reference in addition to a literal, resolved per input structure in one pass by the inputs builder rather than once per id in generated bash.
   - version: "2.0"
     date: "2026-06-10"
     note: >-
@@ -712,8 +1436,28 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
   - biopipelines/rfdiffusion_allatom.py
-  current: "1.1"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.2'
+    date: '2026-09-02'
+    note: >-
+      Constructs its internal code-only `Ligand` with `codes=` rather than the now-deprecated `code=`. The bare-string `ligand="LIG"` shorthand is the documented form, so the deprecation notice it triggered named a call the user never made.
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Forwards constructor keywords it does not type onto the upstream command line, so an advanced user can reach an option the wrapper never curated. Declares `FORWARD_UNKNOWN_KWARGS` with its upstream CLI dialect — hydra `key=value` for the RFdiffusion family, argparse `--key value` for the MPNN family — and every forwarded key and value is validated at construction time through the same denylist as any other freeform string, then emitted double-quoted and echoed into the step log so a forwarded flag is visible rather than silent. A leftover key within the similarity cutoff of a real parameter name is reported as a probable misspelling naming the candidate, and still forwarded rather than dropped.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      No behavioural change; the version moves because the shared rfdiffusion_allatom.py did. See the RFDAA_PrepareLigand 1.2 entry.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -723,8 +1467,20 @@ RTMScore:
   files:
   - biopipelines/rtmscore.py
   - pipe_scripts/pipe_rtmscore.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      No defect found; the runtime pair id is documented rather than changed. RTMScore declares tables only and no streams, so nothing predicts its output ids and `pipe_check_completion` derives an empty declared-id list from it: the `<protein>+<ligand>` id is the scores table's join key and reaches no completion check. Its axes cannot be bundled either, since the constructor refuses a Bundle/Each wrapper, so both are always iterated and the flat product matches what the framework composer would produce. The composition moved into a named `compose_pair_id` recording that, plus the constraint that matters for anyone adding a predictor later: the id set is runtime-determined, because identical input id lists take the diagonal rather than the product.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
+  - version: '1.2'
+    date: '2026-08-31'
+    note: >-
+      Scores the diagonal instead of the full cross product when the protein and ligand id lists are identical, which is the shape produced by carving each ligand from its own complex: 375 of 376 cross-product cells were scoring a pose against the wrong protein. The switch is documented as data-shape inference, and the cross product still runs whenever the id lists differ.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -755,6 +1511,15 @@ Sequence:
   current: "1.0"
   history: []
 
+Scripting:
+  files:
+  - biopipelines/scripting.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      Declares `USER_STREAM_NAMES = True`. A Scripting `configuration()` returns stream names chosen by the user's script, so the stream-name registry check cannot know them in advance. The format checks still apply. One declarative line; no change to generated scripts or outputs.
 SequenceMetricCorrelation:
   files:
   - biopipelines/sequence_metric_correlation.py
@@ -769,18 +1534,49 @@ StitchSequences:
   current: "1.0"
   history: []
 
+StructureCluster:
+  files:
+  - biopipelines/structure_cluster.py
+  - pipe_scripts/pipe_structure_cluster.py
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-07-29'
+    note: >-
+      Adds the cluster MEDOID alongside the representative. The representative
+      is the best-scoring member (sphere exclusion visits in ranking order) and
+      can sit at the edge of its own cluster; the medoid maximises mean
+      similarity to the other members and is the family's most typical fold.
+      New `medoid` column on `clusters` and `is_medoid` on `assignments`; a
+      singleton is its own medoid. Measured on a 48-design campaign, 3 of 14
+      families had a medoid different from the representative.
+  - version: '1.0'
+    date: '2026-07-28'
+    note: >-
+      New tool. Fold-similarity clustering of a structures stream by sphere
+      exclusion over distance-matrix RMSD of length-normalised C-alpha traces,
+      with per-cluster ranking on user-supplied metric columns.
+
 Table:
   files:
   - biopipelines/table.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      Renames its `name` parameter to `table_name`, matching the existing `self.table_name` and the `tool.tables.<name>` handle. `name` is framework-reserved as the job name and was being captured, so the job name was silently lost. `name` remains a deprecated alias.
 
 ThermoMPNN:
   files:
   - biopipelines/thermompnn.py
   - pipe_scripts/pipe_thermompnn.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -790,15 +1586,23 @@ UniProt:
   files:
   - biopipelines/uniprot.py
   - pipe_scripts/pipe_uniprot.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-02'
+    note: >-
+      Declare the empty `compounds` placeholder as `csv` rather than `sdf`, per the Ligand Contract: compounds carries chemistry in its map_table and never coordinate files. The `sdf` spelling came from the developer manual's tool template, which has been corrected. No runtime effect — the placeholder is empty — but the declaration now passes contract_enforcement.check_compounds_format.
 
 VespaG:
   files:
   - biopipelines/vespag.py
   - pipe_scripts/pipe_vespag.py
-  current: "1.1"
+  current: "2.0"
   history:
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -808,8 +1612,16 @@ XTB:
   files:
   - biopipelines/xtb.py
   - pipe_scripts/pipe_xtb.py
-  current: "1.1"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -817,8 +1629,20 @@ XTB:
 RFdiffusion2:
   files:
   - biopipelines/rfdiffusion2.py
-  current: '1.1'
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-09-02'
+    note: >-
+      Documentation only: `Ligand(code=...)` in docstrings and user-facing error messages becomes `Ligand(codes=...)`, since the two parameters were unified and `code` is now a synonym that will soon be deprecated. No behavioural change; the version moves because the wrapper file did.
+  - version: '1.3'
+    date: '2026-09-02'
+    note: >-
+      Constructs its internal code-only `Ligand` with `codes=` rather than the now-deprecated `code=`. The bare-string `ligand="LIG"` shorthand is the documented form, so the deprecation notice it triggered named a call the user never made.
+  - version: '1.2'
+    date: '2026-09-02'
+    note: >-
+      Forwards constructor keywords it does not type onto the upstream command line, so an advanced user can reach an option the wrapper never curated. Declares `FORWARD_UNKNOWN_KWARGS` with its upstream CLI dialect — hydra `key=value` for the RFdiffusion family, argparse `--key value` for the MPNN family — and every forwarded key and value is validated at construction time through the same denylist as any other freeform string, then emitted double-quoted and echoed into the step log so a forwarded flag is visible rather than silent. A leftover key within the similarity cutoff of a real parameter name is reported as a probable misspelling naming the candidate, and still forwarded rather than dropped.
   - version: '1.1'
     date: '2026-06-30'
     note: >-
@@ -828,8 +1652,16 @@ HBDesigner:
   - biopipelines/hbdesigner.py
   - pipe_scripts/pipe_hbdesigner.py
   - pipe_scripts/pipe_hbdesigner_constraints.py
-  current: '1.1'
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-09-04'
+    note: >-
+      The per-input `run_hbdesigner` command is emitted as a bash array instead of through `eval`. `eval` re-parsed the assembled line, so `$OUT_DIR` -- which carries the stream id, and stream ids are validated nowhere -- could close its own quoting and run a second command: an id of `x";>PWNED;"` executed `>PWNED` and silently truncated `--out_dir`. Argument output is byte-identical for every ordinary input.
+  - version: '2.0'
+    date: '2026-09-02'
+    note: >-
+      Resolves the environment it installs into from the config instead of a hardcoded literal, so `environments:` finally redirects install as well as runtime. The literal moved to a declared `ENV_NAME` class attribute and is now used only under `env_manager: pip`; under a real manager a tool with no `environments:` entry raises at install time, naming the tool, variant and config file, rather than building one env and later activating another that does not exist. `env create` also passes `-n <env>`, without which a redirected env was created under the name in its own spec file.
   - version: '1.1'
     date: '2026-06-30'
     note: >-

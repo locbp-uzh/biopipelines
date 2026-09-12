@@ -9,15 +9,21 @@ Handles loading, validating, and managing the config.<variant>.yaml files,
 including pull/repull functionality from the repository.
 
 Variants:
-  - cluster (default outside Colab) -> config.cluster.yaml
   - colab   (default inside Colab)  -> config.colab.yaml
-  - <other> (user-defined site)     -> config.<other>.yaml
+  - cluster / local / container / daint / <other user-defined site>
+                                    -> config.<variant>.yaml
 
-Set the variant via `Pipeline(config="<variant>")` (recommended) or by
-constructing `ConfigManager(variant="<variant>")` before any other code reads
-the config. Without an explicit variant, the loader auto-detects in this
-order: colab (if google.colab imports), then any config.<variant>.yaml
-whose `machine.username` matches the current Unix user, otherwise cluster.
+Set the variant via `Pipeline(config="<variant>")` (recommended), the
+`BIOPIPELINES_CONFIG_VARIANT` environment variable, or by constructing
+`ConfigManager(variant="<variant>")` before any other code reads the config.
+Without an explicit variant, the loader auto-detects in this order: the env
+var, colab (if google.colab imports), then the single config.<variant>.yaml
+whose `machine.username` matches the current Unix user. If nothing matches it
+raises instead of falling back, because a guessed site config produces
+failures that name something other than the config.
+
+Whichever route resolves the variant, one line naming it is printed to stderr
+the first time it is resolved in a process.
 """
 
 import datetime
@@ -25,8 +31,9 @@ import getpass
 import glob
 import os
 import shutil
+import sys
 import urllib.request
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 
 def backup_file(path) -> str:
@@ -72,50 +79,43 @@ def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]
     return out
 
 
-def _autodetect_variant() -> str:
-    """Pick a variant name based on the runtime environment.
+_ENV_VARIANT = "BIOPIPELINES_CONFIG_VARIANT"
 
-    Selection order:
-      1. If ``BIOPIPELINES_CONFIG_VARIANT`` is set, return it. This is the
-         same env var the ``submit`` wrapper reads, so the bash and Python
-         sides always agree on which ``config.<variant>.yaml`` is active.
-      2. If running inside Google Colab, return ``"colab"``.
-      3. Otherwise, scan every repo-root ``config.<variant>.yaml`` (excluding
-         ``config.colab.yaml``) and classify each by its ``machine.username``:
-           - **match**: ``username`` equals the current Unix user.
-           - **wildcard**: ``username`` is absent or empty.
-         If exactly one match exists, return it. If no match exists but at
-         least one wildcard does, return the first wildcard (alphabetical).
-      4. Fall back to ``"cluster"``.
+# Appended to both autodetect failures: the message has to be actionable on its
+# own, because the failure the user would otherwise see names something else
+# entirely (a missing folder key, or "Resources() must be called before adding
+# tools" from a SLURM config loaded on a laptop).
+_HOW_TO_CHOOSE = (
+    "Pick one of these, whichever suits:\n"
+    "  bp-config auto --variant <variant>\n"
+    "      Probes this host (username, env manager, scheduler, modules, container\n"
+    "      runtime) and writes the result into the gitignored .config.<variant>.yaml\n"
+    "      overlay, so auto-detection matches from then on.\n"
+    f"  export {_ENV_VARIANT}=<variant>\n"
+    "      Selects a variant for this shell only. The submit/run wrappers read the\n"
+    "      same variable, so bash and Python stay in agreement.\n"
+    "A pipeline script can also pin it inline with Pipeline(config=\"<variant>\").\n"
+    "On a laptop with no scheduler and no GPU, use the 'local' variant."
+)
 
-    Raises:
-        RuntimeError: If two or more variants claim the same ``username``
-            (ambiguous — the user must select one explicitly).
+
+def _scan_variants(repo_root: str) -> Tuple[List[str], List[str], str]:
+    """Classify every repo-root ``config.<variant>.yaml`` against the current user.
+
+    Returns ``(found, matches, current_user)``: every variant name discovered
+    (``colab`` excluded — it is selected by a real runtime signal, not by
+    username), those whose ``machine.username`` equals the current Unix user,
+    and that user name.
     """
-    env_variant = os.environ.get("BIOPIPELINES_CONFIG_VARIANT")
-    if env_variant:
-        return env_variant
-
-    try:
-        import google.colab  # noqa: F401
-        return "colab"
-    except ImportError:
-        pass
-
     try:
         current_user = getpass.getuser()
     except Exception:
         current_user = ""
 
-    try:
-        import yaml
-    except ImportError:
-        return "cluster"
+    import yaml
 
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    found: List[str] = []
     matches: List[str] = []
-    wildcards: List[str] = []
-
     for path in sorted(glob.glob(os.path.join(repo_root, "config.*.yaml"))):
         base = os.path.basename(path)
         variant = base[len("config."):-len(".yaml")]
@@ -126,6 +126,7 @@ def _autodetect_variant() -> str:
                 data = yaml.safe_load(f) or {}
         except Exception:
             continue
+        found.append(variant)
         # The username usually lives in the gitignored overlay, since a committed
         # one would claim the same Unix name on every machine that ships a config.
         overlay = os.path.join(repo_root, f".config.{variant}.yaml")
@@ -138,20 +139,78 @@ def _autodetect_variant() -> str:
         username = (data.get("machine") or {}).get("username") or ""
         if username and current_user and username == current_user:
             matches.append(variant)
-        elif not username:
-            wildcards.append(variant)
+    return found, matches, current_user
+
+
+def _autodetect_variant_with_source() -> Tuple[str, str]:
+    """Pick a variant from the runtime environment, plus why it was picked.
+
+    Selection order:
+      1. If ``BIOPIPELINES_CONFIG_VARIANT`` is set, use it. This is the same
+         env var the ``submit`` wrapper reads, so the bash and Python sides
+         always agree on which ``config.<variant>.yaml`` is active.
+      2. If running inside Google Colab, use ``"colab"``.
+      3. Otherwise, the one repo-root ``config.<variant>.yaml`` (each deep-merged
+         with its ``.config.<variant>.yaml`` overlay) whose ``machine.username``
+         equals the current Unix user.
+
+    There is deliberately no fourth step: a config that only *might* fit this
+    machine is never selected, because loading the wrong site config fails
+    later with an error that names something other than the config.
+
+    Returns:
+        ``(variant, source)`` — ``source`` is a short phrase for the
+        one-line announcement.
+
+    Raises:
+        RuntimeError: If no variant claims the current user, or if two or
+            more do.
+    """
+    env_variant = os.environ.get(_ENV_VARIANT)
+    if env_variant:
+        return env_variant, f"${_ENV_VARIANT}"
+
+    try:
+        import google.colab  # noqa: F401
+        return "colab", "running inside Google Colab"
+    except ImportError:
+        pass
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        found, matches, current_user = _scan_variants(repo_root)
+    except ImportError:
+        raise RuntimeError(
+            "Cannot auto-detect the BioPipelines config variant: PyYAML is not "
+            f"installed, so no config.<variant>.yaml can be read.\n\n{_HOW_TO_CHOOSE}"
+        )
 
     if len(matches) > 1:
         raise RuntimeError(
-            f"Ambiguous variant auto-detection: multiple config files claim "
-            f"username={current_user!r} ({matches}). Select one explicitly via "
-            f"Pipeline(config=...)."
+            f"Ambiguous BioPipelines config variant: {len(matches)} config files "
+            f"claim machine.username={current_user!r} ({', '.join(matches)}).\n\n"
+            f"{_HOW_TO_CHOOSE}"
         )
     if matches:
-        return matches[0]
-    if wildcards:
-        return wildcards[0]
-    return "cluster"
+        return matches[0], f"machine.username matches the current user {current_user!r}"
+
+    raise RuntimeError(
+        "BioPipelines cannot tell which config.<variant>.yaml applies to this "
+        "machine, and will not guess.\n\n"
+        f"Looked for: a config.<variant>.yaml in {repo_root} whose "
+        f"machine.username equals the current user {current_user!r} (each "
+        "committed file deep-merged with its gitignored .config.<variant>.yaml "
+        "overlay).\n"
+        f"Found: {', '.join(found) if found else '(no config.<variant>.yaml at all)'}"
+        f" - none of them claims {current_user!r}.\n"
+        "config.colab.yaml is not scanned; it is selected automatically inside "
+        f"Google Colab.\n\n{_HOW_TO_CHOOSE}"
+    )
+
+
+def _autodetect_variant() -> str:
+    """Variant name from the runtime environment. See ``_autodetect_variant_with_source``."""
+    return _autodetect_variant_with_source()[0]
 
 
 class ConfigManager:
@@ -165,6 +224,7 @@ class ConfigManager:
     _instance = None
     _config = None
     _variant: Optional[str] = None
+    _variant_announced = False
 
     def __new__(cls, variant: Optional[str] = None):
         """Singleton pattern to ensure only one config manager exists."""
@@ -179,23 +239,52 @@ class ConfigManager:
             variant: Config variant to load (e.g. "cluster", "colab", or any
                 user-defined name matching `config.<variant>.yaml`). If None
                 and no variant has been set previously, auto-detects from the
-                runtime environment. Re-initializing with a different variant
-                resets the cached config so the new one is loaded.
+                runtime environment, raising if nothing matches this machine.
+                Re-initializing with a different variant resets the cached
+                config so the new one is loaded.
         """
         if variant is not None and variant != type(self)._variant:
             type(self)._variant = variant
             type(self)._config = None
+            type(self)._announce_variant(variant, "explicitly requested")
         elif type(self)._variant is None:
-            type(self)._variant = _autodetect_variant()
+            type(self)._variant = type(self)._detect_variant()
 
         if self._config is None:
             type(self)._config = self._load_config()
 
     @classmethod
+    def _announce_variant(cls, variant: str, source: str) -> None:
+        """Print one stderr line naming the resolved variant and where it came from.
+
+        Without it a wrong variant is invisible until some later step fails for a
+        reason that never mentions the config. On stderr, not stdout, so
+        ``$(bp-config path)`` and friends stay machine-readable.
+        """
+        if cls._variant_announced:
+            return
+        cls._variant_announced = True
+        try:
+            path = cls._get_config_path(variant)
+            overlay = cls._get_overlay_path(variant)
+        except Exception:
+            path, overlay = f"config.{variant}.yaml", ""
+        merged = f" + {os.path.basename(overlay)}" if overlay and os.path.isfile(overlay) else ""
+        print(f"[biopipelines] config variant {variant!r}: {path}{merged} ({source})",
+              file=sys.stderr)
+
+    @classmethod
+    def _detect_variant(cls) -> str:
+        """Auto-detect the variant and announce it. Raises if nothing matches."""
+        variant, source = _autodetect_variant_with_source()
+        cls._announce_variant(variant, source)
+        return variant
+
+    @classmethod
     def get_variant(cls) -> str:
         """Return the active variant name (e.g. 'cluster', 'colab')."""
         if cls._variant is None:
-            cls._variant = _autodetect_variant()
+            cls._variant = cls._detect_variant()
         return cls._variant
 
     @classmethod
@@ -215,7 +304,7 @@ class ConfigManager:
         repo_root = os.path.dirname(script_dir)
 
         if variant is None:
-            variant = cls._variant or _autodetect_variant()
+            variant = cls._variant or cls._detect_variant()
 
         return os.path.join(repo_root, f"config.{variant}.yaml")
 
@@ -864,7 +953,7 @@ class ConfigManager:
             )
 
         # Try to get URL from existing config, otherwise use default for the active variant
-        variant = cls._variant or _autodetect_variant()
+        variant = cls._variant or cls._detect_variant()
         default_url = f"https://raw.githubusercontent.com/gquargnali/biopipelines/main/config.{variant}.yaml"
 
         try:

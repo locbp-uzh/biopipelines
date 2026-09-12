@@ -75,14 +75,14 @@ def test_shared_file_stream_keeps_the_shared_path():
 def test_lazy_ids_split_on_their_deterministic_axis():
     """A lazy id has a known outer axis and an unknown bracket fan-out; the
     split happens on the former and the latter is preserved for runtime."""
-    ds = _stream(["prot_<0..9>[_<N><S A L K>]"])
+    ds = _stream(["prot_<0..9>[_<?><S A L K>]"])
     chunks = ds.chunks(4)
 
     assert [len(c) for c in chunks] == [3, 3, 2, 2]
     assert chunks[0].ids_expanded == [
-        "prot_0[_<N><S A L K>]",
-        "prot_1[_<N><S A L K>]",
-        "prot_2[_<N><S A L K>]",
+        "prot_0[_<?><S A L K>]",
+        "prot_1[_<?><S A L K>]",
+        "prot_2[_<?><S A L K>]",
     ]
     assert all(c.is_lazy for c in chunks)
 
@@ -90,7 +90,7 @@ def test_lazy_ids_split_on_their_deterministic_axis():
 def test_top_level_lazy_id_raises():
     """No deterministic prefix means no config-time axis to split on."""
     with pytest.raises(ValueError, match="lazy at the top level"):
-        _stream(["[_<N><S A L K>]"]).chunks(4)
+        _stream(["[_<?><S A L K>]"]).chunks(4)
 
 
 # ── argument validation ───────────────────────────────────────────────────────

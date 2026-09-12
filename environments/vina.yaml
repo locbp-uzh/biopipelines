@@ -1,0 +1,17 @@
+# AutoDock Vina environment.
+# Everything here has a conda-forge linux-aarch64 build, which is why Vina is
+# the docking route on GH200: GNINA ships only a prebuilt x86-64 binary.
+# `vina` supplies the docking binary itself; OpenBabel does the PDBQT
+# conversions Vina's input/output format requires, and RDKit handles conformer
+# generation, clustering and pose RMSD.
+name: vina
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - vina
+  - rdkit
+  - openbabel
+  - numpy
+  - pandas

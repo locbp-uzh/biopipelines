@@ -62,7 +62,7 @@ Small-molecule binding-residue prediction from a single protein structure, lever
 **Tables**:
 - `binding`: `id | chain | resi | resn | p_bind` — one row per target-chain residue (same data as the `binding` stream, combined across inputs).
 - `summary`: `id | n_residues | top_resi | top_p_bind | binding_residues` — `binding_residues` is the top-k selection (e.g. `"A45+A78-80"`), usable directly as a downstream selection column.
-- `missing`: `id | cause`
+- `missing`: `id | removed_by | kind | cause`
 
 **Example**:
 ```python
@@ -188,8 +188,8 @@ Electrostatic surface potential. For each input PDB, runs `pdb2pqr` (PROPKA prot
 **Streams**: `structures` (PQR), `grids` (DX potential grid)
 
 **Tables**:
-- `electrostatics`: | id | net_charge | n_basic | n_acidic | isoelectric_point |
-- `missing`: | id | cause |
+- `electrostatics`: | id | net_charge | n_basic | n_acidic | pI | mean_potential |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -199,6 +199,68 @@ target = PDB("4UFC", convert="pdb")
 elec = APBS(structures=target, ph=7.4)
 elec.tables.electrostatics
 ```
+
+---
+
+### BindingData
+
+Experimentally measured protein–ligand binding affinities for a compounds stream, retrieved from the ChEMBL REST API and the BindingDB RESTful service. For each input compound the tool resolves the molecule in each configured source and collects its Ki/Kd/IC50/EC50 records against protein targets. No model, no GPU — two HTTP APIs.
+
+Sources are queried independently and their rows concatenated, so a measurement curated by both databases appears twice, distinguished by the `source` column; deduplicate downstream with `Panda` if needed. Affinity values are reported in nM. ChEMBL records carry `pchembl_value` (-log10 of the molar value, comparable across measurement types); BindingDB glues its relation onto the value (`">30000"`), which the tool splits into the separate `relation` and `affinity_nm` columns.
+
+Every input id yields at least one row: a compound queried successfully with no matching record keeps an all-NaN row so the `affinities` table stays a complete matrix over the input stream, and is additionally recorded in `missing` with `kind="filter"`.
+
+**Environment**: `biopipelines` (no installation needed).
+
+**Parameters**:
+- `compounds`: Union[DataStream, StandardizedOutput] (required) — Input compounds. SMILES are read from the `smiles` column of the compounds map_table.
+- `sources`: Union[str, List[str]] = `"chembl"` — Which databases to query: `"chembl"`, `"bindingdb"`, or a list of both.
+- `affinity_types`: List[str] = None — Measurement types to keep, any of `"Ki"`, `"Kd"`, `"IC50"`, `"EC50"`. None keeps all four.
+- `match`: str = `"exact"` — How a compound is matched to database molecules: `"exact"` (ChEMBL flexmatch / BindingDB similarity 1.0), `"similarity"` (Tanimoto above `similarity`), or `"substructure"` (ChEMBL only; rejected at construction when `bindingdb` is in `sources`).
+- `similarity`: float = 0.85 — Tanimoto cutoff in [0, 1] for `match="similarity"`. Ignored otherwise.
+- `max_affinity`: float = None — Keep only records at or below this value in nM. None keeps every record. A record whose value cannot be parsed is excluded when a ceiling is set.
+- `organism`: str = None — Restrict to targets whose organism field contains this string (e.g. `"Homo sapiens"`). None keeps every organism.
+- `max_records`: int = 1000 — Cap applied **twice** on the ChEMBL path: to the number of database molecules a query resolves to, and to the activities fetched per resolved molecule. The worst case is therefore `max_records²` records and `max_records + 1` requests per compound, so leave it low for a `match="similarity"` run over a large library. There is no pagination, so anything past ChEMBL's first page (its own cap is 1000) is not fetched.
+
+**Tables**:
+- `affinities`:
+
+  | id | smiles | source | source_molecule_id | target_id | target_name | organism | affinity_type | relation | affinity_nm | pchembl_value | assay_id | assay_description | assay_type | document_id | match_similarity | queried_utc | chembl_release |
+  |----|--------|--------|--------------------|-----------|-------------|----------|---------------|----------|-------------|---------------|----------|-------------------|------------|-------------|------------------|-------------|----------------|
+
+  One row per compound–target measurement. `target_id`, `pchembl_value`, `assay_*` and `document_id` are ChEMBL-only (BindingDB's API returns no identifiers for them); `match_similarity` is populated for `match="similarity"`.
+  `queried_utc` and `chembl_release` record **when** the lookup ran and **which ChEMBL release answered**. Both tables are a snapshot of databases that grow with every release, so two runs months apart legitimately disagree; without these columns there is nothing in the output to tell them apart, and a number cannot be traced back to what produced it. `chembl_release` is blank when ChEMBL was not queried or its status endpoint declined.
+
+
+- `targets`:
+
+  | target_id | source | target_name | organism | n_compounds | n_records | best_affinity_nm | queried_utc | chembl_release |
+  |-----------|--------|-------------|----------|-------------|-----------|------------------|-------------|----------------|
+
+  One row per distinct target and source. Grouping keys on `target_id` where the source supplies one — distinct ChEMBL targets share a `pref_name` (human and sheep COX-1 both read "Prostaglandin G/H synthase 1"), so keying on the name would merge them. BindingDB returns no target id, leaving the name as its only key.
+
+- `missing`: `id | removed_by | kind | cause` — compounds with no SMILES or no matching record, plus upstream-filtered ids.
+
+**Example**:
+```python
+from biopipelines import BindingData, CompoundLibrary, Panda
+
+with Pipeline("Project", "Affinities", description="Known binders of a library"):
+    Resources(time="1:00:00")
+    library = CompoundLibrary("my_library.csv")
+    affinities = BindingData(
+        compounds=library,
+        sources=["chembl", "bindingdb"],
+        max_affinity=1000,          # nM
+        organism="Homo sapiens",
+    )
+
+    # Keep only sub-micromolar dissociation constants
+    Panda(tables=affinities.tables.affinities,
+          operations=[Panda.filter("affinity_type == 'Kd'")])
+```
+
+**References**: Zdrazil et al. (2024) The ChEMBL Database in 2023. *Nucleic Acids Res* 52, D1180. https://www.ebi.ac.uk/chembl/api/data — Gilson et al. (2016) BindingDB in 2015. *Nucleic Acids Res* 44, D1045. https://bindingdb.org/rwd/bind/BindingDBRESTfulAPI.jsp
 
 ---
 
@@ -228,7 +290,7 @@ Emulates a protein's equilibrium structural ensemble from sequence with a genera
 
 **Tables**:
 - `summary`: | id | sequence.id | n_samples | n_residues |
-- `missing`: | id | cause |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -371,6 +433,63 @@ hotspots = Selection(
 
 ---
 
+### StructureCluster
+
+Groups a structures stream into fold families and ranks the families, so a campaign of thousands of designs can be read as "which topologies came out, and which of them fold well" instead of a directory of models. Each structure is reduced to a length-normalized CA trace (resampled to `n_points` positions along the residue index) and compared by distance-matrix RMSD — no superposition is ever computed, which is what makes 10,000 inputs tractable in the base environment. dRMSD is mapped onto a bounded score with the TM-score normalization `1/(1+(dRMSD/d0)^2)`, so `threshold` reads on the familiar 0..1 scale and 0.5 is a sensible start.
+
+This is a proxy for TM-score, not TM-align. dRMSD on a resampled trace is cheaper and stricter: it is sensitive to overall size and internal register in a way an optimal superposition is not, and it will not recognize two folds related by a large rigid-body domain motion. Tune `threshold` against the run's own `similarity_to_representative` distribution rather than transferring a value from the TM-score literature.
+
+Clustering is sphere exclusion (leader / Taylor-Butina) in *ranking* order: structures are visited best-first, and each unassigned structure becomes a representative that absorbs everything within `threshold` of it. Two consequences worth knowing — each cluster's representative is its best-scoring member (the model you actually want to open), and a structure joins the *first* representative that captures it rather than its nearest one. Cost is O(N·n_clusters), not O(N²).
+
+**Environment**: `biopipelines` (numpy + pandas + the shared PDB parser, which already reads mmCIF; no external tool, no dedicated env)
+
+**Installation**: none — the tool runs in the base `biopipelines` environment.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput — predicted structures (PDB or mmCIF). Analyzes `chain`, or the longest protein chain when unset — which in a de novo pipeline is the designed chain, and keeps a HETATM ligand chain out of the trace automatically.
+- `metrics`: TableInfo | StandardizedOutput | str | list = None — per-id table(s) carrying the `rank_by` columns, joined on `id` (e.g. `fold.tables.confidence`, `sasa.tables.sasa`). Without it, clusters are ranked by size.
+- `rank_by`: list[str] = ["plddt", "iptm"] — columns to average per cluster and rank on, in priority order.
+- `ascending`: bool | list[bool] = False — sort direction; the default (higher is better) is right for pLDDT, ipTM and buried surface alike.
+- `threshold`: float = 0.5 — similarity cutoff in (0, 1] for joining a cluster. Higher means tighter, more numerous clusters.
+- `n_points`: int = 64 — CA trace resampling length. Higher sharpens discrimination and costs O(n_points²) memory per structure.
+- `chain`: str = "" — chain to analyze; unset takes the longest protein chain.
+- `min_residues`: int = 20 — shorter chains are dropped from the clustering with `kind="filter"` (they keep their `assignments` row).
+- `max_structures`: int = 0 — input ceiling; 0 disables it.
+
+**Tables**:
+- `assignments`: | id | cluster | cluster_rank | is_representative | is_medoid | similarity_to_representative | n_residues | chain | radius_of_gyration | helix_frac | strand_frac | coil_frac | relative_contact_order |
+- `clusters`: | cluster | cluster_rank | size | fraction | representative | medoid | mean_n_residues | mean_helix_frac | mean_strand_frac | mean_coil_frac | mean_relative_contact_order | mean_radius_of_gyration |
+
+Both tables carry further columns named after `rank_by`: `assignments` appends each ranked metric as-is, `clusters` appends the `mean_`, `median_`, `min_` and `max_` of each.
+- `missing`: | id | removed_by | kind | cause |
+
+Cluster labels are assigned *after* ranking, so `cluster_001` is the best family, and both tables keep a row for every entity that entered (unparseable structures carry NaN rather than vanishing).
+
+**Topology descriptors**: `helix_frac` / `strand_frac` / `coil_frac` come from CA geometry alone (P-SEA-style i→i+2/3/4 distance criteria) and are an estimate, not DSSP — on crystallographic input they track it closely (86% helix for bacteriorhodopsin, 68% strand for a beta-sandwich design), but ~1 Å of per-atom backbone noise pulls them toward coil by 20–30 points, so read them as a comparison between models from the same predictor. Run `DSSP` on the representatives when a real hydrogen-bond assignment matters. `relative_contact_order` (mean sequence separation of CA contacts / chain length) is the noise-robust companion: low for local helical topologies, high for folds stitched together by long-range beta contacts.
+
+**Example**:
+```python
+from biopipelines import ESMFold2, SASA, StructureCluster, Panda
+
+folds = ESMFold2(proteins=seqs, ligands=dye)
+burial = SASA(structures=folds, ligand=dye, mode="ligand")
+
+families = StructureCluster(
+    structures=folds,
+    metrics=[folds.tables.confidence, burial.tables.sasa],
+    rank_by=["plddt", "iptm", "delta_sasa"],
+    threshold=0.5,
+)
+
+# one structure per family, best family first
+reps = Panda(tables=families.tables.assignments,
+             operations=[Panda.filter("is_representative == True"),
+                         Panda.sort("cluster_rank")],
+             pool=folds)
+```
+
+---
+
 ### EnsembleAnalysis
 
 Per-residue RMSF and ensemble-level metrics from a conformer ensemble. Where CABSflex couples RMSF to its own coarse-grained sampling, EnsembleAnalysis analyzes *any* ensemble: it superposes the conformers (least-squares on CA or backbone) and reports per-residue fluctuation, so it overlays RMSF profiles from NMR ensembles, PLACER dumps, BioEmu samples, or any pool of conformers on the same footing. The `rmsf` stream uses the same `resi-csv` schema as CABSflex, so `Selection` thresholds on it unchanged.
@@ -407,6 +526,11 @@ Per-residue RMSF and ensemble-level metrics from a conformer ensemble. Where CAB
 
   | id | frame | rmsd_to_ref | rg |
   |----|-------|-------------|----|
+
+- `missing` (only when an input axis carries an upstream manifest):
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 **Example**:
 ```python
@@ -448,12 +572,27 @@ Quantifies structural changes between reference and target structures using PyMO
   - `"CA"`: alpha-carbon only
   - `"backbone"`: backbone atoms (CA+C+N+O)
   - Any `+`-separated atom names, e.g. `"CA+CB"`
+- `pairing`: str = "sequence" - How atoms are put into correspondence:
+  - `"sequence"` (default): align/super/cealign. Pairs by sequence similarity, so residues it cannot match are **excluded from the RMSD**. Right for homologues.
+  - `"ordered"`: `cmd.fit(matchmaker=-1)` — Nth atom to Nth atom. Right when the structures share numbering and atom order but **not** sequence, e.g. a design and the refold of an inverse-folded sequence.
+  - `"identifier"`: `cmd.fit(matchmaker=0)` — pairs on chain/resi/**resn**/name, so mutated positions are dropped.
+- `cycles`: int = 5 - PyMOL's outlier-rejection cycles. Each discards the worst-fitting pairs and refits, so the reported RMSD describes only the survivors. **Set 0 to measure every atom.**
+- `cutoff`: float = 2.0 - Rejection threshold (Å) for those cycles.
+- `frame`: Optional[str | (TableInfo, "column")] = None - Superpose on this selection, then measure `selection` in that frame without refitting. Answers "given the cores are aligned, how far is the designed part from where it was designed?" A `(TableInfo, "column")` reference resolves per input structure at runtime, so each comparison can be framed on its own region.
+
+  With a `frame`, the measured `selection` is compared where the fit left it. Under `pairing="sequence"` or `"ordered"` that comparison pairs atoms **by position**, so the selection must contain the same number of atoms in both structures — it raises if not, rather than reporting the `0.000 Å` that positional pairing over mismatched counts would otherwise produce. Use `pairing="identifier"` to pair by chain / residue / atom name instead when the two selections differ.
+
+> **Defaults measure similarity, not fidelity.** For "did this fold as designed", use `pairing="ordered", cycles=0`. Measured on one real design whose segment is 11.43 Å from its design over all 200 backbone atoms: the defaults report **1.89 Å** (105 atoms, 29% dropped), `cycles=0` gives 5.69 Å (148 atoms — sequence pairing still excluded 52), `pairing="ordered"` gives the true 11.43 Å, and adding `frame="1-96"` gives **18.89 Å** — where the segment actually sits once the cores are aligned. `cealign` is not a way out: it reports the best common fragment path, 32 of 200 atoms, 3.75 Å.
 
 **Tables**:
 - `changes`:
 
-  | id | reference_structure | target_structure | selection | num_aligned_atoms | RMSD |
-  |----|---------------------|------------------|-----------|-------------------|------|
+  | id | reference_structure | target_structure | selection | num_aligned_atoms | RMSD | RMSD_before | num_atoms_before | num_residues_aligned | atoms_dropped_pct |
+  |----|---------------------|------------------|-----------|-------------------|------|-------------|------------------|----------------------|-------------------|
+
+  `RMSD` covers the atoms that survived refinement; `RMSD_before` / `num_atoms_before` are the same before rejection. A large `atoms_dropped_pct` means the RMSD is not describing the whole selection.
+
+  **`atoms_dropped_pct` is only meaningful for `pairing="sequence"`.** That path goes through `cmd.align` / `cmd.super`, which report how many atoms their outlier-rejection cycles kept. `cmd.fit`, used by `pairing="ordered"` and `"identifier"`, reports no such count and does not narrow the selection, so `num_atoms_before` and `num_aligned_atoms` are necessarily equal there and `atoms_dropped_pct` is `0` by construction — not evidence that nothing was rejected. `cycles` still applies in those modes, and `RMSD` vs `RMSD_before` still shows its effect.
 
 **Example**:
 ```python
@@ -502,8 +641,10 @@ Analyzes contacts between selected protein regions and ligands. For each selecte
 **Tables**:
 - `contacts`:
 
-  | id | source_structure | selections | ligand | contacts | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized |
-  |----|------------------|------------|--------|----------|--------------|--------------|---------------|-------------------------------|
+  | id | source_structure | selections | ligand | {contact_metric_name} | min_distance | max_distance | mean_distance | sum_distances_sqrt_normalized |
+  |----|------------------|------------|--------|-----------------------|--------------|--------------|---------------|-------------------------------|
+
+  The contact-count column is named `contacts` unless `contact_metric_name=` renames it.
 
 **Output Columns**:
 - `id`: Structure identifier
@@ -615,6 +756,11 @@ Selects protein residues based on proximity to a reference — a ligand, a resid
   | id | pdb | within | beyond | distance_cutoff | top_k | mode | reference |
   |----|-----|--------|--------|-----------------|-------|------|-----------|
 
+- `missing` (only when an input axis carries an upstream manifest):
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
 **Example**:
 ```python
 from biopipelines.distance_selector import DistanceSelector
@@ -659,6 +805,9 @@ The canonical use is to turn a per-pose proximity profile (e.g. [DistanceSelecto
 **Streams**:
 - The output stream **keeps the input stream's name** (Panda/Pool convention) — `Consensus(dsel.streams.distances, …)` is read back as `consensus.streams.distances`. It is a `resi-csv` with columns `id | chain | resi | <op columns…> | n_group`, broadcast **one file per input id** (each id carries its own group's aggregated rows), so a downstream stream-consuming tool stays id-keyed and matches per id exactly. Consumable by [Selection](data_management.md#selection), e.g. `Selection.add(c.streams.distances, include="frequency>=0.5")`.
 
+**Tables**:
+- `missing` (only when an input axis carries an upstream manifest): | id | removed_by | kind | cause |
+
 **Example**:
 ```python
 from biopipelines.consensus import Consensus
@@ -697,6 +846,7 @@ Per-residue secondary-structure assignment. For each input PDB, runs DSSP (`mkds
 **Tables**:
 - `secondary_structure`: | id | chain | resnum | resi | resname | resn | ss_code | ss_simple |
 - `summary`: | id | n_residues | helix_frac | sheet_frac | coil_frac |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -728,7 +878,7 @@ Geometry-based binding-pocket detection. For each input PDB, runs the `fpocket` 
 **Tables**:
 - `pockets`: `id | pocket_idx | druggability | volume | n_alpha_spheres | n_residues | residues | pocket_file`
 - `summary`: `id | n_pockets | top_druggability | top_volume | pymol_script`
-- `missing`: `id | cause`
+- `missing`: `id | removed_by | kind | cause`
 
 **Example**:
 ```python
@@ -762,7 +912,7 @@ Protein–ligand **binding-affinity** prediction via a graph neural network with
 
 **Tables**:
 - `affinity`: | id | structures.id | ligands.id | pkd_pred |
-- `missing`: | id | cause |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -775,13 +925,53 @@ aff.tables.affinity
 
 ---
 
+### LigandAtomSelector
+
+Distance-based residue selection referenced to a **subset of atoms inside one ligand residue**, rather than to the whole residue. [DistanceSelector](#distanceselector) measures from every atom of its reference; this measures only from the atom names you name.
+
+The case it exists for is a chimeric ligand that occupies a single residue — a dye conjugated to a peptide, say, all written as one `LIG` — where you want the residues lining the peptide half and not those near the dye. Its output schema is identical to `DistanceSelector`, so the result drops into `LigandMPNN(redesigned=...)` unchanged.
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) — Input structures.
+- `ligand`: str (required) — Ligand residue name, e.g. `"LIG"`.
+- `atoms`: str (required) — `+`-joined atom names within that residue to measure from, e.g. `"C61+C62+S57+O49"`. **Every name must exist in the ligand residue of every input structure**, or that structure is skipped — so a stream whose ligand atom naming is not uniform loses members silently apart from the `missing` row.
+- `distance`: float = 5.0 — Cutoff in Å.
+- `restrict_to`: str | (TableInfo, "column") | None = None — Restrict the search to a selection: a chain-aware string (`"A10-20+A30-40"`), a per-structure table column, or `None` for all protein residues.
+- `include_reference`: bool = True — Kept for API symmetry with `DistanceSelector`. A ligand is not a protein residue, so this has no effect on the protein-residue output.
+
+**Tables**:
+- `selections`:
+
+  | id | pdb | within | beyond | distance_cutoff | reference_ligand |
+  |----|-----|--------|--------|-----------------|------------------|
+
+  `within` and `beyond` are chain-aware selection strings (`"A12+A15-18"`), ready to hand to a design tool.
+
+Atom names come from whatever wrote the structure. A ligand carved from a crystal file, one generated by RDKit, and one round-tripped through PDBQT can all name the same atoms differently — check the names in an actual input before relying on them.
+
+**Example**:
+```python
+from biopipelines import LigandAtomSelector, LigandMPNN
+
+# Redesign only the pocket around the glutathione half of a dye conjugate
+pocket = LigandAtomSelector(structures=complexes, ligand="LIG",
+                            atoms="C61+C62+S57+O49", distance=6.0)
+
+designs = LigandMPNN(structures=complexes, ligand="LIG",
+                     redesigned=pocket.tables.selections.within)
+```
+
+---
+
 ### OpenMM
 
 Energy-minimises protein structures (Amber14 + implicit GBn2 solvent) to relieve clashes and bad geometry before downstream metric calculation. Scope is intentionally narrow — minimisation only, no trajectory production.
 
 **References**: https://github.com/openmm/openmm
 
-**Environment**: `openmm`
+**Environment**: `openmm` (includes the OpenFF/AmberTools stack the `ligand=` path needs, ~740 MB)
 
 **Parameters**:
 - `structures`: DataStream | StandardizedOutput (required) — Input structures.
@@ -792,17 +982,47 @@ Energy-minimises protein structures (Amber14 + implicit GBn2 solvent) to relieve
 - `platform`: str = "auto" — Compute platform (`"auto"`, `"CUDA"`, `"CPU"`, ...).
 - `restraint_selection`: str = "" — Residues to position-restrain during minimization.
 - `restraint_k`: float = 1000.0 — Restraint force constant (kJ/mol/nm²).
+- `ligand`: compounds stream = None — A small molecule bound in the input structures, given as a compounds stream (a `Ligand`, or any tool's `compounds` output). The ligand's HETATM block is carved out by residue name and its topology is built from the stream's `smiles` column via OpenFF — **not** perceived from the PDB coordinates, so bond orders are correct even in a structure with no CONECT records. Without this parameter a bound ligand is simply dropped from the system and the protein minimises as if the pocket were empty.
+- `ligand_charge_method`: str = "am1bcc" — Partial-charge model, `"am1bcc"` or `"nagl"`. AM1-BCC is the reference method and takes minutes for a ~45-atom molecule; NAGL is a graph neural network that is far faster but covers a narrower element set (no Si, P, or metals). Charges are cached across structures on the canonical graph, so a many-pose run over one molecule computes them once. See the note below on mixing methods.
+- `ligand_forcefield`: str = "gaff-2.11" — Small-molecule force field, `"gaff-2.11"` or `"openff-2.0.0"`.
+- `covalent_anchor`: str = None — Protein atom name holding the ligand covalently, e.g. `"SG"`, or `"SG62"` to pin the residue number as well. The closest anchor/ligand-heavy-atom pair within `covalent_max_distance` is held by a stiff harmonic bond during minimisation. Read the caveat below before using this.
+- `covalent_k`: float = 300000.0 — Restraint force constant, kJ/mol/nm².
+- `covalent_length`: float = 0.18 — Restraint equilibrium length in **nm** (0.18 nm ≈ a C–S single bond).
+- `covalent_max_distance`: float = 3.0 — How far the anchor may sit from the ligand and still count as bonded, in **Å**. Note the unit differs from `covalent_length`.
+- `mobile_selection`: str | (TableInfo, "column") = "" — Chain-aware selection whose side chains are free to move; every other protein atom is frozen and the ligand stays mobile. Backbone atoms of the selected residues are frozen too, so only rotamers relax. Empty (the default) means the whole structure is mobile.
+- `frozen_selection`: str | (TableInfo, "column") = "" — Chain-aware selection frozen outright, all atoms. Empty means nothing is frozen. Mutually exclusive with `mobile_selection`.
 
-**Streams**: `structures` (minimized PDB per input)
+Frozen atoms have their mass set to zero, which makes them **immovable**, unlike `restraint_selection` which only applies a harmonic penalty and lets the whole structure drift. Both selections accept a per-structure `(TableInfo, "column")` reference, so a different region can be held for each input.
+
+**Streams**: `structures` (minimized PDB per input), `compounds` (only when `ligand=` was given: the input compounds stream, passed straight through)
+
+The `compounds` stream is the *input* stream, unchanged — the minimiser reuses the input's residue codes rather than assigning its own, so the chemistry is identical and downstream tools keep it. Without `ligand=` the key is an empty placeholder and there is no compounds output at all.
 
 **Tables**:
-- `energies`: | id | energy_initial_kj_mol | energy_final_kj_mol | delta_kj_mol |
+- `energies`: | id | energy_initial_kj_mol | energy_final_kj_mol | delta_kj_mol | n_mobile_atoms | n_frozen_atoms | charge_method |
+- `missing` (only when an input axis carries an upstream manifest): | id | removed_by | kind | cause |
+
+**Reading the energies.** `energy_final_kj_mol` and `delta_kj_mol` include any restraint and covalent-bond terms that were active, so they are **not comparable across structures minimised under different selections**. Compare them within one selection regime, or use them as a relative clash indicator rather than an absolute energy.
+
+**Mixing charge methods.** With `ligand_charge_method="nagl"`, a molecule outside NAGL's element coverage falls back to AM1-BCC with a warning on stderr. That is deliberate — a silicon rhodamine or a phosphonate cannot get NAGL charges at all — but it means one run can produce structures parameterised two different ways, whose energies are not on the same scale. If that matters, set `"am1bcc"` explicitly rather than relying on the fallback.
+
+**The covalent restraint is a tether, not a bond.** `covalent_anchor` adds a stiff harmonic bond to an already-built system; it does not rebuild the topology. The linked pair *is* excluded from the nonbonded terms, as a real bonded pair would be — without that the two atoms would be held a bond length apart while still repelling each other through full Lennard-Jones and Coulomb, and that clash would dominate the reported energies. What the tether still does **not** give you is the rest of a real bond: no angle or torsion terms cross the junction, so the ligand can pivot freely about the attachment point, and both molecules remain chemically saturated — the ligand keeps its hydrogens and the anchor cysteine keeps its HG, so the junction carries two more hydrogens and different formal charges than the real adduct. Use it to hold a covalent ligand in its pocket during minimisation; do not read the resulting energies as those of the adduct itself.
 
 **Example**:
 ```python
-from biopipelines.openmm import OpenMM
+from biopipelines import OpenMM, Ligand
 
 relaxed = OpenMM(structures=boltz, max_iterations=2000)
+
+# With a bound ligand, freezing everything but the pocket side chains
+lig = Ligand(smiles="CC(=O)Oc1ccccc1C(=O)O", codes="LIG")
+relaxed = OpenMM(structures=boltz, ligand=lig,
+                 mobile_selection="A45+A48+A102",
+                 ligand_charge_method="am1bcc")
+
+# Per-structure pocket, read from an upstream selector's table
+relaxed = OpenMM(structures=boltz, ligand=lig,
+                 mobile_selection=(pocket.tables.selection, "within"))
 ```
 
 ---
@@ -826,7 +1046,7 @@ Template-free, machine-learning ligand binding-site prediction. For each input s
 - `pockets`: `id | pocket_idx | rank | score | probability | n_residues | residues | center_x | center_y | center_z` — one row per predicted pocket; `residues` is a chain-aware selection string (e.g. `"A12+A45-47"`).
 - `residues`: `id | chain | resi | resn | pocket_idx | score | probability` — one row per residue (`pocket_idx` 0 = unassigned). Same data as the `residues` stream, combined across all inputs.
 - `summary`: `id | n_pockets | top_score | top_probability | top_residues` — `top_residues` is the rank-1 pocket's residue selection.
-- `missing`: `id | cause`
+- `missing`: `id | removed_by | kind | cause`
 
 **Example**:
 ```python
@@ -911,9 +1131,9 @@ Protein interaction profiler. Reads complex PDBs and reports detected non-covale
 **Streams**: `sessions` (PyMOL `.pse`, when `generate_pse=True`)
 
 **Tables**:
-- `interactions`: | id | ligand | interaction_type | residue | chain | ... |
-- `summary`: | id | n_hbonds | n_hydrophobic | n_pi_stacking | ... |
-- `missing`: | id | cause |
+- `interactions`: | id | ligand | interaction_type | residue | chain | resnum | distance | details |
+- `summary`: | id | n_hbonds | n_hydrophobic | n_pi_stacking | n_salt_bridges | n_halogen | n_water_bridges | session_files |
+- `missing`: | id | removed_by | kind | cause |
 
 In `peptide`/`intra` mode the `ligand` column labels the peptide/partner binding site reported by PLIP rather than a HETATM code.
 
@@ -945,7 +1165,7 @@ Validates computationally generated molecule poses by checking bond lengths, bon
 
 **Parameters**:
 - `structures`: Union[DataStream, StandardizedOutput] (required) - Protein-ligand complexes (PDB/CIF)
-- `ligand`: Union[DataStream, StandardizedOutput] (required) - Compounds stream (`Ligand(code="LIG")` or any compounds-producing tool) naming the ligand. The residue `code` is read from the stream at runtime, and is reused as the reference-structure residue code in redock mode. **Provide a SMILES for non-trivial ligands.** The ligand is extracted from each complex and rebuilt as an SDF for validation. If the stream carries a `smiles`, it is used as a **bond-order template** (`AssignBondOrdersFromTemplate`); otherwise bond orders are perceived from coordinates alone (`rdDetermineBonds`). Coordinate-only perception **fails on charged/conjugated ligands** (dyes, Si-rhodamines, metallo-organics, zwitterions): the molecule won't build, so `mol_pred_loaded` fails and **every** check — including the coordinate-based distance/overlap checks — reports False, i.e. the whole step yields `all_pass=False`. For such ligands you **must** pass `Ligand(smiles=..., codes="LIG")` whose `codes` matches the residue code in the structures. A bare `Ligand(code="LIG")` (no SMILES) is fine only for simple ligands RDKit can perceive from coordinates, and additionally triggers a (failing) RCSB SMILES lookup unless the code is a real CCD code. Note: covalent-derived poses fail `minimum_distance_to_protein` by construction (the attachment atom sits at bonding distance); exclude that check via `exclude=` or `check=[...]` when validating them.
+- `ligand`: Union[DataStream, StandardizedOutput] (required) - Compounds stream (`Ligand(codes="LIG")` or any compounds-producing tool) naming the ligand. The residue `code` is read from the stream at runtime, and is reused as the reference-structure residue code in redock mode. **Provide a SMILES for non-trivial ligands.** The ligand is extracted from each complex and rebuilt as an SDF for validation. If the stream carries a `smiles`, it is used as a **bond-order template** (`AssignBondOrdersFromTemplate`); otherwise bond orders are perceived from coordinates alone (`rdDetermineBonds`). Coordinate-only perception **fails on charged/conjugated ligands** (dyes, Si-rhodamines, metallo-organics, zwitterions): the molecule won't build, so `mol_pred_loaded` fails and **every** check — including the coordinate-based distance/overlap checks — reports False, i.e. the whole step yields `all_pass=False`. For such ligands you **must** pass `Ligand(smiles=..., codes="LIG")` whose `codes` matches the residue code in the structures. A bare `Ligand(codes="LIG")` (no SMILES) is fine only for simple ligands RDKit can perceive from coordinates, and additionally triggers a (failing) RCSB SMILES lookup unless the code is a real CCD code. Note: covalent-derived poses fail `minimum_distance_to_protein` by construction (the attachment atom sits at bonding distance); exclude that check via `exclude=` or `check=[...]` when validating them.
 - `reference_ligand`: Union[DataStream, StandardizedOutput, None] = None - Reference ligand structure for redock mode
 - `mode`: str = "dock" - Validation mode: 'dock' or 'redock' (auto-set to 'redock' if reference_ligand provided)
 - `check`: Union[str, List[str]] = "pose" - Which checks contribute to `all_pass`. All check columns are still written to the CSV — excluded ones are placed to the right of `all_pass` so the audit trail is preserved.
@@ -982,7 +1202,7 @@ from biopipelines.posebusters import PoseBusters
 # Default — "pose" preset, drops electronics so all_pass reflects geometry/placement only
 validation = PoseBusters(
     structures=boltz_holo,
-    ligand=boltz_holo  # reads the LIG code Boltz2 assigned; or Ligand(code="LIG")
+    ligand=boltz_holo  # reads the LIG code Boltz2 assigned; or Ligand(codes="LIG")
 )
 
 # Custom subset — all_pass over only these two columns
@@ -1003,7 +1223,7 @@ validation = PoseBusters(
 xrc = PDB("1ABC")
 validation = PoseBusters(
     structures=boltz_holo,
-    ligand=Ligand(code="ATP"),
+    ligand=Ligand(codes="ATP"),
     reference_ligand=xrc,
     mode="redock"
 )
@@ -1025,11 +1245,13 @@ Measures ligand pose distance between reference holo structure and sample struct
 - `reference_alignment`: Optional[str] = None - PyMOL selection for reference structure alignment (default: "not resn {reference_ligand}", built at runtime once the code is resolved)
 - `target_alignment`: Optional[str] = None - PyMOL selection for target structure alignment (default: "not resn {sample_ligand}", built at runtime once the code is resolved)
 
+- `heavy_only`: bool = False - Compare heavy atoms only. Set this whenever one side has crossed a format that drops hydrogens — a PDBQT round trip through Vina or GNINA keeps only the polar ones — because the two ligands must carry the same atom count for the comparison to run at all, and a mismatch fails every row. A pose RMSD over hydrogens is noise anyway.
+
 **Tables**:
 - `changes`:
 
-  | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | alignment_rmsd | num_ligand_atoms | reference_alignment | target_alignment |
-  |----|------------------|---------------------|-------------|-------------------|----------------|------------------|---------------------|------------------|
+  | id | target_structure | reference_structure | ligand_rmsd | centroid_distance | orientation_angle | orientation_axis | alignment_rmsd | num_ligand_atoms | rmsd_pairing | reference_alignment | target_alignment |
+  |----|------------------|---------------------|-------------|-------------------|-------------------|------------------|----------------|------------------|--------------|---------------------|------------------|
 
 **Output Columns**:
 - `ligand_rmsd`: RMSD between ligand poses after protein alignment (Å)
@@ -1038,6 +1260,12 @@ Measures ligand pose distance between reference holo structure and sample struct
 - `num_ligand_atoms`: Number of atoms in ligand
 - `reference_alignment`: PyMOL selection used for reference structure alignment
 - `target_alignment`: PyMOL selection used for target structure alignment
+
+- `rmsd_pairing`: how the ligand atoms were put into correspondence — `name` (matched by atom name) or `graph` (matched by RDKit substructure, used when names are absent or duplicated)
+
+
+
+**Ligand atoms are paired by identity, not by order.** `ligand_rmsd` matches the two ligands atom-name to atom-name, falling back to an RDKit graph match when names are unusable, and **raises** rather than pairing by position if neither works. Two files listing the same atoms in a different order therefore give ~0 Å instead of a large meaningless number. This changed the values every earlier run reported, so do not compare `ligand_rmsd` across the two behaviours. A reference and sample whose ligands differ in atom count are refused up front — usually a protonation difference, which is what `heavy_only=True` is for.
 
 **Example**:
 ```python
@@ -1088,7 +1316,8 @@ Binding-affinity prediction for **protein–protein** complexes. For each comple
 - `temperature`: float = 25.0 — Temperature (°C) for the Kd conversion.
 
 **Tables**:
-- `affinity`: | id | interface | delta_g_kcal_mol | kd_M |
+- `affinity`: | id | interface | delta_g_kcal_mol | kd_M | n_intermol_contacts | percent_charged_nis | percent_apolar_nis |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -1114,13 +1343,14 @@ Protein–ligand interaction **fingerprints**. For each complex, computes the Pr
 
 **Tables**:
 - `fingerprints`: | id | residue | resn | chain | resnum | resi | interaction_type | present |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
 from biopipelines.prolif import ProLIF
 from biopipelines.entities import Ligand
 
-fp = ProLIF(structures=boltz_holo, ligand=Ligand(code="LIG"))
+fp = ProLIF(structures=boltz_holo, ligand=Ligand(codes="LIG"))
 ```
 
 ---
@@ -1143,7 +1373,7 @@ Adds and optimises explicit hydrogens on protein and ligand atoms via the Richar
 from biopipelines.reduce import Reduce
 
 protonated = Reduce(structures=boltz)
-prolif = ProLIF(structures=protonated, ligand=Ligand(code="LIG"))
+prolif = ProLIF(structures=protonated, ligand=Ligand(codes="LIG"))
 ```
 
 ---
@@ -1166,11 +1396,17 @@ Scores and ranks docking poses by residue–atom distance likelihood (graph tran
 - `ligands_3d`: DataStream = None — Per-id ligand coordinate files passed directly (each file may hold multiple poses → one row per pose).
 - `ligands_smiles`: DataStream = None — Optional `smiles` column for bond-order templating, paired with `ligands_3d`.
 - `cutoff`: float = 10.0 — Pocket cutoff (Å) around the reference ligand.
-- `model`: str = "model1" — Checkpoint (`model1`..`model4`).
+- `model`: str = "model1" — Checkpoint (`model1`, `model2` or `model3`).
 
 **Tables**:
 - `scores`: | id | structures.id | ligands.id | pose | rtmscore |
-- `missing`: | id | cause |
+- `missing`: | id | removed_by | kind | cause |
+
+
+
+**Which pairs are scored.** By default every protein is scored against every ligand — the full cross product. When the protein and ligand id lists are **identical**, RTMScore instead scores only the diagonal, pairing each protein with the ligand of the same id. That is the shape produced by carving each ligand out of its own complex, where 375 of 376 cross-product cells would be scoring a pose against a protein it was never in.
+
+The switch is inferred from the id lists, which has two consequences worth knowing. The lists are compared **in order**, so the same ids arriving in a different order fall back to the cross product. And a genuine N×N screen whose two streams happen to share ids collapses to N diagonal scores — nothing records that the off-diagonal pairs were not computed, so rename one side's ids if you want them.
 
 **Example**:
 ```python
@@ -1195,7 +1431,10 @@ Solvent-accessible surface area analysis. Computes the change in SASA of a ligan
 - `ligand`: Union[str, Ligand, ToolOutput] (required) — The bound ligand. Pass a `Ligand` / any compounds-producing tool output (e.g. a Boltz2 result); the residue `code` is read from the compounds stream's map_table at runtime (Ligand Contract). A bare code string (e.g. `"LIG"`, `"AMX"`, `":X:"`) is also accepted for back-compat.
 - `dot_density`: int = 4 — PyMOL `get_area` dot density (1–4, higher = more accurate, slower).
 
-**Tables**:
+**Streams** (`mode="residues"`):
+- `accessibility`: per-residue relative accessibility (`resi-csv`), one file per input structure. In this mode SASA declares no tables.
+
+**Tables** (`mode="ligand"`, the default):
 - `sasa`:
 
   | id | structure | sasa_ligand_alone | sasa_ligand_complex | delta_sasa |
@@ -1216,19 +1455,18 @@ sasa.tables.sasa  # delta-SASA per structure
 
 Predicted change in fold stability (ddG) upon point mutation, from structure. ThermoMPNN is a lightweight GNN built on the ProteinMPNN backbone, trained on the Megascale stability dataset. For each input structure it scores every position × 19 substitutions in a single forward pass — materially faster than physics-based ddG estimation. Negative `ddG_pred` = predicted stabilising (lower folding free energy). Complements VespaG: ThermoMPNN scores fold *stability* from structure, VespaG scores functional *fitness* from sequence.
 
-**Single point mutations only.** ThermoMPNN predicts the ddG of *one* substitution at a time. Every value it produces — whether in the `ddg` table or the `profile` resi-csv — is an independent single-mutant ddG measured against the wildtype. It does **not** model the combined stability of several simultaneous mutations: summing per-mutation ddGs ignores epistasis and will mis-estimate a real multi-mutant. In the `mutations=` filter, each `+`-joined token is scored separately (it is a selection of single mutants, not a combined variant). For genuine double-mutant ddG (additive and epistatic) use the separate [ThermoMPNN-D](https://github.com/Kuhlman-Lab/ThermoMPNN-D) model; to judge the overall stability of a full multi-mutation design, fold it and compare a global metric to the wildtype.
+**Single point mutations only.** ThermoMPNN predicts the ddG of *one* substitution at a time. Every value in the `ddg` table is an independent single-mutant ddG measured against the wildtype. It does **not** model the combined stability of several simultaneous mutations: summing per-mutation ddGs ignores epistasis and will mis-estimate a real multi-mutant. In the `mutations=` filter, each `+`-joined token is scored separately (it is a selection of single mutants, not a combined variant). For genuine double-mutant ddG (additive and epistatic) use the separate [ThermoMPNN-D](https://github.com/Kuhlman-Lab/ThermoMPNN-D) model; to judge the overall stability of a full multi-mutation design, fold it and compare a global metric to the wildtype.
 
 **Environment**: `thermompnn`
 
 **Installation**: `ThermoMPNN.install()` clones `Kuhlman-Lab/ThermoMPNN` (the default model checkpoint ships with the repo, so no weights download) and creates a torch env. Runs on CPU; a GPU speeds up large/many inputs.
 
 **Parameters**:
-- `structures`: Union[DataStream, StandardizedOutput] (required) — Wildtype backbone/complex PDBs. ThermoMPNN runs its site-saturation pass on these; they define `wildtype`/`resi` per position and serve as the reference for `sequences=`.
+- `structures`: Union[DataStream, StandardizedOutput] (required) — Wildtype backbone/complex PDBs. ThermoMPNN runs its site-saturation pass on these; they define `wildtype`/`resi` per position.
 - `chain`: str = `"A"` — Chain to score.
-- `mutations`: Union[str, (TableInfo, column)] = `""` — Optional. Empty (default) runs site-saturation over all positions of `chain`. Otherwise scores only the named point mutations, given as `+`-joined wildtype-position-mutant tokens (e.g. `"A42G+L50V"`, 1-indexed), or a table column reference whose per-structure cell holds such a string. In explicit mode the native saturation pass still runs and is then filtered to the requested mutants; any requested mutation absent from the output (e.g. a wildtype/position mismatch) is reported in `missing`. Each token is an independent single mutant. Mutually exclusive with `sequences=`.
-- `sequences`: Union[DataStream, StandardizedOutput] = `None` — Optional. A stream of designed sequences (e.g. from `ProteinMPNN`/`LigandMPNN`) to profile against the wildtype. Each sequence is matched to its wildtype structure by the framework's id-matching (the same partition `groups=` tools use: designs `3KZY_<1..10>` match wildtype `3KZY`), diffed against that structure's chain, and emitted as one resi-csv giving, per residue, `0.0` where the design keeps the wildtype residue, else the single-mutant ddG of the wildtype→design substitution at that position. Switches the output from the `ddg` table to the `profile` resi-csv stream. Mutually exclusive with `mutations=`.
+- `mutations`: Union[str, (TableInfo, column)] = `""` — Optional. Empty (default) runs site-saturation over all positions of `chain`. Otherwise scores only the named point mutations, given as `+`-joined wildtype-position-mutant tokens (e.g. `"A42G+L50V"`, 1-indexed), or a table column reference whose per-structure cell holds such a string. In explicit mode the native saturation pass still runs and is then filtered to the requested mutants; any requested mutation absent from the output (e.g. a wildtype/position mismatch) is reported in `missing`. Each token is an independent single mutant.
 
-**Tables** (when `sequences=` is not given):
+**Tables**:
 - `ddg`:
 
   | id | structures.id | chain | position | wildtype | mutation | ddG_pred |
@@ -1236,20 +1474,11 @@ Predicted change in fold stability (ddG) upon point mutation, from structure. Th
 
   One row per scored mutation, sorted by `ddG_pred` ascending (most stabilising first).
 
-- `missing`: `id | removed_by | cause`
-
-**Streams** (when `sequences=` is given):
-- `profile`: resi-csv, one CSV per design id (e.g. `3KZY_1 … 3KZY_10`).
-
-  | id | chain | resi | wildtype | design_aa | ddG_pred |
-  |----|-------|------|----------|-----------|----------|
-
-  One row per residue of the scored chain. `ddG_pred = 0.0` where `design_aa == wildtype` (position unchanged), else the single-mutant ddG for that substitution. Feed it to `Consensus(groups=...)` to roll the per-design profiles up into one per-wildtype summary.
+- `missing`: `id | removed_by | kind | cause`
 
 **Example**:
 ```python
 from biopipelines.thermompnn import ThermoMPNN
-from biopipelines.protein_mpnn import ProteinMPNN
 from biopipelines.panda import Panda
 
 target = PDB("1AKI", convert="pdb")
@@ -1265,10 +1494,6 @@ stabilising = Panda(
 
 # Score a specific shortlist instead (each token is an independent single mutant)
 ddg_subset = ThermoMPNN(structures=target, chain="A", mutations="A42G+L50V")
-
-# Profile a set of designs against the wildtype: one resi-csv per design,
-# 0 where the design kept the wildtype residue, else the per-mutation ddG.
-profiles = ThermoMPNN(structures=target, sequences=ProteinMPNN(target, num_sequences=10))
 ```
 
 **Reference**: Dieckhaus et al. (2024) Transfer learning to leverage larger datasets for improved prediction of protein stability changes. *PNAS* 121, e2314853121. https://github.com/Kuhlman-Lab/ThermoMPNN
@@ -1297,7 +1522,7 @@ Zero-shot single-substitution fitness prediction from sequence. VespaG is a smal
 
   One row per scored mutation, sorted by `fitness` descending (most tolerated/beneficial first).
 
-- `missing`: `id | removed_by | cause`
+- `missing`: `id | removed_by | kind | cause`
 
 **Example**:
 ```python
@@ -1345,8 +1570,8 @@ Semi-empirical GFN2-xTB interaction-energy scoring. For each complex, splits the
 - `opt`: bool = False — Geometry-optimize before the single point.
 
 **Tables**:
-- `interaction_energies`: | id | e_complex_kj | e_protein_kj | e_ligand_kj | e_interaction_kj | ... |
-- `missing`: | id | cause |
+- `interaction_energies`: | id | e_complex_kj | e_protein_kj | e_ligand_kj | e_interaction_kj | e_interaction_kcal | charge_complex |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -1354,5 +1579,5 @@ from biopipelines.xtb import XTB
 from biopipelines.entities import Ligand
 
 # Restrict to the pocket for speed
-e_int = XTB(structures=boltz_holo, ligand=Ligand(code="LIG"), method="gfn2")
+e_int = XTB(structures=boltz_holo, ligand=Ligand(codes="LIG"), method="gfn2")
 ```

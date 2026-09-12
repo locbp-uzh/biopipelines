@@ -34,7 +34,7 @@ def filtered_stream(tmp_path):
             "ATOM      1  CA  ALA A   1       0.0   0.0   0.0  1.00  0.00           C\n")
     mp = tmp_path / "map.csv"
     pd.DataFrame({"id": ids,
-                  "file_path": [str(tmp_path / f"{i}.pdb") for i in ids]}).to_csv(mp, index=False)
+                  "file": [str(tmp_path / f"{i}.pdb") for i in ids]}).to_csv(mp, index=False)
     p = tmp_path / "ds.json"
     p.write_text(json.dumps({"name": "structures", "ids": ids,
                              "files": [str(tmp_path / "<id>.pdb")],

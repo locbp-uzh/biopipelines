@@ -51,8 +51,7 @@ def test_num_batches(local_config, isolated_cwd, new_pipeline):
 
 def test_design_within(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, design_within=8.0)
-    assert "--ligand_mpnn_cutoff_for_score" in content
-    assert "8.0" in content
+    assert_substrings_in(content, ["--ligand_mpnn_cutoff_for_score 8.0"])
 
 
 def test_redesigned_table_reference_serializes(
@@ -125,3 +124,41 @@ def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
         "--bias_AA_per_residue",
         "--seed 7",
     ])
+
+
+def test_pack_side_chains_off_by_default(local_config, isolated_cwd, new_pipeline):
+    """No packing flags, and no structures stream, unless asked for."""
+    content = _build(local_config, isolated_cwd, new_pipeline)
+    assert "--pack_side_chains" not in content
+
+
+def test_pack_side_chains_emits_flags(local_config, isolated_cwd, new_pipeline):
+    content = _build(local_config, isolated_cwd, new_pipeline, pack_side_chains=True)
+    assert_substrings_in(content, [
+        "--pack_side_chains 1",
+        "--number_of_packs_per_design 1",
+        "--pack_with_ligand_context 1",
+    ])
+
+
+def test_packs_per_design(local_config, isolated_cwd, new_pipeline):
+    content = _build(local_config, isolated_cwd, new_pipeline,
+                     pack_side_chains=True, packs_per_design=4)
+    assert_kwarg_emitted(content, "packs_per_design", 4,
+                         flag="--number_of_packs_per_design 4")
+
+
+def test_pack_without_ligand_context(local_config, isolated_cwd, new_pipeline):
+    content = _build(local_config, isolated_cwd, new_pipeline,
+                     pack_side_chains=True, pack_with_ligand_context=False)
+    assert_substrings_in(content, ["--pack_with_ligand_context 0"])
+
+
+def test_packed_files_are_renamed_into_the_stream_folder(
+    local_config, isolated_cwd, new_pipeline,
+):
+    """Upstream writes <struct>_packed_<seq>_<pack>.pdb; the stream ids carry no
+    `_packed_` infix, so the script must rename as it moves them."""
+    content = _build(local_config, isolated_cwd, new_pipeline, pack_side_chains=True)
+    assert "/packed/*.pdb" in content
+    assert "_packed_/_" in content

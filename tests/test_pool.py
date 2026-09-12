@@ -115,6 +115,7 @@ def test_pool_three_sequence_runs_with_unique_ids(
     assert ids == ["a_1", "b_2", "c_3"]
 
 
+@pytest.mark.network
 def test_pool_no_config_time_map_and_content_table_unified(
     local_config, isolated_cwd, new_pipeline,
 ):
@@ -295,19 +296,18 @@ def test_pool_preserves_compounds_chemistry_at_runtime(
     assert "file" not in df.columns
 
 
-def test_pool_pdb_content_table_preserves_file_path_at_runtime(
+def test_pool_pdb_content_table_preserves_the_file_column_at_runtime(
     local_config, isolated_cwd, new_pipeline, tmp_path,
 ):
     """End-to-end runtime check for a content-bearing stream that ALSO carries
     per-id files (PDB's ``structures``): the pooled content table must keep the
-    upstream ``file_path`` column (not a generic ``file``), and the structure
-    files must be copied into the gather folder. Guards the Map Table Contract
-    schema fidelity downstream readers (e.g. rcsb) rely on."""
+    canonical ``file`` column, and the structure files must be copied into the
+    gather folder. Guards the schema fidelity downstream readers rely on."""
     import json
     import pandas as pd
     import pipe_scripts.pipe_pool as pipe_pool
 
-    cols = ["id", "pdb_id", "file_path", "format", "file_size", "source"]
+    cols = ["id", "pdb_id", "file", "format", "file_size", "source"]
     up = []
     for i in range(1, 3):
         d = tmp_path / f"run{i}" / "structures"
@@ -316,7 +316,7 @@ def test_pool_pdb_content_table_preserves_file_path_at_runtime(
         pdb_file.write_text("ATOM      1  N   MET A   1\n")
         csv = d / "structures.csv"
         pd.DataFrame([{
-            "id": "p", "pdb_id": "1ubq", "file_path": str(pdb_file),
+            "id": "p", "pdb_id": "1ubq", "file": str(pdb_file),
             "format": "pdb", "file_size": pdb_file.stat().st_size,
             "source": "rcsb",
         }], columns=cols).to_csv(csv, index=False)
@@ -342,7 +342,7 @@ def test_pool_pdb_content_table_preserves_file_path_at_runtime(
             "format": "pdb"}},
         "out_tables": {"structures": combined},
         "content_bearing_streams": ["structures"],
-        "content_file_cols": {"structures": "file_path"},
+        "content_file_cols": {"structures": "file"},
         "output_folder": str(tmp_path / "out"),
         "recount_prefix": None,
     }
@@ -354,13 +354,12 @@ def test_pool_pdb_content_table_preserves_file_path_at_runtime(
     pipe_pool.main()
 
     df = pd.read_csv(combined)
-    assert "file_path" in df.columns
-    assert "file" not in df.columns
+    assert "file" in df.columns
     assert "value" not in df.columns
     assert list(df["id"]) == ["p_1", "p_2"]
     assert list(df["pool.path"]) == [1, 2]
     # The structure files were copied into the gather folder under composite ids.
-    copied = [df["file_path"].iloc[0], df["file_path"].iloc[1]]
+    copied = [df["file"].iloc[0], df["file"].iloc[1]]
     assert all(os.path.exists(p) for p in copied)
     assert os.path.basename(copied[0]) == "p_1.pdb"
     assert os.path.basename(copied[1]) == "p_2.pdb"
@@ -391,6 +390,7 @@ def test_pool_propagates_table_schema(
 
 # ── happy path: pool two PDB runs (file-based stream + multiple streams) ────
 
+@pytest.mark.network
 def test_pool_two_pdb_runs(
     local_config, isolated_cwd, new_pipeline,
 ):
@@ -398,8 +398,7 @@ def test_pool_two_pdb_runs(
     two PDB runs must:
 
     * preserve all three streams,
-    * track each via its native map_table column convention (PDB uses
-      `file_path` for structures.csv, not `file`),
+    * track each through the canonical `file` column of its map_table,
     * compute the *real* file extension at config time so the
       generated DataStream files don't carry a literal '.*' wildcard.
     """

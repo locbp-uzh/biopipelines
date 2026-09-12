@@ -13,6 +13,7 @@ Usage: python pipe_dna_encoder.py --config <config.json>
 """
 
 import argparse
+import sys
 import json
 import pandas as pd
 import random
@@ -131,6 +132,132 @@ def create_aa_codon_frequency_table(frequency_table: Dict[str, float]) -> Dict[s
     return aa_codon_freq
 
 
+
+IUPAC = {"A": "A", "C": "C", "G": "G", "T": "T",
+         "R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC",
+         "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT"}
+
+
+def _revcomp(site: str) -> str:
+    comp = {"A": "T", "C": "G", "G": "C", "T": "A", "R": "Y", "Y": "R",
+            "S": "S", "W": "W", "K": "M", "M": "K", "B": "V", "V": "B",
+            "D": "H", "H": "D", "N": "N"}
+    return "".join(comp[c] for c in reversed(site))
+
+
+def expand_sites(sites: List[str]) -> List[str]:
+    """Every literal sequence to forbid: each site plus its reverse complement.
+
+    A non-palindromic site cuts just as well when it lands on the other strand,
+    so both orientations have to be excluded.
+    """
+    out = set()
+    for raw in sites:
+        site = raw.strip().upper().replace(" ", "")
+        if not site:
+            continue
+        bad = set(site) - set(IUPAC)
+        if bad:
+            raise ValueError(f"Site {raw!r} has non-IUPAC characters: {sorted(bad)}")
+        out.add(site)
+        out.add(_revcomp(site))
+    return sorted(out)
+
+
+def _matches(window: str, site: str) -> bool:
+    """Could this window BE the site once synthesised?
+
+    Both sides are compared as IUPAC sets rather than the window as a literal
+    base. An X residue is emitted as NNN, and N is any base -- so a window
+    containing one can complete a forbidden site in the ordered DNA even though
+    "N" is not literally in the site's own set. Testing membership treated such
+    a codon as incapable of creating a site, which is the optimistic reading of
+    an unknown base; overlapping the sets is the safe one.
+    """
+    if len(window) != len(site):
+        return False
+    return all(set(IUPAC.get(w, w)) & set(IUPAC[s]) for w, s in zip(window, site))
+
+
+def _creates_site(dna: str, sites: List[str], new_bases: int = 3) -> bool:
+    """Does appending the last `new_bases` of `dna` complete a forbidden site?
+
+    A site may end at any of the newly added bases, not only the last one, so every
+    window that overlaps the new codon has to be tested. Checking just the suffix
+    misses a site that finishes one or two bases earlier.
+    """
+    for site in sites:
+        n = len(site)
+        for end in range(len(dna) - new_bases + 1, len(dna) + 1):
+            start = end - n
+            if start < 0:
+                continue
+            if _matches(dna[start:end], site):
+                return True
+    return False
+
+
+def encode_sequence_excluding(sequence: str,
+                              aa_codon_freq: Dict[str, Tuple[List[str], List[float]]],
+                              sites: List[str],
+                              max_restarts: int = 200) -> str:
+    """Encode a protein while keeping every forbidden site out of the DNA.
+
+    Codons are drawn as in the unconstrained encoder, but a codon that completes a
+    forbidden site is rejected. A site can span up to three codons, so when no codon
+    works at a position the two preceding codons are re-drawn as well (backtracking)
+    rather than giving up.
+    """
+    longest = max((len(s) for s in sites), default=0)
+    lookback = -(-longest // 3) + 1          # codons a site can reach back over
+
+    for _ in range(max_restarts):
+        codons_out: List[str] = []
+        i = 0
+        budget = 40 * (len(sequence) + 1)     # total backtracks allowed this attempt
+        failed = False
+        while i < len(sequence):
+            aa = sequence[i]
+            if aa == "X":
+                codons_out.append("NNN"); i += 1; continue
+            if aa not in aa_codon_freq:
+                raise ValueError(f"Invalid amino acid: {aa}")
+            options, freqs = _threshold_options(aa, aa_codon_freq)
+            prefix = "".join(codons_out[-lookback:]) if codons_out else ""
+            allowed = [(c, f) for c, f in zip(options, freqs)
+                       if not _creates_site(prefix + c, sites)]
+            if allowed:
+                cods, ws = zip(*allowed)
+                codons_out.append(random.choices(list(cods), weights=list(ws), k=1)[0])
+                i += 1
+                continue
+            # nothing fits here: undo the last codons and try a different path
+            budget -= 1
+            if budget <= 0 or not codons_out:
+                failed = True
+                break
+            back = min(len(codons_out), 2)
+            del codons_out[-back:]
+            i -= back
+        if not failed:
+            return "".join(codons_out)
+
+    raise ValueError(
+        "Could not encode the sequence without the excluded sites after "
+        f"{max_restarts} restarts. The peptide may force one of: {sites}")
+
+
+def _threshold_options(aa, aa_codon_freq):
+    """The codon pool the unconstrained encoder would sample from."""
+    codons, frequencies = aa_codon_freq[aa]
+    for cut in (10.0, 5.0):
+        idx = [i for i in range(len(frequencies)) if frequencies[i] >= cut]
+        if idx:
+            return [codons[i] for i in idx], [frequencies[i] for i in idx]
+    m = max(frequencies)
+    return [codons[frequencies.index(m)]], [m]
+
+
 def encode_sequence_thresholded_weighted(sequence: str, aa_codon_freq: Dict[str, Tuple[List[str], List[float]]]) -> str:
     """
     Encode protein sequence to DNA using thresholded weighted method.
@@ -185,12 +312,17 @@ def main():
     sequences_csv = config['sequences_csv']
     organism_code = config['organism']
     dna_output = config['dna_output']
+    exclude_sites = config.get('exclude_sites') or []
     excel_output = config['excel_output']
     info_output = config['info_output']
 
     print(f"DNA Encoder is based on CoCoPUTs (HIVE, tables updated April 2024). Please cite accordingly.")
     print(f"Reading sequences from: {sequences_csv}")
     print(f"Target organism(s): {organism_code}")
+    forbidden = expand_sites(exclude_sites) if exclude_sites else []
+    if forbidden:
+        print(f"Excluding {len(exclude_sites)} site(s) from the coding sequence "
+              f"({len(forbidden)} strings with reverse complements): {', '.join(exclude_sites)}")
 
     # Load protein sequences
     sequences_df = pd.read_csv(sequences_csv)
@@ -224,19 +356,37 @@ def main():
     # Encode sequences
     print(f"Encoding {len(sequences_df)} sequences using thresholded weighted method...")
     results = []
+    failed = []
     for idx, row in sequences_df.iterrows():
         seq_id = row['id']
         protein_seq = row['sequence']
 
-        dna_seq = encode_sequence_thresholded_weighted(protein_seq, aa_codon_freq)
+        # Per-sequence, so one peptide whose residues make an excluded site
+        # unavoidable costs its own row rather than the whole batch.
+        try:
+            if forbidden:
+                dna_seq = encode_sequence_excluding(protein_seq, aa_codon_freq, forbidden)
+            else:
+                dna_seq = encode_sequence_thresholded_weighted(protein_seq, aa_codon_freq)
+        except Exception as e:
+            print(f"WARNING: {seq_id} could not be encoded: {e}", file=sys.stderr)
+            failed.append(seq_id)
+            continue
 
         results.append({
             'id': seq_id,
             'sequence': dna_seq,  # canonical sequence column = the encoded DNA
             'protein_sequence': protein_seq,
             'organism': target_organism,
-            'method': 'thresholded_weighted'
+            'method': 'thresholded_weighted' + ('_site_excluded' if forbidden else '')
         })
+
+    if failed:
+        print(f"Failed {len(failed)}/{len(failed) + len(results)}: {failed}",
+              file=sys.stderr)
+    if not results:
+        print("ERROR: no sequence could be encoded", file=sys.stderr)
+        sys.exit(1)
 
     # Save CSV output
     results_df = pd.DataFrame(results)

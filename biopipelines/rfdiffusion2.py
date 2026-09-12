@@ -107,7 +107,9 @@ class RFdiffusion2(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion2"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.4"
+    # RFdiffusion2's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
+    FORWARD_UNKNOWN_KWARGS = "hydra"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -199,9 +201,9 @@ fi
             ligand: Ligand(s) as a compounds stream. The 3-letter residue ``code``
                 of every id in the stream is read at runtime and joined into
                 ``inference.ligand='CODE1,CODE2'``. For multiple bound ligands pass
-                ONE stream carrying all codes, e.g. ``Ligand(code=["NAD", "OXM"])``
+                ONE stream carrying all codes, e.g. ``Ligand(codes=["NAD", "OXM"])``
                 (or any compounds-producing tool). A bare string is shorthand for an
-                internal ``Ligand(code=...)``.
+                internal ``Ligand(codes=...)``.
             pdb: Input PDB structure (the active-site/theozyme or the ligand-only
                 binder target) as DataStream or StandardizedOutput. Iterated at
                 execution time (one run per input structure).
@@ -248,9 +250,9 @@ fi
             raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
 
         # Ligand — compounds stream; every id's `code` is joined at runtime. A
-        # bare string is shorthand for an internal Ligand(code=...).
+        # bare string is shorthand for an internal Ligand(codes=...).
         self.ligand_stream: DataStream = resolve_basic_input(
-            ligand, Ligand, "compounds", "code", allow_none=False)
+            ligand, Ligand, "compounds", "codes", allow_none=False)
 
         self.contigs = contigs
         self.contig_atoms = contig_atoms
@@ -283,7 +285,7 @@ fi
             raise ValueError("pdb input is required and must not be empty")
 
         if not self.ligand_stream or len(self.ligand_stream) == 0:
-            raise ValueError("ligand (a compounds stream, e.g. Ligand(code=...)) is required and must not be empty")
+            raise ValueError("ligand (a compounds stream, e.g. Ligand(codes=...)) is required and must not be empty")
 
         if self.num_designs <= 0:
             raise ValueError("num_designs must be positive")
@@ -357,6 +359,7 @@ fi
         # RFdiffusion-AA stack relies on the legacy behavior.
         script_content += "export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1\n"
         script_content += self.activate_environment()
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
@@ -396,6 +399,7 @@ fi
         if self.seed_offset is not None:
             args.append(f"inference.seed_offset={self.seed_offset}")
 
+        args += self.extra_args_tokens()
         return args
 
     def _generate_script_run_rfdiffusion(self) -> str:

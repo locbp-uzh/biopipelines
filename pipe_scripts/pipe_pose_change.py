@@ -22,8 +22,69 @@ from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.id_map_utils import get_mapped_ids
 
 
+def _ligand_rmsd(cmd, ref_sel, tgt_sel):
+    """RMSD between two poses of the same ligand, over a real atom correspondence.
+
+    Returns (rmsd, pairing) where pairing names the correspondence used.
+
+    PyMOL's rms_cur(matchmaker=-1) pairs atoms by selection order. Two files
+    written by different programs list the same molecule's atoms in different
+    orders, so that pairs atoms with the wrong partners -- harmless when the
+    poses are far apart, but it inflates the RMSD of exactly the near-native
+    poses worth trusting. Pair by atom name instead, and fall back to a
+    symmetry-aware graph match when the names do not correspond.
+    """
+    ref_names = []
+    tgt_names = []
+    cmd.iterate(ref_sel, 'names.append(name)', space={'names': ref_names})
+    cmd.iterate(tgt_sel, 'names.append(name)', space={'names': tgt_names})
+
+    if len(set(ref_names)) == len(ref_names) and set(ref_names) == set(tgt_names):
+        # A name-list selection cannot reorder anything -- PyMOL always returns
+        # atoms in object order -- so pair the coordinates here rather than
+        # asking rms_cur to do it.
+        import math
+        ref_xyz = dict(zip(ref_names, cmd.get_coords(ref_sel)))
+        tgt_xyz = dict(zip(tgt_names, cmd.get_coords(tgt_sel)))
+        sq = sum(sum((a - b) ** 2 for a, b in zip(ref_xyz[n], tgt_xyz[n]))
+                 for n in ref_names)
+        return math.sqrt(sq / len(ref_names)), 'atom-name'
+
+    rmsd = _symmetry_aware_rmsd(cmd, ref_sel, tgt_sel)
+    if rmsd is not None:
+        return rmsd, 'symmetry-aware'
+
+    raise ValueError(
+        "Cannot establish an atom correspondence between the two ligands: their "
+        "atom names differ and RDKit could not match them by graph. Positional "
+        "pairing would silently compare unrelated atoms.")
+
+
+def _symmetry_aware_rmsd(cmd, ref_sel, tgt_sel):
+    """Best RMSD over all symmetry-equivalent atom matchings, or None."""
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem, rdMolAlign
+    except ImportError:
+        return None
+
+    try:
+        ref = Chem.MolFromPDBBlock(cmd.get_pdbstr(ref_sel), removeHs=False,
+                                   sanitize=False)
+        tgt = Chem.MolFromPDBBlock(cmd.get_pdbstr(tgt_sel), removeHs=False,
+                                   sanitize=False)
+        if ref is None or tgt is None:
+            return None
+        # The poses are already superposed; GetBestRMS would re-fit them, so score
+        # the best matching in place instead.
+        return rdMolAlign.CalcRMS(tgt, ref)
+    except Exception:
+        return None
+
+
 def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, target_id,
-                            ligand, reference_alignment, target_alignment):
+                            ligand, reference_alignment, target_alignment,
+                            heavy_only=False):
     """
     Calculate pose distance metrics for a single target structure.
 
@@ -46,16 +107,30 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
         cmd.load(target_pdb, 'target')
 
         # Check ligands exist
-        ref_lig_count = cmd.count_atoms(f'reference and resn {reference_ligand}')
+        # Hydrogens are the first thing a format conversion drops (PDBQT keeps only
+        # polar ones), and a pose RMSD over them is noise regardless.
+        h_filter = ' and not elem H' if heavy_only else ''
+        ref_lig_count = cmd.count_atoms(f'reference and resn {reference_ligand}{h_filter}')
         if ref_lig_count == 0:
             raise ValueError(
                 f"Ligand '{reference_ligand}' not found in reference structure {reference_pdb}"
             )
 
-        tgt_lig_count = cmd.count_atoms(f'target and resn {ligand}')
+        tgt_lig_count = cmd.count_atoms(f'target and resn {ligand}{h_filter}')
         if tgt_lig_count == 0:
             raise ValueError(
                 f"Ligand '{ligand}' not found in target structure {target_pdb}"
+            )
+
+        # rms_cur pairs atoms by selection order and needs equal counts. Given unequal
+        # ones it writes an error to stderr and returns 0.0 rather than raising, so an
+        # impossible comparison would be recorded as a perfect 0.000 A RMSD.
+        if ref_lig_count != tgt_lig_count:
+            raise ValueError(
+                f"Ligand atom counts differ: reference '{reference_ligand}' has "
+                f"{ref_lig_count}, target '{ligand}' has {tgt_lig_count}. "
+                f"rms_cur pairs atoms positionally and cannot compare different "
+                f"molecules — compare the same chemical species on both sides."
             )
 
         # Align structures using the specified selections (excluding ligands by default)
@@ -71,11 +146,11 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
         # Calculate ligand RMSD after protein alignment
         try:
             # Select ligands
-            ref_ligand_sel = f'reference and resn {reference_ligand}'
-            tgt_ligand_sel = f'target and resn {ligand}'
+            ref_ligand_sel = f'reference and resn {reference_ligand}{h_filter}'
+            tgt_ligand_sel = f'target and resn {ligand}{h_filter}'
 
-            # Calculate RMSD between ligands (after protein alignment)
-            ligand_rmsd = cmd.rms_cur(tgt_ligand_sel, ref_ligand_sel, matchmaker=-1)
+            ligand_rmsd, rmsd_pairing = _ligand_rmsd(
+                cmd, ref_ligand_sel, tgt_ligand_sel)
 
             num_ligand_atoms = cmd.count_atoms(tgt_ligand_sel)
 
@@ -88,6 +163,7 @@ def calculate_pose_change(cmd, reference_pdb, reference_ligand, target_pdb, targ
             'target_structure': os.path.basename(target_pdb),
             'reference_structure': os.path.basename(reference_pdb),
             'ligand_rmsd': round(ligand_rmsd, 3),
+            'rmsd_pairing': rmsd_pairing,
             'alignment_rmsd': round(alignment_rmsd, 3),
             'num_ligand_atoms': num_ligand_atoms,
             'reference_alignment': reference_alignment,
@@ -163,6 +239,7 @@ def main():
     target_alignment = config['target_alignment']
     output_csv = config['output_csv']
     multi_reference = config.get('multi_reference', False)
+    heavy_only = config.get('heavy_only', False)
 
     # Load sample structures DataStream using pipe_biopipelines_io
     samples_ds = load_datastream(config['samples_json'])
@@ -230,7 +307,8 @@ def main():
                 target_id=target_id,
                 ligand=ligand,
                 reference_alignment=reference_alignment,
-                target_alignment=target_alignment
+                target_alignment=target_alignment,
+                heavy_only=heavy_only,
             )
             results.append(result)
             print(f"OK (RMSD: {result['ligand_rmsd']:.2f} A)")

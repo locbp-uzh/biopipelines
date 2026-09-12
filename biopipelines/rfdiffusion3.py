@@ -16,23 +16,25 @@ import re
 from typing import Dict, List, Any, Optional, Union
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string, resolve_table_reference
     from .file_paths import Path
     from .datastream import DataStream
-    from .biopipelines_io import Resolve
+    from .biopipelines_io import Resolve, TableReference
     from .combinatorics import generate_multiplied_ids_pattern
     from .input_standardization import resolve_basic_input
     from .ligand import Ligand
+    from .config_manager import ConfigManager
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string, resolve_table_reference
     from file_paths import Path
     from datastream import DataStream
-    from biopipelines_io import Resolve
+    from biopipelines_io import Resolve, TableReference
     from combinatorics import generate_multiplied_ids_pattern
     from input_standardization import resolve_basic_input
     from ligand import Ligand
+    from config_manager import ConfigManager
 
 
 class RFdiffusion3(BaseConfig):
@@ -67,13 +69,14 @@ class RFdiffusion3(BaseConfig):
 
         # Diffused small-molecule binder: ligand placed (bound coords), buried,
         # with CFG (paper Fig 3c). The ligand must carry coordinates — supply it
-        # as a bound structure; a bare code has nothing to place. A CCD code (e.g.
-        # "SAM") loads that component's reference chemistry. A CUSTOM ligand (a
-        # SMILES-derived molecule whose atom names won't match any CCD entry) must
-        # be coded "UNL" so RFD3 reads its atoms from the structure — see the
-        # select_buried note below.
+        # as a bound structure (Ligand(structures=..., codes=...) carves the bound
+        # HETATM, keeping its coords); a bare CCD code has nothing to place. A CCD
+        # code (e.g. "SAM") loads that component's reference chemistry. A CUSTOM
+        # ligand (a SMILES-derived molecule whose atom names won't match any CCD
+        # entry) must be coded "UNL" so RFD3 reads its atoms from the structure —
+        # see the select_buried note below.
         binder = RFdiffusion3(
-            length="80-120", ligand=Ligand(code="SAM", structures=posed_sam),
+            length="80-120", ligand=Ligand(structures=posed_sam, codes="SAM"),
             select_buried="B1", cfg=True, cfg_scale=2.0,
             step_scale=1.5, noise_scale=0.6, num_steps=200,
         )
@@ -81,7 +84,7 @@ class RFdiffusion3(BaseConfig):
         # Custom (non-CCD) ligand: rename its residue to UNL first, then bury it.
         prepped = PDB(my_pose, PDB.rename("LIG", "UNL"))
         binder2 = RFdiffusion3(
-            pdb=prepped, ligand=Ligand(code="UNL", structures=prepped),
+            pdb=prepped, ligand=Ligand(structures=prepped, codes="UNL"),
             contig="65-95,A84-182", select_buried="B1", cfg=True, cfg_scale=2.0,
         )
 
@@ -103,12 +106,19 @@ class RFdiffusion3(BaseConfig):
         length (str or int): Length constraint for de novo design (no input PDB).
             Use "min-max" for range or int for exact length.
             Example: "100-150" or 120
-        contig (str): Contig specification for motif-based design (requires input PDB).
-            Use '\\0' for chain breaks. Chain letters reference input structure.
+        contig (str or table column): Contig specification for motif-based design
+            (requires input PDB). Use '\\0' for chain breaks. Chain letters reference
+            input structure.
             Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
+            A ``tool.tables.X.col`` reference (or a ``(TableInfo, "column")`` tuple)
+            gives each input PDB its own contig, resolved by id at runtime — use it
+            when the structures differ in length, since one literal cannot name a
+            chain range correct for all of them.
+            ``contigs`` (the plural the other RFdiffusion wrappers take) is accepted
+            as a synonym.
         pdb (DataStream or StandardizedOutput): Input PDB structure (required when using contig)
         ligand (DataStream or StandardizedOutput): Ligand as a compounds stream
-            (Ligand(code="LIG") or any compounds-producing tool). The residue
+            (Ligand(codes="LIG") or any compounds-producing tool). The residue
             `code` is read from the stream's `code` column at runtime. If the
             source also exposes a `structures` stream, that PDB becomes the
             input structure for design.
@@ -142,7 +152,7 @@ class RFdiffusion3(BaseConfig):
             then loads the canonical CCD conformer, whose atom names don't match the
             structure, so the selection resolves to zero atoms. Code such a ligand
             "UNL" (atomworks' DO_NOT_MATCH_CCD sentinel) so its atoms are read from
-            the structure: PDB(pose, PDB.rename("LIG","UNL")) + Ligand(code="UNL").
+            the structure: PDB(pose, PDB.rename("LIG","UNL")) + Ligand(codes="UNL").
         select_exposed (str or dict): Atoms that should be solvent-exposed (RASA control).
             Example: {"B1": "O1,O2"} or "B1" for all atoms
         select_hbond_donor (dict): Hydrogen bond donor specification.
@@ -200,13 +210,19 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "2.0"
+    TOOL_VERSION = "3.4"
+    # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
+    FORWARD_UNKNOWN_KWARGS = "hydra"
+    # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
+    PARAMETER_ALIASES = {"contigs": "contig"}
+    ENV_NAME = "foundry"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         repo_dir = folders.get("RFdiffusion3", "")
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("foundry", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already fully installed (env + non-empty checkpoint dir)
 if {env_check} && [ -d "{repo_dir}" ] && [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
     echo "RFdiffusion3 already installed, skipping. Use force_reinstall=True to reinstall."
@@ -214,27 +230,27 @@ if {env_check} && [ -d "{repo_dir}" ] && [ -n "$(ls -A "{repo_dir}" 2>/dev/null)
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("foundry", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("foundry", env_manager, biopipelines)
-        return f"""echo "=== Installing RFdiffusion3 (foundry) ==="
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
+        return f"""echo "=== Installing RFdiffusion3 ({env}) ==="
 {skip}{remove_block}
-# Create foundry env (skip if it already exists)
+# Create {env} env (skip if it already exists)
 if ! {env_check}; then
     {env_block}
 else
-    echo "foundry environment already exists, skipping creation."
+    echo "{env} environment already exists, skipping creation."
 fi
 
 # Download model weights (skip if checkpoint dir already populated)
 mkdir -p {repo_dir}
 if [ -z "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
-    {cls._env_run("foundry", env_manager)}foundry install rfd3 --checkpoint-dir {repo_dir}
+    {cls._env_run(env, env_manager)}foundry install rfd3 --checkpoint-dir {repo_dir}
 else
     echo "Checkpoint dir {repo_dir} already populated, skipping weight download."
 fi
 
 # Verify installation
-if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {cls._env_run("foundry", env_manager)}python -c "import foundry" >/dev/null 2>&1; then
+if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {cls._env_run(env, env_manager)}python -c "import foundry" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFdiffusion3 installation complete ==="
 else
@@ -273,7 +289,7 @@ fi
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
 
     def __init__(self,
-                 contig: str = "",
+                 contig: Union[str, "TableReference", tuple] = "",
                  length: Union[str, int] = None,
                  pdb: Optional[Union[DataStream, StandardizedOutput]] = None,
                  ligand: Optional[Union[str, DataStream, StandardizedOutput]] = None,
@@ -313,7 +329,7 @@ fi
             contig: Contig specification (use '\\0' for chain breaks)
             length: Length constraint (str "min-max" or int)
             pdb: Input PDB structure as DataStream or StandardizedOutput (optional)
-            ligand: Ligand as a compounds stream (Ligand(code="LIG") or any
+            ligand: Ligand as a compounds stream (Ligand(codes="LIG") or any
                     compounds-producing tool). The residue `code` is read from
                     the stream's `code` column at runtime. If the source also
                     exposes a `structures` stream (e.g. a Ligand with a bound
@@ -348,9 +364,9 @@ fi
         # Ligand — a compounds stream supplying the residue `code` (resolved at
         # runtime). If the source also exposes a structures stream (a Ligand
         # with a bound PDB), those structures become the input PDBs.
-        # A bare string is shorthand for an internal Ligand(code=...).
+        # A bare string is shorthand for an internal Ligand(codes=...).
         self.ligand_stream: Optional[DataStream] = resolve_basic_input(
-            ligand, Ligand, "compounds", "code")
+            ligand, Ligand, "compounds", "codes")
         if ligand is not None and isinstance(ligand, StandardizedOutput):
             lig_structures = ligand.streams.structures
             if lig_structures and len(lig_structures) > 0:
@@ -365,7 +381,11 @@ fi
                 raise ValueError(f"pdb must be DataStream or StandardizedOutput, got {type(pdb)}")
 
         # Store parameters
-        self.contig = contig
+        resolved_contig = resolve_table_reference(contig, "contig")
+        # Literal contig only; a per-PDB column reference resolves at runtime.
+        is_literal = isinstance(resolved_contig, str)
+        self.contig = resolved_contig if is_literal else ""
+        self.contig_reference = None if is_literal else str(resolved_contig)
         self.length = length
         self.num_designs = num_designs
         self.num_models = num_models
@@ -416,9 +436,10 @@ fi
         # Require either length, contig, json_config, or an input that drives
         # a composition (a PDB stream used by unindex/ligand/partial_t).
         has_input = self.pdb_stream is not None or self.ligand_stream is not None
-        drives_input = bool(self.contig) or self.unindex is not None \
+        has_contig = bool(self.contig) or self.contig_reference is not None
+        drives_input = has_contig or self.unindex is not None \
             or self.ligand_stream is not None or self.partial_t is not None
-        if not self.length and not self.contig and not self.json_config \
+        if not self.length and not has_contig and not self.json_config \
                 and not (has_input and drives_input):
             raise ValueError(
                 "Provide length, contig, json_config, or an input structure used "
@@ -441,7 +462,7 @@ fi
         if self.ligand_stream is not None and self.pdb_stream is None:
             raise ValueError(
                 "A ligand needs an input structure to be placed in. Provide the "
-                "ligand with bound coordinates (Ligand(code=..., structures=...)) "
+                "ligand with bound coordinates (Ligand(structures=..., codes=...)) "
                 "or pass pdb= with the ligand bound as HETATM. A bare ligand code "
                 "with length-only (de-novo) design has no structure to bind to."
             )
@@ -466,7 +487,7 @@ fi
                 raise ValueError(
                     f"{', '.join(offending)} require an input structure to resolve "
                     "against, but none was given. Provide pdb= (or a ligand with bound "
-                    "coordinates, e.g. Ligand(code=..., structures=...)). A bare ligand "
+                    "coordinates, e.g. Ligand(structures=..., codes=...)). A bare ligand "
                     "code has no coordinates for these selections."
                 )
 
@@ -476,6 +497,9 @@ fi
             raise ValueError("center_option must be 'all', 'motif', or 'diffuse'")
         if self.symmetry is not None and not isinstance(self.symmetry, (str, dict)):
             raise ValueError("symmetry must be a group-id string (e.g. 'C3') or dict")
+
+        if self.contig_reference is not None and self.pdb_stream is None:
+            raise ValueError("A per-PDB contig reference requires an input structure (pdb=)")
 
         # Check for incorrect chain break syntax
         if self.contig and '/' in self.contig:
@@ -652,6 +676,8 @@ fi
 
         if self.contig:
             config_lines.append(f"CONTIG: {self.contig}")
+        elif self.contig_reference is not None:
+            config_lines.append("CONTIG: (per-structure, resolved at runtime)")
 
         if self.length:
             config_lines.append(f"LENGTH: {self.length}")
@@ -750,6 +776,8 @@ fi
         if self.ligand_stream is not None:
             self.ligand_stream.save_json(self.ligand_json)
             builder_args += f' --ligand-json "{self.ligand_json}"'
+        if self.contig_reference is not None:
+            builder_args += f' --contig-reference "{self.contig_reference}"'
 
         return f"""echo "Building RFdiffusion3 inputs JSON"
 python "{self.build_inputs_py}" {builder_args}
@@ -795,6 +823,7 @@ echo "Using RFdiffusion3 JSON configuration: {self.json_file}"
         (the input pdb id in the multi-PDB case, the de-novo prefix otherwise).
         """
         sampler_args = "".join(f" \\\n    {a}" for a in self._sampler_overrides())
+        sampler_args += "".join(f" \\\n    {t}" for t in self.extra_args_bash_tokens())
         return f"""echo "Starting RFdiffusion3"
 echo "JSON config: {self.json_file}"
 echo "Output folder: {self.output_folder}"
@@ -827,6 +856,21 @@ python -c "import torch; import torchvision" 2>/dev/null || true
 
 """
 
+    def _get_postprocess_pylibs(self) -> str:
+        """Directory of python packages to prepend to PYTHONPATH for the postprocess.
+
+        Lives at ``tool_overrides.rfdiffusion3.postprocess_pylibs``. Needed only
+        where the postprocess runs inside the RFD3 container and the activated
+        biopipelines venv resolves to the container's interpreter rather than the
+        host's, so biopython is not importable — point this at a ``pip --target``
+        install built inside that same image. Empty (the default, and every site
+        whose venv python already carries biopython) emits nothing.
+        """
+        overrides = ConfigManager()._config.get('tool_overrides', {}) or {}
+        pylibs = (overrides.get('rfdiffusion3', {}) or {}).get('postprocess_pylibs', '') or ''
+        _validate_freeform_string("tool_overrides.rfdiffusion3.postprocess_pylibs", pylibs)
+        return pylibs
+
     def _generate_postprocess_section(self) -> str:
         """Generate bash section to post-process RFdiffusion3 outputs.
 
@@ -843,16 +887,10 @@ python -c "import torch; import torchvision" 2>/dev/null || true
         # Output structure ids are keyed by the foundry design key (the input
         # pdb id per entry), so no single --prefix is passed; the postprocess
         # derives each id from the produced filename.
-        # On Daint the postprocess runs INSIDE the RFD3 container, where the
-        # activated biopipelines venv resolves to the container's python 3.12 —
-        # not the host venv's 3.11 that carries biopython. A container-visible
-        # biopython (pip --target into a mounted scratch dir) is exposed via
-        # RFDIFFUSION3_POSTPROCESS_PYLIBS; add it to PYTHONPATH when set. Unset /
-        # empty (Colab, x86-64 where the venv python already has Bio) → no-op.
+        pylibs = self._get_postprocess_pylibs()
+        # Where the container's python must look for biopython; see _get_postprocess_pylibs.
         pylibs_block = (
-            'if [ -n "${RFDIFFUSION3_POSTPROCESS_PYLIBS:-}" ]; then\n'
-            '    export PYTHONPATH="$RFDIFFUSION3_POSTPROCESS_PYLIBS:${PYTHONPATH:-}"\n'
-            'fi'
+            f'export PYTHONPATH="{pylibs}:${{PYTHONPATH:-}}"' if pylibs else ""
         )
         return f"""echo "Post-processing RFdiffusion3 outputs"
 
@@ -907,6 +945,7 @@ python "{self.table_py_file}" \\
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self._generate_json_section()
+        script_content += self.extra_args_echo()
         script_content += self.generate_script_run_rfdiffusion3()
         script_content += self._generate_postprocess_section()
         script_content += self.generate_script_create_table()

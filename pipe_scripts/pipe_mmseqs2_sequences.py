@@ -17,6 +17,13 @@ import sys
 import subprocess
 import tempfile
 import time
+import random
+
+# Sent on every request to a ColabFold-protocol MSA server. api.colabfold.com is
+# a free community service; an unidentified client is one its operators cannot
+# attribute, debug, or contact before blocking.
+COLABFOLD_USER_AGENT = ("biopipelines/1.0 (LOCBP, University of Zurich; "
+                        "https://github.com/locbp-uzh/biopipelines-locbp)")
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -218,19 +225,29 @@ def check_and_resubmit_server(server_dir):
         A lock older than SUBMIT_LOCK_TTL_SECONDS means the server it was
         submitted for never came up; it's treated as absent so a client may
         steal it and resubmit.
+
+        The LOCKDIR is the authority, not the marker file. acquire_submit_lock()
+        judges staleness from the lockdir's mtime, so reading the marker's here
+        left one state where nobody could act: marker gone, lockdir present. Every
+        client then saw no submission in progress, failed to acquire because the
+        directory existed, logged that someone else was submitting, and submitted
+        nothing -- for the full TTL. Reachable from a client dying between mkdir
+        and the marker write, or from a cleanup whose rmdir failed.
         """
-        if not os.path.exists(submit_file):
+        lock_dir = submit_file + '.lockdir'
+        target = lock_dir if os.path.exists(lock_dir) else submit_file
+        if not os.path.exists(target):
             return False
 
         try:
-            age = int(time.time() - os.path.getmtime(submit_file))
+            age = int(time.time() - os.path.getmtime(target))
             if age >= SUBMIT_LOCK_TTL_SECONDS:
                 log(f"Submission lock is stale ({age}s old >= {SUBMIT_LOCK_TTL_SECONDS}s), ignoring")
                 return False
             log(f"Server submission in progress (submitted {age}s ago)")
             return True
         except Exception as e:
-            log(f"Error checking submission file {submit_file}: {e}")
+            log(f"Error checking submission lock {target}: {e}")
             return False
 
     def acquire_submit_lock(lock_file):
@@ -457,7 +474,7 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_posit
             'id': f"{sequence_id}_msa",
             'sequences.id': sequence_id,
             'sequence': query_sequence,
-            'msa_file': output_csv_file  # Reference to converted CSV file
+            'file': output_csv_file  # Reference to converted CSV file
         }]
 
     except Exception as e:
@@ -501,7 +518,7 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
             'id': f"{sequence_id}_msa",
             'sequences.id': sequence_id,
             'sequence': query_sequence,
-            'msa_file': output_csv_file  # Reference to output CSV file
+            'file': output_csv_file  # Reference to output CSV file
         }]
 
     except Exception as e:
@@ -523,7 +540,9 @@ def submit_batch_http(server_url, seqs, output_dir, timeout=3600, user=None, pas
     import io, tarfile, urllib.request, urllib.parse, urllib.error, base64, json
 
     base = server_url.rstrip("/")
-    fasta = "".join(f">{alias}\n{seq}\n" for alias, (_sid, seq) in enumerate(seqs))
+    # Headers start at 101: the ColabFold client does the same, and ids below
+    # that are reserved by the server.
+    fasta = "".join(f">{101 + i}\n{seq}\n" for i, (_sid, seq) in enumerate(seqs))
 
     if user and not base.startswith("https://"):
         log(f"ERROR: refusing to send credentials to {base} — basic auth is base64, "
@@ -534,6 +553,10 @@ def submit_batch_http(server_url, seqs, output_dir, timeout=3600, user=None, pas
         if user:
             token = base64.b64encode(f"{user}:{password or ''}".encode()).decode()
             req.add_header("Authorization", f"Basic {token}")
+        # api.colabfold.com is a free community service. Identify the client so its
+        # operators can attribute and debug the traffic rather than seeing a bare
+        # Python-urllib; the upstream ColabFold client does the same.
+        req.add_header("User-Agent", COLABFOLD_USER_AGENT)
         return urllib.request.urlopen(req, timeout=120)
 
     data = urllib.parse.urlencode({"q": fasta, "mode": "env"}).encode()
@@ -542,6 +565,15 @@ def submit_batch_http(server_url, seqs, output_dir, timeout=3600, user=None, pas
     tid = ticket.get("id")
     if not tid:
         log(f"ERROR: MSA server returned no ticket id: {ticket}")
+        return False
+    # RATELIMIT and MAINTENANCE come back WITH an id. Polling that id anyway means
+    # asking a server that just said "back off" up to timeout/5 more times, so read
+    # the submit status rather than only the id.
+    submit_status = str(ticket.get("status") or "").upper()
+    if submit_status in ("RATELIMIT", "MAINTENANCE"):
+        log(f"ERROR: MSA server answered {submit_status} on submit — not queued. "
+            f"Retry later, or run a local MMseqs2Server to avoid the public "
+            f"endpoint's limits.")
         return False
     log(f"Submitted {len(seqs)} sequence(s) to {base} (ticket {tid})")
 
@@ -554,38 +586,99 @@ def submit_batch_http(server_url, seqs, output_dir, timeout=3600, user=None, pas
         if status in ("ERROR", "UNKNOWN"):
             log(f"ERROR: MSA server ticket {tid} ended as {status}")
             return False
+        if status in ("RATELIMIT", "MAINTENANCE"):
+            log(f"ERROR: MSA server ticket {tid} reports {status}; stopping rather "
+                f"than continuing to poll a throttled server.")
+            return False
         if time.time() - start > timeout:
             log(f"ERROR: MSA server ticket {tid} timed out after {timeout}s (last status {status})")
             return False
-        time.sleep(5)
+        # Jittered backoff, capped: a fixed interval from every concurrent pipeline
+        # step turns N clients into a synchronised poll every 5s.
+        waited = time.time() - start
+        time.sleep(min(5 + waited / 10.0, 30.0) * (0.8 + 0.4 * random.random()))
 
     with _open(urllib.request.Request(f"{base}/result/download/{tid}")) as r:
         blob = r.read()
     os.makedirs(output_dir, exist_ok=True)
 
-    # Map each member to its query by the integer alias in its name, never by
-    # position: the members' lexical order puts "10" before "2", so a positional
-    # rename silently hands one query another's alignment past 10 sequences.
-    written = 0
+    # The tar holds one member per DATABASE, not per query: uniref.a3m always,
+    # plus bfd.mgnify30.metaeuk30.smag30.a3m under mode=env. Each concatenates
+    # every query's alignment separated by NUL bytes. So a query's full MSA is
+    # its slice of uniref JOINED with its slice of the env database -- taking
+    # uniref alone throws away the metagenomic depth that is the entire reason
+    # for using the public server.
+    #
+    # The chunks come back in a server-internal order that is NOT submission
+    # order (nor length- nor id-sorted), so pairing them by position silently
+    # attaches each alignment to the wrong query. Key on the ">101+i" header
+    # that every chunk carries instead.
+    NUL = bytes([0])
+    DB_ORDER = ["uniref.a3m", "bfd.mgnify30.metaeuk30.smag30.a3m"]
+
+    def _alias_of(chunk):
+        """Submission index from the chunk's own query header, or None."""
+        for raw in chunk.lstrip().split(b"\n", 1)[:1]:
+            if not raw.startswith(b">"):
+                return None
+            try:
+                return int(raw[1:].split()[0]) - 101
+            except (ValueError, IndexError):
+                return None
+        return None
+
+    per_db = {}
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
-        members = [m for m in tar.getmembers() if m.name.endswith(".a3m")]
-        for member in members:
-            stem = os.path.splitext(os.path.basename(member.name))[0]
-            if not stem.isdigit():
-                log(f"ERROR: MSA server returned member {member.name!r}, whose name is not "
-                    f"the integer alias this batch submitted; cannot map it to a sequence.")
-                return False
-            alias = int(stem)
-            if not 0 <= alias < len(seqs):
-                log(f"ERROR: MSA server returned alias {alias}, outside the "
-                    f"{len(seqs)} submitted queries.")
-                return False
+        for member in tar.getmembers():
+            name = os.path.basename(member.name)
+            if name not in DB_ORDER:
+                continue
             fh = tar.extractfile(member)
             if fh is None:
                 continue
-            with open(os.path.join(output_dir, f"{alias}.a3m"), "wb") as out:
-                out.write(fh.read())
-            written += 1
+            by_alias = {}
+            for chunk in fh.read().split(NUL):
+                if not chunk.strip():
+                    continue
+                alias = _alias_of(chunk)
+                if alias is None or not 0 <= alias < len(seqs):
+                    log(f"ERROR: {name} chunk has no usable query header; "
+                        f"refusing to guess the pairing.")
+                    return False
+                if alias in by_alias:
+                    log(f"ERROR: {name} returned two alignments for query {alias}.")
+                    return False
+                by_alias[alias] = chunk
+            per_db[name] = by_alias
+
+    if "uniref.a3m" not in per_db:
+        log(f"ERROR: MSA server returned no uniref.a3m; members were "
+            f"{sorted(per_db) or 'none recognised'}.")
+        return False
+    if "bfd.mgnify30.metaeuk30.smag30.a3m" not in per_db:
+        log("WARNING: no environmental database in the result — depth will match "
+            "a uniref-only search, which is what the public server was meant to avoid.")
+
+    for name, parts in per_db.items():
+        if len(parts) != len(seqs):
+            log(f"ERROR: {name} split into {len(parts)} alignments for "
+                f"{len(seqs)} queries; refusing to guess the pairing.")
+            return False
+
+    written = 0
+    for alias in range(len(seqs)):
+        blocks = [per_db[db][alias] for db in DB_ORDER if db in per_db]
+        # The header says which query this is; the sequence must agree with what
+        # we submitted, or the alignment belongs to someone else.
+        body = blocks[0].lstrip().split(b"\n", 2)
+        if len(body) > 1 and body[1].strip().decode(errors="replace") != seqs[alias][1]:
+            log(f"ERROR: alignment for query {alias} ({seqs[alias][0]}) does not "
+                f"match the submitted sequence; refusing to write a mispaired MSA.")
+            return False
+        with open(os.path.join(output_dir, f"{alias}.a3m"), "wb") as out:
+            out.write(b"\n".join(b.rstrip(b"\n") for b in blocks) + b"\n")
+        written += 1
+
     log(f"Retrieved {written} MSA(s) from {base}")
     return written > 0
 
@@ -761,6 +854,10 @@ def main():
         sequences_df = sequences_df[~sequences_df['id'].astype(str).isin(upstream_missing_ids)]
         log(f"Excluded {before - len(sequences_df)} upstream-missing sequence(s) from search")
 
+    # Whether any search was actually asked for. An input set emptied entirely by
+    # the upstream missing table is not a failure -- there was nothing to search.
+    requested_any = len(sequences_df) > 0
+
     # Check server status before starting
     if args.server_url:
         log(f"Using remote MSA server {args.server_url}; no local server needed")
@@ -788,7 +885,7 @@ def main():
                         'id': f"{sequence_id}_msa",
                         'sequences.id': sequence_id,
                         'sequence': existing_df['sequence'].iloc[0],
-                        'msa_file': individual_msa_file,
+                        'file': individual_msa_file,
                     })
                     log(f"Reused existing MSA for {sequence_id}")
                     continue
@@ -802,7 +899,9 @@ def main():
     # over the whole set (the expensive index sweep is amortised across every
     # sequence) instead of one search per sequence. ---
     if pending:
-        ext = args.output_format
+        # A ColabFold-protocol server always returns a3m; csv is produced locally
+        # by converting it. The local server honours output_format directly.
+        ext = "a3m" if args.server_url else args.output_format
         # Unique per-invocation staging dir so concurrent client pipelines (same
         # seq ids from different runs) don't clobber each other's results.
         staging = os.path.join(args.server_dir, "results",
@@ -872,7 +971,7 @@ def main():
     else:
         log("WARNING: No MSA entries generated")
         # Create empty file with correct columns
-        empty_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'msa_file'])
+        empty_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'file'])
         empty_df.to_csv(args.output_msa_csv, index=False)
         log(f"Created empty MSA CSV: {args.output_msa_csv}")
 
@@ -883,6 +982,13 @@ def main():
         cols = ['id', 'removed_by', 'kind', 'cause']
         pd.DataFrame(missing_rows, columns=cols).to_csv(args.missing_csv, index=False)
         log(f"Wrote missing table with {len(missing_rows)} entr(y/ies): {args.missing_csv}")
+
+    # Partial success is useful and exits 0; total failure must not. Writing an
+    # empty MSA CSV and exiting 0 let the completion check pass, and every
+    # downstream fold then ran single-sequence without anything saying so.
+    if not all_msa_rows and requested_any:
+        log("ERROR: no MSA was generated for any sequence")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

@@ -7,7 +7,8 @@
 ESMFold2 inference script.
 
 Reads the combinatorics config written by the ESMFold2 tool, assembles one
-complex per output id (proteins / nucleic acids / ligands as chains), folds it
+complex per output id (proteins / nucleic acids / ligands as chains, plus any
+modification / covalent-bond constraints from --constraints), folds it
 with ESMFold2 over `num_seeds` independent seeds, keeps the best sample by ipTM
 (complex) / pLDDT (monomer), and writes one mmCIF per id plus a per-id scores
 JSON consumed by the post-processing script.
@@ -51,7 +52,19 @@ def load_axis_records(axis):
         if not path or not os.path.exists(path):
             print(f"WARNING: source file not found: {path}", file=sys.stderr)
             continue
-        records = pd.read_csv(path).to_dict("records")
+        # keep_default_na=False: a blank cell (e.g. the `ccd` column of a SMILES
+        # ligand row) must read back as "", not NaN. Every consumer below tests
+        # truthiness with `item.get(x) or ""`, and NaN is truthy in Python
+        # (`bool(float("nan"))` is True), so the default read left a blank ccd
+        # as NaN, which then satisfied `if ch.get("ccd"):` at the branch below
+        # and got wrapped as `ccd=[nan]` -- crashing downstream in the ESM
+        # library with "TypeError: sequence item 0: expected str instance,
+        # float found" when it tried to `','.join(item.ccd)`. This surfaced
+        # only after fixing the ccd/code column mix-up two commits back: `code`
+        # always holds a real string ("LIG" by default) so it never hit the
+        # NaN branch, but the correct `ccd` column is genuinely blank for every
+        # SMILES ligand.
+        records = pd.read_csv(path, keep_default_na=False).to_dict("records")
         if is_iter:
             iterated.extend(records)
             min_iter_order = min(min_iter_order, order)
@@ -61,7 +74,7 @@ def load_axis_records(axis):
     return iterated, static, min_static_order < min_iter_order
 
 
-def build_complexes(config, msa_by_seq):
+def build_complexes(config, msa_by_seq, glycans=None):
     """Yield (complex_id, [chain dicts]) for every output id.
 
     Each chain dict is {entity_type, id (chain letter), sequence|ccd, msa_path}.
@@ -95,17 +108,80 @@ def build_complexes(config, msa_by_seq):
         counter[0] += 1
         return c
 
+    def add_glycan_chains(chains):
+        """One ligand chain per glycan, each an ordered list of CCD codes.
+
+        Glycans ride on the constraints payload rather than the compounds axis:
+        they are not combinatorial, and Ligand cannot express a multi-residue
+        chain anyway (_validate_ccd_code caps a code at 5 characters). Appended
+        after the axis chains, then lettered with everything else, so they sort
+        after the polymers like any other ligand.
+        """
+        for codes in (glycans or []):
+            chains.append(dict(entity_type="ligand", id=None,
+                               ccd=list(codes), smiles=""))
+        return chains
+
+    def assign_chain_ids(chains):
+        """Letter the chains in entity order: polymers first, ligands last.
+
+        Letters used to be handed out in call order, which followed whether an
+        axis ITERATED, not what it contained. A bundled protein axis is static
+        and a bare ligand axis iterates, so `ESMFold2(proteins=Bundle(a, b),
+        ligands=lig)` gave the ligand chain A and pushed the proteins to B/C --
+        contradicting this tool's own documented order and, worse, moving the
+        protein letters whenever a ligand was added or removed. Any
+        covalent_bonds/modifications constraint written against those letters
+        then silently addressed a different chain.
+
+        Ordering by entity type instead keeps polymer letters stable no matter
+        how many ligands are attached, which is what makes multi-ligand work
+        (glycans especially) tractable. The sort is stable, so chains within a
+        group keep their assembly order and a double-stranded pair stays
+        adjacent.
+        """
+        rank = {"protein": 0,
+                "ssdna": 1, "dsdna": 1, "ssrna": 1, "dsrna": 1}
+        chains.sort(key=lambda c: rank.get(c["entity_type"], 2))
+        counter = [0]
+        for c in chains:
+            c["id"] = chain_letter(counter)
+        return chains
+
     def add_item(chains, entity_type, item, counter):
         if entity_type in LIGAND_TYPES:
-            chains.append(dict(entity_type=entity_type, id=chain_letter(counter),
-                               ccd=item.get("code") or "", smiles=item.get("smiles") or ""))
+            # `ccd` comes from the compounds table's `ccd` column, NOT its `code`
+            # column. `ccd` is populated only for a genuine RCSB CCD lookup
+            # (pipe_ligand.py:1058), while `code` is the residue label every
+            # ligand carries and which defaults to "LIG" (pipe_ligand.py:337
+            # leaves `ccd` empty for a SMILES ligand).
+            #
+            # Reading `code` here sent every SMILES ligand down the CCD branch
+            # below, because that branch prefers ccd whenever it is non-empty.
+            # LIG is itself a real CCD entry (C15H11N3, an indazole-pyridine),
+            # so a SMILES-defined dye folded as that heterocycle with the
+            # supplied SMILES sitting unused in the row. The protein folded
+            # fine, so the failure is silent: confidence, ipTM and PAE are all
+            # reported for a complex containing the wrong molecule.
+            #
+            # `format` is what actually distinguishes the two, so gate on it and
+            # only fall back to `code` once the compound is known to be a CCD
+            # entry -- `ccd` is blank for anything defined by SMILES.
+            fmt = str(item.get("format") or "").strip().lower()
+            smiles = str(item.get("smiles") or "").strip()
+            if fmt == "ccd":
+                ccd = str(item.get("ccd") or item.get("code") or "").strip()
+            else:
+                ccd = ""
+            chains.append(dict(entity_type=entity_type, id=None,
+                               ccd=[ccd] if ccd else [], smiles=smiles))
             return
         seq = str(item.get("sequence", ""))
         msa_path = msa_by_seq.get(seq) if entity_type == "protein" else None
-        chains.append(dict(entity_type=entity_type, id=chain_letter(counter),
+        chains.append(dict(entity_type=entity_type, id=None,
                            sequence=seq, msa_path=msa_path))
         if entity_type in DOUBLE_STRANDED:
-            chains.append(dict(entity_type=entity_type, id=chain_letter(counter),
+            chains.append(dict(entity_type=entity_type, id=None,
                                sequence=reverse_complement(seq, entity_type), msa_path=None))
 
     if not iteration_axes:
@@ -114,7 +190,7 @@ def build_complexes(config, msa_by_seq):
             selections[sa["name"]] = ("bundle", [r["id"] for r in sa["items"]], None, [], False)
             for item in sa["items"]:
                 add_item(chains, sa["entity_type"], item, counter)
-        yield predict_single_output_id(**selections), chains
+        yield predict_single_output_id(**selections), assign_chain_ids(add_glycan_chains(chains))
         return
 
     item_lists = [list(enumerate(ia["items"])) for ia in iteration_axes]
@@ -136,7 +212,7 @@ def build_complexes(config, msa_by_seq):
             selections[sa["name"]] = ("bundle", [r["id"] for r in sa["items"]], None, [], False)
             for item in sa["items"]:
                 add_item(chains, sa["entity_type"], item, counter)
-        yield predict_single_output_id(**selections), chains
+        yield predict_single_output_id(**selections), assign_chain_ids(add_glycan_chains(chains))
 
 
 def load_msa_by_sequence(msas_table):
@@ -147,14 +223,118 @@ def load_msa_by_sequence(msas_table):
     out = {}
     for _, row in df.iterrows():
         seq = str(row.get("sequence", "") or "")
-        msa_file = row.get("msa_file", "") or ""
+        msa_file = row.get("file", "") or ""
         if seq and msa_file and os.path.exists(str(msa_file)):
             out[seq] = str(msa_file)
     return out
 
 
-def to_structure_input(chains, input_builder, MSA, max_depth):
+def load_constraints(path):
+    """Read the modification / covalent-bond config, or {} if absent."""
+    if not path:
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def group_modifications(constraints, chain_ids):
+    """Group modification specs by chain, as (label, position, ccd) triples.
+
+    Positions stay 1-indexed here; the conversion to upstream's 0-indexed
+    Modification happens once, at the point of construction.
+    """
+    grouped = {}
+    for i, mod in enumerate(constraints.get("modifications", [])):
+        label = f"modifications[{i}]"
+        chain = mod["chain"]
+        if chain not in chain_ids:
+            raise ValueError(
+                f"{label}: chain {chain!r} is not in this complex (chains: {chain_ids})")
+        grouped.setdefault(chain, []).append((label, int(mod["position"]), mod["ccd"]))
+    return grouped
+
+
+def build_modifications(input_builder, chain_id, sequence, grouped):
+    """Turn this chain's specs into upstream Modification objects, or None."""
+    specs = grouped.get(chain_id)
+    if not specs:
+        return None
+    out = []
+    for label, position, ccd in specs:
+        if position > len(sequence):
+            raise ValueError(
+                f"{label}: position {position} is past the end of chain {chain_id} "
+                f"({len(sequence)} residues)")
+        out.append(input_builder.Modification(position=position - 1, ccd=ccd))
+    return out
+
+
+def build_covalent_bonds(input_builder, constraints, chain_ids):
+    """Build the bonds with placeholder atom indices; resolve_covalent_atom_indices fills them."""
+    bonds = []
+    for i, bond in enumerate(constraints.get("covalent_bonds", [])):
+        chain1, res1, _name1 = bond["atom1"]
+        chain2, res2, _name2 = bond["atom2"]
+        for key, chain in (("atom1", chain1), ("atom2", chain2)):
+            if chain not in chain_ids:
+                raise ValueError(
+                    f"covalent_bonds[{i}].{key}: chain {chain!r} is not in this complex "
+                    f"(chains: {chain_ids})")
+        bonds.append(input_builder.CovalentBond(
+            chain_id1=chain1, res_idx1=int(res1) - 1, atom_idx1=0,
+            chain_id2=chain2, res_idx2=int(res2) - 1, atom_idx2=0))
+    return bonds
+
+
+def resolve_covalent_atom_indices(spi, specs):
+    """Replace the placeholder atom indices with the ones upstream will index by.
+
+    Upstream identifies a bonded atom by its position in the residue's atom list,
+    and that list depends on whether the chain carries a covalent bond at all —
+    leaving atoms are stripped only then. So the bonds must already be declared
+    before the atoms can be enumerated, which is why they are built with
+    placeholders and patched here rather than resolved up front.
+
+    Upstream silently drops a bond whose atom index is out of range; every lookup
+    failure below raises instead.
+    """
+    from esm.models.esmfold2.prepare_input import build_chains_from_input
+
+    chains, tokens, atoms = build_chains_from_input(spi)
+    asym_by_chain = {c.chain_id: c.asym_id for c in chains}
+
+    residue_atoms = {}
+    for atom in atoms:
+        if not atom.is_valid or atom.token_index >= len(tokens):
+            continue
+        token = tokens[atom.token_index]
+        residue_atoms.setdefault((token.asym_id, token.residue_index), []).append(atom)
+
+    def atom_index(label, chain_id, res_idx, atom_name):
+        found = residue_atoms.get((asym_by_chain[chain_id], res_idx))
+        if not found:
+            raise ValueError(
+                f"{label}: chain {chain_id} has no residue at position {res_idx + 1}")
+        names = [a.name for a in found]
+        if atom_name not in names:
+            residue_name = tokens[found[0].token_index].residue_name
+            raise ValueError(
+                f"{label}: atom {atom_name!r} is not in {residue_name} at "
+                f"{chain_id}{res_idx + 1}; available: {names}")
+        return names.index(atom_name)
+
+    for i, (bond, spec) in enumerate(zip(spi.covalent_bonds, specs)):
+        bond.atom_idx1 = atom_index(
+            f"covalent_bonds[{i}].atom1", bond.chain_id1, bond.res_idx1, spec["atom1"][2])
+        bond.atom_idx2 = atom_index(
+            f"covalent_bonds[{i}].atom2", bond.chain_id2, bond.res_idx2, spec["atom2"][2])
+
+
+def to_structure_input(chains, input_builder, MSA, max_depth, constraints):
     """Translate generic chain dicts into a StructurePredictionInput."""
+    chain_ids = [ch["id"] for ch in chains]
+    grouped_mods = group_modifications(constraints, chain_ids)
+
     sequences = []
     for ch in chains:
         et = ch["entity_type"]
@@ -166,21 +346,49 @@ def to_structure_input(chains, input_builder, MSA, max_depth):
                         f"ESMFold2 recycles MSAs in a3m format; got {ch['msa_path']}. "
                         "Convert a Boltz2 CSV msas output with MSA(source, convert='a3m').")
                 msa = MSA.from_a3m(ch["msa_path"], max_sequences=max_depth)
-            sequences.append(input_builder.ProteinInput(id=ch["id"], sequence=ch["sequence"], msa=msa))
+            sequences.append(input_builder.ProteinInput(
+                id=ch["id"], sequence=ch["sequence"], msa=msa,
+                modifications=build_modifications(
+                    input_builder, ch["id"], ch["sequence"], grouped_mods)))
         elif et in ("ssdna", "dsdna"):
-            sequences.append(input_builder.DNAInput(id=ch["id"], sequence=ch["sequence"]))
+            sequences.append(input_builder.DNAInput(
+                id=ch["id"], sequence=ch["sequence"],
+                modifications=build_modifications(
+                    input_builder, ch["id"], ch["sequence"], grouped_mods)))
         elif et in ("ssrna", "dsrna"):
-            sequences.append(input_builder.RNAInput(id=ch["id"], sequence=ch["sequence"]))
+            sequences.append(input_builder.RNAInput(
+                id=ch["id"], sequence=ch["sequence"],
+                modifications=build_modifications(
+                    input_builder, ch["id"], ch["sequence"], grouped_mods)))
         elif et == "ligand":
+            if ch["id"] in grouped_mods:
+                raise ValueError(
+                    f"{grouped_mods[ch['id']][0][0]}: chain {ch['id']} is a ligand; "
+                    "modifications apply to polymer chains only")
+            # ccd is only set when the compound's format is ccd (see add_item),
+            # so these two are mutually exclusive and the order is not a policy.
             if ch.get("ccd"):
-                sequences.append(input_builder.LigandInput(id=ch["id"], ccd=[ch["ccd"]]))
+                print(f"ligand chain {ch['id']}: CCD {'-'.join(ch['ccd'])}", flush=True)
+                sequences.append(input_builder.LigandInput(id=ch["id"], ccd=list(ch["ccd"])))
             elif ch.get("smiles"):
+                print(f"ligand chain {ch['id']}: SMILES {ch['smiles']}", flush=True)
                 sequences.append(input_builder.LigandInput(id=ch["id"], smiles=ch["smiles"]))
             else:
-                raise ValueError(f"ligand chain {ch['id']} has neither ccd nor smiles")
+                raise ValueError(
+                    f"ligand chain {ch['id']} has neither ccd nor smiles. A SMILES "
+                    "compound needs a non-empty smiles column; a CCD compound needs "
+                    "format=ccd and a code.")
         else:
             raise ValueError(f"unknown entity_type: {et}")
-    return input_builder.StructurePredictionInput(sequences=sequences)
+
+    bonds = build_covalent_bonds(input_builder, constraints, chain_ids)
+    spi = input_builder.StructurePredictionInput(
+        sequences=sequences,
+        covalent_bonds=bonds or None,
+    )
+    if bonds:
+        resolve_covalent_atom_indices(spi, constraints["covalent_bonds"])
+    return spi
 
 
 def main():
@@ -196,6 +404,7 @@ def main():
     p.add_argument("--include-pae", action="store_true")
     p.add_argument("--all-samples", action="store_true")
     p.add_argument("--msas-table", default=None)
+    p.add_argument("--constraints", default=None)
     args = p.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -209,19 +418,21 @@ def main():
     with open(args.combinatorics_config) as f:
         config = json.load(f)
     msa_by_seq = load_msa_by_sequence(args.msas_table)
+    constraints = load_constraints(args.constraints)
 
     print(f"Loading ESMFold2 model: {args.model_name}", flush=True)
     model = ESMFold2Model.from_pretrained(args.model_name).cuda().eval()
     folder = ESMFold2InputBuilder()
 
-    complexes = list(build_complexes(config, msa_by_seq))
+    complexes = list(build_complexes(config, msa_by_seq,
+                                     glycans=constraints.get("glycans")))
     print(f"Assembled {len(complexes)} complex(es)", flush=True)
 
     scores = []
     failed = []
     for cid, chains in complexes:
         try:
-            spi = to_structure_input(chains, input_builder, MSA, args.msa_max_depth)
+            spi = to_structure_input(chains, input_builder, MSA, args.msa_max_depth, constraints)
             is_monomer = sum(1 for c in chains if c["entity_type"] != "ligand") <= 1
 
             # fold() returns a list of per-diffusion-sample results (a single

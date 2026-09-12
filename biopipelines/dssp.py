@@ -53,12 +53,14 @@ class DSSP(BaseConfig):
     """
 
     TOOL_NAME = "DSSP"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "dssp"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("dssp", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "DSSP already installed, skipping. Use force_reinstall=True to reinstall."
@@ -66,13 +68,13 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("dssp", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("dssp", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing DSSP ==="
 {skip}{remove_block}
 {env_block}
 
-if {cls._env_run("dssp", env_manager)}mkdssp --help >/dev/null 2>&1 || {cls._env_run("dssp", env_manager)}dssp --help >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}mkdssp --help >/dev/null 2>&1 || {cls._env_run(env, env_manager)}dssp --help >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== DSSP installation complete ==="
 else

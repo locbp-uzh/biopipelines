@@ -98,7 +98,7 @@ class Panda(BaseConfig):
     """
 
     TOOL_NAME = "Panda"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.4"
 
     # Internal column name used to track which input table a row came from
     # when concat runs over multiple inputs. Auto-added before the operation
@@ -722,7 +722,7 @@ echo "=== Panda ready ==="
             if needs_rename:
                 # Derive rename prefix from step folder name, keeping the
                 # execution-order int as a leading namespace so two unnamed Panda
-                # steps don't collide on the same Panda_<N> ids (which suffix/
+                # steps don't collide on the same Panda_<#> ids (which suffix/
                 # exact matching would cross-link before provenance). Strip the
                 # zero-padding: "010_Panda_Cycle1" -> "10_Panda_Cycle1".
                 folder_name = os.path.basename(self.output_folder)
@@ -919,6 +919,14 @@ echo "=== Panda ready ==="
                                 "map_table": spec.map_table,
                                 "file_template": file_template,
                             })
+                            # A value-based stream's map_table IS its content
+                            # table. Copy it to that path, not to tables/:
+                            # pipe_panda augments an existing map_table in
+                            # place but writes a fresh {id, file} one when the
+                            # path is absent, so the content must already be
+                            # sitting there.
+                            if not spec.files:
+                                pool_table_targets[name] = spec.map_table
                 # Propagated pool tables now live under our tables/; map
                 # source basenames to their new canonical destinations so
                 # pipe_panda copies them into the right place.
@@ -928,7 +936,14 @@ echo "=== Panda ready ==="
                 for table_name, info in out.get("tables", {}).items():
                     if isinstance(info, _TI):
                         pool_table_targets[table_name] = info.info.path
-            except Exception:
+            except Exception as e:
+                # Never silently: emptying these is what re-introduces the
+                # value-stream content loss this block exists to prevent, and it
+                # would do so with the regression test still green.
+                print(f"WARNING: {self.TOOL_NAME}: could not compute pool targets "
+                      f"({type(e).__name__}: {e}). Pooled value-stream content will "
+                      f"not be routed to its map_table; a pooled csv stream may lose "
+                      f"its columns.")
                 stream_map_targets = []
                 stream_folders_map = {}
                 pool_table_targets = {}
@@ -1153,7 +1168,7 @@ fi
                     if self.rename and predicted_count is not None:
                         new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
                     elif self.rename:
-                        new_ids = [f"{self.rename}_[<N>]"]
+                        new_ids = [f"{self.rename}_[<#>]"]
                     else:
                         new_ids = data["ids"]
                     shared_basename = os.path.basename(data["shared_src"])
@@ -1172,7 +1187,7 @@ fi
                     if self.rename and predicted_count is not None:
                         new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
                     elif self.rename:
-                        new_ids = [f"{self.rename}_[<N>]"]
+                        new_ids = [f"{self.rename}_[<#>]"]
                     else:
                         new_ids = data["ids"]
                     output_streams[stream_name] = DataStream(
@@ -1192,7 +1207,7 @@ fi
                     new_files = [os.path.join(stream_dir, f"{nid}{ext}") for nid in new_ids]
                 elif self.rename:
                     # Rename with unknown count: lazy pattern
-                    new_ids = [f"{self.rename}_[<N>]"]
+                    new_ids = [f"{self.rename}_[<#>]"]
                     new_files = [os.path.join(stream_dir, f"<id>{ext}")]
                 else:
                     # No rename: copy pool IDs as-is, use template for files

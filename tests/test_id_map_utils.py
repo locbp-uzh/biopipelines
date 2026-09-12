@@ -37,7 +37,7 @@ def _reset_caches():
 def test_map_table_ids_to_ids_basic_numeric_suffix():
     from biopipelines.id_map_utils import map_table_ids_to_ids
 
-    assert map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<N>"}) == [
+    assert map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<#>"}) == [
         "rifampicin_1_2", "rifampicin_1", "rifampicin",
     ]
 
@@ -45,8 +45,8 @@ def test_map_table_ids_to_ids_basic_numeric_suffix():
 def test_map_table_ids_to_ids_segment_suffix():
     from biopipelines.id_map_utils import map_table_ids_to_ids
 
-    # <S> matches any segment, including alphanumeric suffixes.
-    assert map_table_ids_to_ids("protein_1_19A", {"*": "*_<S>"}) == [
+    # <?> matches any segment, including alphanumeric suffixes.
+    assert map_table_ids_to_ids("protein_1_19A", {"*": "*_<?>"}) == [
         "protein_1_19A", "protein_1", "protein",
     ]
 
@@ -62,7 +62,7 @@ def test_map_table_ids_to_ids_multi_axis_plus_separator():
 
     # Multi-axis IDs (joined with '+') generate sub-sequences and
     # suffix-stripped variants.
-    out = map_table_ids_to_ids("prot1+lig1_2", {"*": "*_<S>"})
+    out = map_table_ids_to_ids("prot1+lig1_2", {"*": "*_<?>"})
     # Order is most-specific-first; we don't pin the full enumeration
     # but the most-specific must come first and key prefixes must be
     # present.

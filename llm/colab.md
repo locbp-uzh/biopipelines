@@ -2,6 +2,8 @@
 
 The LLM workflow talks to Google Colab through the official **Colab MCP server** (`github.com/googlecolab/colab-mcp`): the assistant creates notebooks, adds cells, and runs them on a Colab runtime via MCP tool calls. Do not use `colab-ssh`, `cloudflared`, `ngrok`, or any reverse-tunnel trick: Colab's terms prohibit remote shells on managed runtimes, and accounts have been suspended over it.
 
+**This requires the one-time setup below, so check before relying on it.** The MCP path exists only when `mcp__colab-mcp__*` tools are in the session's tool list. When they are not, the assistant cannot operate the runtime at all: the fallback is human-in-the-loop — hand the user a notebook, they execute the cells and paste the outputs back. Look at the tool list rather than assuming, and tell the user which mode is in effect.
+
 ## One-time setup (Claude Code)
 
 1. **Install `uv`** so `uv tool install` is available:
@@ -79,7 +81,7 @@ Colab VMs are ephemeral — everything under `/content` vanishes on recycle. Mou
    Outputs honor `biopipelines_output` on Colab: `local_output` does **not** auto-enable on the colab scheduler (it would otherwise overwrite `biopipelines_output` with the ephemeral `cwd/outputs`, lost on recycle). So once you repoint `biopipelines_output` at Drive above, pipeline outputs land there with no extra flag. (On plain local Jupyter, `local_output` still auto-enables.)
 4. Add a cell with the affected `.install()` call(s).
 5. Add a minimal pipeline cell.
-6. Execute cells in order; read cell outputs (success markers, traceback, `_log` files) directly via the MCP tools — no copy-paste round-trip with the user.
+6. Execute cells in order; read cell outputs directly via the MCP tools — no copy-paste round-trip with the user. Beyond the cell output, check the completion markers written one level above each tool folder (`<NNN>_<ToolName>_COMPLETED` / `_FAILED` / `_WARNING`) and the per-tool log, either `<Job>/Logs/<NNN>_<ToolName>.log` or the identical `_log` written inside the tool's own output folder.
 7. Iterate.
 
 ## Notes

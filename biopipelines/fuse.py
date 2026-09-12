@@ -51,7 +51,8 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.3"
+    # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Fuse step. The retired spelling still sets the label and now also reaches the framework.
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -72,7 +73,7 @@ echo "=== Fuse ready ==="
 
     def __init__(self,
                  sequences: List[Union[DataStream, StandardizedOutput]],
-                 name: str = "",
+                 prefix: str = "",
                  linker: str = "GGGGSGGGGSGGGGSGGGGS",
                  linker_lengths: List[str] = None,
                  **kwargs):
@@ -83,7 +84,7 @@ echo "=== Fuse ready ==="
             sequences: List of DataStreams or StandardizedOutputs, one per fusion slot.
                       Each slot can contain multiple IDs — the output is the
                       cartesian product of all slot options × linker lengths.
-            name: Job name for output files
+            prefix: Label for the fused construct, used as the base of the output file names (default: "fuse"). Formerly spelled `name=`; there is deliberately no alias, because the framework reads `name` as the job name and Fuse capturing it made the job name vanish.
             linker: Base linker sequence unit. Repeated as needed and sliced to
                     the requested length (e.g. "GGS" with length 7 → "GGSGGSG").
             linker_lengths: List of length ranges for each junction, one per pair of
@@ -108,7 +109,7 @@ echo "=== Fuse ready ==="
             raise ValueError("Fuse requires at least 2 sequence slots for fusion")
 
         # Store Fuse-specific parameters
-        self.name = name
+        self.prefix = prefix
         self.linker = linker
 
         # linker_lengths=None means no linkers at all (direct concatenation, no L columns)
@@ -179,7 +180,7 @@ echo "=== Fuse ready ==="
 
     def _get_job_base(self) -> str:
         """Get job base name for file naming."""
-        return self.name if self.name else "fuse"
+        return self.prefix if self.prefix else "fuse"
 
     @staticmethod
     def _parse_length_spec(spec: str) -> List[int]:
@@ -269,7 +270,7 @@ echo "=== Fuse ready ==="
                 if not isinstance(length_spec, str) or not any(c in length_spec for c in '0123456789'):
                     raise ValueError(f"Invalid linker_lengths format: {length_spec}")
 
-        _validate_freeform_string("name", self.name)
+        _validate_freeform_string("prefix", self.prefix)
         _validate_freeform_string("linker", self.linker)
         if self.linker_lengths:
             for i, s in enumerate(self.linker_lengths):
@@ -421,7 +422,7 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
         base_dict = super().to_dict()
         base_dict.update({
             "fuse_params": {
-                "name": self.name,
+                "prefix": self.prefix,
                 "linker": self.linker,
                 "linker_lengths": self.linker_lengths,
                 "num_slots": len(self.input_slots),

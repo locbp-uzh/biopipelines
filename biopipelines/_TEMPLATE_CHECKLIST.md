@@ -9,18 +9,20 @@ Before editing, classify the tool based on the following:
     - shares another tool's env (delegate, e.g. `return PyMOL._install_script(...)`)
     - dedicated env (adapt from `dssp.py`)
     - container (adapt from `gnina.py`: source in `environments/_containers.yaml` + `cls._container_pull_block(folders, force_reinstall)` in the install). 
-    The last two require entries in the config.<variant>.yaml file.
+    The last two require an `environments:` entry in **each** of `config.cluster.yaml`, `config.colab.yaml` and `config.container.yaml` — see §9. A container tool also gets a `containers:` destination line in `config.cluster.yaml` (image path) paired with its source in `environments/_containers.yaml`.
 - **Inputs:** (determines output prediction)
     - single stream > check closest tool in function
     - multiple streams (combinatorial) > see Boltz2/ESMFold2/Gnina 
 
 ## 2. Identity & docstring
 - [ ] `TOOL_NAME` unique; `TOOL_VERSION` set.
+- [ ] `ENV_NAME` declared (the env this tool builds and runs in), unless the tool installs nothing and lives in the `biopipelines` env. **Nothing catches its absence** — not the pre-commit hook, not CI — the tool simply fails to install. Note it is the tool's *default* name, not the authoritative one: `_install_env` reads the `environments:` entry from the active config (see §3 and §9) and only falls back to `ENV_NAME` under `env_manager: pip`.
 - [ ] Class docstring documents every input param and every output stream/table *with columns*. 
 
 ## 3. Install (`_install_script`)
 - [ ] Kept / deleted / container per §1.
 - [ ] If kept: gated on `_env_exists_check`; honors `force_reinstall`; verifies the binary/imports and `touch "$INSTALL_SUCCESS"` on success.
+- [ ] The env name is **never** written into the install bash. Call `cls._install_env(env_manager)` and install into what it returns — that reads the same `environments:` entry `_load_environments` activates at run time, so install and runtime cannot diverge. With no entry under the active variant it raises, naming the tool, the variant and the config file; that is intended (29 tools have no `daint` entry because they do not work there), so do not add a fallback.
 - [ ] If the installation diverges between cluster and Colab, shipped both `environments/<TOOL_NAME>.yaml` **and** `<TOOL_NAME>.colab.yaml`. The `.colab` one drops conda-only deps with no PyPI build. Fork the YAML rather than branching Python on scheduler. 
 
 ## 4. Path descriptors
@@ -32,6 +34,7 @@ Before editing, classify the tool based on the following:
 - [ ] Keeps the raw input handle (`self.structures`) for missing-propagation.
 - [ ] Receives streams/standardized outputs, not bare values. Bare values (a sequence string, a PDB id, a SMILES) are turned into streams by the tools `Sequence`/`PDB`/`Ligand`/... - let the user pass those, so bare-value conversion lives in one place instead of every tool.
 - [ ] `super().__init__(**kwargs)` is the last line.
+- [ ] **Renaming a parameter?** Put the old spelling in `PARAMETER_ALIASES = {"<old>": "<new>"}` and, if it is retired rather than a synonym you intend to keep, list it in `DEPRECATED_ALIASES = ("<old>",)`. Without the alias the old key falls into `**kwargs`, never binds, and the pipeline runs with the parameter at its default — silently, or (on a `FORWARD_UNKNOWN_KWARGS` tool) as a bogus upstream flag. Two `ValueError`s at class creation catch the ways this goes wrong: an alias target no parameter names, and a `DEPRECATED_ALIASES` entry missing from `PARAMETER_ALIASES`. A reserved key (`name`) is *copied*, so the tool and the framework both see it; any other key passed under both spellings raises. Prefer a clean break when the old spelling only affected this tool's own output names, and a kept synonym when its value is a handle other code reaches for (`tool.tables.<name>`). See [Renaming a Parameter](../docs/developer_manual.md#renaming-a-parameter-parameter_aliases).
 
 ## 6. `validate_params`
 - [ ] Fails fast with actionable `ValueError` for empty/invalid/mutually-exclusive inputs. This is the only guardrail before a cluster job queues.
@@ -56,11 +59,25 @@ Before editing, classify the tool based on the following:
 - [ ] Returns `"output_folder": self.output_folder`.
 
 ## 9. Registration
-Skipping any of these makes the commit rejected by `versions/check_tool_edits.py`:
-- [ ] Added the tool to `versions/tool_changelog.yaml` (`files:` = wrapper + pipe_script; `current:` = the `TOOL_VERSION` literal; a `history:` entry).
-- [ ] Added a `CHANGELOG.md` bullet under `[Version] > Tools` naming the tool.
-- [ ] On any later edit to the files: bump `TOOL_VERSION` and `current` together.
-- [ ] Exported the class in `biopipelines/__init__.py`.
+Two gates enforce this section, and both are mechanical. `versions/check_tool_edits.py` runs as a **pre-commit hook** and rejects the commit; `tests/test_registry_consistency.py` runs in **both CI pipelines** and fails the build. Neither is a style preference — a missing entry is a red pipeline.
+
+⚠ The pre-commit hook only runs if it is installed. On a fresh clone: `pip install pre-commit && pre-commit install`. Without that, version-bump violations pass silently and surface later in CI.
+
+**Version bookkeeping** (the pre-commit hook enforces the last two; `test_source_version_matches_tool_changelog` in CI enforces the first, and would otherwise never fire for this tool at all):
+- [ ] Added the tool to `versions/tool_changelog.yaml` (`files:` = wrapper + pipe_script; `current:` = the `TOOL_VERSION` literal in the class body, character-for-character; a `history:` entry).
+- [ ] Added a bullet naming the tool under `[unreleased]` → `### Tools` in **`versions/CHANGELOG.md`**. Note both parts: the file is `versions/CHANGELOG.md` (there is no `CHANGELOG.md` at the repo root), and the section is `[unreleased]`, not a released `[x.y.z]` one. The hook parses for exactly that heading pair.
+- [ ] On any later edit to a file listed under the tool's `files:`: bump `TOOL_VERSION` in the class **and** `current` in the yaml together, and add another `[unreleased]` → `Tools` bullet.
+
+**Registry consistency** (enforced by `tests/test_registry_consistency.py`):
+- [ ] `docs/tool_index.md`: added a table row (`| <n> | <ToolName> | <Category> | <version> | ...`) **and** bumped the `**Public-API count: N**` line — the test asserts that number equals the count of `TOOL_NAME` definitions.
+- [ ] The index row's version cell equals the source `TOOL_VERSION` exactly. A stale cell fails the build even though the row exists.
+- [ ] `docs/tool_reference.md`: added an entry (the test greps for the tool name anywhere in the file, but write a real signature entry).
+- [ ] `docs/tool/<category>.md`: added a section whose heading is `## <ToolName>` or `### <ToolName>` — a literal `##`/`###` heading starting with the tool name. Prose that merely mentions the tool does not satisfy the test and leaves the parameters undocumented.
+- [ ] `README.md`: added a tool-table row using the exact markup the test greps for, `<td><sub><b><ToolName></b>` (with the name as its own `<b>` text). A row that documents two sibling tools together must be registered in the test's `README_COMBINED` map instead.
+- [ ] `environments:` entries in **three** config variants — `config.cluster.yaml`, `config.colab.yaml` **and** `config.container.yaml`. The test diffs colab and container against cluster and fails on any tool present in one and absent from another. `config.daint.yaml` is exempt (aarch64: x86-64-only binaries and PyG wheels are unavailable there), so add it only if the tool actually works on aarch64.
+
+**Not CI-enforced but still required:**
+- [ ] Exported the class in `biopipelines/__init__.py` (both the `from .<module> import <ToolName>` line and the `__all__` entry). Without it `from biopipelines import <ToolName>` fails and the tool is unreachable.
 
 ## 10. The paired pipe_script(s) (`pipe_scripts/pipe_<yourtool>.py`)
 See the annotated companion `_pipe_template.py` for the full pattern.
@@ -78,13 +95,17 @@ See the annotated companion `_pipe_template.py` for the full pattern.
 
 ## 11. Verify
 - [ ] `python -c "import biopipelines.<yourtool>"`.
+- [ ] `python -m pytest tests/ -q` is green. This is the local gate; both CI pipelines run `pytest tests/` on Python 3.10–3.13, and on GitLab a red test stage blocks the mirror to the public GitHub repo.
+- [ ] `python -m pytest tests/test_registry_consistency.py -q` is green — the fast check for §9 while wiring the tool up.
 - [ ] Minimal pipelines exploring different inputs and parameters produce the expected outputs.
 - [ ] Installation works on the intended platform.
+- [ ] *(Optional, GPU-bound.)* If the tool gets a per-tool parameter suite, it is excluded from the default run by `addopts = "-ra -m 'not tool_parameters'"` in `pyproject.toml`; run it explicitly with `pytest tests/tool_parameters -m tool_parameters -v`.
 
 ## 12. Documentation
-- [ ] Docstring in the class.
-- [ ] Entries under docs/tool_index.md, docs/tool_reference.md, docs/tool/<category>.md
-- [ ] Short description and link to repository and main reference paper in the README.
+The registry entries themselves are §9 — this section is the prose quality bar for them.
+- [ ] Docstring in the class documents every parameter and every output stream/table with columns.
+- [ ] The `docs/tool/<category>.md` section (added in §9) actually documents the parameters, not just the tool's existence.
+- [ ] The README row (added in §9) carries a short description plus the repository and main reference-paper links, or the BP-native badge for a tool with no upstream.
 
 ## Gotchas (Python-level, not framework rules)
 - ⚠ No backslash inside f-string `{...}` braces: py3.10/3.11 raise SyntaxError. Build such a fragment in a plain variable first, then interpolate it. One bad f-string breaks the whole tool's pipe script.

@@ -33,11 +33,28 @@ Where:
 - `pseudocount`: float = 0.01 - Pseudocount added to all amino acids before adjustment. Ensures no amino acid has zero probability, allowing correlation signals to resurrect beneficial mutations. After adding, frequencies are normalized to preserve original sum.
 - `positions`: Optional[str] = None - PyMOL-style position filter (e.g., "141+143+145+147-149")
 
-**Outputs**:
-- `tables.adjusted_probabilities`: Raw Bayesian-adjusted probabilities
-- `tables.absolute_probabilities`: Normalized as absolute probabilities
-- `tables.relative_probabilities`: Normalized as relative probabilities (original AA = 0)
-- `tables.adjustment_log`: Detailed log of all adjustments
+**Streams**: `images` (sequence logos of the adjusted distributions)
+
+**Tables**:
+- `adjusted_probabilities` (raw Bayesian-adjusted probabilities):
+
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+- `absolute_probabilities` (normalized as absolute probabilities):
+
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+- `relative_probabilities` (normalized as relative probabilities, original AA = 0):
+
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+- `adjustment_log` (one row per position × amino acid):
+
+  | position | original | aa | prior_freq | correlation | raw_correlation | sample_count | shrinkage_weight | adjusted_prob | change |
+  |----------|----------|----|------------|-------------|-----------------|--------------|------------------|---------------|--------|
 
 **Example**:
 ```python
@@ -96,6 +113,8 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 - `positions`: Optional[str] = None - PyMOL-style position filter restricting the analysis/logos to selected positions (e.g., "141+143+145+147-149")
 - `color_palette`: str = "okabe-ito" - Color palette for sequence logos. Options: "okabe-ito" (colorblind-friendly), "standard" (property-based shading)
 
+**Streams**: `plots` (sequence logos and frequency plots)
+
 **Tables**:
 - `profile`:
 
@@ -109,13 +128,13 @@ mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
 
 - `absolute_frequencies`:
 
-  | position | original | A | C | ... | Y |
-  |----------|----------|---|---|-----|---|
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 - `relative_frequencies`:
 
-  | position | original | A | C | ... | Y |
-  |----------|----------|---|---|-----|---|
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 **Example**:
 ```python
@@ -163,21 +182,23 @@ Note: When n ≤ 1 for either group, correlation is set to 0.
 - `metric`: str (required) - Metric column name to analyze
 - `positions`: Optional[str] = None - PyMOL-style position filter (e.g., "141+143+145+147-149")
 
-**Outputs**:
-- `tables.correlation_1d`:
+**Streams**: `images` (correlation heatmaps and logos)
+
+**Tables**:
+- `correlation_1d`:
 
   | position | original | correlation | mean_mutated | mean_wt | var_mutated | var_wt | n_mutated | n_wt |
-  |----------|-------|-------------|--------------|---------|-------------|--------|-----------|------|
+  |----------|----------|-------------|--------------|---------|-------------|--------|-----------|------|
 
-- `tables.correlation_2d`:
+- `correlation_2d`:
 
-  | position | original | A | C | ... | Y |
-  |----------|-------|---|---|-----|---|
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
-- `tables.sample_counts_2d`:
+- `sample_counts_2d`:
 
-  | position | original | A | C | ... | Y |
-  |----------|-------|---|---|-----|---|
+  | position | original | A | C | D | E | F | G | H | I | K | L | M | N | P | Q | R | S | T | V | W | Y |
+  |----------|----------|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 **Example**:
 ```python

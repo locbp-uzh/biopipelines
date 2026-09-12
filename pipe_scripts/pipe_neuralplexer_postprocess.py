@@ -49,7 +49,7 @@ def merge_protein_ligand_pdb(prot_pdb: str, lig_sdf: str, out_pdb: str) -> None:
             for line in block.splitlines():
                 if line.startswith(("HETATM", "CONECT")):
                     out.write(line + "\n")
-        out.write("END\n")
+        out.write("END".ljust(80) + "\n")
 
 
 def parse_confidence_csv(path: str) -> Dict[int, float]:

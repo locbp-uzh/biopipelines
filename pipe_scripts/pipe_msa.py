@@ -126,15 +126,15 @@ def main():
 
     df = pd.read_csv(input_msa_table)
 
-    if 'msa_file' not in df.columns:
-        print(f"Error: Input MSA table missing 'msa_file' column")
+    if 'file' not in df.columns:
+        print(f"Error: Input MSA table missing 'file' column")
         sys.exit(1)
 
     ext = ".a3m" if convert == "a3m" else ".csv"
     output_rows = []
 
     for _, row in df.iterrows():
-        msa_file = row['msa_file']
+        msa_file = row['file']
         row_id = row.get('id', '')
         seq_id = row.get('sequences.id', row_id)
 
@@ -155,7 +155,7 @@ def main():
             'id': f"{seq_id}_msa",
             'sequences.id': seq_id,
             'sequence': query_seq,
-            'msa_file': output_file
+            'file': output_file
         })
 
     output_df = pd.DataFrame(output_rows)

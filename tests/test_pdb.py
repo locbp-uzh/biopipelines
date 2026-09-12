@@ -15,6 +15,7 @@ import pytest
 
 # ── single + list + dict construction ────────────────────────────────────────
 
+@pytest.mark.network
 def test_pdb_single_rcsb_code(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -32,6 +33,7 @@ def test_pdb_single_rcsb_code(
     assert ids == ["4ufc"]
 
 
+@pytest.mark.network
 def test_pdb_list_of_codes(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -61,6 +63,7 @@ def test_pdb_dict_uses_keys_as_ids(record_case):
     assert p.pdb_ids == ["4ufc", "1ake"]
 
 
+@pytest.mark.network
 def test_pdb_custom_ids_list(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -133,6 +136,7 @@ def test_pdb_single_file_path_id_is_basename_stem(
 
 # ── convert option ───────────────────────────────────────────────────────────
 
+@pytest.mark.network
 def test_pdb_convert_pdb(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -148,6 +152,7 @@ def test_pdb_convert_pdb(
     assert p.streams.structures.format == "pdb"
 
 
+@pytest.mark.network
 def test_pdb_convert_cif(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -163,6 +168,7 @@ def test_pdb_convert_cif(
     assert p.streams.structures.format == "cif"
 
 
+@pytest.mark.network
 def test_pdb_convert_none_is_mixed_format(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -268,6 +274,7 @@ def test_pdb_empty_dict_raises(record_case):
 
 # ── integration: PDB + Mock ──────────────────────────────────────────────────
 
+@pytest.mark.network
 def test_pdb_feeds_mock(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -294,6 +301,7 @@ def test_pdb_feeds_mock(
 
 # ── integration: PDB + Panda ─────────────────────────────────────────────────
 
+@pytest.mark.network
 def test_pdb_feeds_panda_on_sequences_table(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -316,6 +324,7 @@ def test_pdb_feeds_panda_on_sequences_table(
     assert_valid_script(script_path, "PDB", "Panda", "pdb_feeds_panda")
 
 
+@pytest.mark.network
 def test_pdb_feeds_panda_on_structures_table(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -341,6 +350,7 @@ def test_pdb_feeds_panda_on_structures_table(
     assert_valid_script(script_path, "PDB", "Panda")
 
 
+@pytest.mark.network
 def test_pdb_panda_filter(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -362,6 +372,7 @@ def test_pdb_panda_filter(
     assert_valid_script(script_path, "PDB", "Panda")
 
 
+@pytest.mark.network
 def test_pdb_panda_tail(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -383,6 +394,7 @@ def test_pdb_panda_tail(
     assert_valid_script(script_path, "PDB", "Panda")
 
 
+@pytest.mark.network
 def test_pdb_panda_filter_sort_head_chain(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -409,6 +421,7 @@ def test_pdb_panda_filter_sort_head_chain(
     assert_valid_script(script_path, "PDB", "Panda")
 
 
+@pytest.mark.network
 def test_pdb_panda_select_columns(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -430,6 +443,7 @@ def test_pdb_panda_select_columns(
     assert_valid_script(script_path, "PDB", "Panda")
 
 
+@pytest.mark.network
 def test_pdb_panda_rename_column(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):
@@ -453,6 +467,7 @@ def test_pdb_panda_rename_column(
 
 # ── chain semantics: auto / all / list / explicit letter ─────────────────────
 
+@pytest.mark.network
 def test_pdb_chain_auto_emits_literal_sequence_ids(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -473,10 +488,11 @@ def test_pdb_chain_auto_emits_literal_sequence_ids(
     assert struct_ids == ["4ufc", "1ake"]
 
 
+@pytest.mark.network
 def test_pdb_chain_all_emits_lazy_sequence_ids(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
-    """chain='all' declares lazy <id>[_<chain>] sequences (cardinality at runtime)."""
+    """chain='all' declares lazy <id>[_<?>] sequences (cardinality at runtime)."""
     from biopipelines.pdb import PDB
 
     pipeline = new_pipeline("pdb_chain_all")
@@ -487,13 +503,14 @@ def test_pdb_chain_all_emits_lazy_sequence_ids(
     seq_ids = list(p.streams.sequences.ids)
     struct_ids = list(p.streams.structures.ids)
     record_case(input="PDB('1a3n', chain='all')",
-                expected={"sequences": ["1a3n[_<chain>]"], "structures": ["1a3n"]},
+                expected={"sequences": ["1a3n[_<?>]"], "structures": ["1a3n"]},
                 actual={"sequences": seq_ids, "structures": struct_ids})
-    assert seq_ids == ["1a3n[_<chain>]"]
+    assert seq_ids == ["1a3n[_<?>]"]
     # split_chains defaults to False → structures stream stays single-id literal
     assert struct_ids == ["1a3n"]
 
 
+@pytest.mark.network
 def test_pdb_chain_list_emits_literal_per_chain_ids(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -514,6 +531,7 @@ def test_pdb_chain_list_emits_literal_per_chain_ids(
     assert struct_ids == ["1a3n"]  # split_chains=False → single structure file
 
 
+@pytest.mark.network
 def test_pdb_chain_list_split_chains_emits_per_chain_structures(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -534,6 +552,7 @@ def test_pdb_chain_list_split_chains_emits_per_chain_structures(
     assert struct_ids == ["4ake_A", "4ake_B"]
 
 
+@pytest.mark.network
 def test_pdb_chain_all_split_chains_emits_lazy_structures(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -548,12 +567,13 @@ def test_pdb_chain_all_split_chains_emits_lazy_structures(
     seq_ids = list(p.streams.sequences.ids)
     struct_ids = list(p.streams.structures.ids)
     record_case(input="PDB('4lcd', chain='all', split_chains=True)",
-                expected={"sequences": ["4lcd[_<chain>]"], "structures": ["4lcd[_<chain>]"]},
+                expected={"sequences": ["4lcd[_<?>]"], "structures": ["4lcd[_<?>]"]},
                 actual={"sequences": seq_ids, "structures": struct_ids})
-    assert seq_ids == ["4lcd[_<chain>]"]
-    assert struct_ids == ["4lcd[_<chain>]"]
+    assert seq_ids == ["4lcd[_<?>]"]
+    assert struct_ids == ["4lcd[_<?>]"]
 
 
+@pytest.mark.network
 def test_pdb_chain_explicit_letter_emits_single_literal_id(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
@@ -805,10 +825,10 @@ def test_upstream_map_is_authoritative_id_set(tmp_path, record_case):
             "ATOM      1  CA  ALA A   1      1.0  1.0  1.0  1.00  0.00           C\n")
     map_csv = tmp_path / "structures.csv"
     pd.DataFrame({"id": survivors,
-                  "file_path": [str(tmp_path / f"{s}.pdb") for s in survivors]}
+                  "file": [str(tmp_path / f"{s}.pdb") for s in survivors]}
                  ).to_csv(map_csv, index=False)
 
-    upstream_id_to_file = {r["id"]: r["file_path"]
+    upstream_id_to_file = {r["id"]: r["file"]
                            for _, r in pd.read_csv(map_csv).iterrows()}
     pdb_ids, custom_ids = list(swept), list(swept)
 

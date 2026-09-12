@@ -78,7 +78,8 @@ class Frame2Seq(BaseConfig):
     """
 
     TOOL_NAME = "Frame2Seq"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "frame2seq"
 
     # ------------------------------------------------------------------
     # Install
@@ -89,28 +90,29 @@ class Frame2Seq(BaseConfig):
         """Create the frame2seq env from environments/frame2seq.<variant>.yaml
         and pip-install the package on top. Verification imports frame2seq +
         torch (the heaviest transitive dep)."""
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("frame2seq", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} \\
-   && {cls._env_run("frame2seq", env_manager)}python -c "import frame2seq, torch" >/dev/null 2>&1; then
-    echo "frame2seq environment already installed, skipping. Use force_reinstall=True to reinstall."
+   && {cls._env_run(env, env_manager)}python -c "import frame2seq, torch" >/dev/null 2>&1; then
+    echo "{env} environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("frame2seq", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("frame2seq", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing Frame2Seq ==="
 {skip}{remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create frame2seq environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
 # Verify installation (frame2seq + torch importable)
-if {cls._env_run("frame2seq", env_manager)}python -c "import frame2seq, torch" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import frame2seq, torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Frame2Seq installation complete ==="
 else

@@ -42,7 +42,7 @@ class PoseChange(BaseConfig):
     """
 
     TOOL_NAME = "PoseChange"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -68,6 +68,7 @@ class PoseChange(BaseConfig):
                  sample_ligand: Union[DataStream, StandardizedOutput, None] = None,
                  reference_alignment: Optional[str] = None,
                  target_alignment: Optional[str] = None,
+                 heavy_only: bool = False,
                  **kwargs):
         """
         Initialize PoseChange tool.
@@ -90,6 +91,11 @@ class PoseChange(BaseConfig):
             target_alignment: PyMOL selection for target structure alignment
                              (default: "not resn {sample_ligand}" — everything except the ligand,
                              built at runtime once the ligand code is resolved)
+            heavy_only: Compare heavy atoms only (default False). Set this whenever
+                one side has crossed a format that drops hydrogens — a PDBQT round
+                trip keeps only the polar ones — because the ligand atom counts must
+                match for the comparison to run at all. A pose RMSD over hydrogens
+                is noise anyway.
             **kwargs: Additional parameters passed to BaseConfig
 
         Output:
@@ -123,6 +129,7 @@ class PoseChange(BaseConfig):
         # an unspecified alignment is built as "not resn <code>" by the script.
         self.reference_alignment = reference_alignment
         self.target_alignment = target_alignment
+        self.heavy_only = heavy_only
 
         super().__init__(**kwargs)
 
@@ -138,6 +145,11 @@ class PoseChange(BaseConfig):
 
     def validate_params(self):
         """Validate tool parameters."""
+        if not isinstance(self.heavy_only, bool):
+            raise ValueError(
+                f"heavy_only must be a bool, got {type(self.heavy_only).__name__}. "
+                f"A truthy string such as \"false\" would otherwise read as True.")
+
         if not self.reference_stream or len(self.reference_stream) == 0:
             raise ValueError("reference_structure cannot be empty")
 
@@ -175,6 +187,7 @@ class PoseChange(BaseConfig):
             f"SAMPLE LIGAND: {runtime}",
             f"REFERENCE ALIGNMENT: {ref_aln_display}",
             f"TARGET ALIGNMENT: {tgt_aln_display}",
+            f"ATOMS COMPARED: {'heavy only' if self.heavy_only else 'all, including H'}",
             f"METRICS: RMSD, centroid, orientation"
         ])
 
@@ -210,6 +223,7 @@ class PoseChange(BaseConfig):
             "reference_json": self.reference_ds_json,
             "reference_id": reference_id,
             "multi_reference": multi_reference,
+            "heavy_only": self.heavy_only,
             "reference_ligand": "",
             "samples_json": self.samples_ds_json,
             "ligand": "",
@@ -277,6 +291,7 @@ python "{self.pose_change_py}" --config "{self.config_file}"
             "orientation_axis",
             "alignment_rmsd",
             "num_ligand_atoms",
+            "rmsd_pairing",
             "reference_alignment",
             "target_alignment"
         ]

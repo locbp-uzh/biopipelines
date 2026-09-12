@@ -1,5 +1,7 @@
-# OpenMM environment - energy minimisation only.
+# OpenMM environment - energy minimisation, with small-molecule parameterisation.
 # CPU build is sufficient for the minimisation use-case; GPU not required.
+# Carries the same OpenFF/AmberTools stack as openmm.yaml so ligand= behaves the
+# same on Colab; it is ~740MB, which dominates this env's install time there.
 name: openmm
 channels:
   - conda-forge
@@ -7,6 +9,10 @@ dependencies:
   - python>=3.10,<3.13
   - pip
   - openmm>=8.0
+  - openmmforcefields>=0.14
+  - openff-toolkit
+  - ambertools
   - pdbfixer
+  - rdkit
   - pandas
   - numpy

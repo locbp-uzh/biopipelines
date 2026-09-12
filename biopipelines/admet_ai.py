@@ -47,13 +47,15 @@ class ADMETAI(BaseConfig):
     """
 
     TOOL_NAME = "ADMETAI"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "admet_ai"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         """Install ADMET-AI in a dedicated conda environment."""
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("admet_ai", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "ADMET-AI already installed, skipping. Use force_reinstall=True to reinstall."
@@ -61,9 +63,9 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("admet_ai", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("admet_ai", env_manager, biopipelines)
-        env_python = f'{cls._env_run("admet_ai", env_manager)}python'
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
+        env_python = f'{cls._env_run(env, env_manager)}python'
         # descriptastorus imports dbm at module scope. Some distributions (SUSE
         # on Daint) split it out of the stdlib into a package we cannot install,
         # leaving an _import_failed stub. dbm.dumb is pure python and dbm's
@@ -91,7 +93,7 @@ fi
 # Verify installation — instantiating ADMETModel downloads the bundled
 # Chemprop-RDKit weights, so a successful import + construction is the
 # right verification (and pre-warms the model cache for the first run).
-if MPLBACKEND=agg {cls._env_run("admet_ai", env_manager)}python -c "from admet_ai import ADMETModel; ADMETModel()" >/dev/null 2>&1; then
+if MPLBACKEND=agg {cls._env_run(env, env_manager)}python -c "from admet_ai import ADMETModel; ADMETModel()" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ADMET-AI installation complete ==="
 else

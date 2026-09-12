@@ -253,15 +253,9 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
         else:
             run_df = None
 
-        # File-column convention varies by upstream tool: most stream
-        # map_tables use 'file', but the PDB tool's structures.csv uses
-        # 'file_path'. Probe both.
         file_col = None
-        if run_df is not None:
-            for cand in ("file", "file_path"):
-                if cand in run_df.columns:
-                    file_col = cand
-                    break
+        if run_df is not None and "file" in run_df.columns:
+            file_col = "file"
 
         if run_df is not None and "id" in run_df.columns:
             ids = [str(v) for v in run_df["id"].tolist()]
@@ -317,7 +311,7 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
             if run_df is not None and j < len(run_df):
                 run_row = run_df.iloc[j].to_dict()
                 for col, val in run_row.items():
-                    if col in ("id", "file", "file_path") or col in row:
+                    if col in ("id", "file") or col in row:
                         continue
                     if (recount_prefix is None and col.endswith(".id")
                             and pd.notna(val) and str(val) != ""):

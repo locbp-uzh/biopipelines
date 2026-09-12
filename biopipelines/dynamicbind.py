@@ -84,7 +84,12 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.2"
+    # run_single_protein_inference.py is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "dynamicbind"
+    # Secondary env, addressed by this name at install and at run time: only the primary env has an environments: entry.
+    RELAX_ENV_NAME = "dynamicbind_relax"
 
     # ------------------------------------------------------------------
     # Install
@@ -98,20 +103,22 @@ class DynamicBind(BaseConfig):
         Verification: both envs exist, torch importable in inference env,
         openmm importable in relax env, workdir/ directory present.
         """
+        env = cls._install_env(env_manager)
+        relax = cls.RELAX_ENV_NAME
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("DynamicBind", "")
         parent_dir = os.path.dirname(repo_dir)
         workdir = os.path.join(repo_dir, "workdir")
 
-        inf_check = cls._env_exists_check("dynamicbind", env_manager)
-        relax_check = cls._env_exists_check("dynamicbind_relax", env_manager)
+        inf_check = cls._env_exists_check(env, env_manager)
+        relax_check = cls._env_exists_check(relax, env_manager)
         repo_check = f'[ -f "{repo_dir}/run_single_protein_inference.py" ]'
         workdir_check = f'[ -d "{workdir}" ]'
 
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {inf_check} && {relax_check} && {workdir_check} \\
-   && {cls._env_run("dynamicbind", env_manager)}python -c "import torch" >/dev/null 2>&1 \\
-   && {cls._env_run("dynamicbind_relax", env_manager)}python -c "import openmm" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch" >/dev/null 2>&1 \\
+   && {cls._env_run(relax, env_manager)}python -c "import openmm" >/dev/null 2>&1; then
     echo "DynamicBind already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -123,10 +130,10 @@ if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/luwei0917/DynamicBind.git "{repo_dir}"
 fi"""
 
-        inf_remove = cls._env_remove_block("dynamicbind", env_manager) if force_reinstall else ""
-        relax_remove = cls._env_remove_block("dynamicbind_relax", env_manager) if force_reinstall else ""
-        inf_env = cls._env_install_block("dynamicbind", env_manager, biopipelines)
-        relax_env = cls._env_install_block("dynamicbind_relax", env_manager, biopipelines)
+        inf_remove = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        relax_remove = cls._env_remove_block(relax, env_manager) if force_reinstall else ""
+        inf_env = cls._env_install_block(env, env_manager, biopipelines)
+        relax_env = cls._env_install_block(relax, env_manager, biopipelines)
 
         weights_block = f"""# Fetch workdir.zip weights from Zenodo (~hundreds of MB).
 if [ ! -d "{workdir}" ]; then
@@ -140,18 +147,18 @@ fi"""
 {skip}{clone_block}
 
 {inf_remove}
-echo "--- Creating dynamicbind (inference) env ---"
+echo "--- Creating {env} (inference) env ---"
 {inf_env}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create dynamicbind env."
+    echo "ERROR: Failed to create {env} env."
     exit 1
 fi
 
 {relax_remove}
-echo "--- Creating dynamicbind_relax env ---"
+echo "--- Creating {relax} env ---"
 {relax_env}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create dynamicbind_relax env."
+    echo "ERROR: Failed to create {relax} env."
     exit 1
 fi
 
@@ -159,8 +166,8 @@ fi
 
 # Verify installation
 if {repo_check} && {workdir_check} \\
-   && {cls._env_run("dynamicbind", env_manager)}python -c "import torch" >/dev/null 2>&1 \\
-   && {cls._env_run("dynamicbind_relax", env_manager)}python -c "import openmm" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch" >/dev/null 2>&1 \\
+   && {cls._env_run(relax, env_manager)}python -c "import openmm" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== DynamicBind installation complete ==="
 else
@@ -326,9 +333,11 @@ fi
         # absolute env Python paths up front and let it dispatch.
         script += "# --- DynamicBind inference (dynamicbind env) ---\n"
         script += self.activate_environment()  # dynamicbind
+        script += self.extra_args_echo()
         rigid_flag = " --rigid_protein" if self.rigid_protein else ""
         movie_flag = " --movie" if self.make_movie else ""
-        relax_python_cmd = ConfigManager().get_env_python_command("dynamicbind_relax")
+        extra_flags = "".join(f" \\\n        {t}" for t in self.extra_args_bash_tokens())
+        relax_python_cmd = ConfigManager().get_env_python_command(self.RELAX_ENV_NAME)
         script += f"""# Locate the two env Pythons via the same env_manager BioPipelines uses.
 DB_PYTHON=$(python -c "import sys; print(sys.executable)")
 RELAX_PYTHON={relax_python_cmd}
@@ -367,7 +376,7 @@ for struct_id in {Resolve.stream_ids(self.structures_json)}; do
         --num_workers {self.num_workers} \\
         --seed {self.seed}{rigid_flag}{movie_flag} \\
         --python "$DB_PYTHON" \\
-        --relax_python "$RELAX_PYTHON"
+        --relax_python "$RELAX_PYTHON"{extra_flags}
     rc=$?
     set -e
     if [ $rc -ne 0 ]; then

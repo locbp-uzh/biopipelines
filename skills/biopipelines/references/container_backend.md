@@ -17,12 +17,13 @@ GPU host, or an interactive Slurm GPU shell.
 ## One line to edit
 
 `config.container.yaml` -> `folders.base.root:` (default `/workspace`). Point it
-at the persistent mount. Everything derives from `<root>`:
+at the persistent mount. Every path *the config owns* derives from `<root>`:
 
 - `home`, `data`, `scratch` under `<root>`
-- micromamba env root under `<root>` (set `MAMBA_ROOT_PREFIX=<root>/micromamba`)
 - weight caches (`BoltzCache`, `ColabFoldDatabases`, ...) under `<root>/cache`
 - `biopipelines_output` = `<root>/outputs`
+
+The micromamba env root is **not** one of them: it is the `MAMBA_ROOT_PREFIX` environment variable, hardcoded as `ENV MAMBA_ROOT_PREFIX=/workspace/micromamba` in `Dockerfile.container`. Changing `root:` therefore takes a second edit — export `MAMBA_ROOT_PREFIX=<root>/micromamba` (or edit the Dockerfile) — or the envs land on `/workspace` while everything else moves, and are lost at teardown.
 
 Because envs and weights live on the persistent mount, the FIRST job pays the
 install/download cost (`bp-warm`) and every later job reuses it.

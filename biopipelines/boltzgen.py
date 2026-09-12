@@ -46,12 +46,14 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "boltzgen"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("boltzgen", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."
@@ -59,14 +61,14 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("boltzgen", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("boltzgen", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing BoltzGen ==="
 {skip}{remove_block}
 {env_block}
 
 # Verify installation
-if {cls._env_run("boltzgen", env_manager)}python -c "import boltzgen" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import boltzgen" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== BoltzGen installation complete ==="
 else
@@ -1129,7 +1131,7 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -1327,7 +1329,7 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

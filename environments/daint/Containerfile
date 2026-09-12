@@ -1,0 +1,37 @@
+# BioPipelines base container for CSCS Daint (aarch64 / GH200).
+#
+# This bakes ONLY the generic runtime: CUDA runtime libs, a C/C++ toolchain
+# (several tools JIT-compile a CUDA/C helper at import and fail without gcc on
+# PATH), git/wget, and the micromamba binary. It deliberately does NOT bake the
+# biopipelines package or any tool env -- those are created as micromamba envs
+# on a persistent $SCRATCH mount at bootstrap/bp-warm time, exactly the model
+# config.container.yaml expects. Keeping them out of the image means adding a
+# tool never rebuilds this image.
+#
+#   podman build -t biopipelines-base:<ver> -f Containerfile .
+#
+# Mirrors the repo's Dockerfile.container (CUDA 12.4 runtime + build-essential),
+# with the one correction that matters here: micromamba/linux-aarch64, not
+# linux-64. Build natively on a Daint compute node (environments/daint/build_base.sh).
+# Fully qualified: Daint's unqualified-search default is registry.suse.com,
+# which does not carry nvidia/cuda. Pull from Docker Hub, which has the arm64
+# (sbsa) manifest for this tag.
+FROM docker.io/nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# build-essential/gcc REQUIRED: Boltz-2 (via Triton) and other cuda ops
+# JIT-compile at import and need a compiler on PATH. git/wget for tools whose
+# install clones a repo (LigandMPNN) or fetches weights.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git wget curl bzip2 ca-certificates build-essential gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CC=gcc CXX=g++
+
+# micromamba: the env_manager the container config expects. linux-aarch64.
+RUN wget -qO- https://micro.mamba.pm/api/micromamba/linux-aarch64/latest \
+        | tar -xvj -C /usr/local bin/micromamba \
+    && /usr/local/bin/micromamba --version
+
+CMD ["bash"]

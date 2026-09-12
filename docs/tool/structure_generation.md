@@ -57,15 +57,32 @@ The design can be specified manually (Option 1, a full YAML/dict) or built autom
 - `steps`: Optional[List[str]] = None - Run only specific pipeline steps
 - `cache_dir`: Optional[str] = None - Model download location
 
-**Tables** (only predicted if the appropriate step is chosen; there are many columns, please refer to the repository for more info):
+Which streams and tables exist depends on `steps`. With the default full pipeline all of them are produced.
 
-After analysis:
-- `aggregate_metrics`
-- `per_target_metrics`
+**Streams**:
+- `structures` — the designs as mmCIF. Which set you get depends on `steps`: with `filtering`, the top-`budget` ranked designs, ids `rank01…rank<budget>`; when `folding`/`design_folding` runs *without* `filtering`, the refolded intermediate designs instead. Either way the stream is reached as `.streams.structures`.
+- `sequences` (only with the `filtering` step) — value-based sequences of the ranked designs.
 
-After filtering:
-- `all_designs_metrics`
-- `final_metrics`
+**Tables** (only produced if the corresponding step runs):
+- `aggregate_metrics` (`analysis` step) — one row per design:
+
+  | id | file_name | designed_sequence | designed_chain_sequence | num_prot_tokens | num_lig_atoms | num_resolved_tokens | num_tokens | num_design | UNK_fraction | GLY_fraction | ALA_fraction | CYS_fraction | SER_fraction | PRO_fraction | THR_fraction | VAL_fraction | ILE_fraction | ASN_fraction | ASP_fraction | LEU_fraction | MET_fraction | GLN_fraction | GLU_fraction | LYS_fraction | HIS_fraction | PHE_fraction | ARG_fraction | TYR_fraction | TRP_fraction | loop | helix | sheet | liability_score | liability_num_violations | liability_high_severity_violations | liability_medium_severity_violations | liability_low_severity_violations | native_rmsd | native_rmsd_bb | native_rmsd_refolded | native_rmsd_bb_refolded | bb_rmsd | bb_rmsd_design | bb_rmsd_target | design_ptm | design_iptm | design_to_target_iptm | min_design_to_target_pae | min_interaction_pae | affinity_pred_value | affinity_probability_binary1 |
+  |----|-----------|-------------------|-------------------------|-----------------|---------------|---------------------|------------|------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|------|-------|-------|-----------------|--------------------------|------------------------------------|--------------------------------------|-----------------------------------|-------------|----------------|----------------------|-------------------------|---------|----------------|----------------|------------|-------------|-----------------------|--------------------------|---------------------|---------------------|------------------------------|
+
+- `per_target_metrics` (`analysis` step) — one row per target:
+
+  | target_id | num_prot_tokens | num_lig_atoms | num_resolved_tokens | num_tokens | num_design | UNK_fraction | GLY_fraction | ALA_fraction | CYS_fraction | SER_fraction | PRO_fraction | THR_fraction | VAL_fraction | ILE_fraction | ASN_fraction | ASP_fraction | LEU_fraction | MET_fraction | GLN_fraction | GLU_fraction | LYS_fraction | HIS_fraction | PHE_fraction | ARG_fraction | TYR_fraction | TRP_fraction | loop | helix | sheet | liability_score | liability_num_violations | bb_rmsd | bb_rmsd_design | design_ptm | design_iptm | design_to_target_iptm | min_design_to_target_pae | affinity_pred_value | affinity_probability_binary1 |
+  |-----------|-----------------|---------------|---------------------|------------|------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|------|-------|-------|-----------------|--------------------------|---------|----------------|------------|-------------|-----------------------|--------------------------|---------------------|------------------------------|
+
+- `all_designs_metrics` (`filtering` step) — every design, ranked:
+
+  | id | final_rank | designed_sequence | designed_chain_sequence | num_design | affinity_probability_binary1 | design_to_target_iptm | min_design_to_target_pae | design_ptm | filter_rmsd | designfolding-filter_rmsd | plip_hbonds_refolded | delta_sasa_refolded | design_largest_hydrophobic_patch_refolded | design_chain_hydrophobicity | design_hydrophobicity | loop | helix | sheet | file_name |
+  |----|------------|-------------------|-------------------------|------------|------------------------------|-----------------------|--------------------------|------------|-------------|---------------------------|----------------------|---------------------|-------------------------------------------|-----------------------------|-----------------------|------|-------|-------|-----------|
+
+- `final_designs_metrics` (`filtering` step) — the same schema, cut to the top `budget`:
+
+  | id | final_rank | designed_sequence | designed_chain_sequence | num_design | affinity_probability_binary1 | design_to_target_iptm | min_design_to_target_pae | design_ptm | filter_rmsd | designfolding-filter_rmsd | plip_hbonds_refolded | delta_sasa_refolded | design_largest_hydrophobic_patch_refolded | design_chain_hydrophobicity | design_hydrophobicity | loop | helix | sheet | file_name |
+  |----|------------|-------------------|-------------------------|------------|------------------------------|-----------------------|--------------------------|------------|-------------|---------------------------|----------------------|---------------------|-------------------------------------------|-----------------------------|-----------------------|------|-------|-------|-----------|
 
 **Notes**:
 - **Residue indexing**: All residue indices start at 1 and use canonical mmcif `label_asym_id`, not `auth_asym_id`
@@ -102,7 +119,7 @@ boltzgen = BoltzGen(
 )
 
 # Access final designs
-best_designs = boltzgen.tables.final_metrics
+best_designs = boltzgen.tables.final_designs_metrics
 ```
 
 **Example with File**:
@@ -144,8 +161,8 @@ The scaffold must have the **ligand bound as HETATM** in the binding site — th
 - `sequences` — designed pocket sequence per pair.
 
 **Tables**:
-- `sequences`: | id | structures.id | compounds.id | sequence |
-- `missing`: | id | removed_by | cause |
+- `sequences`: | id | structures.id | compounds.id | sample | sequence |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -199,6 +216,7 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 - `cyclic`: bool = False - Close the backbone into a macrocycle (`inference.cyclic`).
 - `cyc_chains`: Optional[str] = None - Chain letter(s) to cyclize (`inference.cyc_chains`); requires `cyclic=True`.
 - `provide_seq`: Optional[str] = None - Residue range(s) whose sequence is fixed during partial diffusion (`contigmap.provide_seq`); requires `partial_steps > 0`.
+- `length`: Optional[str] = None - Total output length, exact or a range (`contigmap.length`, e.g. `"309"` or `"309-311"`). Constrains the *sum* of the diffused segments while each keeps its own range, so a two-linker contig `A1-20/1-4/B1-100/1-4/A50-90` with the total pinned admits (1,4) and (4,1) but not (1,1) or (4,4). Counts the whole chain, motif residues included.
 - `noise_scale_ca` / `noise_scale_frame`: Optional[float] = None - Translational / rotational denoiser noise scale (`denoiser.noise_scale_ca` / `noise_scale_frame`); values < 1 (often 0) reduce diversity but raise quality, common for binder design.
 - `inpaint_str_helix` / `inpaint_str_strand`: Optional[str] = None - Residues whose secondary structure is masked and forced to helix / strand (`contigmap.inpaint_str_helix` / `inpaint_str_strand`).
 - `scaffold_dir`: Optional[str] = None - Directory of scaffold `_ss.pt` / `_adj.pt` files for fold conditioning (`scaffoldguided.scaffold_dir`); setting it (or `target_ss`/`target_adj`) turns on `scaffoldguided.scaffoldguided` and the run is driven by the scaffold set rather than `contigs`.
@@ -258,10 +276,10 @@ Enzyme active-site scaffolding and small-molecule binder design. Its defining ca
 
 **Installation**:
 
-`RFdiffusion2.install()` clones the repo and runs the upstream `setup.py`, which downloads the model weights and the Apptainer container image (`rf_diffusion/exec/bakerlab_rf_diffusion_aa.sif`). The tool runs through that container — point `containers.RFdiffusion2` at the `.sif` in `config.yaml`. The download is large (30+ minutes); `python setup.py overwrite` resumes if interrupted.
+`RFdiffusion2.install()` clones the repo and runs the upstream `setup.py`, which downloads the model weights and the Apptainer container image (`rf_diffusion/exec/bakerlab_rf_diffusion_aa.sif`). The tool runs through that container — point `containers.RFdiffusion2` at the `.sif` in your `config.<variant>.yaml`. The download is large (30+ minutes); `python setup.py overwrite` resumes if interrupted.
 
 **Parameters**:
-- `ligand`: Union[str, DataStream, StandardizedOutput] - Bound ligand(s) as a compounds stream (`Ligand(code="NAD")` or a tool's compounds output). Every id's 3-letter `code` is read at runtime and joined into `inference.ligand='NAD,OXM'`. A bare string is shorthand for `Ligand(code=...)`.
+- `ligand`: Union[str, DataStream, StandardizedOutput] - Bound ligand(s) as a compounds stream (`Ligand(codes="NAD")` or a tool's compounds output). Every id's 3-letter `code` is read at runtime and joined into `inference.ligand='NAD,OXM'`. A bare string is shorthand for `Ligand(codes=...)`.
 - `pdb`: Union[DataStream, StandardizedOutput] - Input active-site/theozyme (or ligand-only binder target) structure(s). **Multiple input structures are iterated** — one design run per input PDB (`num_designs` each).
 - `contigs`: str | (TableInfo, column) - Contig specification (RFdiffusion2 uses `,` separators, e.g. `"46,A106-106,59,A166-166,2,A169-169,23,A193-193,46"`, or a bare length like `"150"` for binder design). A string is broadcast to every input PDB; a table column reference is resolved per input-PDB id at runtime.
 - `contig_atoms`: Dict[str, str] = None - Per-residue side-chain atoms defining the atomic motif, e.g. `{"A106": "NE,CD,CZ", "A166": "OD1,CG"}` → `contigmap.contig_atoms`.
@@ -277,9 +295,10 @@ Enzyme active-site scaffolding and small-molecule binder design. Its defining ca
 
 The sweep/benchmark orchestrator (`benchmark/pipeline.py`, `sweep.*`), the `stop_step='end'` sequence-fitting/folding follow-on, and PyMOL visualization are **not** wrapped — the framework owns scheduling and downstream sequence/fold steps are separate tools.
 
-**Outputs**:
-- `structures` (`.pdb`, with `.trb` trajectory siblings)
-- `tables.structures`: `id | pdb | fixed | designed | source_fixed | plddt_mean | status`
+**Streams**: `structures` (`.pdb`, with `.trb` trajectory siblings)
+
+**Tables**:
+- `structures`: | id | pdb | fixed | designed | source_fixed | plddt_mean | status |
 
 **Example** (active-site scaffolding, the open-source demo case):
 
@@ -290,7 +309,7 @@ from biopipelines.entities import PDB, Ligand
 site = PDB("/path/to/M0584_1ldm.pdb")
 rfd2 = RFdiffusion2(
     pdb=site,
-    ligand=Ligand(code=["NAD", "OXM"]),  # one compounds stream, two codes -> inference.ligand='NAD,OXM'
+    ligand=Ligand(codes=["NAD", "OXM"]),  # one compounds stream, two codes -> inference.ligand='NAD,OXM'
     contigs="46,A106-106,59,A166-166,2,A169-169,23,A193-193,46",
     contig_atoms={"A106": "NE,CD,CZ", "A166": "OD1,CG",
                   "A169": "NH2,CZ", "A193": "NE2,CD2,CE1"},
@@ -329,6 +348,7 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
   - "/0" indicates chain break (adds 200aa jump)
   - Numbers without prefix = design new residues
   - May be a table column reference resolved per-input-PDB at runtime (each input structure gets its own contig)
+- `contigs`: str | (TableInfo, column) - A first-class synonym for `contig=`, not a deprecated one: RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this parameter `contigs`, so the plural has to work here too. It **binds the parameter** rather than being forwarded to the hydra CLI — which is what it used to do, since RFdiffusion3 renders untyped kwargs as `key=value` overrides: the plural was reported as a probable misspelling, passed through as a bogus override, and the job ran to completion producing unconditioned de-novo backbones with the motif silently discarded. Using it prints nothing. Passing `contig=` and `contigs=` together raises.
 - `length`: Union[str, int] = None - Length range for designed regions (e.g., "50-150")
 - `pdb`: Optional[Union[DataStream, StandardizedOutput]] = None - Input PDB structure(s), optional for de novo design. **Multiple input structures are iterated** — one design run per input PDB (`num_designs` each), so a pose ensemble propagates fully into design instead of only the first structure being used.
 - `ligand`: Optional[Union[str, DataStream, StandardizedOutput]] = None - Ligand to design around (compounds stream or 3-letter code)
@@ -363,13 +383,28 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 
 The `cfg*`, `step_scale`, `noise_scale`, `num_steps`, `center_option`, and `seed` parameters are emitted as Hydra `inference_sampler.*` overrides on the `rfd3 design` command line (mapped to foundry keys: `noise_scale`→`gamma_0`, `num_steps`→`num_timesteps`). All other parameters above are written into the per-design inputs JSON.
 
-**Streams**: `structures`
+**Streams**: `structures`, `sequences` (value-based, extracted from the designed backbones)
 
 **Tables**:
 - `structures`:
 
-  | id | source_id | pdb | contig | length | design_name | status |
-  |----|-----------|-----|--------|--------|-------------|--------|
+  | id | design | model | pdb | fixed | designed | contig | length | time | status |
+  |----|--------|-------|-----|-------|----------|--------|--------|------|--------|
+
+- `metrics` (per-design geometry and topology checks):
+
+  | id | design | model | max_ca_deviation | n_chainbreaks | n_clashing_interresidue_w_sidechain | n_clashing_interresidue_w_backbone | ligand_clashes | ligand_min_distance | non_loop_fraction | loop_fraction | helix_fraction | sheet_fraction | num_ss_elements | radius_of_gyration | alanine_content | glycine_content | num_residues |
+  |----|--------|-------|------------------|---------------|-------------------------------------|------------------------------------|----------------|---------------------|-------------------|---------------|----------------|----------------|-----------------|--------------------|-----------------|-----------------|--------------|
+
+- `specifications` (what was actually sampled for each design):
+
+  | id | design | model | sampled_contig | num_tokens_in | num_residues_in | num_chains | num_atoms | num_residues |
+  |----|--------|-------|----------------|---------------|-----------------|------------|-----------|--------------|
+
+- `sequences`:
+
+  | id | source_id | source_pdb | chain | sequence | length |
+  |----|-----------|------------|-------|----------|--------|
 
 **Example**:
 ```python
@@ -406,10 +441,10 @@ rfd3 = RFdiffusion3(length="100-120", symmetry="C3", num_designs=10)
 # Diffused small-molecule binder: placed ligand + buried + classifier-free guidance
 # (paper Fig 3c inference settings: η=1.5, γ₀=0.6, 200 steps, CFG scale 2).
 # The ligand must carry coordinates — foundry appends it to an input atom array, so
-# supply it bound via Ligand(code=, structures=) or pass a pdb with it as HETATM.
+# supply it bound via Ligand(codes=, structures=) or pass a pdb with it as HETATM.
 rfd3 = RFdiffusion3(
     length="80-120",
-    ligand=Ligand(code="SAM", structures=posed_sam),
+    ligand=Ligand(codes="SAM", structures=posed_sam),
     select_buried="B1",
     cfg=True, cfg_scale=2.0,
     step_scale=1.5, noise_scale=0.6, num_steps=200,
@@ -423,7 +458,7 @@ rfd3 = RFdiffusion3(
 # DO_NOT_MATCH_CCD sentinel) so its atoms are read from the structure:
 prepped = PDB(my_pose, PDB.rename("LIG", "UNL"))
 rfd3_custom = RFdiffusion3(
-    pdb=prepped, ligand=Ligand(code="UNL", structures=prepped),
+    pdb=prepped, ligand=Ligand(codes="UNL", structures=prepped),
     contig="65-95,A84-182", select_buried="B1", cfg=True, cfg_scale=2.0,
 )
 
@@ -458,13 +493,14 @@ Designs highly-connected hydrogen-bonding networks that satisfy the requested co
 - `anchor_res`: Optional[str | (TableInfo, column)] = None - Residues that must appear in every designed network. Same forms as `guide_res`.
 - `seed`: Optional[int] = None - Random seed for reproducibility.
 
-**Output**:
-- Streams:
-  - `structures` (.pdb) — the designed HBNet backbones.
-  - `sequences` (csv) — one-letter sequence per designed backbone (HBDesigner emits no FASTA; extracted from the PDB).
-- Tables:
-  - `sequences`: id | structures.id | sequence
-  - `summary`: id | structures.id | Scaffold | Output_PDB | Rank | HB_Score_full | HB_Score_hb | Avg_Burial | saturation | buried_heavy_unsats | buried_unsat_Hpol | network (one row per retained design; the metric columns mirror HBDesigner's per-run stats CSV)
+**Streams**:
+- `structures` (.pdb) — the designed HBNet backbones.
+- `sequences` (csv) — one-letter sequence per designed backbone (HBDesigner emits no FASTA; extracted from the PDB).
+
+**Tables**:
+- `summary` (one row per retained design; the metric columns mirror HBDesigner's per-run stats CSV): | id | structures.id | Scaffold | Output_PDB | Rank | HB_Score_full | HB_Score_hb | Avg_Burial | saturation | buried_heavy_unsats | buried_unsat_Hpol | network |
+- `sequences`: | id | structures.id | sequence |
+- `missing`: | id | removed_by | kind | cause |
 
 ```python
 from biopipelines.hbdesigner import HBDesigner
@@ -493,7 +529,7 @@ Generates protein structures with explicit modeling of ligands and small molecul
 **Installation**: Works in SE3nv environment as installed with RFdiffusion.
 
 **Parameters**:
-- `ligand`: Union[str, DataStream, StandardizedOutput] (required) - Compounds stream (`Ligand(code="ATP")` or any compounds-producing tool) or a 3-letter code; the residue `code` is read from the stream at runtime and passed to `inference.ligand=`. One ligand is reused across all input PDBs.
+- `ligand`: Union[str, DataStream, StandardizedOutput] (required) - Compounds stream (`Ligand(codes="ATP")` or any compounds-producing tool) or a 3-letter code; the residue `code` is read from the stream at runtime and passed to `inference.ligand=`. One ligand is reused across all input PDBs.
 - `pdb`: Optional[Union[DataStream, StandardizedOutput]] = None - Input PDB template(s). **Multiple input structures are iterated** — one design run per input PDB (`num_designs` each), so a pose ensemble propagates fully into design instead of only the first structure being used.
 - `contigs`: str | (TableInfo, column) = "" - Contig specification. Accepts a table column reference resolved per-input-PDB at runtime (each pose can get its own contig).
 - `inpaint`: str | (TableInfo, column) = "" - Inpainting specification (also accepts a per-PDB table column reference)
@@ -528,7 +564,7 @@ Use the typed builder `RFdiffusionAllAtom.GuidingPotential.ligand_ncontacts(...)
 ```python
 rfdaa = RFdiffusionAllAtom(
     pdb=poses,
-    ligand=Ligand(code="LIG"),
+    ligand=Ligand(codes="LIG"),
     contigs="40-60,A84-182",
     num_designs=2,
     guiding_potentials=RFdiffusionAllAtom.GuidingPotential.ligand_ncontacts(
@@ -548,8 +584,8 @@ Notes:
 **Tables**:
 - `structures`:
 
-  | id | source_id | pdb | fixed | designed | contigs | time | status |
-  |----|-----------|-----|-------|----------|---------|------|--------|
+  | id | pdb | fixed | designed | source_fixed | plddt_mean | status |
+  |----|-----|-------|----------|--------------|------------|--------|
 
 **Example**:
 ```python
@@ -558,7 +594,7 @@ from biopipelines.ligand import Ligand
 
 rfdaa = RFdiffusionAllAtom(
     pdb=template,
-    ligand=Ligand(code="LIG"),
+    ligand=Ligand(codes="LIG"),
     contigs='10-20,A6-140',
     num_designs=5
 )

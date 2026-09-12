@@ -1,7 +1,15 @@
 # BioPipelines base environment - CSCS Daint (aarch64/GH200) variant.
-# venv, not conda: the interpreter is the host python3.11 and every dependency
-# comes from biopipelines.pip.daint.txt. See that file for why.
+# venv, not conda: every dependency comes from biopipelines.pip.daint.txt.
+#
+# python=3.12, and the version is load-bearing beyond this env. In venv mode
+# _env_install_block strips the `python=` dependency (base_config.py: `extra`
+# excludes python/pip) and creates each tool's venv from whatever interpreter is
+# AMBIENT -- which is this base env. So the version here silently becomes the
+# version of every venv-mode tool env. RFdiffusion3's rc-foundry pins
+# >=3.12,<3.13, so a 3.11 base makes `pip install rc-foundry[all]` fail with
+# "No matching distribution found" and RFdiffusion3 cannot be provisioned at
+# all. 3.12 also matches the container variant and the ngc-pytorch image.
 name: biopipelines
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip

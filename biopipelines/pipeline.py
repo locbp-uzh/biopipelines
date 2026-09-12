@@ -23,6 +23,7 @@ from datetime import datetime
 
 from .folders import FolderManager
 from .config_manager import ConfigManager
+from .contract_enforcement import ContractViolation
 from ._layout import INTERNAL_FOLDER
 from .schedulers import get_backend, BATCH_SCHEDULERS
 try:
@@ -132,20 +133,7 @@ class Pipeline:
         self.on_the_fly = on_the_fly
 
         if local_output is None:
-            # Explicit override wins: single-node container backends (Modal, RunPod,
-            # a plain Docker GPU box, ...) repoint biopipelines_output at a persistent
-            # mount and must set BIOPIPELINES_LOCAL_OUTPUT=0 so results are NOT
-            # diverted to the ephemeral cwd/outputs and lost on teardown.
-            env_lo = os.environ.get("BIOPIPELINES_LOCAL_OUTPUT")
-            if env_lo is not None:
-                local_output = env_lo == "1"
-            else:
-                # Auto-enable local output for interactive/notebook runs, which usually
-                # lack shared storage. EXCEPT on Colab: there the config's
-                # biopipelines_output is deliberately repointed at mounted Drive for
-                # persistence, and forcing local_output would overwrite it with the
-                # ephemeral cwd/outputs (lost on runtime recycle). Let the config win.
-                local_output = on_the_fly and ConfigManager().get_scheduler() != "colab"
+            local_output = self._default_local_output(on_the_fly)
         self.local_output = local_output
 
         self.folder_manager = FolderManager(project, job, local_output=local_output)
@@ -159,6 +147,8 @@ class Pipeline:
         # Tool management
         self.tools = []
         self.tool_outputs = []
+        # One record per (producing tool, stream) a tool consumed; see _record_input_edges.
+        self.dataflow_edges = []  # type: List[Dict[str, Any]]
         self.execution_order = 0      # all tools, real run order
         self.public_step_order = 0    # public tools only, drives public folder/script names
         self.internal_order = 0       # internal tools only, drives .internal layout + ".NNN" names
@@ -226,6 +216,17 @@ class Pipeline:
         # the `with` statement. Replace any previously active pipeline.
         if self.on_the_fly:
             _active_pipeline.set(self)
+
+    @staticmethod
+    def _default_local_output(on_the_fly: bool) -> bool:
+        """Whether results go to ``./outputs/`` when the caller did not say.
+
+        Three rules, in order. ``BIOPIPELINES_LOCAL_OUTPUT`` wins outright, because a single-node container backend (Modal, RunPod, a plain Docker GPU box) repoints ``biopipelines_output`` at a persistent mount and must not have results diverted to a cwd that dies with the container. Otherwise an interactive or notebook run defaults to local, since it usually has no shared storage. The exception is Colab, where the config deliberately points ``biopipelines_output`` at mounted Drive for persistence, so forcing local output would replace it with an ephemeral cwd lost on runtime recycle -- there the config wins.
+        """
+        override = os.environ.get("BIOPIPELINES_LOCAL_OUTPUT")
+        if override is not None:
+            return override == "1"
+        return on_the_fly and ConfigManager().get_scheduler() != "colab"
 
     @staticmethod
     def _detect_notebook() -> bool:
@@ -348,6 +349,37 @@ class Pipeline:
             public_step=public_step, internal_order=internal_order
         )
 
+    def _record_input_edges(self, tool_config: BaseConfig):
+        """Record the dataflow edges into ``tool_config``, read off its stored inputs.
+
+        Central recovery is the point: ``input_sources`` has always been the designed home for this, and 2 of 92 tools ever populated it. ``ToolOutput.output`` stamps every object it hands out with its producing config, so the consuming tool's own attributes carry the edge and the framework can read it without asking tool authors for anything.
+        """
+        from .base_config import recover_input_edges
+
+        try:
+            recovered = recover_input_edges(tool_config)
+        except Exception as e:
+            print(f"Warning: could not recover input edges for {tool_config.TOOL_NAME}: {e}")
+            return
+
+        for edge in recovered:
+            producer = edge["producer"]
+            record = {
+                "from_step": producer.execution_order,
+                "from_tool": producer.TOOL_NAME,
+                "from_internal": bool(getattr(producer, "internal", False)),
+                "to_step": tool_config.execution_order,
+                "to_tool": tool_config.TOOL_NAME,
+                "to_internal": bool(getattr(tool_config, "internal", False)),
+                "stream": edge["stream"],
+                "shape": edge["shape"],
+                "arguments": list(edge["arguments"]),
+            }
+            self.dataflow_edges.append(record)
+            if isinstance(getattr(tool_config, "input_sources", None), dict):
+                key = f"{edge['stream'] or 'output'}_from_step_{producer.execution_order}"
+                tool_config.input_sources.setdefault(key, record)
+
     def add(self, tool_config: BaseConfig, **kwargs):
         """
         Add a tool to the pipeline.
@@ -369,7 +401,8 @@ class Pipeline:
         # Merge current batch resources with tool resources
         current_resources = self.batch_resources[self.current_batch]
         for key, value in current_resources.items():
-            if value is not None:
+            # A declined GPU is a decision, not a missing value, so the key survives the merge.
+            if value is not None or key == "gpu":
                 tool_config.resources[key] = value
 
         # Set execution order and create step-numbered folder immediately
@@ -377,6 +410,7 @@ class Pipeline:
 
         # Configure inputs immediately so tool outputs are properly set
         tool_config.configure_inputs(self.folders)
+        self._record_input_edges(tool_config)
         
         # Add to pipeline
         self.tools.append(tool_config)
@@ -393,6 +427,9 @@ class Pipeline:
             # once per tool at config time; idempotent.
             tool_config._materialize_output_layout(expected_outputs)
             tool_output.update_outputs(expected_outputs)
+        except ContractViolation:
+            # A promoted check must reach the user, not degrade to empty outputs.
+            raise
         except Exception as e:
             # If get_output_files fails, tool may need dependencies resolved first
             # We'll populate it later during script generation
@@ -444,7 +481,8 @@ class Pipeline:
         # Merge current batch resources with tool resources
         current_resources = self.batch_resources[self.current_batch]
         for key, value in current_resources.items():
-            if value is not None:
+            # A declined GPU is a decision, not a missing value, so the key survives the merge.
+            if value is not None or key == "gpu":
                 tool_config.resources[key] = value
 
         # Set execution order and create step-numbered folder
@@ -452,6 +490,7 @@ class Pipeline:
 
         # Configure inputs immediately
         tool_config.configure_inputs(self.folders)
+        self._record_input_edges(tool_config)
 
         # Add to pipeline
         self.tools.append(tool_config)
@@ -466,6 +505,8 @@ class Pipeline:
             expected_outputs = tool_config.get_output_files()
             tool_config._materialize_output_layout(expected_outputs)
             tool_output.update_outputs(expected_outputs)
+        except ContractViolation:
+            raise
         except Exception as e:
             print(f"Warning: Could not immediately populate outputs for {tool_config.TOOL_NAME}: {e}")
 
@@ -531,6 +572,14 @@ class Pipeline:
         print(f"{'='*60}")
         print(f"{tool_config.TOOL_NAME} completed")
         print(f"{'='*60}\n")
+
+        # On-the-fly has no end: __exit__ returns early so later notebook cells can keep adding tools. Refreshing here keeps the page current after every step instead of it never being written at all.
+        try:
+            # The page reads its per-step inventory from ToolOutputs/, which only save() writes; without this every card on an on-the-fly page shows the missing-inventory placeholder.
+            self._export_tool_outputs()
+            self._write_pipeline_page()
+        except Exception as exc:
+            print(f"Note: could not refresh the run page: {exc}")
 
     def validate_pipeline(self) -> bool:
         """
@@ -610,17 +659,124 @@ class Pipeline:
         # Export tool outputs for potential reuse with Load
         self._export_tool_outputs()
 
+        # Self-contained HTML record of the pipeline's shape, wiring and outputs
+        self._write_pipeline_page()
+
         # Save the original pipeline Python script to runtime folder
         self._save_original_pipeline_script()
 
         print(f"Pipeline saved to: {script_path}")
         return script_path
     
-    def _generate_pipeline_script(self) -> str:
-        """Generate unified pipeline script following notebook pattern."""
-        # Pipeline folders already created during initialization
-        # Just need to configure tools and generate scripts
-        
+    def _page_refresh_lines(self) -> list:
+        """Bash that refreshes RunTime/pipeline.html once the run has produced outputs.
+
+        save() writes the page at configuration time, when no completion marker exists and every node reads "pending". Without this the page stays a plan, and on a cluster nobody is there to regenerate it by hand.
+
+        It has to run under the framework environment: the job shell has only `module load miniforge3` applied, whose bare `python` has no pandas, so an unqualified interpreter imports nothing and the refresh never happens. A failure is reported rather than swallowed, because a silently unrefreshed page is indistinguishable from a run that produced no outputs.
+        """
+        repo = self.folders.get("biopipelines", "")
+        runtime = self.folders["runtime"]
+        if not repo or not self.tools:
+            return []
+        code = ("import sys; sys.path.insert(0, %r); "
+                "from biopipelines.pipeline import regenerate_pipeline_page as r; r(%r)" % (repo, runtime))
+        return [
+            "# Refresh the run page now that outputs and completion markers exist.",
+            "# A subshell, because the job shell's bare `python` has no pandas and the activation must not leak.",
+            "(",
+            self.tools[-1].activate_environment(name="biopipelines"),
+            f'python -c {code!r} || echo "WARNING: run page not refreshed; the pre-run plan page is still in place"',
+            ")",
+        ]
+
+
+    def _kill_trap_lines(self, tools) -> list:
+        """Bash that records a scheduler kill, which no other guard can see.
+
+        The PIPESTATUS guard needs the step to return, and the marker count needs the step to have written something. A SLURM TIMEOUT or a `scancel` kills the job mid-step, so neither happens: the step keeps whatever it had, and no marker at all reads as "not run yet" -- a dead step and a queued one look identical on the page, which is the defect the marker work set out to close.
+
+        SLURM sends SIGTERM before SIGKILL on both timeout and scancel, so trapping it is enough to leave a record. An OOM kill is SIGKILL and cannot be trapped; that case is still only visible in `sacct`.
+
+        A killed step is marked FAILED rather than given a state of its own: the page, the marker count and the exit path already handle FAILED, and the echo says which it was.
+        """
+        if not tools:
+            return []
+        pairs = []
+        for tool in tools:
+            markers = self._completion_marker_paths(tool)
+            pairs.append(f'"{markers["completed"]}|{markers["failed"]}"')
+        return [
+            f"BP_STEP_MARKERS=({' '.join(pairs)})",
+            "_bp_on_kill() {",
+            '  echo "Job signalled by the scheduler (timeout or scancel); marking unfinished steps FAILED."',
+            '  for _pair in "${BP_STEP_MARKERS[@]}"; do',
+            '    _done="${_pair%%|*}"; _fail="${_pair##*|}"',
+            '    [ -f "$_done" ] || [ -f "$_fail" ] || touch "$_fail"',
+            "  done",
+            *self._page_refresh_lines(),
+            "  exit 1",
+            "}",
+            "trap _bp_on_kill TERM XCPU",
+        ]
+
+    def _step_failure_guard(self, tool, indent: str = "", exit_on_failure: bool = False, successors=None) -> list:
+        """Bash that refuses to let a step's failure pass unrecorded.
+
+        A step is run as ``step.sh 2>&1 | tee log``, whose exit status is tee's and therefore always 0, so a tool that exited non-zero left the job COMPLETED and the pipeline carried on into steps whose inputs were never produced. ``${PIPESTATUS[0]}`` is the step's own status and has to be read on the very next command.
+
+        The marker matters as much as the status: a tool that exits from inside its own bash never reaches the block that writes COMPLETED or FAILED, so the step stayed unmarked -- which the run page and every downstream check read as "not run yet", indistinguishable from a step still queued.
+        """
+        markers = self._completion_marker_paths(tool)
+        lines = [
+            f'{indent}if [ ${{PIPESTATUS[0]}} -ne 0 ]; then',
+            f'{indent}  [ -f "{markers["completed"]}" ] || touch "{markers["failed"]}"',
+            f'{indent}  echo "ERROR: {tool.TOOL_NAME} exited non-zero; wrote {os.path.basename(markers["failed"])}"',
+        ]
+        # Exiting here skips the rest of this task, and an unmarked step reads as "still queued".
+        for later in successors or []:
+            later_markers = self._completion_marker_paths(later)
+            lines.append(f'{indent}  [ -f "{later_markers["completed"]}" ] || touch "{later_markers["failed"]}"')
+        if exit_on_failure:
+            lines.append(f"{indent}  exit 1")
+        else:
+            lines.append(f"{indent}  BP_FAILED_STEPS=$((BP_FAILED_STEPS + 1))")
+        lines.append(f"{indent}fi")
+        return lines
+
+    def _failed_step_exit_lines(self, tools=None) -> list:
+        """Bash that makes the scheduler agree with the markers, run after the page refresh so a failed run still gets its page.
+
+        Two different failures have to be counted. A tool that exits non-zero is caught by the per-step guard. A tool that runs to the end and finds its outputs missing writes its own FAILED marker and still exits 0 -- measured on AlphaFold, whose upstream binary died while its wrapper completed normally -- so the markers are counted as well, or that job also reports COMPLETED.
+
+        ``tools`` scopes the marker count to those steps. Every batch runs this block, and sibling batches under ``Parallel()`` share one afterok parent and so run at the same time -- a count over the whole output root made each sibling fail on the others' markers and cancel its own successors. The paths come from :meth:`_completion_marker_paths`, so the count cannot drift from where the marker is actually written.
+        """
+        if tools is None:
+            tools = self.tools
+        markers = [self._completion_marker_paths(t)["failed"] for t in tools]
+        if not markers:
+            lines = ["BP_FAILED_MARKERS=0"]
+        else:
+            array = " ".join(f'"{m}"' for m in markers)
+            lines = [
+                f"BP_MY_MARKERS=({array})",
+                "BP_FAILED_MARKERS=0",
+                'for _m in "${BP_MY_MARKERS[@]}"; do',
+                '  [ -f "$_m" ] && BP_FAILED_MARKERS=$((BP_FAILED_MARKERS + 1))',
+                "done",
+            ]
+        return lines + [
+            'if [ "${BP_FAILED_STEPS:-0}" -ne 0 ] || [ "${BP_FAILED_MARKERS:-0}" -ne 0 ]; then',
+            '  echo "Batch finished with $BP_FAILED_STEPS step(s) exiting non-zero and $BP_FAILED_MARKERS FAILED marker(s)."',
+            "  exit 1",
+            "fi",
+        ]
+
+    def _resolve_tool_outputs_and_write_configs(self):
+        """Settle every tool's inputs and outputs, then write ``RunTime/config.sh``.
+
+        Runs before any script text is built, and in order, because a tool's inputs are resolved against the outputs of the tools before it -- a later tool asked first would see nothing. A tool whose outputs cannot be determined yet is left empty rather than failed: the files do not exist until execution, so absence here is expected and not an error.
+        """
         # Process tools in order, setting up outputs for dependencies first
         for i, tool in enumerate(self.tools, 1):
             # Ensure all previous tools have their outputs set up
@@ -633,6 +789,8 @@ class Pipeline:
                     try:
                         expected_outputs = prev_tool.get_output_files()
                         prev_tool_output.update_outputs(expected_outputs)
+                    except ContractViolation:
+                        raise
                     except Exception as e:
                         # If we can't get outputs, create empty ones so dependencies don't fail
                         print(f"Warning: Could not get outputs from {prev_tool.TOOL_NAME}: {e}")
@@ -645,6 +803,8 @@ class Pipeline:
             try:
                 expected_outputs = tool.get_output_files()
                 self.tool_outputs[i-1].update_outputs(expected_outputs)
+            except ContractViolation:
+                raise
             except Exception as e:
                 # If we can't get outputs yet, leave empty for now
                 print(f"Warning: Could not get outputs from {tool.TOOL_NAME} during pipeline setup: {e}")
@@ -681,6 +841,13 @@ class Pipeline:
             f.write("#!/bin/bash\n")
             f.write("\n".join(config_lines))
         os.chmod(config_script, 0o755)
+        return config_script
+    def _generate_pipeline_script(self) -> str:
+        """Generate unified pipeline script following notebook pattern."""
+        # Pipeline folders already created during initialization
+        # Just need to configure tools and generate scripts
+        
+        config_script = self._resolve_tool_outputs_and_write_configs()
         
         # Build main pipeline script
         cfg = ConfigManager()
@@ -725,6 +892,8 @@ class Pipeline:
             script_lines.append("")
 
         script_lines += [
+            "BP_FAILED_STEPS=0",
+            *self._kill_trap_lines(self.tools),
             "echo Configuration",
             f"{config_script} | tee {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
@@ -751,6 +920,8 @@ class Pipeline:
                     if tool_output.config == tool:
                         tool_output.update_outputs(expected_outputs)
                         break
+            except ContractViolation:
+                raise
             except Exception as e:
                 # Continue if output files can't be determined yet
                 # This is expected - files don't exist until execution
@@ -765,6 +936,7 @@ class Pipeline:
             script_lines.extend([
                 f"echo {tool.TOOL_NAME}",
                 f"{self._edf_prefix(tool)}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}",
+                *self._step_failure_guard(tool),
                 "echo"
             ])
 
@@ -778,6 +950,8 @@ class Pipeline:
             f"echo Results in:",
             f"echo {self.folders['output']}"
         ])
+        script_lines.extend(self._page_refresh_lines())
+        script_lines.extend(self._failed_step_exit_lines())
         
         return "\n".join(script_lines)
 
@@ -1109,7 +1283,7 @@ class Pipeline:
             names = "+".join(t.TOOL_NAME for t in run["tools"])
             lines.append(f"# task {idx + 1}/{len(runs)}: {names}")
             lines.append("(")
-            for tool in run["tools"]:
+            for tool_idx, tool in enumerate(run["tools"]):
                 tool_script_path = os.path.join(self.folders["runtime"], f"{tool.script_basename}.sh")
                 log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
                 tool_folder_log = os.path.join(tool.output_folder, "_log")
@@ -1122,6 +1296,8 @@ class Pipeline:
                 )
                 lines.append(f"  echo {tool.TOOL_NAME}")
                 lines.append(f"  {prefix}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}")
+                # Exit the subshell so `wait` sees the failure; the pack's own counter takes it from there.
+                lines.extend(self._step_failure_guard(tool, indent="  ", exit_on_failure=True, successors=run["tools"][tool_idx + 1:]))
             lines.append(") &")
             lines.append("_pack_pids+=($!)")
             lines.append(f'_pack_names+=("{names}")')
@@ -1136,7 +1312,9 @@ class Pipeline:
             "done",
             'if [ "$_pack_failed" -gt 0 ]; then',
             '  echo "$_pack_failed of ${#_pack_pids[@]} packed tasks failed"',
-            "  exit 1",
+            # Fold into the counter rather than exiting here: the page refresh and the exit check are
+            # appended after this body, so exiting skipped both and left the pre-run plan page.
+            '  BP_FAILED_STEPS=$((BP_FAILED_STEPS + _pack_failed))',
             "fi",
             "echo",
         ])
@@ -1447,13 +1625,17 @@ umask 002
             script_lines.append(self._generate_debug_capture_block())
             script_lines.append("")
 
+        packed = self._packed_batches.get(batch_idx)
+        packed_tools = [t for run in (packed["runs"] if packed else []) for t in run["tools"]]
+
         script_lines += [
+            "BP_FAILED_STEPS=0",
+            *self._kill_trap_lines(packed_tools or batch_tools),
             "echo Configuration",
             f"{config_script} | tee -a {os.path.join(self.folders['output'], f'{self.project}_config.txt')}",
             "echo"
         ]
 
-        packed = self._packed_batches.get(batch_idx)
         if packed:
             script_lines.extend(
                 self._packed_body_lines(packed, self.batch_resources[batch_idx])
@@ -1466,12 +1648,16 @@ umask 002
                 log_file = os.path.join(self.folders["logs"], f"{tool.script_basename}.log")
                 tool_folder_log = os.path.join(tool.output_folder, "_log")
 
-                script_lines.extend([f"echo {tool.TOOL_NAME}", f"{self._edf_prefix(tool)}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}", "echo"])
+                script_lines.extend([f"echo {tool.TOOL_NAME}", f"{self._edf_prefix(tool)}{tool_script_path} 2>&1 | tee {log_file} {tool_folder_log}", *self._step_failure_guard(tool), "echo"])
 
         # Final steps
         script_lines.extend(["echo", f"echo Batch {batch_idx + 1} done"])
         if batch_idx == len(self.batch_resources) - 1:  # Last batch
             script_lines.extend(["echo", "echo All jobs complete", f"echo Results in:", f"echo {self.folders['output']}"])
+        # Every batch, not only the last: a batch that fails now exits non-zero, which cancels its
+        # afterok successors, and a run that ends there still deserves a page of what it did produce.
+        script_lines.extend(self._page_refresh_lines())
+        script_lines.extend(self._failed_step_exit_lines(packed_tools or batch_tools))
 
         return "\n".join(script_lines)
 
@@ -1490,6 +1676,37 @@ umask 002
             job_ids = [job_ids]
         self.external_dependencies.extend(job_ids)
 
+
+    def _batch_parent_edges(self):
+        """The dependency edges the batch being opened inherits, as ``(afterok_parents, after_parents)``.
+
+        Two edge kinds are computed independently and may coexist, which is why this is not one branch: siblings of a Parallel block that follows a Service get both.
+
+        ``after_parents`` (SLURM ``after:``) means the batch waits for a Service daemon to *start* rather than finish, so that daemon must never also be an afterok parent -- hence the exclusion below. ``new_parents`` (SLURM ``afterok:``) takes the first that applies: a fan-in pending from a Parallel block that just exited, else the anchor batch when inside a Parallel block, else the previous batch.
+        """
+        after_parents = []
+        if self._parallel_anchor is not None:
+            if self._parallel_after_anchor is not None:
+                after_parents = [self._parallel_after_anchor]
+        elif self._pending_after_parent is not None:
+            after_parents = [self._pending_after_parent]
+            self._pending_after_parent = None
+
+        if self._pending_post_parents is not None:
+            new_parents = list(self._pending_post_parents)
+            self._pending_post_parents = None
+        elif self._parallel_anchor is not None:
+            self._parallel_siblings.append(self.current_batch)
+            if self._parallel_anchor >= 0 and self._parallel_anchor not in after_parents:
+                new_parents = [self._parallel_anchor]
+            else:
+                new_parents = []
+        elif after_parents:
+            # A plain batch after a Service: the daemon is its only predecessor, via after:.
+            new_parents = []
+        else:
+            new_parents = [self.current_batch - 1] if self.current_batch > 0 else []
+        return new_parents, after_parents
     def resources(self, gpu: str = None, memory: str = None, time: str = None, cpus: int = None, gpus: int = None, **scheduler_options):
         """
         Configure computational resources and start a new batch.
@@ -1566,32 +1783,6 @@ umask 002
         self.current_batch += 1
         self.batch_start_indices.append(len(self.tools))
 
-        # Determine the new batch's parents in the dependency DAG. Two
-        # orthogonal edge kinds are computed independently and may coexist
-        # (e.g. siblings of a Parallel block that follows a Service):
-        #
-        #   after_parents (SLURM `after:`): a batch that follows a Service
-        #     waits for the daemon to START, not finish. For a plain batch
-        #     this is the single _pending_after_parent. For a Parallel block
-        #     that follows a Service, EVERY sibling gets the edge, carried on
-        #     _parallel_after_anchor. The daemon must never also be an afterok
-        #     parent, so it is excluded from new_parents below.
-        #
-        #   new_parents (SLURM `afterok:`), in priority order:
-        #     1. fan-in pending from a Parallel block that just exited.
-        #     2. inside a Parallel block: parent is the anchor (the batch
-        #        current when the block was entered). Record this sibling for
-        #        later fan-in. An anchor that is the service daemon is dropped
-        #        — that edge is expressed via after_parents instead.
-        #     3. chain default: parent is the previous batch ([] for batch 0).
-        after_parents = []  # type: List[int]
-        if self._parallel_anchor is not None:
-            if self._parallel_after_anchor is not None:
-                after_parents = [self._parallel_after_anchor]
-        elif self._pending_after_parent is not None:
-            after_parents = [self._pending_after_parent]
-            self._pending_after_parent = None
-
         if self._parallel_pack is not None:
             if self._packed_resources_seen:
                 raise RuntimeError(
@@ -1600,21 +1791,7 @@ umask 002
                 )
             self._packed_resources_seen = True
 
-        if self._pending_post_parents is not None:
-            new_parents = list(self._pending_post_parents)
-            self._pending_post_parents = None
-        elif self._parallel_anchor is not None:
-            self._parallel_siblings.append(self.current_batch)
-            if self._parallel_anchor >= 0 and self._parallel_anchor not in after_parents:
-                new_parents = [self._parallel_anchor]
-            else:
-                new_parents = []
-        elif after_parents:
-            # Plain (non-parallel) batch after a Service: daemon is its only
-            # predecessor via after:, so no afterok parent of its own.
-            new_parents = []
-        else:
-            new_parents = [self.current_batch - 1] if self.current_batch > 0 else []
+        new_parents, after_parents = self._batch_parent_edges()
         self.batch_parents.append(new_parents)
         self.batch_after_parents.append(after_parents)
 
@@ -1766,6 +1943,8 @@ umask 002
                 
                 exported_count += 1
                 
+            except ContractViolation:
+                raise
             except Exception as e:
                 print(f"Warning: Could not export output metadata for {tool.TOOL_NAME}: {e}")
                 continue
@@ -1775,6 +1954,151 @@ umask 002
         else:
             print("Warning: No tool output metadata could be exported")
     
+    def _batch_of_tool_index(self, tool_index: int) -> int:
+        """Batch index owning ``tool_index``, or -1 when no batch has opened yet."""
+        batch = -1
+        for i, start in enumerate(self.batch_start_indices):
+            if start <= tool_index:
+                batch = i
+            else:
+                break
+        return batch
+
+    def _completion_marker_paths(self, tool) -> Dict[str, str]:
+        """The COMPLETED/FAILED marker paths ``pipe_check_completion`` writes for a step."""
+        folder_name = os.path.basename(tool.output_folder)
+        parent_dir = os.path.dirname(tool.output_folder)
+        if '_' in folder_name and folder_name.split('_')[0].isdigit():
+            stem = f"{folder_name.split('_')[0]}_{tool.TOOL_NAME}"
+        else:
+            stem = tool.TOOL_NAME
+        return {
+            "completed": os.path.join(parent_dir, f"{stem}_COMPLETED"),
+            "failed": os.path.join(parent_dir, f"{stem}_FAILED"),
+        }
+
+    def build_pipeline_graph(self) -> Dict[str, Any]:
+        """Serializable record of this pipeline's shape: batches, steps, and dataflow edges.
+
+        Everything here is already known to the framework at save time. The per-step output inventory is NOT duplicated: each step points at the ``ToolOutputs/<basename>.json`` that ``_export_tool_outputs`` already writes, and the page reads it from there.
+        """
+        output_root = self.folders["output"]
+
+        batches = []
+        for i, resources in enumerate(self.batch_resources):
+            start = self.batch_start_indices[i] if i < len(self.batch_start_indices) else 0
+            end = (self.batch_start_indices[i + 1]
+                   if i + 1 < len(self.batch_start_indices) else len(self.tools))
+            batches.append({
+                "index": i,
+                "resources": dict(resources),
+                "parents": list(self.batch_parents[i]) if i < len(self.batch_parents) else [],
+                "after_parents": (list(self.batch_after_parents[i])
+                                  if i < len(self.batch_after_parents) else []),
+                "packed": i in self._packed_batches,
+                "start_tool_index": start,
+                "n_tools": max(0, end - start),
+            })
+
+        steps = []
+        for index, tool in enumerate(self.tools):
+            markers = self._completion_marker_paths(tool)
+            basename = getattr(tool, "script_basename", tool.TOOL_NAME)
+            steps.append({
+                "execution_order": tool.execution_order,
+                "public_step": getattr(tool, "public_step", None),
+                "internal_order": getattr(tool, "internal_order", None),
+                "internal": bool(tool.internal),
+                "tool": tool.TOOL_NAME,
+                "tool_class": type(tool).__name__,
+                "tool_version": str(getattr(tool, "TOOL_VERSION", "") or ""),
+                "job_name": tool.job_name,
+                "suffix": getattr(tool, "suffix", ""),
+                "script_basename": basename,
+                "batch": self._batch_of_tool_index(index),
+                "output_folder": tool.output_folder,
+                "resources": dict(tool.resources),
+                "environments": list(tool.environments) if tool.environments else [],
+                "script_file": os.path.join(self.folders["runtime"], f"{basename}.sh"),
+                "log_file": os.path.join(self.folders["logs"], f"{basename}.log"),
+                "completed_marker": markers["completed"],
+                "failed_marker": markers["failed"],
+                "tool_outputs_json": os.path.join(output_root, "ToolOutputs", f"{basename}.json"),
+            })
+
+        return {
+            "schema": 1,
+            "pipeline": {
+                "project": self.project,
+                "job": self.job,
+                "description": self.description,
+                "config_variant": ConfigManager().get_variant(),
+                "scheduler": ConfigManager().get_scheduler(),
+                "on_the_fly": bool(self.on_the_fly),
+                "output_folder": output_root,
+                "runtime_folder": self.folders["runtime"],
+                "logs_folder": self.folders["logs"],
+                "saved_at": datetime.now().isoformat(timespec="seconds"),
+                "biopipelines_version": self._framework_version(),
+                "python_version": sys.version.split()[0],
+                "host": __import__("socket").gethostname(),
+            },
+            # Recorded at save time rather than resolved at render time: a page regenerated in a bare
+            # process may auto-detect a different variant than the one the pipeline actually ran under.
+            "machine": self._machine_snapshot(),
+            "batches": batches,
+            "steps": steps,
+            "edges": [dict(e) for e in self.dataflow_edges],
+        }
+
+    @staticmethod
+    def _framework_version() -> Optional[str]:
+        try:
+            from . import __version__
+            return __version__
+        except Exception:
+            return None
+
+    @staticmethod
+    def _machine_snapshot() -> Dict[str, Any]:
+        """The machine block of the active config, minus anything host-specific enough to be noise."""
+        try:
+            machine = dict((ConfigManager()._config or {}).get("machine") or {})
+        except Exception:
+            return {}
+        keep = ("scheduler", "env_manager", "modules", "partition", "account", "container_runtime",
+                "gpu", "cpus", "memory", "time_limit", "venv_root", "conda_env_root", "scratch")
+        snapshot = {}
+        for key in keep:
+            value = machine.get(key)
+            if isinstance(value, dict):
+                value = value.get("name", value)
+            if value not in (None, "", [], {}):
+                snapshot[key] = value
+        return snapshot
+
+    def _write_pipeline_page(self) -> Optional[str]:
+        """Write ``RunTime/pipeline_graph.json`` and the self-contained ``RunTime/pipeline.html``.
+
+        Failure here must never lose a saved pipeline, so everything is caught and reported as a warning.
+        """
+        graph_path = os.path.join(self.folders["runtime"], "pipeline_graph.json")
+        try:
+            graph = self.build_pipeline_graph()
+            with open(graph_path, 'w', encoding="utf-8") as f:
+                json.dump(graph, f, indent=2, default=self._json_serializer)
+        except Exception as e:
+            print(f"Warning: could not write pipeline graph: {e}")
+            return None
+
+        try:
+            page_path = render_pipeline_page(graph, os.path.join(self.folders["runtime"], "pipeline.html"))
+        except Exception as e:
+            print(f"Warning: could not write pipeline page: {e}")
+            return None
+        print(f"Pipeline page written to: {page_path}")
+        return page_path
+
     def _json_serializer(self, obj):
         """Custom JSON serializer for ToolOutput and other non-serializable objects."""
         if hasattr(obj, 'to_dict'):
@@ -1841,6 +2165,48 @@ umask 002
             print(f"Warning: Could not save original pipeline script: {e}")
 
         return None
+
+
+def _load_page_renderer():
+    """Load ``renderers/pipeline_report.py`` by path, the way stream renderers are loaded."""
+    import importlib.util
+
+    # The renderers live inside the package, so this resolves the same from a
+    # clone and from site-packages.
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    script = os.path.join(package_dir, "renderers", "pipeline_report.py")
+    if not os.path.isfile(script):
+        raise FileNotFoundError(f"page renderer not found: {script}")
+    spec = importlib.util.spec_from_file_location("bp_pipeline_report", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def render_pipeline_page(graph: Dict[str, Any], out_path: str,
+                         allow_external: bool = False) -> str:
+    """Render ``graph`` to a self-contained HTML page at ``out_path`` and return the path.
+
+    The 3D viewers come from the vendored py3Dmol copy and need no network. ``allow_external=True`` only matters for renderer output that fetches from the network, including the CDN fallback used when that vendored copy is absent.
+    """
+    return _load_page_renderer().render_page(graph, out_path, allow_external=allow_external)
+
+
+def regenerate_pipeline_page(runtime_folder: str, allow_external: bool = False) -> str:
+    """Rebuild ``<runtime_folder>/pipeline.html`` from the graph saved beside it.
+
+    Run this after the pipeline has executed: the page reads the same ``ToolOutputs/*.json`` and on-disk outputs, so a page written at save time (everything pending) and one written afterwards (outputs rendered) come from one code path.
+    """
+    graph_path = os.path.join(runtime_folder, "pipeline_graph.json")
+    if not os.path.isfile(graph_path):
+        raise FileNotFoundError(
+            f"No pipeline_graph.json in {runtime_folder}. It is written by "
+            f"pipeline.save(); regeneration needs it to know the pipeline's shape."
+        )
+    with open(graph_path, encoding="utf-8") as f:
+        graph = json.load(f)
+    return render_pipeline_page(graph, os.path.join(runtime_folder, "pipeline.html"),
+                               allow_external=allow_external)
 
 
 # Module-level convenience functions for use within Pipeline context

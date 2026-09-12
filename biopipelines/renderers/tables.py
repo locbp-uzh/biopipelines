@@ -107,6 +107,28 @@ def _render_dataframe(df, output_folder=None):
     )
 
 
+def _project(df, output):
+    """``df`` narrowed to the caller's selection, if one was requested.
+
+    bp-visualize puts the ordered id list and the item cap in
+    ``rendering_parameters["_selection"]``. Without this a page asking for the top 5 by
+    pLDDT showed 5 structures beside a table of every row in file order -- the same page
+    answering the question two different ways.
+    """
+    selection = (getattr(output, "rendering_parameters", None) or {}).get("_selection") or {}
+    ids = selection.get("ids")
+    cap = selection.get("max_items")
+    if ids and "id" in df.columns:
+        rank = {str(v): i for i, v in enumerate(ids)}
+        keep = df[df["id"].astype(str).isin(rank)].copy()
+        if len(keep) > 0:
+            keep["_bp_rank"] = keep["id"].astype(str).map(rank)
+            df = keep.sort_values("_bp_rank", kind="stable").drop(columns="_bp_rank")
+    if isinstance(cap, int) and cap > 0:
+        df = df.head(cap)
+    return df
+
+
 def render(table_info, output):
     """Render table metadata and CSV content."""
     rel = lambda p: _rel(p, output.output_folder)
@@ -137,7 +159,7 @@ def render(table_info, output):
     # CSV content
     if t_meta.path and os.path.exists(t_meta.path):
         try:
-            table_df = pd.read_csv(t_meta.path)
+            table_df = _project(pd.read_csv(t_meta.path), output)
             if len(table_df) > 0:
                 parts.append(_render_dataframe(table_df, output_folder=output.output_folder))
         except Exception:

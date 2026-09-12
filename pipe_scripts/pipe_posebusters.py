@@ -86,7 +86,7 @@ def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structur
     protein_pdb_path = os.path.join(output_dir, f"{structure_id}_protein.pdb")
     with open(protein_pdb_path, 'w') as f:
         f.writelines(protein_lines)
-        f.write("END\n")
+        f.write("END".ljust(80) + "\n")
 
     # Extract each ligand copy
     results = []

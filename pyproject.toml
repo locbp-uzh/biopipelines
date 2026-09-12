@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "biopipelines"
 dynamic = ["version"]
 description = "Automated pipeline framework for protein modeling workflows"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 dependencies = [
     "pandas>=2.2",
     "numpy>=1.26",
@@ -39,20 +39,26 @@ bp-submit = "biopipelines.cli:submit"
 bp-config = "biopipelines.cli:config"
 bp-run = "biopipelines.cli:run"
 bp-warm = "biopipelines.cli:warm"
+bp-visualize = "biopipelines.cli:visualize"
 biopipelines-submit = "biopipelines.cli:submit"
 biopipelines-config = "biopipelines.cli:config"
 biopipelines-run = "biopipelines.cli:run"
 biopipelines-warm = "biopipelines.cli:warm"
+biopipelines-visualize = "biopipelines.cli:visualize"
 
 [tool.setuptools.packages.find]
 include = ["biopipelines*"]
+
+[tool.setuptools.package-data]
+"biopipelines.renderers" = ["vendor/*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "biopipelines.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra -m 'not tool_parameters'"
+addopts = "-ra -m 'not tool_parameters and not network'"
 markers = [
+    "network: reaches a live external API (RCSB). Excluded from the default run so a local suite is hermetic and works offline; CI has connectivity and runs it explicitly.",
     "tool_parameters: opt-in suite that drives every wrapped public-repo tool with a minimal pipeline and asserts each kwarg lands in the emitted artifacts. GPU-bound, so excluded by default; run with 'pytest tests/tool_parameters -m tool_parameters -v'.",
 ]

@@ -68,7 +68,7 @@ with Pipeline(project="ToolParameters",
     #    Tests Tuple[TableInfo, str] / TableReference form for `redesigned`.
     # ──────────────────────────────────────────────────────────────────────
     Suffix("rfdaa_to_lmpnn_tableref")
-    dp9 = Ligand(code="9DP")
+    dp9 = Ligand(codes="9DP")
     rfdaa = RFdiffusionAllAtom(
         pdb=abl1,
         ligand=dp9,

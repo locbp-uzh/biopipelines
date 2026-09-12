@@ -44,7 +44,7 @@ class ConformationalChange(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "ConformationalChange"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -67,6 +67,10 @@ class ConformationalChange(BaseConfig):
                  selection: Optional[Union[str, Tuple['TableInfo', str]]] = None,
                  alignment: str = "align",
                  atoms: str = "all",
+                 pairing: str = "sequence",
+                 cycles: int = 5,
+                 cutoff: float = 2.0,
+                 frame: Optional[Union[str, Tuple['TableInfo', str]]] = None,
                  **kwargs):
         """
         Initialize conformational change analysis tool.
@@ -78,12 +82,34 @@ class ConformationalChange(BaseConfig):
                       - None: Compare all atoms (whole structure RMSD)
                       - String: '10-20+30-40' (fixed residue ranges for all structures)
                       - Table column reference: (table, "column_name") for per-structure selections
-            alignment: Alignment method - "align", "super", or "cealign" (default: "align")
+            alignment: Alignment method - "align", "super", or "cealign" (default: "align").
+                      Only used when pairing="sequence".
             atoms: Which atoms to use for alignment. Options:
                   - "all" (default): all atoms
                   - "CA": alpha-carbon only
                   - "backbone": backbone atoms (CA+C+N+O)
                   - Any '+'-separated atom names, e.g. "CA+CB"
+            pairing: How atoms in the two structures are put into correspondence:
+                  - "sequence" (default): PyMOL align/super/cealign. Pairs by SEQUENCE
+                    similarity, so residues it cannot match are silently excluded from
+                    the RMSD. Correct for comparing homologues.
+                  - "ordered": cmd.fit(matchmaker=-1) — pairs the Nth atom of one
+                    selection with the Nth of the other. Correct when both structures
+                    share a numbering scheme and atom order but NOT their sequence,
+                    e.g. a design and the refold of an inverse-folded sequence.
+                  - "identifier": cmd.fit(matchmaker=0) — pairs on full atom identifiers
+                    (chain/resi/resn/name). Note this includes the RESIDUE NAME, so
+                    positions that were mutated are dropped.
+            cycles: Outlier-rejection cycles (default 5, PyMOL's default). Each cycle
+                  discards the worst-fitting atom pairs and refits, so the reported RMSD
+                  describes only the atoms that survived. Set 0 to measure every atom.
+            cutoff: Rejection threshold in Angstrom for those cycles (default 2.0).
+            frame: Optional selection to superpose on before measuring `selection`.
+                  With frame set, the fit is computed on `frame` and the RMSD is then
+                  measured over `selection` in that frame WITHOUT refitting. Use it to
+                  ask "given the structures are aligned on their fixed core, how far is
+                  the designed part from where it was designed?" — a segment allowed its
+                  own superposition can score well while sitting in the wrong place.
             **kwargs: Additional parameters
 
         Selection Syntax (string):
@@ -99,7 +125,14 @@ class ConformationalChange(BaseConfig):
         Output:
             Streams: (none)
             Tables:
-                changes: id | reference_structure | target_structure | selection | num_aligned_atoms | RMSD
+                changes: id | reference_structure | target_structure | selection |
+                         num_aligned_atoms | RMSD | RMSD_before | num_atoms_before |
+                         num_residues_aligned | atoms_dropped_pct
+
+        RMSD is measured over the atoms that survived refinement; RMSD_before and
+        num_atoms_before are the same quantities before any outlier rejection. When
+        those differ materially the reported RMSD is not describing the whole selection
+        — atoms_dropped_pct makes that visible instead of silent.
         """
         # Resolve reference structures to DataStream
         if isinstance(reference_structures, StandardizedOutput):
@@ -120,6 +153,10 @@ class ConformationalChange(BaseConfig):
         self.selection_spec = selection
         self.alignment_method = alignment
         self.atoms = atoms
+        self.pairing = pairing
+        self.cycles = cycles
+        self.cutoff = cutoff
+        self.frame_spec = frame
 
         super().__init__(**kwargs)
 
@@ -134,8 +171,29 @@ class ConformationalChange(BaseConfig):
         if self.alignment_method not in ["align", "super", "cealign"]:
             raise ValueError(f"Alignment method must be 'align', 'super', or 'cealign', got: {self.alignment_method}")
 
+        if self.pairing not in ("sequence", "ordered", "identifier"):
+            raise ValueError(
+                f"pairing must be 'sequence', 'ordered', or 'identifier', got: {self.pairing}")
+        if self.pairing != "sequence" and self.alignment_method != "align":
+            raise ValueError(
+                f"alignment={self.alignment_method!r} only applies to pairing='sequence'; "
+                f"pairing={self.pairing!r} uses cmd.fit")
+        # bool is an int subclass, so cycles=True would otherwise pass as 1 cycle.
+        if isinstance(self.cycles, bool) or not isinstance(self.cycles, int) or self.cycles < 0:
+            raise ValueError(f"cycles must be a non-negative integer, got: {self.cycles!r}")
+        if isinstance(self.cutoff, bool) or not isinstance(self.cutoff, (int, float)):
+            raise ValueError(f"cutoff must be a number, got: {type(self.cutoff).__name__}")
+        if self.cutoff <= 0:
+            raise ValueError(f"cutoff must be positive, got: {self.cutoff!r}")
+        if self.pairing == "sequence" and self.alignment_method == "cealign" and self.cycles != 5:
+            raise ValueError("cealign has no outlier-rejection cycles; leave cycles at its default")
+        if self.frame_spec is not None and self.selection_spec is None:
+            raise ValueError("frame requires selection: there is nothing to measure inside the frame")
+
         if isinstance(self.selection_spec, str):
             _validate_freeform_string("selection", self.selection_spec)
+        if isinstance(self.frame_spec, str):
+            _validate_freeform_string("frame", self.frame_spec)
         _validate_freeform_string("atoms", self.atoms)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
@@ -157,9 +215,13 @@ class ConformationalChange(BaseConfig):
             f"REFERENCE STRUCTURES: {len(self.reference_stream)} files",
             f"TARGET STRUCTURES: {len(self.target_stream)} files",
             f"SELECTION: {selection_display}",
-            f"ALIGNMENT METHOD: {self.alignment_method}",
+            f"PAIRING: {self.pairing}",
+            f"ALIGNMENT METHOD: {self.alignment_method if self.pairing == 'sequence' else 'cmd.fit'}",
             f"ATOMS: {self.atoms}",
-            f"METRICS: RMSD (PyMOL {self.alignment_method}, {self.atoms} atoms)"
+            f"CYCLES: {self.cycles} (cutoff {self.cutoff} A)"
+            + ("  [no outlier rejection]" if self.cycles == 0 else ""),
+            f"FRAME: {self.frame_spec if self.frame_spec is not None else 'measured selection itself'}",
+            f"METRICS: RMSD ({self.atoms} atoms)"
         ])
 
         return config_lines
@@ -191,12 +253,24 @@ class ConformationalChange(BaseConfig):
         else:
             selection_config = {"type": "fixed", "value": self.selection_spec}
 
+        if self.frame_spec is None:
+            frame_config = None
+        elif isinstance(self.frame_spec, TableReference):
+            frame_config = {"type": "table_column", "table_path": self.frame_spec.path,
+                            "column_name": self.frame_spec.column}
+        else:
+            frame_config = {"type": "fixed", "value": self.frame_spec}
+
         config_data = {
             "reference_structures_json": self.reference_ds_json,
             "target_structures_json": self.target_ds_json,
             "selection": selection_config,
+            "frame": frame_config,
             "alignment_method": self.alignment_method,
             "atoms": self.atoms,
+            "pairing": self.pairing,
+            "cycles": self.cycles,
+            "cutoff": self.cutoff,
             "output_csv": self.analysis_csv
         }
 
@@ -221,7 +295,8 @@ python "{self.analysis_py}" --config "{self.config_file}"
                 name="changes",
                 path=self.analysis_csv,
                 columns=["id", "reference_structure", "target_structure", "selection",
-                        "num_aligned_atoms", "RMSD"],
+                        "num_aligned_atoms", "RMSD", "RMSD_before", "num_atoms_before",
+                        "num_residues_aligned", "atoms_dropped_pct"],
                 description="Conformational change analysis between reference and target structures"
             )
         }

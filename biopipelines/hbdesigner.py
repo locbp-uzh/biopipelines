@@ -106,7 +106,8 @@ class HBDesigner(BaseConfig):
     """
 
     TOOL_NAME = "HBDesigner"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "hbdesigner"
 
     DESIGN_MODELS = ("design_002", "design_020")
 
@@ -134,16 +135,18 @@ class HBDesigner(BaseConfig):
         """
         if device not in ("gpu", "cpu"):
             raise ValueError(f"device must be 'gpu' or 'cpu', got {device!r}")
+        env = cls._install_env(env_manager)
+        named = cls._env_create_name_flag(env, env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("HBDesigner", "")
         parent_dir = os.path.dirname(repo_dir)
         env_yaml = f"{biopipelines}/environments/hbdesigner.{device}.yaml"
         env_pip = f"{biopipelines}/environments/hbdesigner.{device}.pip.txt"
 
-        env_check = cls._env_exists_check("hbdesigner", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -d "{repo_dir}/.git" ]'
         entry_check = (
-            f'{cls._env_run("hbdesigner", env_manager)}'
+            f'{cls._env_run(env, env_manager)}'
             f'python -c "import shutil,sys; sys.exit(0 if shutil.which(\'run_hbdesigner\') else 1)"'
         )
         # Env name is shared across devices, so the skip must also match the
@@ -160,7 +163,7 @@ fi
 """
         # Unconditional (not just force_reinstall): skip also declines on a
         # device switch, and env create fails on an existing env.
-        remove_block = cls._env_remove_block("hbdesigner", env_manager)
+        remove_block = cls._env_remove_block(env, env_manager)
 
         return f"""echo "=== Installing HBDesigner ({device}) ==="
 {skip}{remove_block}
@@ -170,13 +173,13 @@ if [ ! -d "{repo_dir}/.git" ]; then
     git clone https://github.com/Kuhlman-Lab/HBDesigner.git "{repo_dir}"
 fi
 
-# Create the hbdesigner env from the device-matching vendored spec + pip layer.
-{env_manager} env create -f "{env_yaml}" -y
+# Create the {env} env from the device-matching vendored spec + pip layer.
+{env_manager} env create -f "{env_yaml}"{named} -y
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create hbdesigner environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
-{cls._env_run("hbdesigner", env_manager)}pip install -r "{env_pip}"
+{cls._env_run(env, env_manager)}pip install -r "{env_pip}"
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to install hbdesigner pip layer."
     exit 1
@@ -184,7 +187,7 @@ fi
 
 # Editable: run_hbdesigner resolves model_weights/ relative to the package, which must be the repo.
 cd "{repo_dir}"
-{cls._env_run("hbdesigner", env_manager)}pip install -e .
+{cls._env_run(env, env_manager)}pip install -e .
 
 # Verify: the run_hbdesigner entry point resolves inside the env.
 if {entry_check} >/dev/null 2>&1; then
@@ -336,16 +339,16 @@ fi
         script_content += self.generate_completion_check_footer()
         return script_content
 
-    def _fixed_options(self) -> str:
+    def _fixed_options(self) -> List[str]:
         """run_hbdesigner flags shared by every input (no --pdb / --out_dir)."""
-        opts = (
-            f"--n_res {self.n_res}"
-            f" --n_samples {self.n_samples}"
-            f" --top_k {self.top_k}"
-            f" --design_model {self.design_model}"
-        )
+        opts = [
+            "--n_res", str(self.n_res),
+            "--n_samples", str(self.n_samples),
+            "--top_k", str(self.top_k),
+            "--design_model", str(self.design_model),
+        ]
         if self.seed is not None:
-            opts += f" --seed {self.seed}"
+            opts += ["--seed", str(self.seed)]
         return opts
 
     def _generate_script_run_hbdesigner(self) -> str:
@@ -356,7 +359,7 @@ fi
         values and appends only the non-empty ones as flags. Each run writes its
         designed PDBs and a CSV summary under <execution>/<id>/.
         """
-        fixed = self._fixed_options()
+        fixed_array = " ".join('"' + a + '"' for a in self._fixed_options())
         exec_root = self.execution_path()
 
         with open(self.constraints_args_json, "w") as f:
@@ -384,18 +387,22 @@ for STRUCT_ID in {Resolve.stream_ids(self.structures_json)}; do
     GUIDE_RES=$(echo "$OPTS" | sed -n '1p')
     GUIDE_SEQ=$(echo "$OPTS" | sed -n '2p')
     ANCHOR_RES=$(echo "$OPTS" | sed -n '3p')
-    HBDES_OPTIONS="--pdb \\"$INPUT_PDB\\" --out_dir \\"$OUT_DIR\\" {fixed}"
+    HBDES_OPTIONS=(
+        --pdb "$INPUT_PDB"
+        --out_dir "$OUT_DIR"
+        {fixed_array}
+    )
     if [ -n "$GUIDE_RES" ]; then
-        HBDES_OPTIONS="$HBDES_OPTIONS --guide_res \\"$GUIDE_RES\\""
+        HBDES_OPTIONS+=(--guide_res "$GUIDE_RES")
     fi
     if [ -n "$GUIDE_SEQ" ]; then
-        HBDES_OPTIONS="$HBDES_OPTIONS --guide_seq \\"$GUIDE_SEQ\\""
+        HBDES_OPTIONS+=(--guide_seq "$GUIDE_SEQ")
     fi
     if [ -n "$ANCHOR_RES" ]; then
-        HBDES_OPTIONS="$HBDES_OPTIONS --anchor_res \\"$ANCHOR_RES\\""
+        HBDES_OPTIONS+=(--anchor_res "$ANCHOR_RES")
     fi
     echo "Running HBDesigner for $STRUCT_ID"
-    if ! eval run_hbdesigner $HBDES_OPTIONS; then
+    if ! run_hbdesigner "${{HBDES_OPTIONS[@]}}"; then
         # Record a crash so the collector reports a real failure for this input
         # (kind="failure") rather than excusing its absent output as a filter.
         echo "ERROR: run_hbdesigner failed for $STRUCT_ID" >&2

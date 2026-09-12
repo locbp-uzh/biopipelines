@@ -8,3 +8,12 @@ submit text eol=lf
 run text eol=lf
 resubmit text eol=lf
 check-updates text eol=lf
+
+# Vendored browser libraries ship verbatim and are inlined byte-for-byte into the
+# run page. EOL conversion changes their length, corrupting the working copy on
+# Windows and failing the vendoring check; never translate them.
+biopipelines/renderers/vendor/** -text
+
+# Python sources run on Linux clusters through generated bash; a CRLF blob in
+# the index breaks a shebang and inflates every diff that touches the file.
+*.py text eol=lf

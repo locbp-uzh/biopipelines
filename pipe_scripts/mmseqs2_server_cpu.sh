@@ -134,6 +134,69 @@ SUBMITTING_FILE="$MMSEQS_SERVER_DIR/CPU_SUBMITTING"
 # So CPU_SUBMITTING stays held (covering queue + install + load) and CPU_SERVER
 # is written only after the index is resident (see mark_server_ready below).
 
+# Declared here, not next to the loader that fills it, because cleanup() reads it and has to exist before the lock is claimed.
+PIDFILE_DIR="$MMSEQS2_SHARED_FOLDER/vmtouch_pids"
+
+# 0 until the ready path writes CPU_SERVER, so a death during the load never deletes a peer's advertisement.
+SERVER_READY=0
+
+# Cleanup on exit. Wired to EXIT so a crash, `set -e` abort, or signal all
+# release the mlocked indices — otherwise hundreds of GB stay pinned on the node
+# — and all release the submission lock. Clear the trap first so the closing
+# `exit` can't re-enter it.
+#
+# Armed before the lock is claimed below: arming it after the load, where this block used to sit, leaked the lockdir for its full 3 h TTL on every death inside the ~271 s window the lock covers.
+cleanup() {
+  # Captured first so a death during the load still reports FAILED to SLURM instead of exiting 0 through the trap.
+  local rc=$?
+  trap - EXIT SIGINT SIGTERM
+  log "MMseqs2 CPU server shutting down (exit status $rc)"
+  # Release the mlocked indices so the RAM is freed for other jobs: kill every
+  # vmtouch daemon we started (one per byte-range, tracked via pidfiles).
+  if [[ -d "$PIDFILE_DIR" ]]; then
+    for pf in "$PIDFILE_DIR"/*.pid; do
+      [[ -f "$pf" ]] || continue
+      kill "$(cat "$pf")" 2>/dev/null || true
+    done
+    rm -f "$PIDFILE_DIR"/*.pid 2>/dev/null || true
+  fi
+  # Belt-and-braces: any stray vmtouch of ours against these indices.
+  pkill -u "$USER" -f "vmtouch.*mmseqs2_databases" 2>/dev/null || true
+  # Free the tmpfs staging copy (Daint) — otherwise ~266GB stays pinned in RAM
+  # for the life of the node allocation, not just this process.
+  [[ "$USE_SHM" == "1" ]] && rm -rf "$SHM_DB_DIR" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  # Remove timestamp file on shutdown, but only the one we wrote ourselves.
+  if [[ "$SERVER_READY" == "1" ]]; then
+    rm -f "$SERVER_TIMESTAMP_FILE"
+    log "Removed server timestamp file"
+  fi
+  # Also drop the submission lock if we still hold it (died before ready), so a
+  # client is not blocked for the lock's 3h TTL by a server that never came up.
+  # The lockdir goes first: it is the primitive acquire_submit_lock() tests, and
+  # if the rmdir fails (NFS silly-rename, permissions) a surviving marker makes
+  # clients wait out the TTL instead of finding no submission in progress AND no
+  # acquirable lock, which is a silent no-op for every one of them.
+  rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
+  rm -f "$SUBMITTING_FILE"
+  exit "$rc"
+}
+trap cleanup EXIT SIGINT SIGTERM
+
+# Claim the submission lock if no client already holds it. A client-started
+# server inherits the lock the client took before submitting, but one started
+# directly (Service(), or by hand) holds nothing, so during the minutes of index
+# loading a client sees neither CPU_SERVER nor CPU_SUBMITTING and submits a
+# second, redundant server. mkdir is the atomic primitive over NFS, matching
+# acquire_submit_lock() in pipe_mmseqs2_sequences.py; mark_server_ready clears
+# both the marker and the lockdir.
+if mkdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null; then
+  date '+%H:%M:%S' > "$SUBMITTING_FILE"
+  log "Claimed submission lock while the index loads (no client held it)"
+else
+  log "Submission lock already held by the client that submitted us"
+fi
+
 log "Using mmseqs: $MMSEQS_BIN ($("$MMSEQS_BIN" version 2>/dev/null))"
 
 # Memory / thread settings.
@@ -204,9 +267,9 @@ convert_a3m_to_csv() {
 #     compute nodes) and a node large enough to hold the indices (~768GB+;
 #     request memory="900GB" via Resources()).
 #
-# PIDFILE_DIR holds the per-chunk vmtouch daemon pidfiles, killed on shutdown.
+# PIDFILE_DIR (declared above, next to cleanup) holds the per-chunk vmtouch
+# daemon pidfiles, killed on shutdown.
 WARM_STREAMS="${MMSEQS2_WARM_STREAMS:-16}"
-PIDFILE_DIR="$MMSEQS2_SHARED_FOLDER/vmtouch_pids"
 # Load + lock one .idx by splitting it into WARM_STREAMS byte ranges and running
 # a `vmtouch -t -l -d` per range concurrently. Each chunk reads its slice off
 # /shares AND mlocks it in one pass (vmtouch -p <range>), so there is no
@@ -310,40 +373,13 @@ fi
 # CPU_SUBMITTING, so there is never a window where a client sees neither (which
 # would let it submit a duplicate).
 date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
+SERVER_READY=1
 log "Created server timestamp file at $SERVER_TIMESTAMP_FILE (server is ready to serve)"
+rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
 if [[ -f "$SUBMITTING_FILE" ]]; then
   log "Releasing submission lock"
   rm -f "$SUBMITTING_FILE"
 fi
-rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
-
-# Cleanup on exit. Wired to EXIT (below) so a crash, `set -e` abort, or signal
-# all release the mlocked indices — otherwise hundreds of GB stay pinned on the
-# node. Clear the trap first so the closing `exit` can't re-enter it.
-cleanup() {
-  trap - EXIT SIGINT SIGTERM
-  log "MMseqs2 CPU server shutting down"
-  # Release the mlocked indices so the RAM is freed for other jobs: kill every
-  # vmtouch daemon we started (one per byte-range, tracked via pidfiles).
-  if [[ -d "$PIDFILE_DIR" ]]; then
-    for pf in "$PIDFILE_DIR"/*.pid; do
-      [[ -f "$pf" ]] || continue
-      kill "$(cat "$pf")" 2>/dev/null || true
-    done
-    rm -f "$PIDFILE_DIR"/*.pid 2>/dev/null || true
-  fi
-  # Belt-and-braces: any stray vmtouch of ours against these indices.
-  pkill -u "$USER" -f "vmtouch.*mmseqs2_databases" 2>/dev/null || true
-  # Free the tmpfs staging copy (Daint) — otherwise ~266GB stays pinned in RAM
-  # for the life of the node allocation, not just this process.
-  [[ "$USE_SHM" == "1" ]] && rm -rf "$SHM_DB_DIR" 2>/dev/null || true
-  rm -f "$PID_FILE"
-  # Remove timestamp file on shutdown
-  rm -f "$SERVER_TIMESTAMP_FILE"
-  log "Removed server timestamp file"
-  exit 0
-}
-trap cleanup EXIT SIGINT SIGTERM
 
 cleanup_old_files() {
     # Delete files older than 24 hours

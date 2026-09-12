@@ -123,8 +123,8 @@ def test_box_center_size(local_config, isolated_cwd, new_pipeline):
         center="(10, 20, 30)",
         size=18.0,
     )
-    assert "10" in content and "20" in content and "30" in content
-    assert "18" in content
+    # Bare "18" is already in the default build, so it passed whatever `size` was.
+    assert_substrings_in(content, ['"center": "(10, 20, 30)"', '"size": 18.0'])
 
 
 def test_mode_default_is_docking(local_config, isolated_cwd, new_pipeline):

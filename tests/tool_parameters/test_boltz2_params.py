@@ -33,14 +33,12 @@ def _build(local_config, isolated_cwd, new_pipeline, **boltz_kwargs):
 
 def test_recycling_steps(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, recycling_steps=5)
-    assert "5" in content
-    assert "recycling" in content.lower() or "--recycling" in content
+    assert "--recycling_steps 5" in content
 
 
 def test_diffusion_samples(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, diffusion_samples=4)
-    assert "4" in content
-    assert "diffusion" in content.lower() or "--diffusion" in content
+    assert "--diffusion_samples 4" in content
 
 
 def test_use_potentials(local_config, isolated_cwd, new_pipeline):
@@ -117,8 +115,10 @@ def test_disulfide_bonds(local_config, isolated_cwd, new_pipeline):
         local_config, isolated_cwd, new_pipeline,
         disulfide_bonds=[{"token1": ["A", 12], "token2": ["A", 45]}],
     )
-    assert "--disulfide-bonds" in content
-    assert "12" in content and "45" in content
+    assert (
+        '--disulfide-bonds \'[{"token1": ["A", 12], "token2": ["A", 45]}]\''
+        in content
+    )
 
 
 def test_metal_coord(local_config, isolated_cwd, new_pipeline):

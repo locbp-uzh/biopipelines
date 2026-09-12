@@ -29,6 +29,7 @@ Creates compound collections from dictionaries with optional combinatorial expan
 
 **Tables**:
 - `compounds`: | id | format | smiles | ccd | {branching_keys} |
+- `covalent_compounds` (only when `covalent=True`): | id | format | smiles | ccd |
 
 **Examples**:
 
@@ -123,12 +124,13 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 **Parameters**:
 - `lookup`: str | List[str] | Dict[str, str] = None - Lookup values (CCD, CID, CAS, name), or path to a `.txt` file (one SMILES per line) or `.cdxml` file (ChemDraw molecules). File types are auto-detected by extension.
 - `ids`: str | List[str] = None - Custom IDs (defaults to lookup / file-derived names / "smilesN")
-- `codes`: str | List[str] = None - Residue codes carried on the compounds stream, 1-5 alphanumeric (extended CCD); defaults to the lookup value or "LIG"
-- `code`: str | List[str] = None - Name an existing HETATM residue by its code (1-5 alphanumeric) **without** downloading or generating any structure (compounds-only). Hand the result to tools that only need the residue code (LigandMPNN, PoseBusters, PLIP, …).
+- `codes`: str | List[str] = None - Residue code(s), 1-5 alphanumeric (extended CCD). **What else you pass selects the mode** — see *Which mode `codes` selects* below. With chemistry (`lookup`/`smiles`) it is the residue label the compounds stream carries downstream; with `structures=` it names the HETATM to carve out; on its own it names an existing HETATM residue and nothing else. Defaults to the lookup value (when that is itself a valid CCD code) or `"LIG"`.
+- `code`: str | List[str] = None - A synonym for `codes=` that will soon be deprecated. It binds `codes` and the pipeline runs as written, but each use prints one `[contract:deprecated_alias]` notice. Passing `code=` and `codes=` together raises.
 - `source`: str = None - Force "rcsb" or "pubchem" (auto-detects if None)
 - `local_folder`: str = None - Check first before ligands/
 - `smiles`: str | List[str] | Dict[str, str] = None - Direct SMILES input (bypasses lookup)
 - `structures`: DataStream | StandardizedOutput = None - Extract the ligand's bound coordinates from these structures (keeps the crystal pose). With `codes=` and no `lookup`/`smiles` it **fans out over the input structures**: N structures × 1 code gives N ligands keyed by the input ids, N × M codes gives N·M ligands keyed `<structure_id>_<code>`, and both maps carry a `structures.id` provenance column. `ids=` is not accepted in this mode (ids are derived) and a code missing from a given structure routes that pair to the `failed` table while the rest proceed. Combined with `lookup`/`smiles` it instead overlays bound coordinates onto that one chemistry entry, so it requires a single input structure. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
+- `template_smiles`: str = None - One SMILES describing the chemistry of every ligand carved by the `structures=` + `codes=` path, written into the emitted compounds stream's `smiles` column. **Only valid in that mode.** Without it a carved ligand carries a residue code and coordinates but no chemistry, so every downstream consumer (`write_ligand_sdf`, RTMScore, OpenMM's `ligand=`, Gnina/Vina score mode) has to perceive bond orders from the coordinates — which loses aromaticity, formal charges and bond orders on any structure without CONECT records. The string is not parsed by RDKit at configuration time, so a wrong tautomer or an unparseable SMILES lands in the column silently; check it against the molecule you carved.
 - `generate_images`: bool = False - Generate PNG images per ligand using RDKit
 - `compounds`: DataStream | StandardizedOutput = None - Existing compounds stream to enrich. Mutually exclusive with the ligand-construction inputs.
 - `vendor_lookup`: bool = False - Resolve each compound to a PubChem CID and append live chemical-vendor evidence from PUG-View. Works both while constructing ligands and with `compounds=` enrichment; enrichment preserves the input rows, IDs, and extra columns.
@@ -141,10 +143,13 @@ Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates
 
 **Streams**: `structures`, `compounds`, `images` (if `generate_images=True`)
 
-The `structures` stream is **SDF** for fetched/generated ligands (download, PubChem, SMILES) and the input structure's own format (pdb/cif) for the `structures=` HETATM-extract path; it is absent in `code`-only mode. `Ligand` does not write PDB/CIF coordinates itself — for those, convert afterwards with `OpenBabel(compounds=lig, convert_3d="pdb"|"cif")`. The residue code (1-5 chars, extended-CCD capable) lives on the `compounds` stream and is independent of the coordinate file's format.
+The `structures` stream is **SDF** for fetched/generated ligands (download, PubChem, SMILES) and the input structure's own format (pdb/cif) for the `structures=` HETATM-extract path; it is absent in code-only mode. `Ligand` does not write PDB/CIF coordinates itself — for those, convert afterwards with `OpenBabel(compounds=lig, convert_3d="pdb"|"cif")`. The residue code (1-5 chars, extended-CCD capable) lives on the `compounds` stream and is independent of the coordinate file's format.
 
 **Tables**:
-- `compounds`: | id | code | lookup | source | smiles | formula |
+- `compounds`: | id | format | code | lookup | source | ccd | cid | cas | smiles | name | formula | file_path | vendor_status | vendor_count | vendors | vendor_urls | vendor_checked_at | vendor_error |
+- `failed`: | lookup | error_message | source | attempted_path |
+
+The vendor columns are populated only when a vendor check runs; otherwise they are blank.
 
 **Examples**:
 
@@ -172,7 +177,30 @@ ligands = Ligand("my_ligands.cdxml")
 available = Ligand(compounds=screened, vendor_lookup=True)
 ```
 
-A `code`-only Ligand (`Ligand(code="ZIT")`) names an existing HETATM residue without downloading or generating any structure — hand it to tools that only need the ligand's residue code (LigandMPNN, PoseBusters, PLIP, …). To turn a SMILES-carrying Ligand into a 3-D file, run [OpenBabel](cheminformatics.md#openbabel).
+**Which mode `codes` selects.** There is one `codes` parameter, and the rest of the call decides what it means. `codes` was once two confusable parameters — `codes=` for the residue label on a ligand whose chemistry you had supplied, `code=` for code-only construction with no chemistry at all — one letter apart, mutually exclusive, and mistyping one for the other silently produced a chemistry-free stub.
+
+| Call | Mode | Chemistry | `structures` stream |
+|---|---|---|---|
+| `Ligand(codes="UNL")` | code-only: names an existing HETATM residue | none | absent |
+| `Ligand(smiles=…, ids=…, codes="BGD")` | labelled chemistry (the dominant usage) | from `smiles=` | SDF |
+| `Ligand(lookup=…, codes="BGD")` | labelled chemistry | fetched | SDF |
+| `Ligand(codes="STI", structures=complex)` | carve that residue out of the given structures | none, unless `template_smiles=` | the input's own format |
+| `Ligand("aspirin")` | `lookup` is the first positional, so this fetches chemistry — **not** code-only | fetched | SDF |
+
+Because a forgotten `smiles=` now yields a chemistry-free stub instead of an error, the code-only path announces itself on stderr rather than letting the omission surface in whatever downstream tool needed the molecule:
+
+```
+[contract:code_only_ligand] Ligand(codes='UNL') carries no chemistry, only a residue code
+    Pass lookup or smiles to retrieve chemical information.
+```
+
+That notice is deliberately suppressed for the bare-string `ligand="LIG"` shorthand, where filtering by residue code is the entire intent. Like every [contract check](../developer_manual.md#contract-enforcement) it is severity-gated: `BIOPIPELINES_ENFORCE_CODE_ONLY_LIGAND=off` silences it, `=raise` makes it fatal.
+
+A code-only Ligand has no SMILES, so it cannot be converted to 3-D — hand it to tools that only need the ligand's residue code (LigandMPNN, PoseBusters, PLIP, …). To turn a SMILES-carrying Ligand into a 3-D file, run [OpenBabel](cheminformatics.md#openbabel).
+
+**Two calls that used to raise and now work.** `Ligand(codes=…, structures=…)` was rejected as "not compatible"; it is now the carve path. `Ligand(code=…, smiles=…)` was rejected as "mutually exclusive"; it is now the labelled-chemistry case. Examples printed against the old API therefore behave differently rather than failing — check yours against the table above.
+
+`Compound` is another name for `Ligand`, named for the `compounds` stream it emits — see [Structure and Compound](../user_manual.md#structure-and-compound).
 
 ---
 
@@ -180,21 +208,25 @@ A `code`-only Ligand (`Ligand(code="ZIT")`) names an existing HETATM residue wit
 
 Reload previously produced pipeline outputs back into a run.
 
-**Load** — loads a single tool output JSON file.
+**Load** — loads a single tool's output folder.
 
 **Parameters**:
-- `path`: str - Path to the tool output JSON file
+- `path`: str - Path to the tool's output folder (the one holding `.expected_outputs.json`)
 - `filter`: str = None - Pandas query filter
-- `validate_files`: bool = True - Check file existence
+- `validate_files`: bool = True - Resolve streams against their map_table and check file existence
 
 ```python
 from biopipelines.load import Load
 
 prev = Load(
-    path="/path/to/ToolOutputs/003_Boltz2.json",
+    path="/path/to/job/003_Boltz2",
     filter="confidence_score > 0.8"
 )
 ```
+
+With `validate_files=True` (the default), each file-based stream is resolved through its `map_table`, which lists one row per id the producer actually wrote. The stream's ids are narrowed to those rows and its `<id>` file template is replaced with the concrete paths, so a run that declared 300 designs but produced 290 loads as 290 — downstream tools never inherit the 10 phantom ids. Only files the map_table lists are statted, and two conditions are reported separately: *absent* (a listed file is not on disk) and *unresolved* (a stream carries an `<id>` template with no map_table behind it to resolve it against).
+
+With `validate_files=False` nothing is resolved: ids propagate exactly as declared, including compact patterns. Downstream tools must then consume `tables/missing.csv` to excuse ids that were never produced.
 
 **LoadMultiple** — loads multiple outputs from a ToolOutputs folder. Returns a dict mapping identifiers to `Load` objects.
 
@@ -221,7 +253,7 @@ cycle10 = LoadMultiple("/path/to/job/", suffix="Cycle10")
 
 ### PDB
 
-Fetches protein structures with priority: `local_folder` → `pdbs/` → RCSB download.
+Fetches protein structures with priority: `local_folder` → `pdbs/` → RCSB download. Accepts and emits mmCIF as readily as PDB, which is why it is also exported as `Structure` — see [Structure and Compound](../user_manual.md#structure-and-compound). Both spellings are first-class; outputs are named `PDB` either way.
 
 **Environment**: `biopipelines`
 
@@ -249,9 +281,11 @@ Fetches protein structures with priority: `local_folder` → `pdbs/` → RCSB do
 **Streams**: `structures`, `sequences`, `compounds`
 
 **Tables**:
-- `structures`: | id | pdb_id | file_path | format | source |
+- `structures`: | id | pdb_id | file | format | file_size | source |
 - `sequences`: | id | sequence |
-- `compounds`: | id | code | smiles | ccd |
+- `compounds`: | id | code | format | smiles | ccd |
+- `failed`: | pdb_id | error_message | source | attempted_path |
+- `missing` (only when an input axis carries an upstream manifest): | id | removed_by | kind | cause |
 
 **Stream cardinality vs `chain` / `split_chains`**:
 
@@ -313,6 +347,11 @@ Creates plots from CSV data.
 - `HeatMap(data, columns)` - Correlation heatmap
 
 **Column styles**: "column", "simple_bar", "scatter", "box", "floating_bar"
+
+**Streams**: `plots` (one image per operation)
+
+**Tables**:
+- `metadata` (one row per emitted plot): | filename | type | title | x_column | y_column | data_sources |
 
 **Example**:
 
@@ -388,11 +427,14 @@ To override defaults, use `PyMOL.Set()` before other operations.
 - `Center(selection="all")` - Center view on selection without changing orientation
 - `Zoom(selection="all", buffer=5.0)` - Zoom to fit selection with buffer (Angstroms)
 - `Orient(selection="all")` - Orient view to show selection from best angle
-- `Save(filename)` - Save session
+- `Save(filename=None)` - Save session to `_extras/<filename>` (absolute paths honored); defaults to `_extras/<session>.pse`
 - `Render(structures, orient_selection, width, height, filename, dpi)` - Render single PNG
 - `RenderEach(structures, ...)` - Render each structure individually as PNG. **SLOW** (~5–10 s ray-traced per structure); pass only a small curated set, not a full design pool — see the warning above.
 
-**Streams**: `images` (when using Render/RenderEach)
+**Streams**: `renders` (PNG per rendered structure, when using Render/RenderEach)
+
+**Tables**:
+- `missing` (only when an input axis carries an upstream manifest): | id | removed_by | kind | cause |
 
 **RenderEach Parameters**:
 - `structures`: Structures to render
@@ -535,7 +577,7 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 - `TotalPolymerResidues`, `EntryPolymerComposition`, `EntryPolymerTypes`
 
 `StructureAttribute.PolymerMolecularFeatures`
-- `PolymerEntityDescription`, `PolymerEntityType`, `PolymerEntitySequenceLength`
+- `PolymerEntityDescription`, `PolymerEntityType`, `PolymerEntitySequenceLength`, `MonomerComponentId`
 - `ScientificName`, `TaxonomyId`, `GeneName`, `EnzymeClassification`
 
 `StructureAttribute.NonpolymerFeatures`
@@ -547,18 +589,44 @@ Searches the RCSB PDB Search API v2 and downloads matching structures.
 `StructureAttribute.Methods`
 - `ExperimentalMethod`, `Resolution`
 
+`StructureAttribute.BindingAffinity`
+- `Value`, `Type` — measured affinities curated from Binding MOAD, BindingDB and PDBBind.
+
+  Units follow the measurement type: nM for the concentration and binding constants (IC50, EC50, Kd, Ka, Ki), kJ/mol for the thermodynamic ones.
+
+  An entry carries a *list* of affinity records, and `Value` and `Type` are matched independently against that list. Combining them selects entries having some record of that type and some record in that range — not necessarily the same record. Filter the exact pairing downstream when it matters.
+
+  Only these two fields are usable. `unit`, `symbol`, `provenance_code` and `reference_sequence_identity` are not search-enabled, and `comp_id` — though search-enabled and populated — matches nothing outside a nested group, so none are exposed.
+
+```python
+from biopipelines.entities import RCSB
+from biopipelines.rcsb import StructureAttribute, BindingAffinityType
+
+# Kinase structures with a sub-100 nM dissociation constant on record
+results = RCSB(
+    StructureAttribute.BindingAffinity.Type.equals(BindingAffinityType.KD),
+    StructureAttribute.BindingAffinity.Value.less_than(100),
+    StructureAttribute.PolymerMolecularFeatures.PolymerEntityDescription.contains("kinase"),
+    max_results=50,
+)
+```
+
 **Value enums** (for use with `.equals()` / `.is_any()`):
 - `PolymerEntityType` — `PROTEIN`, `DNA`, `RNA`, `NA_HYBRID`, `OTHER`
+- `BindingAffinityType` — `IC50`, `EC50`, `KD`, `KA`, `KI`, `DELTA_G`, `DELTA_H`, `MINUS_T_DELTA_S`
 - `SymmetryType` — `ASYMMETRIC`, `HOMO_2_MER`, `HOMO_3_MER`, `HOMO_4_MER`, `HOMO_5_MER`, `HOMO_6_MER`, `HOMO_7_MER`, `PSEUDO_SYMMETRIC`, `HETEROMERIC`
 - `ExperimentalMethod` — `X_RAY_DIFFRACTION`, `ELECTRON_MICROSCOPY`, `SOLUTION_NMR`, `SOLID_STATE_NMR`, `NEUTRON_DIFFRACTION`, `ELECTRON_CRYSTALLOGRAPHY`, `FIBER_DIFFRACTION`, `EPR`, `FLUORESCENCE_TRANSFER`, `INFRARED_SPECTROSCOPY`
 
 **Streams**: `structures`, `sequences`, `compounds`
 
 **Tables**:
-- `structures`: | id | pdb_id | file_path | format | source |
+- `structures`: | id | pdb_id | file | format | file_size | source |
 - `sequences`: | id | sequence |
-- `compounds`: | id | code | smiles | ccd |
-- `search_results`: | id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
+- `compounds`: | id | code | format | smiles | ccd |
+- `failed`: | pdb_id | error_message | source | attempted_path |
+- `search_results` — two shapes, depending on whether the query came from a compounds stream:
+  - literal descriptor (entry metadata): | id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date |
+  - compounds-stream query (provenance instead): | id | pdb_id | result_id | score | compounds.id | query_smiles |
 - `missing`: | pdb_id | error_message | source | attempted_path |
 
 **Searching from a compounds stream**:
@@ -678,7 +746,10 @@ Runs a user-authored script as a typed, two-phase pipeline step — an escape ha
 - `inputs`: Dict[str, ...] (required) — Maps a name to a `StandardizedOutput`, a `DataStream`, a whole table (`tool.tables.x` / a `TableInfo`, giving `.row(id)`/`.rows()`/`.columns`), or a table-column reference (`tool.tables.x.col` or `(TableInfo, "col")`, giving `.value(id)`). A `StandardizedOutput` resolves by preferring an exact match on the input key (`inputs={"structures": tool}` → `tool.streams.structures`), falling back to its single non-empty stream when the key doesn't match a stream name (`inputs={"seqs": seq_tool}` → the lone `sequences` stream). It errors only on a genuine ambiguity — no name match and several non-empty streams — in which case pass an explicit stream (`tool.streams.structures`).
 - `env`: str = None — Conda env the execution phase runs in.
 
-**Streams / Tables**: whatever `configuration()` declares — `Stream(format, ids)` for a stream (file-based when format is `pdb`/`cif`/`sdf`/...; value-based when format is `csv` and rows carry no `file` column), `Table(columns=[...])` for a standalone table.
+**Streams**: whatever `configuration()` declares — `Stream(format, ids)` for each (file-based when format is `pdb`/`cif`/`sdf`/...; value-based when format is `csv` and rows carry no `file` column).
+
+**Tables**: whatever `configuration()` declares via `Table(columns=[...])`, plus one the tool always adds:
+- `missing`: | id | removed_by | kind | cause | — the ids `outputs.drop(id, cause=...)` filtered out, merged with any upstream manifest.
 
 **Script API** (`from biopipelines.scripting_api import Stream, Table`). `execution()` returns nothing; every output is filled through its `outputs[name]` handle, where `name` is a key the `configuration` dict declared:
 
@@ -754,10 +825,12 @@ Creates sequences from strings with auto-detection (protein/DNA/RNA).
 - `type`: str = "auto" - Sequence type ("auto", "protein", "dna", "rna")
 - `ids`: str | List[str] = None - Custom IDs (defaults to "seq_N")
 
-**Streams**: `sequences`
+**Streams**: `sequences`, `fasta` (one multi-record FASTA of every sequence)
 
 **Tables**:
 - `sequences`: | id | sequence | type | length |
+
+  Extra columns from a CSV/Excel source are carried through after `length`.
 
 **Examples**:
 
@@ -784,21 +857,24 @@ Direct table construction from an existing CSV or Excel file. Loads the file at 
 
 **Parameters**:
 - `path`: str (required) — Path to a `.csv`, `.xlsx`, or `.xls` file.
-- `name`: str = `"data"` — Logical table name; downstream tools reference it as `<step>.tables.<name>`.
+- `table_name`: str = `"data"` — Logical table name; downstream tools reference it as `<step>.tables.<table_name>`.
+- `name`: str — A deprecated synonym for `table_name=`. It still names the table (and, now, the job as well) but prints one `[contract:deprecated_alias]` line. Pass both and `table_name` names the table while `name` is only the job name.
 - `description`: str = `""` — Free-form description captured in provenance.
 
 **Tables**:
-- `<name>`: the loaded table, columns preserved verbatim.
+- `<table_name>`: the loaded table, columns preserved verbatim.
+
+**Why `name` survives here.** `name` is framework-reserved as the job name, and `Table` was capturing it, so every `Table` step's job name silently vanished. The fix was a parameter of its own — but unlike [`Fuse`](sequence_design.md#fuse), which took the clean break, `Table` keeps `name` as a synonym: its value is the handle a downstream step reaches the table by (`tool.tables.<name>`), so silently redirecting it would break a consumer further down the pipeline rather than just renaming a file. The value is shell-safety-checked wherever it was bound from, so the synonym is not a way past the validator.
 
 **Example**:
 ```python
 from biopipelines.table import Table
 
 # CSV input → directly available as tbl.tables.metrics
-tbl = Table("metrics.csv", name="metrics", description="Per-design metrics")
+tbl = Table("metrics.csv", table_name="metrics", description="Per-design metrics")
 
 # Use a column as a per-structure reference for a downstream tool
-ProteinMPNN(structures=proteins, redesigned=(tbl.tables.metrics, "designed_positions"))
+ProteinMPNN(structures=proteins, redesigned=tbl.tables.metrics.designed_positions)
 ```
 
 ---

@@ -37,7 +37,7 @@ class XTB(BaseConfig):
     Inputs:
         structures: PDB complexes (each must contain the ligand as HETATM
                     records with a 3-letter residue code matching the ligand).
-        ligand: compounds stream (Ligand(code="LIG") or any compounds-producing
+        ligand: compounds stream (Ligand(codes="LIG") or any compounds-producing
                 tool) naming the ligand to isolate from each complex. The
                 residue `code` is read from the stream's `code` column at
                 runtime (a single distinct value is required).
@@ -58,12 +58,14 @@ class XTB(BaseConfig):
     """
 
     TOOL_NAME = "XTB"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "xtb"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("xtb", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "XTB already installed, skipping. Use force_reinstall=True to reinstall."
@@ -71,13 +73,13 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("xtb", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("xtb", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing XTB ==="
 {skip}{remove_block}
 {env_block}
 
-if {cls._env_run("xtb", env_manager)}xtb --version >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}xtb --version >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== XTB installation complete ==="
 else

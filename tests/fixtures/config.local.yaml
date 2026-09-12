@@ -40,10 +40,12 @@ folders:
   # without raising KeyError, since no upstream binary is executed.
   repositories:
     ProteinMPNN: "<biopipelines>/_stub_repos/ProteinMPNN"
+    LASErMPNN: "<biopipelines>/_stub_repos/LASErMPNN"
     LigandMPNN: "<biopipelines>/_stub_repos/LigandMPNN"
     Boltz2: "<biopipelines>/_stub_repos/boltz"
     RFdiffusion: "<biopipelines>/_stub_repos/RFdiffusion"
     RFdiffusionAllAtom: "<biopipelines>/_stub_repos/rf_diffusion_all_atom"
+    RFdiffusion2: "<biopipelines>/_stub_repos/RFdiffusion2"
     RFdiffusion3: "<biopipelines>/_stub_repos/RFdiffusion3"
     AlphaFold: "<biopipelines>/_stub_repos/AlphaFold"
     BoltzGen: "<biopipelines>/_stub_repos/boltzgen"
@@ -52,6 +54,7 @@ folders:
     PoseBusters: "<biopipelines>/_stub_repos/posebusters"
     PyMOL: "<biopipelines>/_stub_repos/pymol"
     MMseqs2: "<biopipelines>/_stub_repos/mmseqs2"
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
     RBSDesigner: "<biopipelines>/_stub_repos/RBSDesigner"
     DNAEncoder: "<biopipelines>/_stub_repos/DNAEncoder"
     DiffDock: "<biopipelines>/_stub_repos/DiffDock"
@@ -65,4 +68,6 @@ folders:
   cache:
     BoltzCache: "./cache/boltz"
     AlphaFoldParams: "<biopipelines>/_stub_repos/alphafold_params"
+    ColabFoldDatabases: "<cache>/colabfold_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
   server: {}

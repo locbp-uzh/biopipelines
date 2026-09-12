@@ -99,13 +99,58 @@ def changelog_unreleased_tools_section(text: str) -> str:
     return after[: stop2.start()] if stop2 else after
 
 
+def history_problems(tools: dict[str, dict]) -> list[str]:
+    """Structural faults in the `history` lists, whatever the staged files are.
+
+    A tool whose history was `[]` is written on one line, so an entry appended after it lands in the
+    next tool's block instead. That happened three times (AlphaFold into APBS, Mutagenesis into
+    MutationProfiler, Pool into PoseBusters) and nothing could see it: the gate only ever read
+    `current`. The donor is then left with a bumped `current` and no history, and the recipient holds
+    a duplicate version dated after its own `current` -- so those two shapes are what to look for.
+    """
+    problems = []
+    for tool, entry in sorted(tools.items()):
+        history = entry.get("history") or []
+        current = str(entry.get("current", ""))
+        versions = [str(h.get("version", "")) for h in history]
+
+        duplicates = sorted({v for v in versions if versions.count(v) > 1})
+        if duplicates:
+            problems.append(
+                f"  - {tool}: history lists {', '.join(duplicates)} more than once. "
+                f"An entry appended to the wrong tool is the usual cause."
+            )
+        if current and current != "1.0" and not history:
+            problems.append(
+                f"  - {tool}: current={current!r} but history is empty, so the bump it records "
+                f"went somewhere else -- check the tool that follows it in the file."
+            )
+        if current and history and versions[0] != current:
+            problems.append(
+                f"  - {tool}: current={current!r} but the newest history entry is {versions[0]!r}. "
+                f"History is newest-first and its head must be `current`."
+            )
+    return problems
+
+
 def main() -> int:
+    tool_changelog_text_now = TOOL_CHANGELOG.read_text(encoding="utf-8")
+    tools_now = parse_tool_map(tool_changelog_text_now)
+
+    # Runs whatever is staged: a misfiled entry is a fault in the file, not in a commit.
+    structural = history_problems(tools_now)
+    if structural:
+        sys.stderr.write(
+            "tool_changelog.yaml has misfiled history entries:\n"
+            + "\n".join(structural)
+            + "\n\nMove each entry under the tool it belongs to. `history: []` is written on one "
+              "line, so an entry appended after it lands in the next tool's block.\n"
+        )
+        return 1
+
     staged = staged_files()
     if not staged:
         return 0
-
-    tool_changelog_text_now = TOOL_CHANGELOG.read_text(encoding="utf-8")
-    tools_now = parse_tool_map(tool_changelog_text_now)
 
     # For diff: read HEAD's tool_changelog.yaml (None on first commit)
     head_text = read_blob("HEAD", "versions/tool_changelog.yaml")

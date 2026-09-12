@@ -55,7 +55,8 @@ class PLM_Sol(BaseConfig):
     """
 
     TOOL_NAME = "PLM_Sol"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "plm_sol"
 
     # ------------------------------------------------------------------
     # Install
@@ -68,15 +69,16 @@ class PLM_Sol(BaseConfig):
         (model_param/model_param.t7). ProtT5 embeddings come from transformers
         (T5EncoderModel); the prot_t5_xl_uniref50 weights download lazily on the
         first prediction."""
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("PLM_Sol", "")
         parent_dir = os.path.dirname(repo_dir)
         weight_check = f'[ -f "{repo_dir}/model_param/model_param.t7" ]'
-        env_check = cls._env_exists_check("plm_sol", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {weight_check} \\
-   && {cls._env_run("plm_sol", env_manager)}python -c "import torch, transformers" >/dev/null 2>&1; then
-    echo "plm_sol environment already installed, skipping. Use force_reinstall=True to reinstall."
+   && {cls._env_run(env, env_manager)}python -c "import torch, transformers" >/dev/null 2>&1; then
+    echo "{env} environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
@@ -85,21 +87,21 @@ fi
 if [ ! -d "{repo_dir}/.git" ]; then
     git clone https://github.com/Violet969/PLM_Sol.git "{repo_dir}"
 fi"""
-        remove_block = cls._env_remove_block("plm_sol", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("plm_sol", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing PLM_Sol ==="
 {skip}{remove_block}
 {clone_block}
 
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create plm_sol environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
 # Verify: deps importable AND committed checkpoint present in the clone.
 if {weight_check} \\
-   && {cls._env_run("plm_sol", env_manager)}python -c "import torch, transformers" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, transformers" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PLM_Sol installation complete ==="
 else

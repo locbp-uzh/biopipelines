@@ -82,23 +82,71 @@ def _cell(table_cfg, col):
 def _resolve_parent_ids(cfg):
     """Re-resolve parent IDs at runtime from source stream JSONs, if any.
 
-    For lazy upstream streams, this reads the runtime-populated map_table,
-    picking up whatever the upstream tool actually wrote.
+    For lazy upstream streams, this reads the runtime-populated map_table, picking up whatever the upstream tool actually wrote. Naming goes through the framework's composer so that what Mock produces is what it declared.
+
+    Returns ``(parent_ids, contributions)``, where each contribution records what every axis put into that id -- kept from composition because an id cannot be decomposed back by splitting on the separator.
     """
     sources = cfg.get("source_streams") or []
     if not sources:
-        return list(cfg["parent_ids"])
+        return list(cfg["parent_ids"]), []
 
-    # Single-axis: flat list of IDs.
-    if len(sources) == 1:
-        return _load_source_ids(sources[0]["path"])
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from biopipelines.combinatorics import predict_single_output_id
 
-    # Multi-axis: cartesian product of each source's runtime IDs, joined by '+'
-    per_axis = [_load_source_ids(src["path"]) for src in sources]
-    out = [""]
-    for axis_ids in per_axis:
-        out = [f"{prefix}+{a}" if prefix else a for prefix in out for a in axis_ids]
-    return out
+    ids_by_position = [_load_source_ids(src["path"]) for src in sources]
+    ids_by_stream = {src["name"]: ids for src, ids in zip(sources, ids_by_position)}
+    axes = cfg.get("axes") or []
+    if not axes:
+        # Pre-axes configs: one stream is one iterated axis, in declared order.
+        axes = [{"name": src["name"], "mode": "each", "streams": [i]}
+                for i, src in enumerate(sources)]
+
+    def _ids_for(keys):
+        collected = []
+        for key in keys:
+            # Streams are recorded by index; a config written before that used the stream name.
+            collected.extend(ids_by_position[key] if isinstance(key, int)
+                             else ids_by_stream.get(key, []))
+        return collected
+
+    per_axis = []
+    for axis in axes:
+        axis_ids = _ids_for(axis.get("streams") or [axis["name"]])
+        static_ids = _ids_for(axis.get("static_streams") or [])
+        per_axis.append((axis["name"], axis.get("mode", "each"), axis_ids,
+                         static_ids, bool(axis.get("static_first"))))
+
+    # A bundled axis contributes one prefix however many ids it holds, so only iterated axes multiply.
+    iterated = [(name, ids) for name, mode, ids, _s, _f in per_axis if mode != "bundle"]
+    combinations = _index_combinations([len(ids) for _name, ids in iterated])
+    iterated_names = [name for name, _ in iterated]
+
+    out, contributions = [], []
+    for combination in combinations:
+        picked = dict(zip(iterated_names, combination))
+        selection, contributed = {}, {}
+        for name, mode, ids, static_ids, static_first in per_axis:
+            idx = picked.get(name) if mode != "bundle" else None
+            selection[name] = (mode, ids, idx, static_ids, static_first)
+            # Recorded while composing rather than recovered by splitting the id afterwards: a bundled
+            # axis contributes several '+'-joined parts and is hoisted ahead of the iterated ones.
+            if mode == "bundle":
+                contributed[name] = "+".join(ids)
+                for member_position, member in enumerate(ids, start=1):
+                    contributed[f"{name}.{member_position}"] = member
+            else:
+                contributed[name] = ids[idx or 0]
+        out.append(predict_single_output_id(**selection))
+        contributions.append(contributed)
+    return out, contributions
+
+
+def _index_combinations(lengths):
+    """Row-major index tuples over the given per-axis lengths, left-to-right."""
+    combos = [()]
+    for length in lengths:
+        combos = [combo + (i,) for combo in combos for i in range(length)]
+    return combos
 
 
 def _apply_children(parent_ids, cfg):
@@ -113,7 +161,7 @@ def _apply_children(parent_ids, cfg):
         expanded, parents_mapped = [], []
         for pid in parent_ids:
             for suffix in produce:
-                # lazy brackets were around the suffix (e.g. "[_<N><A V>]")
+                # lazy brackets were around the suffix (e.g. "[_<#><A V>]")
                 # so we just concatenate the produce entry.
                 expanded.append(f"{pid}{suffix}")
                 parents_mapped.append(pid)
@@ -173,15 +221,23 @@ def _rebuild_runtime_provenance(cfg, parent_ids):
     return prov
 
 
+def _provenance_from_contributions(contributions, axis_names):
+    """Per-axis provenance as recorded during composition, one row per parent id."""
+    return {axis: [row.get(axis, "") for row in contributions] for axis in axis_names}
+
+
 def main(config_path):
     with open(config_path) as f:
         cfg = json.load(f)
 
     os.makedirs(cfg["output_folder"], exist_ok=True)
 
-    parent_ids = _resolve_parent_ids(cfg)
-    # Re-project provenance onto runtime parent IDs (compact → real IDs).
-    cfg["provenance"] = _rebuild_runtime_provenance(cfg, parent_ids)
+    parent_ids, contributions = _resolve_parent_ids(cfg)
+    axis_names = list((cfg.get("provenance") or {}).keys()) or list(cfg.get("axis_names") or [])
+    if contributions and axis_names:
+        cfg["provenance"] = _provenance_from_contributions(contributions, axis_names)
+    else:
+        cfg["provenance"] = _rebuild_runtime_provenance(cfg, parent_ids)
     cfg["parent_ids"] = list(parent_ids)
     expanded_ids, parents_mapped = _apply_children(parent_ids, cfg)
     expanded_ids, parents_mapped = _apply_missing(

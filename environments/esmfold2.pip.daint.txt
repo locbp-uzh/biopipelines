@@ -1,0 +1,17 @@
+# ESMFold2 on Daint (aarch64 / NGC PyTorch image).
+#
+# Identical to esmfold2.pip.txt except numpy is pinned below 2.
+#
+# The venv is built inside the NGC image, so `torch>=2.2.0` is satisfied by the
+# image's torch — which is compiled against NumPy 1.x. Installing pandas pulls
+# NumPy 2.x into the venv, where it shadows the image's numpy and every
+# torch.from_numpy call fails at fold time with:
+#
+#     RuntimeError: Numpy is not available
+#
+# The traceback points at esm/models/esmfold2/prepare_input.py, which makes it
+# look like an esm bug; it is an ABI mismatch. Pinning numpy<2 resolves it.
+numpy<2
+torch>=2.2.0
+esm @ git+https://github.com/evolutionaryscale/esm.git@main
+pandas

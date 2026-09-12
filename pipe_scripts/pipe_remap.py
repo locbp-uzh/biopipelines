@@ -90,8 +90,8 @@ def expand_id_mapping(raw_mapping):
         if id_patterns.is_lazy(old_pattern) or id_patterns.is_lazy(new_pattern):
             has_lazy = True
             continue
-        old_ids = id_patterns.expand_pattern(old_pattern) if id_patterns.contains_pattern(old_pattern) else [old_pattern]
-        new_ids = id_patterns.expand_pattern(new_pattern) if id_patterns.contains_pattern(new_pattern) else [new_pattern]
+        old_ids = id_patterns.expand_pattern(old_pattern) if id_patterns.can_expand(old_pattern) else [old_pattern]
+        new_ids = id_patterns.expand_pattern(new_pattern) if id_patterns.can_expand(new_pattern) else [new_pattern]
         if len(new_ids) == 1 and len(old_ids) > 1:
             # Single new value replicated (shouldn't happen in normal use)
             for oid in old_ids:
@@ -116,23 +116,22 @@ def expand_stream_ids(stream):
     has_lazy = any(id_patterns.is_lazy(s) for s in raw_ids)
 
     if has_lazy:
-        # Read concrete IDs from map_table CSV (written by the source tool at runtime)
+        # The map_table (written by the source tool at runtime) is the row set and the pattern is the selector, so take the rows the pattern covers — not every row.
         map_table = stream.get("map_table", "")
         if map_table and os.path.exists(map_table):
-            df = pd.read_csv(map_table)
-            expanded_ids = df['id'].astype(str).tolist()
+            expanded_ids = id_patterns.resolve_pattern_ids(raw_ids, map_table)
         else:
             # Fallback: expand deterministic prefixes only
             expanded_ids, _ = id_patterns.try_expand_ids(raw_ids)
             print(f"  Warning: lazy IDs but no map_table found, using prefixes only")
     else:
-        expanded_ids = id_patterns.expand_ids(raw_ids) if any(id_patterns.contains_pattern(s) for s in raw_ids) else raw_ids
+        expanded_ids = id_patterns.expand_ids(raw_ids) if id_patterns.can_expand_ids(raw_ids) else raw_ids
 
     if raw_files and len(raw_files) == 1 and '<id>' in raw_files[0]:
         template = raw_files[0]
         expanded_files = [template.replace('<id>', eid) for eid in expanded_ids]
-    elif raw_files and any(id_patterns.contains_pattern(s) for s in raw_files):
-        expanded_files = id_patterns.expand_ids(raw_files)
+    elif raw_files and any(id_patterns.is_pattern(s) for s in raw_files):
+        expanded_files = id_patterns.partial_expand_ids(raw_files)
     else:
         expanded_files = raw_files
     stream["ids"] = expanded_ids
@@ -166,10 +165,10 @@ def main():
                 continue  # already handled
             # Match concrete IDs against the lazy prefix
             old_prefix = id_patterns.strip_brackets(old_pattern)
-            old_prefixes = id_patterns.expand_pattern(old_prefix) if id_patterns.contains_pattern(old_prefix) else [old_prefix]
+            old_prefixes = id_patterns.expand_pattern(old_prefix) if id_patterns.can_expand(old_prefix) else [old_prefix]
             # Build new_pattern base (strip brackets from new pattern too)
             new_base = id_patterns.strip_brackets(new_pattern)
-            new_bases = id_patterns.expand_pattern(new_base) if id_patterns.contains_pattern(new_base) else [new_base]
+            new_bases = id_patterns.expand_pattern(new_base) if id_patterns.can_expand(new_base) else [new_base]
 
             # Collect concrete IDs matching each prefix
             for i, prefix in enumerate(old_prefixes):

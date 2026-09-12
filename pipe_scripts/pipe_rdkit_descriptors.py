@@ -170,13 +170,13 @@ def _strain_workers(cfg, n_tasks):
 
 def _strain_one(task):
     """One pose's strain. Module-level so multiprocessing can pickle it."""
-    sid, path, smiles, restrain_bonds, ff = task
+    sid, path, smiles, restrain_bonds, ff, max_iters = task
     try:
         if not smiles:
             raise ValueError("no bond-order template SMILES for this id")
         mol = posed_ligand_mol(path, smiles)
         e_pose, e_relaxed, strain, engine = conformer_strain(
-            mol, restrain_bonds=restrain_bonds, ff=ff)
+            mol, restrain_bonds=restrain_bonds, ff=ff, max_iters=max_iters)
         return {"id": sid, "smiles": smiles, "e_pose": e_pose,
                 "e_relaxed": e_relaxed, "strain": strain, "ff_engine": engine}, None
     except Exception as e:
@@ -189,6 +189,7 @@ def compute_strain(cfg):
     restrain_bonds = cfg.get("restrain_bonds")
     restrain_bonds = [tuple(b) for b in restrain_bonds] if restrain_bonds else None
     ff = cfg.get("ff", "auto")
+    max_iters = cfg.get("max_iters", 2000)
 
     # The structures map is the concrete runtime output of the upstream tool.
     # The declared ids can still describe its pre-filter domain (and numeric
@@ -206,7 +207,7 @@ def compute_strain(cfg):
     failed = []
     for sid, path in iterate_files(ds):
         try:
-            tasks.append((sid, path, resolve_smiles(sid), restrain_bonds, ff))
+            tasks.append((sid, path, resolve_smiles(sid), restrain_bonds, ff, max_iters))
         except Exception as e:
             print(f"WARNING: {sid} strain failed: {e}", file=sys.stderr)
             failed.append(sid)

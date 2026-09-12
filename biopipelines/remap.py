@@ -54,7 +54,7 @@ class ReMap(BaseConfig):
     """
 
     TOOL_NAME = "ReMap"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -214,8 +214,8 @@ echo "=== ReMap ready ==="
 
             has_lazy = any(id_patterns.is_lazy(s) for s in all_source_ids)
             if has_lazy:
-                # Lazy: can't know count at config time — use <N> marker
-                new_id_pattern = f"{onto}_<N>"
+                # A lazy bracket, not a bare slot: `onto_<#>` outside brackets would be one literal id.
+                new_id_pattern = f"{onto}_[<#>]"
                 for old_id in all_source_ids:
                     mapping[old_id] = new_id_pattern
             else:

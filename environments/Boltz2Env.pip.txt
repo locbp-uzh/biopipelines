@@ -1,1 +1,8 @@
 boltz[cuda]
+# cuequivariance 0.11.x imports is_fx_symbolic_tracing from torch.fx._symbolic_trace,
+# which NVIDIA's container torch (2.8.0a0+nv25.06) does not provide -- the kernel then
+# raises inside the forward pass, not at import, so prediction dies at the first batch.
+cuequivariance==0.10.0
+cuequivariance-torch==0.10.0
+cuequivariance-ops-cu12==0.10.0
+cuequivariance-ops-torch-cu12==0.10.0

@@ -776,40 +776,31 @@ def predict_single_output_id(
         )
         → "prot1+lig2"
     """
-    # Collect unique IDs from pure bundle axes (prefix)
-    bundle_parts = []
-    seen_bundle = set()
+    # A pipe script loads this module standalone via sys.path, where a relative import has no package.
+    try:
+        from .idset import AXIS_MODES, IdSet, compose_axes
+    except ImportError:
+        import os
+        import sys
+        sys.path.append(os.path.dirname(__file__))
+        from idset import AXIS_MODES, IdSet, compose_axes
+
+    axes = []
     for name, (mode, all_ids, idx, static_ids, static_first) in axis_selections.items():
+        if mode not in AXIS_MODES:
+            # A misspelling used to fall through to the iterated branch and quietly pick one id.
+            raise ValueError(
+                f"Axis {name!r} has unknown mode {mode!r}; expected one of {AXIS_MODES}")
         if mode == "bundle" and idx is None:
-            for bid in all_ids:
-                if bid not in seen_bundle:
-                    seen_bundle.add(bid)
-                    bundle_parts.append(bid)
+            axes.append((IdSet(all_ids), "bundle"))
+            continue
+        selected = all_ids[idx if idx is not None else 0]
+        axes.append((IdSet([selected]), "each", IdSet(static_ids or []), bool(static_first)))
 
-    # Collect selected IDs from iterated axes (in order)
-    iter_parts = []
-    for name, (mode, all_ids, idx, static_ids, static_first) in axis_selections.items():
-        if mode == "each" or idx is not None:
-            selected_idx = idx if idx is not None else 0
-            selected_id = all_ids[selected_idx]
-            if static_ids:
-                static_part = "+".join(static_ids)
-                if static_first:
-                    iter_parts.append(f"{static_part}+{selected_id}")
-                else:
-                    iter_parts.append(f"{selected_id}+{static_part}")
-            else:
-                iter_parts.append(selected_id)
-
-    parts = bundle_parts + iter_parts
-
-    if not parts:
+    composed = compose_axes(axes)
+    if not composed:
         raise ValueError("predict_single_output_id requires at least one axis with IDs")
-
-    if len(parts) == 1:
-        return parts[0]
-
-    return "+".join(parts)
+    return composed[0]
 
 
 def assemble_provenance_id(

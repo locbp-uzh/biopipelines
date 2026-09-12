@@ -69,7 +69,7 @@ class RDKit(BaseConfig):
         compounds: SMILES read from the compounds map_table (`smiles` column).
             Produces the `descriptors` table.
         structures: posed ligand coordinate files, one per id (e.g. the structures
-            stream of `Ligand(code=..., structures=poses)`). Produces the `strain`
+            stream of `Ligand(codes=..., structures=poses)`). Produces the `strain`
             table.
         descriptors: list of RDKit descriptor function names to compute
             (default: MolWt, MolLogP, TPSA, NumHAcceptors, NumHDonors,
@@ -89,6 +89,13 @@ class RDKit(BaseConfig):
             Each pose is independent, so this scales close to linearly.
         ff: force field — "auto" (MMFF, falling back to UFF where MMFF cannot
             type the molecule), "mmff", or "uff".
+        max_iters: minimizer iteration cap per pose for both the restrained and
+            free minimizations (default 2000). A pose whose minimization hits
+            this cap has not reached a minimum, so its strain is unreliable and
+            the pose raises rather than emitting a misleading number. Larger
+            or more strained ligands may need more than the default to
+            converge; raise this rather than trusting a number from a capped
+            minimization.
 
     Outputs:
         Streams: (none)
@@ -100,7 +107,7 @@ class RDKit(BaseConfig):
     """
 
     TOOL_NAME = "RDKit"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -125,6 +132,7 @@ echo "=== RDKit ready ==="
                  smiles: Union[str, Tuple[TableInfo, str], 'TableReference'] = None,
                  restrain_bonds: List[Tuple[str, str]] = None,
                  ff: str = "auto",
+                 max_iters: int = 2000,
                  cpus: Optional[int] = None,
                  **kwargs):
         self.compounds_stream: Optional[DataStream] = None
@@ -151,6 +159,7 @@ echo "=== RDKit ready ==="
         self.restrain_bonds = [tuple(b) for b in restrain_bonds] if restrain_bonds else None
         self.cpus = int(cpus) if cpus else None
         self.ff = ff
+        self.max_iters = int(max_iters)
         super().__init__(**kwargs)
 
     def validate_params(self):
@@ -170,6 +179,9 @@ echo "=== RDKit ready ==="
 
         if self.ff not in FF_CHOICES:
             raise ValueError(f"ff must be one of {FF_CHOICES}, got {self.ff!r}")
+
+        if self.max_iters <= 0:
+            raise ValueError(f"max_iters must be a positive integer, got {self.max_iters}")
 
         if self.structures_stream is None:
             return
@@ -207,6 +219,8 @@ echo "=== RDKit ready ==="
             lines.append(f"STRAIN: {len(self.structures_stream)} pose(s), ff={self.ff}")
             if self.restrain_bonds:
                 lines.append(f"RESTRAINED BONDS: {', '.join('-'.join(b) for b in self.restrain_bonds)}")
+            if self.max_iters != 2000:
+                lines.append(f"MAX ITERS: {self.max_iters}")
         return lines
 
     def generate_script(self, script_path: str) -> str:
@@ -225,6 +239,7 @@ echo "=== RDKit ready ==="
             cfg["smiles"] = str(self.smiles) if self.smiles is not None else None
             cfg["restrain_bonds"] = [list(b) for b in self.restrain_bonds] if self.restrain_bonds else None
             cfg["ff"] = self.ff
+            cfg["max_iters"] = self.max_iters
             cfg["cpus"] = self.cpus
 
         os.makedirs(os.path.dirname(self.config_json), exist_ok=True)

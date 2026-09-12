@@ -44,10 +44,14 @@ class CABSflex(BaseConfig):
     """
 
     TOOL_NAME = "CABSflex"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
+    # The `CABSflex` binary is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "CABSflex"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         try:
             from .config_manager import ConfigManager
         except ImportError:
@@ -58,7 +62,7 @@ class CABSflex(BaseConfig):
         # Use the same env-manager-agnostic import check as the verification
         # step below — `conda list` is unavailable on Colab (micromamba only).
         skip = "" if force_reinstall else f"""# Check if already installed
-if {cls._env_run("CABSflex", env_manager)}python -c "import CABS" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import CABS" >/dev/null 2>&1; then
     echo "CABS-Flex already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -70,14 +74,14 @@ fi
 echo "Get one at https://salilab.org/modeller/registration.html"
 echo "Then set: export KEY_MODELLER=your_key"
 """
-        remove_block = cls._env_remove_block("CABSflex", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("CABSflex", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing CABS-Flex ==="
 {skip}{modeller_note}{remove_block}
 {env_block}
 
 # Verify installation
-if {cls._env_run("CABSflex", env_manager)}python -c "import CABS" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import CABS" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== CABS-Flex installation complete ==="
 else
@@ -256,6 +260,7 @@ fi
         # middle (see _generate_script_run_cabsflex); resolving stream IDs there
         # would crash, because resolve_stream_ids.py imports the py3 package.
         script_content += self.activate_environment(name="biopipelines")
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_cabsflex()
         script_content += self.generate_completion_check_footer()
 
@@ -294,6 +299,7 @@ fi
             flags.append("-A")
         if self.pdb_output != "A":
             flags.append(f"-o {self.pdb_output}")
+        flags += self.extra_args_bash_tokens()
 
         flags_str = " ".join(flags)
 

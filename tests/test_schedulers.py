@@ -37,12 +37,18 @@ def test_get_backend_rejects_non_batch():
 def test_env_var_overrides_variant_detection(monkeypatch):
     # BIOPIPELINES_CONFIG_VARIANT (the same var the submit wrapper reads) must
     # win, so the bash and Python sides agree on the active config variant.
+    import getpass
+
     from biopipelines.config_manager import _autodetect_variant
     monkeypatch.setenv("BIOPIPELINES_CONFIG_VARIANT", "lsf")
     assert _autodetect_variant() == "lsf"
+
+    # Without the env var, and with a user no shipped config claims, detection
+    # refuses rather than guessing a variant that merely might fit.
     monkeypatch.delenv("BIOPIPELINES_CONFIG_VARIANT", raising=False)
-    # Without the env var it falls back to runtime detection (not "lsf").
-    assert _autodetect_variant() != "lsf"
+    monkeypatch.setattr(getpass, "getuser", lambda: "no-such-biopipelines-user")
+    with pytest.raises(RuntimeError, match="BIOPIPELINES_CONFIG_VARIANT"):
+        _autodetect_variant()
 
 
 def test_memory_to_mb():

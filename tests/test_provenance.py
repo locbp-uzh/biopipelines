@@ -225,7 +225,7 @@ def test_provenance_multi_axis_then_children(
 def test_provenance_lazy_children_carries_upstream(
     local_config, isolated_cwd, new_pipeline, record_case,
 ):
-    """m1 → m2(source=m1, children='[_<N><A V>]', produce=[...]) — the
+    """m1 → m2(source=m1, children='[_<?><A V>]', produce=[...]) — the
     runtime-expanded rows must still carry the upstream axis provenance."""
     from biopipelines.mock import Mock
 
@@ -237,7 +237,7 @@ def test_provenance_lazy_children_carries_upstream(
         )
         m2 = Mock(
             source=m1.streams.structures,
-            children="[_<N><A V>]",
+            children="[_<?><A V>]",
             produce=["_1A", "_1V"],
             streams={"mutants": {"format": "pdb", "file": "<id>.pdb"}},
         )

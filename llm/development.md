@@ -20,9 +20,7 @@ concerns:
 - `docs/user_manual.md`
 - `docs/developer_manual.md`
 
-Then read `docs/tool_reference.md` when the task involves writing or
-modifying a tool (use it to find the closest existing analogue and copy its
-file as a skeleton).
+Then read `docs/tool_reference.md` when the task involves writing or modifying a tool — use it to find, per design axis, the existing tools that exhibit the pattern you need. The skeleton to start from is `biopipelines/_TEMPLATE.py`, never a copy of one existing tool's file; see step 3 of *Order of operations for a new tool* below for why.
 
 Do not announce that you've read them, do not summarise
 them, do not list what you found. Just have the context loaded so your
@@ -56,10 +54,10 @@ minimum to understand and use the codebase.
 
 ### Order of operations for a new tool
 
-**Further readings**:
-- biopipelines/_TEMPLATE.py
-- biopipelines/_TEMPLATE_CHECKLIST.md
-- pipe_scripts/_pipe_template.py
+**Read these three before writing any code — they are the contract, not background reading:**
+- `biopipelines/_TEMPLATE.py` — the skeleton to copy to `biopipelines/<yourtool>.py`.
+- `biopipelines/_TEMPLATE_CHECKLIST.md` — the step-by-step checklist. Work it top to bottom; §9 (Registration) is what CI and the pre-commit hook enforce, so skipping it means a red pipeline or a rejected commit, not a stylistic lapse.
+- `pipe_scripts/_pipe_template.py` — the annotated execution-time counterpart.
 
 1. **Settle the branch decision first** — see "Branch and PR
    conventions" below. Default to proposing a dedicated `tool-<name>`
@@ -91,11 +89,7 @@ minimum to understand and use the codebase.
    - **ID handling** — passes IDs through, generates new IDs, fans out to
      derived IDs.
 
-   For each axis, find one or two existing tools in `tool_reference.md`
-   that exhibit that pattern cleanly and use them as the reference **for
-   that aspect only**. Do not copy a single tool's file wholesale — that
-   imports its quirks along with its shape. The new tool is an assembly
-   of patterns picked per-axis, not a clone of one neighbour.
+   For each axis, find one or two existing tools in `tool_reference.md` that exhibit that pattern cleanly and use them as the reference **for that aspect only**. Start the file from `biopipelines/_TEMPLATE.py` and do not copy a single tool's file wholesale — that imports its quirks along with its shape. The new tool is an assembly of patterns picked per-axis, not a clone of one neighbour.
 
    **Most importantly, get the configuration-vs-execution split right.**
    This is the deepest mistake to avoid. Every line of code in the tool
@@ -150,6 +144,33 @@ minimum to understand and use the codebase.
    or ask.
 
 5. Ask scope as one closed question (see *Asking questions* below).
+
+6. **Write the wrapper and its `pipe_*` script**, following `_TEMPLATE_CHECKLIST.md` §2–§10.
+
+7. **Register the tool.** This is not optional polish: `tests/test_registry_consistency.py` runs in both CI pipelines and fails the build on any of these, and `versions/check_tool_edits.py` runs as a pre-commit hook and rejects the commit. Work `_TEMPLATE_CHECKLIST.md` §9, which lists all of them — the ones most often missed:
+   - `versions/tool_changelog.yaml`: a new entry with `files:`, `current:` equal to the class's `TOOL_VERSION` literal, and a `history:` entry.
+   - `versions/CHANGELOG.md`: a bullet naming the tool under `[unreleased]` → `### Tools`. Note the path — there is no `CHANGELOG.md` at the repo root.
+   - `docs/tool_index.md`: a table row **and** a bump of the `**Public-API count: N**` line; the row's version cell must equal the source `TOOL_VERSION`.
+   - `docs/tool_reference.md`: an entry (the test greps for the tool name).
+   - `docs/tool/<category>.md`: a real `##` or `###` heading whose text starts with the tool name. Prose mentioning the tool is not enough.
+   - `README.md`: a tool-table row using the exact `<td><sub><b>Name</b>` markup the test greps for.
+   - `environments:` entries in **three** config variants — `config.cluster.yaml`, `config.colab.yaml`, `config.container.yaml`. The test compares colab and container against cluster and fails on any gap; `config.daint.yaml` is exempt (aarch64).
+   - `biopipelines/__init__.py`: export the class (not CI-enforced, but the tool is unreachable without it).
+
+8. **Run the gates locally before pushing** — see *Tests and gates* below.
+
+### Tests and gates
+
+- **The local gate is `python -m pytest tests/ -q`.** Both CI pipelines (`.gitlab-ci.yml` and `.github/workflows/tests.yml`) run `pytest tests/` on Python 3.10–3.13, and on GitLab a red test stage blocks the mirror to the public GitHub repo. Run it before pushing.
+- **The registration gate is `tests/test_registry_consistency.py`.** It is the test that fails when step 7 above is incomplete. Run it alone with `python -m pytest tests/test_registry_consistency.py -q` for a fast check while wiring a new tool up.
+- **The per-tool parameter suites are opt-in.** `pyproject.toml` sets `addopts = "-ra -m 'not tool_parameters'"`, so they are excluded by default; they are GPU-bound and run with `pytest tests/tool_parameters -m tool_parameters -v`. Do not expect them to have run just because `pytest tests/` was green.
+- **`pre-commit install` is required once per clone.** The `TOOL_VERSION` hook lives in `.pre-commit-config.yaml` and runs `python versions/check_tool_edits.py`; on a fresh clone that hook is not installed, so commits that skip the version bump go through silently and CI catches them later:
+  ```bash
+  pip install pre-commit
+  pre-commit install
+  pre-commit run --all-files   # on demand
+  ```
+  The hook fires whenever a staged file is listed under some tool's `files:` in `versions/tool_changelog.yaml`, and then demands the bumped `current`, a matching `TOOL_VERSION` literal in the wrapper class, and a staged `versions/CHANGELOG.md` mentioning the tool under `[unreleased]` → `Tools`.
 
 ### Asking questions: format
 
@@ -227,12 +248,7 @@ config change, the section below applies.
 Framework code should behave identically on cluster and Colab — they share
 the same Python API and runtime logic. The two genuine differences are:
 
-- **Where you can drive the test from.** On the cluster, you can operate
-  end to end yourself (push → sync → submit → tail → iterate) over
-  `log.sh ssh`. On Colab, you cannot operate the runtime — the user has to
-  execute cells and paste back outputs. So the cluster is the default
-  verification venue whenever it's available; Colab verification is
-  human-in-the-loop and slower.
+- **Where you can drive the test from.** On the cluster, you can operate end to end yourself (push → sync → submit → inspect → iterate) over `log.sh ssh`. On Colab it depends on whether the Colab MCP server is registered: if `mcp__colab-mcp__*` tools are in this session's tool list you can create the notebook, run its cells and read the outputs back yourself (see `colab.md`); if they are not, you cannot touch the runtime and the user has to execute the cells and paste back outputs. Check the tool list rather than assuming. Either way the cluster stays the default verification venue whenever it is available, since it needs no notebook round-trip at all.
 - **Install paths can diverge.** `.install()` scripts, `config.colab.yaml`
   env entries, and micromamba behavior are the one area where Colab needs
   separate testing even when the runtime logic is unchanged.
@@ -255,7 +271,7 @@ trail for the session. Read `cluster.md` for more information.
 1. Push the branch.
 2. On the cluster: `cd <repo> && git fetch && git checkout <branch> && git reset --hard origin/<branch>`. Confirm the branch and the hard-reset target with the user first — this is destructive on the remote checkout.
 3. On the cluster: `./submit <pipeline.py>` with a minimal test pipeline.
-4. Tail `<RunTime>/slurm.out` to inspect.
+4. Inspect the logs. `ls <RunTime>/*.out` first: a pipeline with more than one `Resources()` call is submitted as one job per batch and writes `<RunTime>/job_batch<N>.out`; only a single-batch pipeline writes `<RunTime>/slurm.out`. Then read the per-tool log at `<Job>/Logs/<NNN>_<ToolName>.log`, and check the completion markers (`<NNN>_<ToolName>_COMPLETED` / `_FAILED` / `_WARNING`) sitting directly in the job folder.
 5. **Inspect the actual output files, not just the success marker.** "completed successfully" only means the completion-check found the expected paths — not that the result is right. Open the produced files: a structure PDB has plausible coordinates, a scores/affinity table has finite non-empty values, an N-sample run wrote N files. Also sanity-check timing — a GPU job that took minutes for a tiny input likely fell back to CPU.
 
 Two recurring traps:
@@ -269,8 +285,11 @@ To test pipelines, write them under `my_pipelines` (gitignored folder) and scp, 
 
 If the change modifies any `.install()` script, `config.colab.yaml`, or the
 micromamba env setup, also verify on Colab — cluster verification will not
-catch install-side regressions. You cannot drive Colab from this session;
-hand the user a notebook with:
+catch install-side regressions.
+
+**If `mcp__colab-mcp__*` tools are in this session's tool list**, drive it yourself: follow the workflow in `colab.md` → "Workflow — running a test pipeline on Colab", which builds the same notebook and executes the cells over MCP.
+
+**Otherwise** you cannot drive Colab from this session; hand the user a notebook with:
 1. Replaced git clone line:
    ```bash
    !git clone -b <branch> https://github.com/<org>/biopipelines.git
@@ -284,8 +303,7 @@ and ask them to:
    kernel is required — re-running on a kernel that already has the env
    masks broken `.install()` logic).
 2. Run all the cells.
-3. Paste back cell outputs (success markers, traceback, or `_log` files).
-  Or download artifacts.
+3. Paste back the cell outputs, plus the tool's log — `<Job>/Logs/<NNN>_<ToolName>.log`, or the same stream as `_log` inside the tool's own output folder — and which completion marker was written (`<NNN>_<ToolName>_COMPLETED` / `_FAILED` / `_WARNING`, one level above the tool folder). Or download the artifacts with `<tool>.download()`.
 
 ## Reporting back
 

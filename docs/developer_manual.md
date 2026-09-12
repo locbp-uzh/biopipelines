@@ -10,6 +10,7 @@
     - [Value-Based `csv` Streams](#value-based-csv-streams)
     - [`resi-csv` Streams](#resi-csv-streams)
     - [The Ligand Contract: compounds = chemistry, structures = coordinates](#the-ligand-contract-compounds--chemistry-structures--coordinates)
+    - [Contract Enforcement](#contract-enforcement)
     - [Internal Tools and Input Shorthands](#internal-tools-and-input-shorthands)
 - [IDs: Configuration Time vs Execution Time](#ids-configuration-time-vs-execution-time)
   - [ID Patterns](#id-patterns)
@@ -21,12 +22,15 @@
 - [Tool Development](#tool-development)
   - [Creating a Tool](#creating-a-tool)
   - [Required Methods](#required-methods)
+  - [Renaming a Parameter: `PARAMETER_ALIASES`](#renaming-a-parameter-parameter_aliases)
+  - [Forwarding Untyped Kwargs: `FORWARD_UNKNOWN_KWARGS`](#forwarding-untyped-kwargs-forward_unknown_kwargs)
   - [Path Descriptors](#path-descriptors)
   - [Script Generation](#script-generation)
   - [Output Prediction](#output-prediction)
     - [File Templates with \<id\>](#file-templates-with-id)
   - [Map Table Contract](#map-table-contract)
   - [Install Scripts and the `$INSTALL_SUCCESS` Contract](#install-scripts-and-the-install_success-contract)
+  - [Environments and `ENV_NAME`](#environments-and-env_name)
 - [Shell Safety](#shell-safety)
   - [Why](#why)
   - [Where Validation Lives](#where-validation-lives)
@@ -118,7 +122,7 @@ while `"pdb|sdf"` fails. Tools that require homogeneous PDB input should use
 
 **Shared-file streams and slicers.** When a tool (e.g. Panda) filters a shared-file stream down to a subset of ids, the underlying artifact must also be sliced — copying the whole file would leak stale records past the filter. Format-aware slicers live in `biopipelines/stream_slicers.py` keyed by stream `format`. Built-in slicers cover `fasta`/`fa` and `csv`. To add another format, decorate a function with `@register("sdf")` (or the relevant format key) — Panda picks it up automatically. No silent fallback to "copy whole file": an unregistered format raises `ValueError`.
 
-**TableInfo** (`base_config.py`) — Metadata for CSV outputs:
+**TableInfo** (`data_containers.py`, re-exported from `base_config.py`) — Metadata for CSV outputs:
 ```python
 TableInfo(
     name="results",
@@ -128,7 +132,9 @@ TableInfo(
 )
 ```
 
-**StandardizedOutput** (`base_config.py`) — Tool output wrapper:
+Reading any public attribute off a `TableInfo` gives you a column reference — `results.score` is `TableReference(path, "score")` — whether or not the name appears in `columns`, because a tool often knows a table's path long before its schema. Names starting with `_` are the one exception: they raise `AttributeError`, so `hasattr(table, "_entries")` and the copy/pickle protocol's dunder lookups answer honestly instead of every duck-type probe against a table coming back true. Do not duck-type a `TableReference` with `hasattr(x, "path") and hasattr(x, "column")` — a `TableInfo` still satisfies that, since `path` and `column` are legal column names; use `isinstance(x, TableReference)`.
+
+**StandardizedOutput** (`outputs.py`, re-exported from `base_config.py`) — Tool output wrapper:
 ```python
 output.structures  # DataStream
 output.sequences   # DataStream
@@ -185,8 +191,68 @@ Ligands split cleanly across two streams, and every tool must honour the split:
 
 Two consequences:
 
-1. **Tools never take a ligand SDF path or a bare 3-letter `ligand_code` string.** They take a `Ligand` (or any tool's compounds/structures output) and read the residue `code` (and `smiles`) from the compounds stream's map_table at runtime. A ligand that only names an existing HETATM code is constructed as `Ligand(code="ZIT")` — a one-row `compounds` csv (`format="csv"`, `code="ZIT"`, empty `smiles`) and no structures stream.
+1. **Tools never take a ligand SDF path or a bare 3-letter `ligand_code` string.** They take a `Ligand` (or any tool's compounds/structures output) and read the residue `code` (and `smiles`) from the compounds stream's map_table at runtime. A ligand that only names an existing HETATM code is constructed as `Ligand(codes="ZIT")` — a one-row `compounds` csv (`format="csv"`, `code="ZIT"`, empty `smiles`) and no structures stream. `codes` is one parameter serving three modes and what else the caller passes selects between them (code-only, labelled chemistry, or carving a residue out of `structures=`), so a consumer must not assume a `compounds` stream carries `smiles` just because its `code` is set — see [Which mode `codes` selects](tool/inputs_io.md#ligand) for the mode table.
 2. **Producers that rename a ligand emit an updated compounds stream.** A tool like Boltz2 assigns its own residue codes (`LIG`, `LIG01`, …) when it writes the complex. It must emit a fresh `compounds` stream carrying the **same ids and SMILES** as its input but with the `code` column overwritten with the codes it actually assigned. Because the ids are unchanged, `{compounds}.id` provenance columns (see [Provenance Columns](#provenance-columns)) stay joinable — a rename changes a *cell*, not an *id*. Passing that output downstream then yields the correct code automatically, with nobody having to guess.
+
+#### Contract Enforcement
+
+The conventions above used to exist only as prose, which is how the manual's own tool template came to declare `compounds` as `format="sdf"` for years while five tools copied it. `biopipelines/contract_enforcement.py` is now the framework's single home for the checks that hold them, and a violation announces itself on stderr:
+
+```
+[contract:compounds_format] compounds stream declared format='sdf', expected 'csv' (in MyTool)
+    compounds carries ligand chemistry and identity in its map_table; coordinates belong on a structures stream. See the Ligand Contract in docs/developer_manual.md.
+```
+
+**Every check is a pure function.** A `check_*` function takes the facts it judges and returns a `Violation` — a frozen dataclass of `check`, `message` and an optional `hint`, rendered as the two lines above — or `None`, which is a pass. It never prints, never raises, and never looks at a severity. Acting on the result is `report(violation)`'s job, and it is the only thing that does: `None` returns immediately, `off` returns, `warn` prints `violation.render()` to stderr, `raise` raises `ContractViolation` carrying the same text. `check_all(*violations)` reports several in order and stops at the first `raise`-severity one. Keeping the judgement and the reaction apart is what makes a check testable without capturing output and reusable from a call site that wants a different reaction.
+
+**The severity ladder is `off` / `warn` / `raise`**, resolved per check by `severity_for(check)` in this order:
+
+1. `BIOPIPELINES_ENFORCE_<CHECK>` in the environment — e.g. `BIOPIPELINES_ENFORCE_COMPOUNDS_FORMAT=raise` to promote one check for one run.
+2. `SEVERITY[<check>]`, the table at the top of the module.
+3. `DEFAULT_SEVERITY`, which is `warn`, for a check with no table entry.
+
+**There is no global switch.** `BIOPIPELINES_ENFORCE` was removed: it promised two things and delivered neither. `=off` did not silence everything, because the rows reporting a working construction rather than a fault were skipped in both directions; and `=raise`, the setting this manual named for CI, refused every pipeline using `FORWARD_UNKNOWN_KWARGS` — a supported feature — until an exemption set was added to patch that, which is what broke the other direction. Name the checks you want fatal, one variable each. An unrecognised value is ignored rather than rejected, and says so once, so a typo falls through to the next rung instead of turning enforcement off.
+
+**Checks ship at `warn`.** A new check goes into `SEVERITY` as `WARN`, so a violation is reported without failing a pipeline that would otherwise run — the framework tells you about a contract breach, it does not hold your job hostage to one. Promote a row to `RAISE` only once a warn phase has shown the tree clean for it; until then, `BIOPIPELINES_ENFORCE_<CHECK>=raise` is how you make one fatal for your own run or in CI.
+
+**Reports are deduplicated.** `report()` keeps the rendered text of every warning it has printed in a module-level set and prints each distinct line once. Without it a violation inside a per-id loop prints hundreds of identical lines and buries everything else. `reset_reported()` clears the cache — tests need it, and so does a long-lived session (a notebook) where you want to see the same warning again after a fix.
+
+**Adding a check.** Four steps, no more:
+
+1. Write a `check_<name>(...) -> Optional[Violation]` that returns `Violation(check="<name>", message=..., hint=...)` or `None`. Put the actionable instruction in the `hint` — what to change, and what goes wrong if it is not changed.
+2. Add `"<name>": WARN` to `SEVERITY`.
+3. Call it from **the one place** the contract applies, through `report()` or `check_all()`. `check_stream()` is the model: `DataStream.__post_init__` is the single place a stream is built, so every stream-level contract is checked there — above its early returns, so pattern and shared-file streams are covered too — and nowhere else.
+4. Add a case to `tests/test_contract_enforcement.py`.
+
+**Naming the offender.** A `DataStream` does not know which tool built it, and must stay constructible standalone because pipe scripts import it directly at runtime — so the tool name cannot travel through its signature. Instead `BaseConfig.__init_subclass__` wraps each subclass's `get_output_files()` in `contract_enforcement.tool_context(TOOL_NAME)`, a `contextvars` context that the stream checks read `where` from. Wrapping once in `__init_subclass__` rather than at ~90 call sites is what keeps that free.
+
+**Three class attributes a tool may set:**
+
+- `USER_STREAM_NAMES` (default `False`) — set it to `True` when the tool's *user* names its streams, so no registry can know them in advance. `Mock(streams={...})` and `Scripting` are the two, and `tool_context` carries the flag so `check_stream_name` is skipped for that tool only. The format checks still apply: a user-named stream is still a stream, so `compounds`-as-`sdf` and a value-based stream with a non-csv format are still reported. Only the "is this name in `KNOWN_STREAM_NAMES`?" question is dropped, and only because it is unanswerable.
+- `FORWARD_UNKNOWN_KWARGS` (default `""`, off) — set it to `"argparse"` or `"hydra"` to declare that this wrapper renders a constructor keyword it does not type onto the upstream command line, which switches `check_kwargs` from `check_no_unknown_kwargs` to the `check_probable_typo` + `check_forwarded_kwargs` pair. It only works on a wrapper whose own bash contains that command, and `assert_can_forward` refuses it at class creation otherwise. See [Forwarding Untyped Kwargs](#forwarding-untyped-kwargs-forward_unknown_kwargs).
+- `ENV_NAME` — the tool's own default environment name, declared beside `TOOL_NAME` and `TOOL_VERSION`. See [Environments and `ENV_NAME`](#environments-and-env_name); it is not a contract-enforcement attribute, but it is the other class attribute a new tool has to remember to declare.
+
+A new stream name is declared by adding it to `KNOWN_STREAM_NAMES` in the module. That is not a permission list — nothing is forbidden, and an unregistered name is a `warn`, never an error. It exists so a typo (`scors` for `scores`) is caught at construction rather than discovered later as a consumer that reads the stream back by name and silently gets nothing.
+
+Leftover constructor kwargs are checked through the same machinery: `BaseConfig.__init__` calls `check_kwargs(...)` once, after the subclass has bound its own named parameters, so anything left is a framework key from `RESERVED_KWARGS`, a typo, or an option the tool forwards upstream.
+
+**The roster.** `SEVERITY` in `contract_enforcement.py` is the authoritative list; these are its rows today, all at `warn`:
+
+| Check | Fires when | Silence with |
+|---|---|---|
+| `stream_name` | a stream's name is not in `KNOWN_STREAM_NAMES` | `BIOPIPELINES_ENFORCE_STREAM_NAME=off` |
+| `compounds_format` | a `compounds` stream declares a format other than `csv` | `…_COMPOUNDS_FORMAT=off` |
+| `value_based_format` | a `files=[]` stream declares a non-csv format | `…_VALUE_BASED_FORMAT=off` |
+| `unknown_kwargs` | a constructor kwarg matches no parameter, on a tool that forwards nothing (`check_no_unknown_kwargs`), or is a near-miss on a real one (`check_probable_typo`) | `…_UNKNOWN_KWARGS=off` |
+| `forwarded_kwargs` | an untyped kwarg is about to be rendered onto a forwarding tool's upstream command line | `…_FORWARDED_KWARGS=off` |
+| `pattern_selection` | a pattern set selects 0 of a non-empty row set, so the selection silently did nothing | `…_PATTERN_SELECTION=off` |
+| `deprecated_alias` | a `DEPRECATED_ALIASES` spelling is used — the value still binds | `…_DEPRECATED_ALIAS=off` |
+| `code_only_ligand` | a `Ligand` is built from `codes=` alone, so it carries a residue code and no chemistry | `…_CODE_ONLY_LIGAND=off` |
+| `id_match_consistency` | a remap's id-match score is low enough to be worth seeing, though nothing gates on it | `…_ID_MATCH_CONSISTENCY=off` |
+
+`forwarded_kwargs`, `deprecated_alias`, `code_only_ligand` and `id_match_consistency` report a construction that *works*, so they are the rows a blanket "make everything fatal" should never have touched — which is why there is no longer a switch that could. Promote any of them by name when you want it fatal.
+
+Two of them came in with the alias mechanism below. Both report something that *works* rather than something broken: a deprecated spelling still binds its parameter, and a code-only `Ligand` is a legitimate object — the notice exists because a forgotten `smiles=` now produces one silently instead of raising, and the failure would otherwise surface in whatever downstream tool needed the molecule. `check_code_only_ligand` is deliberately not called for the `ligand="LIG"` shorthand, where naming a residue code is the entire intent.
 
 #### Internal Tools and Input Shorthands
 
@@ -209,8 +275,8 @@ from .input_standardization import resolve_basic_input
 from .ligand import Ligand
 
 # StandardizedOutput -> streams.compounds; DataStream -> itself;
-# str "LIG" -> Ligand(code="LIG", _internal=True) -> its compounds stream
-self.ligand_stream = resolve_basic_input(ligand, Ligand, "compounds", "code", allow_none=False)
+# str "LIG" -> Ligand(codes="LIG", _internal=True) -> its compounds stream
+self.ligand_stream = resolve_basic_input(ligand, Ligand, "compounds", "codes", allow_none=False)
 ```
 
 The signature is `resolve_basic_input(obj, cls, stream, argument, *, allow_none=True)`. A bare string is promoted to `cls(**{argument: obj}, _internal=True)` and its `<stream>` is returned. The promotion works both inside and outside a pipeline: inside, the entity auto-registers and `cls(...)` already returns a `StandardizedOutput`; standalone it returns the raw tool instance, which the resolver wraps with `StandardizedOutput(entity.get_output_files())` to reach the same stream. Inside a pipeline the auto-registration also means the entity is constructed *during the consuming tool's `__init__`* and therefore runs **before** the consumer — ordering is correct for free. Only a non-string, non-DataStream, non-StandardizedOutput value raises. Apply the shorthand **only to the parameter whose stream the tool actually consumes** — e.g. a tool's compounds-reading `ligand` gets it, but a coordinate-reading `reference_ligand` (which needs a real 3-D structure) does not.
@@ -227,9 +293,12 @@ DataStream IDs can be stored in compact pattern form instead of listing every ID
 |---------|---------|-----------|
 | `prot_<0..2>` | Numeric range | `prot_0`, `prot_1`, `prot_2` |
 | `<A B C>` | Enumeration | `A`, `B`, `C` |
-| `prot_<N><S A L K>` | Deterministic prefix + lazy suffix | See below |
+| `<0..1>_<A B>` | Multi-slot — cartesian product of the slots | `0_A`, `0_B`, `1_A`, `1_B` |
+| `prot_<N><S A L K>` | Multi-slot, first slot a one-element set | `prot_NS`, `prot_NA`, `prot_NL`, `prot_NK` |
 
-The `<..>` angle-bracket patterns are **deterministic** — they can be fully expanded at configuration time.
+A slot's content is parsed by `_parse_slot` in `id_patterns.py`: it is a numeric range only when it contains `..`, and otherwise a **space-separated enumeration**. So `<N>` is not a placeholder or a wildcard — it is the one-element set containing the literal letter `N`, and `expand_pattern('prot_<N>')` returns `['prot_N']`. Multiple slots in one string multiply out as a cartesian product in left-to-right, row-major order.
+
+The `<..>` angle-bracket patterns are **deterministic** — they can be fully expanded at configuration time, however many slots they have. Laziness comes only from `[...]` square brackets (next section); `is_lazy('prot_<N><S A L K>')` is `False`.
 
 ### Lazy IDs
 
@@ -253,7 +322,76 @@ ds = load_datastream("structures.json")
 ds.ids_expanded  # → ["prot_1_1S", "prot_2_2A", ...] (concrete rows)
 ```
 
-To select map_table rows against a pattern at runtime (the shared, one-map helper used by combinatorics, stitch, and any bulk consumer), use `id_patterns.select_ids(patterns, row_ids)` (deterministic slots match exactly, `[...]` matches by glob) or `id_patterns.resolve_pattern_ids(patterns, map_table)`. Because the rows are the source of truth, this honors any upstream filter automatically — a filtered stream simply has fewer rows.
+To select map_table rows against a pattern at runtime (the shared, one-map helper used by combinatorics, stitch, and any bulk consumer), use `id_patterns.select_ids(patterns, row_ids)` or `id_patterns.resolve_pattern_ids(patterns, map_table)`. Matching is exact everywhere except the unresolved slots: a deterministic slot matches its own values, and inside a `[...]` bracket the *literal* text stays literal while only the `<..>` slots become wildcards. So `design_1[_<N>]` covers `design_1_7` but not `design_10_7` — the bracket's leading `_` is what separates them. (`glob_from_lazy` is the separate, genuinely glob-shaped helper, used for matching real filenames on disk rather than map_table rows.) Because the rows are the source of truth, this honors any upstream filter automatically — a filtered stream simply has fewer rows.
+
+#### Where the delimiter sits decides what the bracket means
+
+A `[...]` bracket is a **zero-or-more repetition** of its content, and each slot value is bounded by the `_` suffix delimiter — a value never crosses one. Those two rules are the whole contract; the two spellings below are not special cases but consequences of where the caller puts the delimiter, so no producer has to know about either.
+
+| Pattern | Compiles to | Covers | Does not cover |
+|---------|-------------|--------|----------------|
+| `parent[_<?>]` | `parent(?:_[^_]+)*` | `parent`, `parent_4E`, `parent_4E_6U`, `parent_4E_6U_9Z` | `parentX` |
+| `parent_[<?>]` | `parent_[^_]*` | `parent_4E`, `parent_1` | `parent`, `parent_4E_6U` |
+
+Note the `<?>`. A slot is a literal value set, so `parent[_<N>]` compiles to `parent(?:_N)*` and covers `parent`, `parent_N`, `parent_N_N` — the letter N, nothing else. Write `<?>` for one segment and `<#>` for a number.
+
+With the delimiter **inside** the bracket, each repetition carries its own, so the suffix is genuinely optional and genuinely repeatable — this is the spelling for a chain of appended suffixes.
+
+With the delimiter **outside**, the value cannot cross a delimiter, so the group collapses to at most one suffix. Zero repetitions would leave the bare `parent_`, which is never a real id, so in practice this spelling selects exactly the ids that are `parent_` followed by one value — which is what a flat renumber (`name_1`, `name_2`, …) wants. `[^_]+` means "one or more characters that are not `_`"; `[^_]*` is the same with zero allowed.
+
+Bounding the value at the delimiter is also what keeps selection exact: `design_1[_<?>]` cannot reach into `design_10_5`.
+
+### IdSet — the type that owns these rules
+
+An id is a string and an id set was a `List[str]`, so every rule above lived as a free function in `id_patterns` and had to be remembered at each call site. `IdSet` (`biopipelines/idset.py`) gives them one home: a function that takes an `IdSet` cannot be handed a bare list that skipped the rule.
+
+It is a pure value type — ids and nothing else, no map_table and no file handles — so it is comparable, hashable and testable on its own, and equality is over the ids alone.
+
+**Reading it.** `len(ids)` is how many ids are *declared*, so a pattern counts once; `ids.count()` is how many they expand to, counting a lazy bracket's prefix only. Those differ deliberately: at configuration time an expansion is often not knowable, and a count you cannot compute is worse than the one you can. `ids.enumerated()` gives every id the set stands for — all of them when the set is expandable, and ids that still carry their unexpandable parts when it is not. `ids.select(rows)` picks the map_table rows the patterns cover.
+
+**The four operations**, which are the only ways ids are combined:
+
+| Operation | Call | Example |
+|---|---|---|
+| bundling | `ids.bundled()` | `['l1','l2']` → `['l1+l2']` |
+| cartesian product | `a.product(b)` | `['p1','p2'] × ['l1','l2']` → `['p1+l1','p1+l2','p2+l1','p2+l2']` |
+| suffix multiplication | `ids.multiplied_by_suffix('<1..3>')` | `['5HG6_<0..4>']` → `['5HG6_<0..4>_<1..3>']` |
+| renaming | `ids.renamed(mapping)` | cardinality-preserving; a rename that would collapse two ids raises |
+
+`+` composes axes and `_` separates a parent from its child, which is what lets `prot1+lig1` be told apart from a suffix pattern. A suffix carrying a `+` is refused for that reason.
+
+**Composing axes.** `compose_axes([(ids, mode), ...])` is the axis-aware entry point, and it is what tools should use: a `"bundle"` axis contributes one `+`-joined prefix however many ids it holds, a `"each"` axis contributes one id per row. **Bundle prefixes come first, ahead of the iterated axes and regardless of declared order.** That convention has a consequence worth internalizing: an id cannot be decomposed back by splitting on `+` and pairing positions with declared axes, because a bundle occupies as many positions as it has members and not the position it was declared in. Record what each axis contributed while composing instead. Getting this wrong silently mis-assigns provenance columns rather than failing.
+
+`product` on its own is the plain cartesian product and respects declared order; it does not know about modes, because `bundled()` has already collapsed a bundled axis to an ordinary one-element set. The convention lives in `compose_axes`, not in `product`.
+
+#### Two bracket vocabularies, and why they must stay apart
+
+`<...>` and `[...]` answer different questions, and a third notation in `id_map_utils` answers a third. Confusing them is silent, so they are spelled so they cannot be.
+
+| Notation | Module | Means | Example |
+|---|---|---|---|
+| `<...>` | `id_patterns` | a finite set of **literal values**, compacting an id that is already **predictable** | `<0..2>` is three ids; `<A V>` is two; `<N>` is the single id `N` |
+| `[...]` | `id_patterns` | an **unpredictable** value, not knowable until the upstream tool has run | `prot[_<N>]` covers `prot`, `prot_4E`, `prot_4E_6U` |
+| `<#>` `<?>` | `id_map_utils` | a **match class** for walking up a parent chain: digits, or one segment | `{"*": "*_<?>"}` strips `protein_1_19A` to `protein` |
+
+**`<N>` is the letter N, not a number.** These brackets exist to compact ids that are already known, so a slot is a set of values and `expand_pattern('prot_<N>')` is `['prot_N']`. Write `<0..9>` or `<1 2 3>` when you mean digits.
+
+**A `[...]` bracket cannot be *enumerated*, but it can be *constrained*.** Its values arrive at runtime, so nothing there expands at configuration time — yet a slot can still say what shape the value will take, and saying so is what stops `design_1[_<#>]` from covering `design_1_ZZZ`:
+
+| Slot inside a bracket | Matches | Example |
+|---|---|---|
+| `<#>` | one or more digits | `design_1[_<#>]` covers `design_1_99`, not `design_1_1A` |
+| `<?>` | any one segment | `design_1[_<?>]` covers both |
+| `<A V>`, `<0..9>` | exactly those values | `prot[_<#><A V>]` covers `prot_5A`, not `prot_5X` |
+| a single bare word | **that literal text** | `[<hits>]` covers `hits`; `[_<N>]` covers `_N` |
+
+`<#>` and `<?>` are the only two classes. Everything else inside a slot is a value set, including a single bare word — so `[<hits>]` matches the literal `hits` and nothing else, and `[_<N>]` matches `_N`, not a number. Both spellings existed before the classes did and used to fall through to a wildcard; `rcsb.py` was migrated to `[<?>]` in RCSB 1.4 for exactly this reason. If a pattern of yours reads like a placeholder, it is now a literal.
+
+**Adjacent classes are rewritten, not refused.** `[<#><?>]` compiles to `(?:\d[^_]+)?` rather than the naive `(?:\d+[^_]+)*`. Both quantifiers would otherwise compete for the same characters — `<?>` is `[^_]+`, which includes digits — and rejecting an id would cost one attempt per ordered partition of its run, 395 ms at 22 characters and doubling with each one. The rewrite matches exactly the same strings: a piece with a strictly wider neighbour gives up its quantifier because that neighbour absorbs what it left, one quantifier covers a run of equal-width pieces, and the outer `*` becomes `?` because two iterations are then always subsumed by one. `[<#><#>]` still means two or more digits, which no single class can say.
+
+**`id_map_utils` uses punctuation, because a letter cannot survive here.** Its classes used to be `<N>` for digits and `<S>` for a segment, which read as the exact opposite of `id_patterns` and are ambiguous besides: `<N><S E>` reads as serine or glutamate at position N, while `<15 16><N>` reads as asparagine at positions 15 and 16. The classes are now `<#>` and `<?>`. **The letter spellings no longer do anything**: `{"*": "*_<S>"}` leaves `protein_1_19A` unstripped rather than walking up its parent chain, and it does so silently — there is no deprecation warning on this path. Rewrite any stored id_map to `<#>` or `<?>`.
+
+The delimiter and the "one segment" rule have a single definition, `id_patterns.SUFFIX_DELIMITER` and `id_patterns.SEGMENT_REGEX`, which `id_map_utils` imports — so changing what separates a parent from a child moves both modules at once.
 
 ### The Rule
 
@@ -312,6 +450,8 @@ done
 ```
 
 The loop works correctly whether the DataStream has literal IDs, deterministic patterns, or lazy patterns.
+
+`stream_ids(ds_json, index=None, valid_set=True)` takes a third argument worth knowing about. With `valid_set=True` (the default) the printed ids are restricted to those whose file is actually present on disk, which is what you want for a file-backed stream: a filtered `Pool`/`Panda` declares every original id but materializes only the survivors, so looping over the declared list would hand the tool paths that do not exist. The restriction is skipped automatically for a stream that declares no files at all (a value-based `compounds` stream, say), where file presence says nothing — so the default is safe there too and still prints every declared id. Pass `valid_set=False` only when you deliberately want the declared ids of a file-backed stream, including ones whose files are absent.
 
 #### Using `eval` for pre-formatted argument variables
 
@@ -447,12 +587,17 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from biopipelines_io import Resolve
+```
 
 > **Why the dual import?** Tools are normally imported as part of the `biopipelines` package (relative imports via `.base_config`, etc.). The `except ImportError` fallback adds the module's own directory to `sys.path` so the same file can also be imported standalone — useful for debugging or running a tool file directly. Always include this pattern in new tool files.
 
-
+```python
 class MyTool(BaseConfig):
     TOOL_NAME = "MyTool"
+    TOOL_VERSION = "1.0"
+    # The env this tool builds and runs in. Nothing mechanical catches its
+    # absence; the tool just fails to install. See "Environments and ENV_NAME".
+    ENV_NAME = "mytool"
 
     # Path descriptors — route each artefact into its canonical sub-folder.
     # Never use ``self.output_folder`` directly; go through:
@@ -524,7 +669,7 @@ python {self.helper_py} \\
         return {
             "structures": DataStream.empty("structures", "pdb"),
             "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
+            "compounds": DataStream.empty("compounds", "csv"),  # always "csv" — see the Ligand Contract
             "tables": tables,
             "output_folder": self.output_folder
         }
@@ -539,13 +684,99 @@ python {self.helper_py} \\
 | `generate_script(script_path)` | Return bash script as string |
 | `get_output_files()` | Return dict with DataStreams and tables |
 
+### Renaming a Parameter: `PARAMETER_ALIASES`
+
+Every tool constructor ends in `**kwargs`, so an unknown key is silently accepted and only the leftover-kwargs contract notices it. That makes renaming a parameter dangerous in a specific way: a pipeline written against the old spelling keeps running, the value never binds, and the tool does whatever it does with the parameter at its default. Four near-misses between our own sibling tools all failed exactly like that, which is why `BaseConfig` grew two class attributes:
+
+```python
+class RFdiffusion3(BaseConfig):
+    TOOL_NAME = "RFdiffusion3"
+    # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`.
+    PARAMETER_ALIASES = {"contigs": "contig"}
+
+class Ligand(BaseConfig):
+    TOOL_NAME = "Ligand"
+    PARAMETER_ALIASES = {"code": "codes"}
+    DEPRECATED_ALIASES = ("code",)
+```
+
+- **`PARAMETER_ALIASES`** is `{alternative spelling: current parameter name}`. Declare a renamed parameter's old spelling here so a pipeline written against it still binds the new parameter, and declare a synonym a user reasonably expects the same way — `RFdiffusion3`'s `contigs` is the plural its three sibling wrappers all take, so the plural has to bind rather than be forwarded.
+- **`DEPRECATED_ALIASES`** is the subset of those keys that are a *retired* spelling rather than a first-class synonym. Only these report a `deprecated_alias` contract line, so a synonym stays silent instead of warning on every legitimate use.
+
+**Aliases resolve before the constructor binds.** `__init_subclass__` wraps the tool's `__init__` in `_alias_resolving_init`, which rewrites the kwargs dict on the way in. That ordering is the whole point: an aliased key is never a leftover kwarg, so it is neither reported as a probable typo nor — on a tool with [`FORWARD_UNKNOWN_KWARGS`](#forwarding-untyped-kwargs-forward_unknown_kwargs) — rendered onto the upstream command line. `RFdiffusion3(contigs=…)` used to do both: reported as a misspelling, then passed to hydra as a bogus override, leaving `self.contig` empty while the job ran to completion producing unconditioned de-novo backbones.
+
+**Two guards fire at class creation**, not at call time, because an alias that does not work is exactly the silence the mechanism exists to remove:
+
+1. An alias whose *target* no constructor parameter names — the alias would land back in `**kwargs` and change nothing. `ValueError`, naming the unbound targets.
+2. A `DEPRECATED_ALIASES` entry absent from `PARAMETER_ALIASES` — a deprecation for a spelling that binds nothing. `ValueError`.
+
+**A reserved key is copied, not moved.** For a key in `contract_enforcement.RESERVED_KWARGS` — in practice `name`, the job name — the value is written under the tool's new parameter name *and left in place*, so the tool and the framework both see it. That is what let `Table` keep `name=` as a synonym for `table_name=` while the job name finally reaches `BaseConfig` again. For any other key, passing both spellings raises rather than picking one:
+
+```
+ValueError: Ligand: code= is another spelling of codes=; pass one or the other, not both.
+```
+
+And for a reserved key, passing both is not a clash: `Table(path, table_name="metrics", name="jobname")` names the table `metrics` and the job `jobname`.
+
+**When to add an alias, and when not to.** A permanent synonym is worth it when the value is a *handle other code reaches for* — `Table`'s `name` becomes `tool.tables.<name>`, so silently redirecting it breaks a consumer further down the pipeline. A clean break is better when the old spelling only affects this tool's own output names — `Fuse`'s label became `prefix` with **no** alias, so `name` on `Fuse` means the job name exactly as it does everywhere else. Whole-tool aliases (`Structure = PDB`, `Compound = Ligand`) are a different thing entirely: a bare module-level assignment, no `PARAMETER_ALIASES` involved, and `TOOL_NAME` unchanged so the registry, the docs index and the config's `environments:` / `folders:` keys stay single-entry per tool.
+
+### Forwarding Untyped Kwargs: `FORWARD_UNKNOWN_KWARGS`
+
+`TOOL_NAME`, `TOOL_VERSION`, `ENV_NAME` and `USER_STREAM_NAMES` say what a tool *is*. `FORWARD_UNKNOWN_KWARGS` says something narrower and rarer: that this wrapper hands a constructor keyword it does not recognise straight to the program it runs.
+
+```python
+class RFdiffusion(BaseConfig):
+    TOOL_NAME = "RFdiffusion"
+    FORWARD_UNKNOWN_KWARGS = "hydra"      # "" (default, off) | "argparse" | "hydra"
+```
+
+**What it is for.** Some tools are a wrapper around an inference script, a binary, or a container that takes its parameters in free form, and the framework has not typed every one of those arguments — there are hundreds, they change between upstream releases, and most are never used. Without the marker, `RFdiffusion(denoiser_noise_scale=0.5)` lands in `**kwargs`, is parked in `self.params`, and is never read: the pipeline runs to completion with the option at its default. With it, the leftover keys are rendered onto the upstream command line, so an advanced user can reach an option the wrapper never curated instead of waiting for someone to type it.
+
+**The dialect** is how the upstream program spells an option, and there are two:
+
+| Value | Renders `omit_AAs="CX"` as | Use when the upstream parser is |
+|---|---|---|
+| `"argparse"` | `--omit_AAs CX` | Python `argparse`/`click`, or any `--flag value` binary |
+| `"hydra"` | `omit_AAs=CX` | hydra / OmegaConf, taking dotted `key=value` overrides |
+
+Read it off the upstream command, not off the language: `python inference.py --num_seq 8` is argparse, `python run_inference.py inference.num_designs=8` is hydra. Under `argparse` a `True` value becomes a bare flag (`--score_only`) and a list repeats the flag; under `hydra` `True` has to be spelled out (`inference.cyclic=True`) because a bare token is not a valid override, and a list becomes one bracketed override (`ppi.hotspot_res=[A30,A33]`) because a repeated hydra override keeps only its last value. `False` and `None` render as nothing at all under both — "off" is the upstream default the wrapper never touched, and emitting a flag would change it.
+
+**The architectural fact that decides whether the marker works at all.** Most wrappers in this tree do not build an upstream command line. They serialize their parameters into a config JSON and emit one line of bash:
+
+```bash
+python pipe_mytool.py --config /path/to/_configuration/mytool_config.json
+```
+
+The *pipe script* then assembles argv on the compute node. For such a wrapper there is no wrapper-written command for a forwarded token to join, so the marker is accepted and the tokens are dropped — the exact silence it exists to remove. **Only a wrapper whose own generated bash contains the upstream command can take the marker as a one-liner.** Thirteen of the ninety tools do today: the RFdiffusion family, the MPNN family, AlphaFold, Boltz2, NeuralPLexer, LASErMPNN, Aggrescan3D, CABSflex and DynamicBind. Before setting it, open your `generate_script()` and look for the upstream program's name. If you find it, interpolate the tokens into that command; if you find only `pipe_<tool>.py --config`, you have two honest options — give the pipe script a typed parameter instead, or move the upstream command into the wrapper first.
+
+Rendering is one call, in whichever shape the command needs:
+
+```python
+script += self.extra_args_echo()                       # announce them in the step log
+...
+f"python {self.inference_py} {options} {self.extra_args_bash()}"   # one bash fragment
+opts += self.extra_args_tokens()                       # raw argv tokens, to join yourself
+self.extra_args_bash_tokens()                          # each token double-quoted
+```
+
+`extra_args_echo()` alone is not forwarding — it prints the tokens and nothing else — and `contract_enforcement.assert_can_forward` refuses a marker on a class whose wrapper source never calls one of the three rendering accessors. That check runs at class creation, so a marker that cannot work is an import error naming the tool and the fix, rather than a flag that is accepted and then silently ignored. It is a necessary condition, not a sufficient one; `tests/test_forwarded_kwargs.py` discovers every tool carrying the marker and requires the token to appear on a real command line in the generated `NNN_<Tool>.sh`, with `echo` lines excluded so the announcement cannot answer for the command. A tool that gains the marker is tested by having gained it — there is no list to remember to edit.
+
+**The trade you are making.** Forwarding turns a configuration-time report into a runtime failure. A non-forwarding tool answers `MyTool(num_desgins=8)` at the user's desk with `[contract:unknown_kwargs] … did you mean 'num_designs'?`; a forwarding tool renders `--num_desgins 8` as written, and the complaint arrives from upstream, on a compute node, after the queue. Only the typo check survives the switch: `check_probable_typo` still names a key within the similarity cutoff of a real parameter name, because a near-miss is almost certainly a misspelling either way — but a key that resembles nothing is passed through unvalidated, since the wrapper has no model of the upstream parser to check it against. So the marker is a good trade on a large, stable option surface where the curated subset will always be a fraction of what upstream accepts, and a bad one on a tool with two or three flags, where typing the third flag is less work than the failure mode.
+
+**Shell safety.** Every forwarded key and value goes through `_validate_extra_arg` at construction. Keys are checked against `_SAFE_EXTRA_KEY_RE` in `base_config.py`, so a key that is not a plain Python identifier — a dotted hydra override such as `denoiser.noise_scale_ca` — reaches the constructor only as `Tool(**{"denoiser.noise_scale_ca": 0.5})`; check that regex before assuming a given upstream flag has a keyword spelling at all. Values refuse the four characters that break double-quoted interpolation — `"`, `` ` ``, `$`, backslash — and also `;`, `|`, `&`, `<`, `>`, `(`, `)`, CR and LF. That second list is wider than the freeform denylist elsewhere in the framework for a specific reason: LigandMPNN emits its command through `eval`, which re-parses the line and strips one layer of quoting, so the double quotes the renderer puts around a forwarded value do not survive to contain a `;`. See [Shell Safety](#shell-safety); this is the same fourth layer, with the `eval` case accounted for.
+
 ### Path Descriptors and the Canonical Layout
 
-Every tool's ``output_folder`` has a predictable sub-layout that the
-framework creates automatically after ``get_output_files()`` returns.
-**Tool authors never ``mkdir`` anything**, either in Python or in the
-generated bash. Instead, route every output path through one of these
-helpers on ``BaseConfig``:
+Every tool's ``output_folder`` has a predictable sub-layout that the framework creates automatically — but only *after* ``get_output_files()`` returns, via ``_materialize_output_layout()``. **Never invent a directory name or ``mkdir`` a path you derived yourself**: route every output path through one of the helpers below, and in the generated bash rely on the layout the framework has already created rather than adding your own ``mkdir -p``.
+
+Two places do have to create their directory themselves, because they run before that layout exists:
+
+- **``configure_inputs()``**, which the pipeline calls *before* ``_materialize_output_layout()``. A tool that writes a config-time input file there must ``os.makedirs(os.path.dirname(path), exist_ok=True)`` first — `mmseqs2.py`, `sequence.py` and `table.py` all do. The path itself still comes from a helper.
+- **A pipe script writing per-stream files**, which may run before its stream folder exists; ``os.makedirs(self.stream_folder(name), exist_ok=True)`` before the first write is correct. (``create_map_table()`` already does this for the map itself.)
+
+Note that ``BaseConfig.stream_folder``'s own docstring states the folder "is not created here — the tool (or its pipe script) is responsible for calling ``os.makedirs``", which reads as a broader licence than the rule above. Follow the rule: create nothing you can get from a helper, and makedirs only in the two cases listed.
+
+Instead of hand-built paths, use these helpers:
 
 | Artefact | Helper | Resolves to |
 |---|---|---|
@@ -645,6 +876,8 @@ Return standardized output structure. Use compact `ids` patterns (not expanded) 
 
 - `files=["<id>.pdb"]` + `ids=["prot_<0..2>"]` → `prot_0.pdb`, `prot_1.pdb`, `prot_2.pdb`
 
+`files` carries meaning in its **type**: a list is per-ID, a bare string is the *shared-file* form (one artifact covering every ID). So `files="<id>.pdb"` as a string is not a template — every ID resolves to that same literal path.
+
 This prevents a length-mismatch validation error (1 file vs N ids) and is **required** when inputs may carry lazy IDs — building per-ID file paths with f-strings embeds bracket patterns into paths, causing `LazyPatternError`. The implementation lives in `datastream.py:_has_file_template()` (detects the pattern) and `id_patterns.py:expand_file_pattern()` (performs the substitution).
 
 ```python
@@ -675,13 +908,13 @@ def get_output_files(self) -> Dict[str, Any]:
     return {
         "structures": structures,
         "sequences": DataStream.empty("sequences", "fasta"),
-        "compounds": DataStream.empty("compounds", "sdf"),
+        "compounds": DataStream.empty("compounds", "csv"),  # always "csv" — see the Ligand Contract
         "tables": tables,
         "output_folder": self.output_folder
     }
 ```
 
-`get_output_files()` returns a plain dict, **not** a `StandardizedOutput`. The wrapping into `StandardizedOutput` happens automatically in the `ToolOutput.output` property (`base_config.py:1768`). This is by design:
+`get_output_files()` returns a plain dict, **not** a `StandardizedOutput`. The wrapping into `StandardizedOutput` happens automatically in the `ToolOutput.output` property; both classes live in `biopipelines/outputs.py` and are re-exported from `base_config.py`, so either import path works. This is by design:
 
 - Pipeline infrastructure (`pipeline.py`, `base_config.py:get_id_provenance()`) iterates the raw dict with `.items()` and `isinstance()` checks before any user accesses it — dicts are natural for this.
 - `StandardizedOutput.__init__` takes a dict and destructures it into `.streams`, `.tables`, etc. — returning `StandardizedOutput` from tools would just add an object whose constructor immediately unpacks it back.
@@ -726,7 +959,15 @@ File templates with `<id>` are the preferred form for the declared stream — co
 
 **Rule:** if a tool returns a DataStream with a `map_table` path, that CSV **must exist and be accurate** by the time the tool's script finishes. Downstream tools will read it.
 
-**The one exception: `Load`.** The config-time ban exists because a normal tool's outputs do not exist yet — its ids are predictions, so writing a map at config time would record rows that have not been produced. `Load` is the inverse: it imports data that **already exists on disk** when the pipeline is authored, so its ids are genuinely known at config time (it globs the real files and reads any `missing` table in `get_output_files()`). For `Load`, resolving concrete ids — and writing a map_table — at config time is correct, because the map records data that is actually there. The discriminator is not the phase but the question *"does the data this map describes exist at the moment the map is written?"* For a producing tool the answer is no until its run finishes (→ runtime only); for `Load` it is yes (→ config time is fine).
+**When config time is allowed.** The config-time ban exists because a normal tool's outputs do not exist yet — its ids are predictions, so writing a map at config time would record rows that have not been produced. The discriminator is therefore not the phase but the question *"does the data this map describes exist at the moment the map is written?"* For a producing tool the answer is no until its run finishes (→ runtime only). Where the answer is yes, or where a config-time map is only a placeholder the runtime pass overwrites, a config-time map is legitimate. Three cases in tree:
+
+- **`Load`** imports data that **already exists on disk** when the pipeline is authored, so its ids are genuinely known at config time. Note that `Load` does not call `create_map_table` at all: it reads the upstream producer's map_table and reuses it, writing a `.rebased_<map filename>` copy beside it only when the run folder has moved and the recorded paths need rewriting.
+- **`BoltzGen`** calls `create_map_table` at config time inside `get_output_files()` (twice — for its final-ranked and refolded structure streams) because the rank ids and their glob file patterns are fully determined by `budget`, not by the run.
+- **`Mock`** does so behind its `map_table_strategy` flag (`"config"` or `"both"`), where a config-time map is deliberately a test fixture; for lazy outputs it writes only the deterministic prefix and the pipe script overwrites it at runtime.
+
+Outside these, write the map from the pipe script.
+
+`Load` resolves against the upstream **map_table**, not by globbing: the map lists one row per id the producer actually wrote, so it is the authoritative answer to what exists. Two things follow. First, a `files` entry containing `<id>` is a *template*, not a path — statting it always fails, so it must be expanded via the map before any existence check. Second, `Load` narrows the stream's ids to the map's rows, so a stream declaring 300 ids whose producer emitted 290 loads as 290 and downstream tools never inherit the 10 phantom ids. Globbing is the fallback only when a stream has no readable map_table, and that case is reported as *unresolved* rather than as missing files. With `validate_files=False` none of this runs — ids propagate as declared, and downstream tools must consume `missing.csv` themselves.
 
 ### Install Scripts and the `$INSTALL_SUCCESS` Contract
 
@@ -773,6 +1014,61 @@ fi
 ```
 
 **Pick a real verification.** Prefer an import that exercises the heaviest binary dependency (`import torch`, `import boltz`, `import pymol`) over a shallow check like "directory exists". For binary tools (GNINA), check that the executable is present and `-x`. For tools whose install only downloads weights, check the weight file exists.
+
+### Environments and `ENV_NAME`
+
+A tool that builds its own conda/mamba environment declares that environment's default name as a class attribute, beside `TOOL_NAME` and `TOOL_VERSION`:
+
+```python
+class MyTool(BaseConfig):
+    TOOL_NAME = "MyTool"
+    TOOL_VERSION = "1.0"
+    ENV_NAME = "mytool"
+```
+
+**Nothing mechanical will remind you.** The pre-commit gate (`versions/check_tool_edits.py`) and `tests/test_registry_consistency.py` between them check the changelog, the tool index, the reference, the category doc, the README row and the `environments:` entries — none of them checks that `ENV_NAME` exists. A tool that omits it imports fine, passes the whole suite, and then fails to install. Declare it.
+
+**Where the installed env name actually comes from.** `_install_script` must never spell its environment out; it calls `cls._install_env(env_manager)` and installs into whatever that returns. The resolution order in `BaseConfig._install_env` is:
+
+1. An explicit `env_name=` argument from the caller, if one was passed.
+2. The tool's `environments:` entry in the active `config.<variant>.yaml`, keyed by `TOOL_NAME`. A list-valued entry contributes its first element.
+3. Under `env_manager: pip` only — `cls.ENV_NAME`, because a laptop variant declares no `environments:` block at all.
+4. Otherwise **it raises**. There is no hardcoded fallback, and in particular no fallback to `ENV_NAME` outside pip mode.
+
+The config is consulted **before** the pip fallback, not after. It used to be the other way round, which made pip the one manager where the wrapper's own literal beat an explicit `environments:` entry — so a laptop config that did name an environment was ignored.
+
+The config entry is the one `_load_environments` activates at run time, so reading the same entry at install time is what keeps the two pointed at the same environment. An install script that hard-codes its own name builds one env while the pipeline activates another, and that mismatch does not surface until a job reaches a compute node and cannot find its interpreter.
+
+**The naming standard: a spec file is named after the environment it defines.** An `environments:` entry names an *environment*, and an environment is defined by `environments/<env>.<variant>.yaml`, falling back to `environments/<env>.yaml` when the env resolves identically across variants. Nothing is keyed by tool name, which is why several tools can share one environment — 23 share `biopipelines`, six share `ProteinEnv`, three share `SE3nv` — and why redirecting a tool is a one-line config change:
+
+```yaml
+environments:
+  DSSP: MyDSSPEnv      # then environments/MyDSSPEnv.yaml must exist, or be built elsewhere
+```
+
+Across `config.cluster.yaml`'s 77 entries there are 42 distinct environment names and 45 spec files, and 41 of the 42 have a spec. **The exception is deliberate and worth knowing:** `RF3: modelforge` names an environment that the upstream installer builds, so no biopipelines spec exists for it on cluster, colab or container. So a missing spec is *not* an error — the emitted script tries the variant spec, then the shared one, and otherwise says it is assuming the environment already exists instead of running `env create -f` on a file that is not there. That keeps a hand-built or vendor-built env usable.
+
+That test lives in the generated bash rather than in Python, and it has to: the install script is generated on your machine and executed on the cluster, so the repo path it names is remote and no config-time `os.path.isfile` can see it.
+
+**`env_manager: pip` cannot build an environment at all.** It has no environment manager, so `_env_install_block` refuses with a message naming the variant, rather than emitting `pip env create -f ...` and `pip run -n ...` — neither of which is a pip command, so the old script could only fail later and less legibly.
+
+**Why a raise is the right answer.** On `daint`, 29 tools that declare an `ENV_NAME` have no `environments:` entry at all, because they genuinely are not set up there — aarch64 has no x86-64 binaries and no PyG wheels, and `config.daint.yaml` is explicitly exempt from the three-variant parity test for that reason. Falling back to `ENV_NAME` for those tools would happily build `mytool` on a login node and then activate nothing, or activate an env the runtime side never agreed to. The raise instead names the tool, the variant and the config file:
+
+```
+MyTool: no environment is configured for it in config.daint.yaml (variant 'daint'), so
+there is no name to install into. Add an environments: entry --
+environments.MyTool: "<env name>" -- or install MyTool under a variant that configures it.
+```
+
+An install-time refusal that names all three beats the same failure arriving later, on a compute node, as an activation that finds nothing.
+
+An `environments:` entry that is present but **empty** (`MyTool: ""`) means something different and gets its own message: the tool's image supplies the interpreter, so there is no environment to build and installing under that variant is unsupported. `BioEmu` on `daint` is the one such entry today.
+
+So `ENV_NAME` is the tool's declared default, consulted only in pip mode — and the reason to declare it anyway is that it is the single place a reader can find which env the tool means, instead of reading it out of an install script's bash.
+
+**A multi-environment tool's secondary envs are not config-driven.** `DynamicBind` needs two: an inference env and a relax env. The first comes from `environments.DynamicBind` like everyone else's; the second is a class attribute, `RELAX_ENV_NAME = "dynamicbind_relax"`, with no `environments:` entry in any config variant. Install and runtime both address it through that attribute (`cls.RELAX_ENV_NAME` in `_install_script`, `ConfigManager().get_env_python_command(self.RELAX_ENV_NAME)` in `generate_script`), so the two agree and this is not a bug — but it does mean a site cannot redirect a secondary environment the way it can redirect a primary one. `_load_environments` already accepts a list-valued `environments:` entry (`["dynamicbind", "dynamicbind_relax"]`, addressed by `activate_environment(index=N)`) and `_install_env` takes its first element, so the plumbing for config-driven secondaries exists; no config uses it today. If you write a second multi-env tool, know that you are copying a hardcoded pattern.
+
+**Pip-mode installs are non-functional.** Under `env_manager: pip` the shared helpers emit `pip env create -f <yaml>` and `pip run -n <env> ...`, which are not pip commands — pip has no `env` or `run` subcommand, and neither has ever installed anything. This is also why `_install_env` can safely keep returning `ENV_NAME` in pip mode: that path never built an environment it could get wrong. Colab, the variant that uses `env_manager: pip`, runs tools in the pre-existing base Python and installs them by other means. Do not spend an afternoon debugging why a pip-mode install produced nothing.
 
 ---
 
@@ -930,8 +1226,24 @@ from biopipelines.pdb_parser import (
     # Distance
     calculate_distance,   # Atom, Atom → float
     calculate_distances,  # List[Atom], List[Atom], metric → float
+
+    # Fixed-column field accessors — read ATOM/HETATM fields through these
+    field_atom_name,    # line → "CA"
+    field_res_name,     # line → "ALA" or "A1EI4"
+    field_chain,        # line → "A", or "" when the record leaves it blank
+    field_res_seq,      # line → "201" as a string, insertion code excluded
+    field_coords,       # line → (x, y, z) floats
+    field_element,      # line → "C", falling back to the atom name's first letter
 )
 ```
+
+#### Field accessors — never inline PDB column offsets
+
+Fourteen pipe scripts plus `converters.py` read ATOM/HETATM fields, and they all go through the `field_*` accessors rather than slicing columns themselves. That is not only DRY: the PDB layout is no longer fixed. The residue-name field is 3 wide, but the PDB now issues **5-character CCD codes** (`A1EI4`), and a record carrying one shifts every field after the code right by its excess width — 2 columns, measured against RCSB's own output.
+
+`_residue_shift(line)` derives that offset from the code's width and every accessor applies it, so one code path handles both layouts. Do not reintroduce a tokenizing (`line.split()`) shortcut: it looks equivalent and fails on three real inputs — a blank chain id (routine in tool-generated ligand PDBs) shifts the token list by one so `field_res_seq` returns a coordinate; an insertion code glues onto the residue number; and two adjacent full-width `%8.3f` coordinates (`-100.123-100.123`) are a single token. Each case made `int()` raise, and the atom was **silently dropped** — an entire ligand disappearing from a parse while every distance and box computed from it looked plausible.
+
+Both parser loops now report what they skip (`_report_dropped`). If you add a third, report too: the silence is what kept that bug invisible.
 
 #### resolve_selection
 
@@ -1461,9 +1773,9 @@ with Pipeline("Test", "Debug", "Testing", local_output=True):
 
 ### Critical Files (rarely need changes)
 
-- `base_config.py`
+- `base_config.py` (`BaseConfig` itself; `ToolOutput`/`StandardizedOutput` live in `outputs.py` and the table and stream containers in `data_containers.py`, both re-exported here)
 - `pipeline.py`
 - `datastream.py`
-- `standardized_output.py`
+- `combinatorics.py`
 
 If Claude suggests changing these, question why. Usually the tool should adapt to the base class.

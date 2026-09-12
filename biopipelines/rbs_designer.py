@@ -47,12 +47,14 @@ class RBSDesigner(BaseConfig):
     """
 
     TOOL_NAME = "RBSDesigner"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "rbs_designer"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("rbs_designer", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "RBSDesigner environment already installed, skipping. Use force_reinstall=True to reinstall."
@@ -60,20 +62,20 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("rbs_designer", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("rbs_designer", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing RBSDesigner ==="
-{skip}echo "Creating rbs_designer environment with ViennaRNA from bioconda..."
+{skip}echo "Creating {env} environment with ViennaRNA from bioconda..."
 {remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create rbs_designer environment."
+    echo "ERROR: Failed to create {env} environment."
     echo "ViennaRNA requires the bioconda channel with flexible channel priority."
     exit 1
 fi
 
 # Verify installation
-if {cls._env_run("rbs_designer", env_manager)}python -c "import RNA" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import RNA" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== RBSDesigner installation complete ==="
 else
@@ -237,7 +239,7 @@ python "{self.designer_py}" --config "{self.config_file}"
             ids=sequence_ids,
             files=[],
             map_table=self.rbs_csv,
-            format="dna"
+            format="csv"
         )
 
         tables = {

@@ -1,0 +1,8 @@
+# MutationEnv on Daint (aarch64/GH200), replacing the conda MutationEnv.yaml.
+# Every dependency is pure python or ships an aarch64 wheel, so a login-node venv
+# covers it — no conda shim and no image needed.
+seaborn
+matplotlib
+pandas
+logomaker
+scipy

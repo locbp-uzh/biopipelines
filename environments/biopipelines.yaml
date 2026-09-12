@@ -5,7 +5,8 @@ channels:
 channel_priority: strict
 
 dependencies:
-  - python>=3.10,<3.13
+  # pyproject.toml `requires-python` is authoritative; keep this in step with it.
+  - python>=3.10
   - pandas>=2.2
   - numpy>=1.26
   - matplotlib>=3.8

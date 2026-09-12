@@ -21,7 +21,7 @@ with Pipeline(project="ToolParameters",
 
     abl1 = PDB("3QRK", ids="ABL1")
     contigs = "A227-377,10-20"
-    dp9 = Ligand(code="9DP")
+    dp9 = Ligand(codes="9DP")
 
     # 1: defaults — 9DP ligand context
     Suffix("default")

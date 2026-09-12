@@ -128,7 +128,7 @@ def load_datastream(source: Union[str, Dict[str, Any]]) -> DataStream:
     # shared-file form where one path covers every id).
     is_shared = isinstance(files, str) and bool(files)
     has_patterns = _id_patterns and any(
-        _id_patterns.contains_pattern(s) or '[' in s for s in data['ids']
+        _id_patterns.is_pattern(s) for s in data['ids']
     )
     has_template = (
         isinstance(files, list) and len(files) == 1 and '<id>' in files[0]
@@ -666,6 +666,55 @@ def load_table(
     return df, column_name
 
 
+def _lookup_table_value_with_tier(
+    table: pd.DataFrame,
+    item_id: str,
+    column: str,
+    id_column: str = "id",
+    pdb_column: str = "pdb",
+    map_table_paths: Optional[List[str]] = None,
+) -> Tuple[Any, str]:
+    """:func:`lookup_table_value`, returning ``(value, tier)``.
+
+    Which tier answered is only interesting across a whole set of ids, so the value-only wrapper stays the public entry point and ``iterate_table_values`` uses this one to score the set it walks.
+    """
+    if column not in table.columns:
+        raise KeyError(
+            f"Column '{column}' not found in table. "
+            f"Available columns: {list(table.columns)}"
+        )
+
+    key_col = id_column if id_column in table.columns else (
+        pdb_column if pdb_column in table.columns else None)
+    if key_col is None:
+        raise KeyError(
+            f"Table has neither '{id_column}' nor '{pdb_column}' column to match "
+            f"'{item_id}' against. Columns: {list(table.columns)}"
+        )
+
+    # pdb-column ids carry a .pdb extension; strip it so they match design ids.
+    table_ids = [str(x) for x in table[key_col].tolist()]
+    stripped = [i[:-4] if i.endswith(".pdb") else i for i in table_ids]
+
+    from biopipelines.id_map_utils import TIER_NONE, get_mapped_ids_with_tiers
+    matched, tier = get_mapped_ids_with_tiers(
+        [item_id], stripped, unique=True, map_table_paths=map_table_paths
+    ).get(item_id, (None, TIER_NONE))
+    if matched is None:
+        hint = "" if map_table_paths else (
+            " No map_table provenance was supplied, so only string-suffix "
+            "matching was tried; if an upstream tool renamed ids, pass the "
+            "consumed stream's map_table via map_table_paths."
+        )
+        raise KeyError(
+            f"ID '{item_id}' not found in table (col '{key_col}'). "
+            f"Available: {table_ids[:10]}{'...' if len(table_ids) > 10 else ''}.{hint}"
+        )
+    # Map the stripped match back to the actual table row.
+    row_idx = stripped.index(matched)
+    return table.iloc[row_idx][column], tier
+
+
 def lookup_table_value(
     table: pd.DataFrame,
     item_id: str,
@@ -676,7 +725,7 @@ def lookup_table_value(
 ) -> Any:
     """
     Look up a value from a table for a given ID, using the framework's standard
-    id matching (``get_mapped_ids``): exact, child-parent (``design+Cy7RR`` ->
+    id matching (``get_mapped_ids``): exact, child-parent (``design+lig1`` ->
     ``design``), and provenance.
 
     Args:
@@ -701,41 +750,10 @@ def lookup_table_value(
     Raises:
         KeyError: If the id can't be matched, or the column doesn't exist.
     """
-    if column not in table.columns:
-        raise KeyError(
-            f"Column '{column}' not found in table. "
-            f"Available columns: {list(table.columns)}"
-        )
-
-    key_col = id_column if id_column in table.columns else (
-        pdb_column if pdb_column in table.columns else None)
-    if key_col is None:
-        raise KeyError(
-            f"Table has neither '{id_column}' nor '{pdb_column}' column to match "
-            f"'{item_id}' against. Columns: {list(table.columns)}"
-        )
-
-    # pdb-column ids carry a .pdb extension; strip it so they match design ids.
-    table_ids = [str(x) for x in table[key_col].tolist()]
-    stripped = [i[:-4] if i.endswith(".pdb") else i for i in table_ids]
-
-    from biopipelines.id_map_utils import get_mapped_ids
-    matched = get_mapped_ids(
-        [item_id], stripped, unique=True, map_table_paths=map_table_paths
-    ).get(item_id)
-    if matched is None:
-        hint = "" if map_table_paths else (
-            " No map_table provenance was supplied, so only string-suffix "
-            "matching was tried; if an upstream tool renamed ids, pass the "
-            "consumed stream's map_table via map_table_paths."
-        )
-        raise KeyError(
-            f"ID '{item_id}' not found in table (col '{key_col}'). "
-            f"Available: {table_ids[:10]}{'...' if len(table_ids) > 10 else ''}.{hint}"
-        )
-    # Map the stripped match back to the actual table row.
-    row_idx = stripped.index(matched)
-    return table.iloc[row_idx][column]
+    value, _tier = _lookup_table_value_with_tier(
+        table, item_id, column, id_column, pdb_column, map_table_paths
+    )
+    return value
 
 
 def iterate_table_values(
@@ -767,10 +785,16 @@ def iterate_table_values(
         for struct_id, positions in iterate_table_values(table, structure_ids, column):
             print(f"{struct_id}: {positions}")
     """
+    from biopipelines.id_map_utils import report_id_match_consistency
+    tiers: Dict[str, str] = {}
     for item_id in item_ids:
-        value = lookup_table_value(table, item_id, column, id_column, pdb_column,
-                                   map_table_paths=map_table_paths)
+        value, tier = _lookup_table_value_with_tier(
+            table, item_id, column, id_column, pdb_column,
+            map_table_paths=map_table_paths)
+        tiers[item_id] = tier
         yield (item_id, value)
+    # One line for the whole walk: a single id's tier says nothing, the set's consistency does.
+    report_id_match_consistency(tiers, where=f"table lookup of column {column!r}")
 
 
 def clear_table_cache() -> None:

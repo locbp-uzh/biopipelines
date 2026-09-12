@@ -8,6 +8,8 @@ Network calls during configure_inputs are allowed — Ligand checks RCSB/PubChem
 for remote lookups at config time.
 """
 
+import glob
+import json
 import os
 
 import pytest
@@ -488,13 +490,16 @@ def test_ligand_code_only_streams(
 def test_ligand_code_mutually_exclusive(record_case):
     from biopipelines.ligand import Ligand
 
-    record_case(input="Ligand(code=, smiles=) — mutually exclusive",
-                expected="ValueError", actual="ValueError")
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        Ligand(code="ZIT", smiles="CCO")
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        Ligand(code="ZIT", lookup="ATP")
-    with pytest.raises(ValueError, match="mutually exclusive"):
+    record_case(input="Ligand(codes=, smiles=) — now the labelled-chemistry case",
+                expected="accepted", actual="accepted")
+    # `code` and `codes` are one parameter now, so what else you pass selects the
+    # mode: with chemistry it labels a real ligand, without it names a HETATM.
+    labelled = Ligand(codes="ZIT", smiles="CCO")
+    assert labelled.code_only is False
+    assert labelled.residue_codes == ["ZIT"]
+    assert Ligand(codes="ZIT").code_only is True
+    # Passing the retired spelling and its target together is still a contradiction.
+    with pytest.raises(ValueError, match="another spelling"):
         Ligand(code="ZIT", codes="LIG")
 
 
@@ -521,6 +526,51 @@ def test_ligand_structures_stream_has_map_and_template(
     assert len(files) == 1 and files[0].endswith("<id>.sdf")
     # coordinate files live in the structures/ stream folder, not compounds/
     assert "structures" in str(structures.map_table)
+
+
+def test_ligand_template_smiles_reaches_carved_compounds(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """template_smiles lands in the carve path's emitted config.
+
+    Without it the carved compounds row has smiles='' and any tool needing a
+    bond-order template (RTMScore, write_ligand_sdf) gets 'nan'.
+    """
+    from biopipelines.ligand import Ligand
+    from biopipelines.datastream import DataStream
+
+    smi = "CC1=CC=C(C=C1)C"
+    holo = DataStream(name="structures", ids=["a", "b"],
+                      files=["/tmp/a.pdb", "/tmp/b.pdb"], format="pdb")
+    pipeline = new_pipeline("lig_template_smiles")
+    with pipeline:
+        lig = Ligand(structures=holo, codes="UNL", template_smiles=smi)
+        pipeline.save()
+
+    hits = glob.glob(os.path.join(lig.output_folder, "**", "fetch_config.json"),
+                     recursive=True)
+    assert hits, "no fetch_config.json emitted"
+    cfg = json.load(open(hits[0], encoding="utf-8"))
+    record_case(input="Ligand(structures=..., codes='UNL', template_smiles=...)",
+                expected=smi, actual=cfg.get("template_smiles"))
+    assert cfg["template_smiles"] == smi
+
+
+def test_ligand_template_smiles_rejected_outside_carve(record_case):
+    """template_smiles is refused where it would be silently discarded."""
+    import pytest as _pytest
+    from biopipelines.ligand import Ligand
+    from biopipelines.datastream import DataStream
+
+    smi = "CCO"
+    holo = DataStream(name="structures", ids=["a"], files=["/tmp/a.pdb"], format="pdb")
+    for kwargs in ({"smiles": smi, "ids": "x", "codes": "UNL", "template_smiles": smi},
+                   {"lookup": "ATP", "template_smiles": smi},
+                   {"structures": holo, "template_smiles": smi}):
+        with _pytest.raises(ValueError, match="carve path"):
+            Ligand(**kwargs)
+    record_case(input="template_smiles outside the carve path",
+                expected="ValueError", actual="ValueError")
 
 
 # ── HETATM extraction (structures= path) ─────────────────────────────────────

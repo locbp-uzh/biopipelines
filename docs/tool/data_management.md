@@ -76,8 +76,8 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 **Streams** (pool mode): `structures`, `sequences`, `compounds` (matching filtered IDs)
 
 **Tables**:
-- `result` - Transformed table
-- `missing` - Filtered out IDs (pool mode)
+- `result` — the transformed table. Its columns are whatever the operation chain leaves, so they are known only once the inputs are.
+- `missing` — ids this step filtered out: | id | removed_by | kind | cause |
 
 **Examples**:
 

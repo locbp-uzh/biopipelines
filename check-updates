@@ -28,10 +28,102 @@
 #
 
 GITHUB_URL="https://github.com/locbp-uzh/biopipelines.git"
+GITHUB_FEED="https://github.com/locbp-uzh/biopipelines/commits/main.atom"
 RELEASE_BRANCH="main"   # the public release line this checkout should stay current with
 LS_REMOTE_TIMEOUT=5     # seconds; a slow/blocked network must not delay a job
+FEED_TIMEOUT=5          # same budget for the optional summary call
+SUMMARY_MAX=8           # subjects listed before the rest are counted rather than named
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Print the subjects of the commits this checkout is missing.
+#
+# ls-remote hands back a sha and nothing else, and this script must not fetch, so
+# there is no local object to read a message from. The subjects come from GitHub's
+# Atom feed for the release branch, and each candidate is tested for ancestry
+# against our HEAD: the listing stops at the first commit we already have, so what
+# remains is exactly what is new here. That reuses the same ancestry question the
+# check itself is built on, so the summary cannot disagree with the notice above it.
+#
+# The feed is XML rather than the JSON API deliberately. This runs from ./submit
+# before any environment is activated -- the same constraint that keeps an awk
+# fallback in submit's own config parsing -- so it must not need python or jq. awk
+# is already required by submit, and curl or wget covers the transfer.
+#
+# Best effort throughout. No downloader, no network, a rate-limited or malformed
+# feed all end in silence rather than a delayed or broken job.
+print_update_summary() {
+    local feed=""
+    if command -v curl >/dev/null 2>&1; then
+        feed="$(curl -sfL --max-time "$FEED_TIMEOUT" "$GITHUB_FEED" 2>/dev/null)"
+    elif command -v wget >/dev/null 2>&1; then
+        feed="$(wget -qO- --timeout="$FEED_TIMEOUT" "$GITHUB_FEED" 2>/dev/null)"
+    else
+        return 0
+    fi
+    [ -n "$feed" ] || return 0
+    command -v awk >/dev/null 2>&1 || return 0
+
+    local lines
+    lines="$(printf '%s\n' "$feed" | awk '
+        function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+        function unescape(v) {
+            gsub(/&lt;/, "<", v); gsub(/&gt;/, ">", v);
+            gsub(/&quot;/, "\"", v); gsub(/&#39;/, "@Q@", v);
+            gsub(/&amp;/, "\\&", v); gsub(/@Q@/, "@SQ@", v);
+            return v
+        }
+        /Grit::Commit\// {
+            sha = $0
+            sub(/^.*Grit::Commit\//, "", sha)
+            sub(/<\/id>.*$/, "", sha)
+            have = 1; intitle = 0; buf = ""
+            next
+        }
+        # The feed opens with a channel-level <title>; gating on a captured sha skips it.
+        have && !intitle && /<title>/ {
+            line = $0
+            sub(/^.*<title>/, "", line)
+            if (line ~ /<\/title>/) {
+                sub(/<\/title>.*$/, "", line)
+                print sha "\t" unescape(trim(line)); have = 0
+            } else { intitle = 1; buf = trim(line) }
+            next
+        }
+        intitle {
+            line = $0
+            if (line ~ /<\/title>/) {
+                sub(/<\/title>.*$/, "", line)
+                buf = trim(buf " " trim(line))
+                print sha "\t" unescape(trim(buf)); intitle = 0; have = 0; buf = ""
+            } else { buf = trim(buf " " trim(line)) }
+        }
+    ')"
+    lines="$(printf '%s\n' "$lines" | sed "s/@SQ@/'/g")"
+    [ -n "$lines" ] || return 0
+
+    local shown=0 extra=0 sha subject out=""
+    while IFS="$(printf '\t')" read -r sha subject; do
+        [ -n "$sha" ] && [ -n "$subject" ] || continue
+        # Stop at the first commit already in our history; everything before it is new.
+        if git -C "$SCRIPT_DIR" merge-base --is-ancestor "${sha}^{commit}" HEAD 2>/dev/null; then
+            break
+        fi
+        if [ "$shown" -lt "$SUMMARY_MAX" ]; then
+            out="$out   - $subject"
+            out="$out"$'\n'
+            shown=$((shown + 1))
+        else
+            extra=$((extra + 1))
+        fi
+    done <<< "$lines"
+
+    [ "$shown" -gt 0 ] || return 0
+    echo " What is new:"
+    printf '%s' "$out"
+    [ "$extra" -gt 0 ] && echo "   ... and $extra more commit(s)."
+    echo ""
+}
 
 # git on PATH and a real repo, or nothing to do.
 command -v git >/dev/null 2>&1 || exit 0
@@ -56,7 +148,14 @@ echo "Checking for BioPipelines updates..."
 # Ask GitHub for the release branch's HEAD sha without configuring a remote or
 # fetching. A non-zero exit, timeout, or empty result is treated as "can't
 # tell" and stays silent.
-RELEASE_SHA="$(timeout "$LS_REMOTE_TIMEOUT" git -C "$SCRIPT_DIR" \
+# `timeout` is GNU coreutils and absent from a stock macOS; without it the
+# ls-remote still runs, it just cannot be bounded.
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="timeout $LS_REMOTE_TIMEOUT"
+else
+    TIMEOUT_CMD=""
+fi
+RELEASE_SHA="$($TIMEOUT_CMD git -C "$SCRIPT_DIR" \
     ls-remote "$GITHUB_URL" "refs/heads/$RELEASE_BRANCH" 2>/dev/null | awk '{print $1}')"
 [ -n "$RELEASE_SHA" ] || exit 0  # branch absent upstream or network failure
 
@@ -79,6 +178,7 @@ echo "────────────────────────�
 echo " A newer version of BioPipelines is available on GitHub."
 echo " (github.com/locbp-uzh/biopipelines, branch $RELEASE_BRANCH)"
 echo ""
+print_update_summary
 if [ "$CURRENT_BRANCH" = "$RELEASE_BRANCH" ]; then
     echo " To update your copy, run this from the BioPipelines folder:"
     echo ""

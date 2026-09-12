@@ -406,3 +406,125 @@ def test_generated_scripts_quote_paths_under_spaced_workspace(
             assert not bad.search(stripped), (
                 f"unquoted script path in {os.path.basename(sh)}: {stripped!r}"
             )
+
+
+# ── 5. HBDesigner emits its command without eval ─────────────────────────────
+
+def _hbdesigner_run_block(ids):
+    """Emit HBDesigner's per-input run loop for a structures stream of `ids`."""
+    import pathlib
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.hbdesigner import HBDesigner
+    from biopipelines.datastream import DataStream
+
+    pipeline = Pipeline(project="TestSuite", job="hbdes", description="d",
+                        on_the_fly=False, local_output=True, config="local")
+    with pipeline:
+        pdb = DataStream(name="structures", ids=ids, files=["<id>.pdb"],
+                         map_table="", format="pdb")
+        HBDesigner(structures=pdb)
+        script_path = pipeline.save()
+    step = sorted(pathlib.Path(script_path).parent.glob("*_HBDesigner.sh"))[0]
+    body = step.read_text(encoding="utf-8")
+    start = body.index("for STRUCT_ID in")
+    return body[start:body.index("\ndone", start) + len("\ndone")]
+
+
+def test_hbdesigner_does_not_eval_its_command(local_config, isolated_cwd):
+    """`eval` re-parses the assembled line, so any runtime value reaching it is
+    a second parse away from executing. The command must go out as a bash array."""
+    import re
+
+    block = _hbdesigner_run_block(["x"])
+    # Match `eval` as a command word only; a tmp_path name can contain the substring.
+    evals = [l for l in block.splitlines() if re.match(r"\s*(if\s+!\s+)?eval\b", l)]
+    assert not evals, f"HBDesigner still emits through eval: {evals}"
+    assert 'HBDES_OPTIONS=(' in block, f"expected a bash array:\n{block}"
+    assert 'run_hbdesigner "${HBDES_OPTIONS[@]}"' in block, (
+        f"array must be expanded one-element-per-argument:\n{block}"
+    )
+
+
+@pytest.mark.skipif(not __import__("shutil").which("bash"),
+                    reason="needs bash to replay the emitted loop")
+def test_hbdesigner_hostile_id_executes_nothing(local_config, isolated_cwd, tmp_path):
+    """A stream id carrying `";cmd;"` reaches $OUT_DIR. Under the former
+    `eval run_hbdesigner $HBDES_OPTIONS` it broke out of the quoting and ran
+    `cmd`; replayed against the emitted loop it must stay one argument."""
+    import subprocess
+
+    hostile = 'x";>PWNED_ID;"'  # no whitespace, so the loop's word splitting keeps it whole
+    block = _hbdesigner_run_block([hostile])
+
+    lines = ['run_hbdesigner() { printf "ARGV:"; for a in "$@"; do printf " <%s>" "$a"; done; echo; }']
+    for line in block.splitlines():
+        s = line.strip()
+        if s.startswith("for STRUCT_ID in"):
+            lines.append("for STRUCT_ID in $(printf '%s\n' \"$HOSTILE\"); do")
+        elif s.startswith("INPUT_PDB="):
+            lines.append('    INPUT_PDB=/tmp/in.pdb')
+        elif s.startswith("OUT_DIR="):
+            lines.append('    OUT_DIR="/tmp/exec/$STRUCT_ID"')
+        elif s.startswith("OPTS="):
+            lines.append('    OPTS=$(printf "\n\n\n")')
+        elif s.startswith("mkdir -p") or s.startswith("rm -f") or s.startswith("touch "):
+            continue
+        else:
+            lines.append(line)
+    harness = tmp_path / "replay.sh"
+    harness.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    result = subprocess.run(
+        ["bash", str(harness)], capture_output=True, text=True,
+        cwd=str(tmp_path), env=dict(os.environ, HOSTILE=hostile),
+    )
+    assert not os.path.exists(tmp_path / "PWNED_ID"), (
+        f"injected command ran; stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert f'<--out_dir> </tmp/exec/{hostile}>' in result.stdout, (
+        f"the id must survive as one argument; got {result.stdout!r}"
+    )
+
+
+# ── 6. LigandMPNN: the last eval in emitted bash ──────────────────────────────
+
+def test_ligandmpnn_does_not_eval_its_command(local_config, isolated_cwd, new_pipeline):
+    """LigandMPNN assembled `eval python run.py … --pdb_path '"$PDB_FILE"' $FIXED_OPTION` -- the same escaped-quote-under-eval construction HBDesigner shed. `$PDB_FILE` is a runtime-resolved path and the position options carried a flag plus a quoted value, which is why the eval was there: it split them. A bash array does that without a second parse."""
+    import glob
+
+    from biopipelines.ligand import Ligand
+    from biopipelines.ligand_mpnn import LigandMPNN
+    from biopipelines.mock import Mock
+
+    pipeline = new_pipeline("lmpnn_noeval")
+    with pipeline:
+        seeds = Mock(ids=["s1"], streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
+        ligand = Ligand(codes="STI")
+        LigandMPNN(structures=seeds.streams.structures, ligand=ligand.streams.compounds)
+
+    script = glob.glob(pipeline.folders["runtime"] + "/*LigandMPNN*.sh")[0]
+    body = open(script, encoding="utf-8").read()
+    assert "eval " not in body, "the command is evaluated a second time"
+    assert 'LMPNN_ARGS=(' in body
+    assert 'python run.py "${LMPNN_ARGS[@]}"' in body
+
+
+def test_a_hostile_path_stays_one_argument_for_ligandmpnn():
+    """Replays the emitted shape: a path that closes its own quoting used to reach a second parse."""
+    import subprocess
+    import tempfile
+
+    workdir = tempfile.mkdtemp()
+    script = (
+        f'cd {workdir}\n'
+        'PDB_FILE=\'x";>PWNED;"\'\n'
+        "POSITION_OPTIONS=(--fixed_residues 'A10 A11')\n"
+        'LMPNN_ARGS=("--model_type" "ligand_mpnn" --pdb_path "$PDB_FILE" "${POSITION_OPTIONS[@]}")\n'
+        'printf "ARG <%s>\n" "${LMPNN_ARGS[@]}"\n'
+    )
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    import os
+
+    assert "PWNED" not in os.listdir(workdir), "the injected command ran"
+    assert 'ARG <x";>PWNED;">' in result.stdout, "the path was split instead of staying one argument"
+    assert "ARG <A10 A11>" in result.stdout, "a residue list with a space was word-split"

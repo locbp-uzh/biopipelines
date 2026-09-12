@@ -81,10 +81,12 @@ class AF2BIND(BaseConfig):
     """
 
     TOOL_NAME = "AF2BIND"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "af2bind"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         # AF2 network params live in the SHARED cache (its params/ subdir holds
         # params_model_*.npz). The AF2BIND linear head is tool-specific and
         # stays under the AF2BIND folder.
@@ -128,7 +130,7 @@ fi
         # MPLBACKEND=Agg: ColabDesign imports matplotlib, and Colab's inherited
         # MPLBACKEND=module://matplotlib_inline.backend_inline crashes the import
         # in this isolated env (no matplotlib_inline here).
-        cd_check = f'MPLBACKEND=Agg {cls._env_run("af2bind", env_manager)}python -c "import colabdesign" >/dev/null 2>&1'
+        cd_check = f'MPLBACKEND=Agg {cls._env_run(env, env_manager)}python -c "import colabdesign" >/dev/null 2>&1'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {cd_check} && {weights_check}; then
     echo "AF2BIND already installed, skipping. Use force_reinstall=True to reinstall."
@@ -136,15 +138,15 @@ if {cd_check} && {weights_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("af2bind", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("af2bind", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         # Explicit pip install (not a yaml pip: section): mamba env-create can
         # swallow a failing pip resolve and still exit 0, leaving jax/colabdesign
         # missing. Running it here surfaces failures and lets `set -e` abort.
         # --find-links provides the cuda11 jaxlib wheel for jax[cuda11_pip].
         # scipy<1.13: jax 0.4.23 imports scipy.linalg.tril, removed in scipy 1.13.
         pip_block = (
-            f'{cls._env_run("af2bind", env_manager)}pip install '
+            f'{cls._env_run(env, env_manager)}pip install '
             f'--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html '
             f'"jax[cuda11_pip]==0.4.23" "scipy<1.13" "dm-haiku==0.0.10" "chex==0.1.7" '
             f'"optax==0.1.7" "{COLABDESIGN_SPEC}"'
@@ -152,7 +154,7 @@ fi
         return f"""echo "=== Installing AF2BIND ==="
 {skip}{remove_block}
 {env_block}
-echo "Installing JAX + ColabDesign into af2bind env"
+echo "Installing JAX + ColabDesign into {env} env"
 {pip_block}
 {download_block}
 # Verify installation

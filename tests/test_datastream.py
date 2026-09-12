@@ -15,7 +15,7 @@ from biopipelines.base_config import StandardizedOutput
 @pytest.mark.parametrize("ids, expected_len", [
     (["a", "b", "c"],                 3),
     (["5HG6_<0..49>"],                 50),
-    (["prot_<0..4>[_<N><A V>]"],       5),   # lazy: prefix count only
+    (["prot_<0..4>[_<?><A V>]"],       5),   # lazy: prefix count only
     (["<0..1>_<A B>"],                 4),
 ])
 def test_datastream_len(record_case, ids, expected_len):

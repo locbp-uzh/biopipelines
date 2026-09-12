@@ -22,7 +22,7 @@ from itertools import product
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
-from biopipelines.id_patterns import expand_ids, contains_pattern
+from biopipelines.id_patterns import is_lazy, partial_expand_ids, select_ids
 
 
 def parse_length_spec(spec: str) -> List[int]:
@@ -65,7 +65,8 @@ def load_sequences_from_slot(slot: Dict[str, Any]) -> Dict[str, str]:
         Dict mapping ID → sequence string
     """
     raw_ids = slot["ids"]
-    ids = expand_ids(raw_ids) if any(contains_pattern(s) for s in raw_ids) else raw_ids
+    # Deterministic slots only: a lazy [...] bracket has no config-time value, so it stays and select_ids resolves it against the map rows below.
+    ids = partial_expand_ids(raw_ids)
     map_table = slot.get("map_table", "")
     files = slot.get("files", [])
 
@@ -73,10 +74,12 @@ def load_sequences_from_slot(slot: Dict[str, Any]) -> Dict[str, str]:
     if map_table and os.path.exists(map_table):
         df = pd.read_csv(map_table)
         if 'id' in df.columns and 'sequence' in df.columns:
+            row_ids = [str(v) for v in df['id'].tolist()]
+            selected = set(select_ids(ids, row_ids, where=map_table))
             id_to_seq = {}
             for _, row in df.iterrows():
                 row_id = str(row['id'])
-                if row_id in ids:
+                if row_id in selected:
                     id_to_seq[row_id] = str(row['sequence']).upper()
             if id_to_seq:
                 return id_to_seq
@@ -134,10 +137,13 @@ def generate_fusion_sequences(
         slot_sequences.append(id_to_seq)
 
     # Get per-slot ID lists
-    slot_id_lists = [
-        expand_ids(slot["ids"]) if any(contains_pattern(s) for s in slot["ids"]) else slot["ids"]
-        for slot in slots
-    ]
+    slot_id_lists = []
+    for slot, id_to_seq in zip(slots, slot_sequences):
+        slot_ids = partial_expand_ids(slot["ids"])
+        # A lazy id only becomes concrete through the rows just loaded, so select against those keys rather than expanding a bracket that has no config-time value.
+        if any(is_lazy(s) for s in slot_ids):
+            slot_ids = select_ids(slot_ids, list(id_to_seq))
+        slot_id_lists.append(slot_ids)
 
     # Parse linker length ranges — None entries mean no linker at that junction
     # junction_length_lists is parallel to linker_lengths: None or list-of-ints

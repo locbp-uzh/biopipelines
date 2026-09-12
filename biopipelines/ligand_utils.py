@@ -55,25 +55,47 @@ def _read_codes(ligand_json: str):
 
 
 def resolve_ligand_smiles(ligand_json: str):
-    """Return the ligand SMILES from a compounds-stream JSON, or None if absent.
+    """Return THE ligand SMILES from a compounds-stream JSON, or None if absent.
 
-    Unlike the `code`, SMILES is optional (code-only ligands have none). Returns
-    the first non-empty `smiles` value; used as a bond-order template by tools
-    that need correct ligand chemistry from coordinates (PoseBusters, etc.).
+    Unlike the `code`, SMILES is optional (code-only ligands have none), so None
+    is a legitimate answer. Used as a bond-order template by tools that need
+    correct ligand chemistry from coordinates (OpenMM's ligand=, PoseBusters).
+
+    Every caller applies the result to every structure it processes, so a stream
+    carrying more than one distinct molecule has no single right answer: taking
+    the first would parameterise each structure with another compound's chemistry
+    and report the energies as if they described the molecule that was asked for.
+    That case raises.
     """
     try:
         from .biopipelines_io import load_datastream, iterate_values
     except ImportError:
         from biopipelines_io import load_datastream, iterate_values  # type: ignore
-    try:
-        ds = load_datastream(ligand_json)
-        for _cid, values in iterate_values(ds, columns=["smiles"]):
-            s = str(values.get("smiles", "") or "").strip()
-            if s:
-                return s
-    except Exception:
-        pass
-    return None
+
+    ds = load_datastream(ligand_json)
+    found = []
+    for _cid, values in iterate_values(ds, columns=["smiles"]):
+        raw = values.get("smiles", "")
+        # An empty cell round-trips through pandas as NaN, and str(NaN) is the
+        # non-empty string "nan" -- which is truthy, is not a parseable SMILES,
+        # and was being handed to RDKit as though it were the ligand's chemistry.
+        if raw is None or raw != raw:
+            continue
+        s = str(raw).strip()
+        if s.lower() in ("", "nan", "none", "<na>"):
+            continue
+        if s not in found:
+            found.append(s)
+
+    if not found:
+        return None
+    if len(found) > 1:
+        raise ValueError(
+            f"the ligand compounds stream carries {len(found)} distinct SMILES "
+            f"({found[0]!r}, {found[1]!r}, ...), but this tool applies one chemistry "
+            f"to every structure it processes. Pass a single-compound stream, or "
+            f"select one with output[\"<id>\"] / Panda.filter before handing it over.")
+    return found[0]
 
 
 def resolve_ligand_code(ligand_json: str) -> str:
@@ -124,7 +146,7 @@ def auth_ligand_field(row) -> tuple:
     correspond (use the CCD).
 
     Raises with an actionable message when the row carries no chemistry — a
-    code-only ``Ligand(code=...)`` is a structural HETATM label, not chemistry;
+    code-only ``Ligand(codes=...)`` is a structural HETATM label, not chemistry;
     fetch the CCD with ``Ligand("<code>")`` or pass ``smiles=`` instead.
     """
     chem = ligand_chemistry(row)
@@ -140,7 +162,7 @@ def auth_ligand_field(row) -> tuple:
     code = str(row.get("code", "") or "").strip()
     raise ValueError(
         f"ligand {code or '?'!r} has no chemistry (no smiles, no ccd): a code-only "
-        f"Ligand(code=...) is a structural HETATM label, not a molecule. To give a "
+        f"Ligand(codes=...) is a structural HETATM label, not a molecule. To give a "
         f"tool real chemistry, fetch the CCD with Ligand({code or '<code>'!r}) or pass "
         f"Ligand(smiles=...).")
 
@@ -190,7 +212,13 @@ def templated_ligand_mol(coord_path: str, smiles: str = None):
     ext = os.path.splitext(coord_path)[1].lower()
     if ext == ".pdb":
         _reject_complex_pdb(coord_path)
-        mol = Chem.MolFromPDBFile(coord_path, removeHs=False, sanitize=False)
+        # When the file declares its bonds, use them alone: RDKit's proximity
+        # bonding adds spurious extra bonds on top, which shows up as over-valent
+        # atoms (a carbon with 5 neighbours) and defeats template matching.
+        with open(coord_path) as _fh:
+            has_conect = any(l.startswith("CONECT") for l in _fh)
+        mol = Chem.MolFromPDBFile(coord_path, removeHs=False, sanitize=False,
+                                  proximityBonding=not has_conect)
     elif ext == ".mol2":
         mol = Chem.MolFromMol2File(coord_path, removeHs=False, sanitize=False)
     else:

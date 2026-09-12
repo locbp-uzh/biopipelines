@@ -54,7 +54,10 @@ class Table(BaseConfig):
     """
 
     TOOL_NAME = "Table"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
+    # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Table step. The retired spelling still sets the table identifier and now also reaches the framework.
+    PARAMETER_ALIASES = {"name": "table_name"}
+    DEPRECATED_ALIASES = ("name",)
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -66,7 +69,7 @@ echo "=== Table ready ==="
 
     def __init__(self,
                  path: str,
-                 name: str = "data",
+                 table_name: str = "data",
                  description: str = "",
                  **kwargs):
         """
@@ -77,7 +80,10 @@ echo "=== Table ready ==="
                   Can be absolute, relative to the current directory, or a
                   filename inside the pipeline's tables/ folder.
                   Excel files are converted to CSV internally.
-            name: Name for the table (default: "data")
+            table_name: Identifier the table is reached by downstream, as
+                  `tool.tables.<table_name>` (default: "data"). Was spelled `name=`,
+                  which the framework reads as the job name; that spelling still sets
+                  the identifier — and now the job name too — but reports a deprecation.
             description: Description of the table contents
             **kwargs: Additional parameters
         """
@@ -85,7 +91,7 @@ echo "=== Table ready ==="
         if ext not in ('.csv', '.xlsx', '.xls'):
             raise ValueError(f"Table only accepts CSV or Excel files (.csv, .xlsx, .xls). Got: '{path}'")
 
-        self.table_name = name
+        self.table_name = table_name
         self.table_description = description
         self._pending_filename = None
         # When the source is Excel, defer the CSV write until configure_inputs
@@ -129,7 +135,7 @@ echo "=== Table ready ==="
         if not self._pending_filename and not os.path.exists(self.table_path):
             raise FileNotFoundError(f"Table file not found: {self.table_path}")
 
-        _validate_freeform_string("name", self.table_name)
+        _validate_freeform_string("table_name", self.table_name)
         _validate_freeform_string("description", self.table_description)
         # table_path is a filesystem path, not a user-supplied free-form
         # string; Windows paths legitimately contain backslashes. We escape

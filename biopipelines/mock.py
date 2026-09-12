@@ -17,7 +17,7 @@ Design:
     - `children`: optional suffix pattern appended to each parent ID.
         - Deterministic (e.g. "<1..3>", "<A B>"): output IDs stay expandable;
           config-time count is exact.
-        - Lazy (e.g. "[_<N><A V>]"): output IDs remain lazy; `produce` is
+        - Lazy (e.g. "[_<#><A V>]"): output IDs remain lazy; `produce` is
           REQUIRED so the runtime knows what files to actually emit per
           parent.
     - `produce`: list of expanded suffix strings applied per parent at
@@ -47,7 +47,7 @@ Examples:
     # but the test declares exactly what the runtime should emit.
     Mock(
         source=parent_tool.streams.structures,
-        children="[_<N><A V>]",
+        children="[_<#><A V>]",
         produce=["_1A", "_1V", "_2A"],
         streams={"mutants": {"format": "pdb", "file": "<id>.pdb"}},
     )
@@ -70,6 +70,7 @@ try:
     from .combinatorics import (
         Bundle,
         Each,
+        get_mode,
         predict_output_ids_with_provenance,
     )
     from . import id_patterns
@@ -79,11 +80,31 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream, create_map_table
-    from combinatorics import Bundle, Each, predict_output_ids_with_provenance
+    from combinatorics import Bundle, Each, get_mode, predict_output_ids_with_provenance
     import id_patterns
 
 
 MapTableStrategy = str  # "runtime" | "config" | "both"
+
+
+def _axis_metadata(axis_name: str, value: Any, inner: List[DataStream], offset: int) -> Dict[str, Any]:
+    """How one axis contributes to an output id, in the terms the composer uses.
+
+    A `Bundle` holding an `Each` is the static pattern: the `Each` sources iterate while the rest ride along on every row, and `static_first` records which side of the id they land on. A `Bundle` with no `Each` is one entity contributing a single prefix; anything else iterates.
+    """
+    positions = list(range(offset, offset + len(inner)))
+    if isinstance(value, Bundle) and any(isinstance(src, Each) for src in value.sources):
+        iterated, static = [], []
+        cursor = offset
+        for src in value.sources:
+            span = len(_collect_datastreams(src))
+            (iterated if isinstance(src, Each) else static).extend(range(cursor, cursor + span))
+            cursor += span
+        static_first = not isinstance(value.sources[0], Each) if value.sources else False
+        return {"name": axis_name, "mode": "each", "streams": iterated,
+                "static_streams": static, "static_first": static_first}
+    return {"name": axis_name, "mode": get_mode(value), "streams": positions,
+            "static_streams": [], "static_first": False}
 
 
 def _collect_datastreams(source: Any) -> List[DataStream]:
@@ -111,7 +132,10 @@ class Mock(BaseConfig):
     """Stub tool for tests. See module docstring for usage."""
 
     TOOL_NAME = "Mock"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.5"
+
+    # streams={...} is a documented feature: the caller names the streams.
+    USER_STREAM_NAMES = True
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -161,11 +185,13 @@ echo "=== Mock ready ==="
             self.parent_ids: List[str] = [ids] if isinstance(ids, str) else list(ids)
             self.provenance: Dict[str, List[str]] = {}
             self.axis_names: List[str] = []
+            self.axes: List[Dict[str, Any]] = []
         else:
-            parent_ids, provenance, axis_names = self._resolve_from_source(source)
+            parent_ids, provenance, axis_names, axes = self._resolve_from_source(source)
             self.parent_ids = parent_ids
             self.provenance = provenance
             self.axis_names = axis_names
+            self.axes = axes
 
         if not self.parent_ids:
             raise ValueError("Mock: resolved parent ID list is empty")
@@ -212,6 +238,8 @@ echo "=== Mock ready ==="
             return value
 
         named = {}
+        axes = []
+        offset = [0]
 
         def _axis(value):
             inner = _collect_datastreams(value)
@@ -220,6 +248,10 @@ echo "=== Mock ready ==="
             axis_name = inner[0].name or f"axis{len(named)}"
             wrapped = _wrap(value, axis_name)
             named[axis_name] = (wrapped, axis_name)
+            # Carried into the config JSON so the runtime composes the ids the wrapper predicted rather
+            # than guessing. Streams are recorded by index because two in one axis can share a name.
+            axes.append(_axis_metadata(axis_name, value, inner, offset[0]))
+            offset[0] += len(inner)
 
         if isinstance(source, (DataStream, Bundle, Each)):
             _axis(source)
@@ -230,7 +262,7 @@ echo "=== Mock ready ==="
             raise ValueError(f"Mock: unsupported source type {type(source)}")
 
         parent_ids, provenance = predict_output_ids_with_provenance(**named)
-        return parent_ids, provenance, list(named.keys())
+        return parent_ids, provenance, list(named.keys()), axes
 
     def _validate_specs(self):
         n = len(self.parent_ids)
@@ -441,6 +473,7 @@ echo "=== Mock ready ==="
             "map_table_strategy": self.map_table_strategy,
             "missing": self.missing,
             "source_streams": source_stream_jsons,
+            "axes": self.axes,
         }
         with open(self.config_file, "w") as f:
             json.dump(config_data, f, indent=2)

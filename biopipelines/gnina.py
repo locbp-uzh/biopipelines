@@ -84,7 +84,11 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.2"
+    # gnina is a binary whose flag surface the wrapper types only part of.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "gnina"
+    BACKEND = "gnina"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -106,6 +110,7 @@ class Gnina(BaseConfig):
             module avail cuda && module avail cudnn
             module show cuda/<version>
         """
+        env = cls._install_env(env_manager)
         try:
             from .config_manager import ConfigManager
         except ImportError:
@@ -131,13 +136,13 @@ class Gnina(BaseConfig):
         env_check = "true"  # cluster: nothing to verify beyond the binary.
         if scheduler == "colab":
             biopipelines = folders.get("biopipelines", "")
-            install = cls._env_install_block("gnina", env_manager, biopipelines)
-            env_check = cls._env_exists_check("gnina", env_manager)
-            env_block = f"""# Create the gnina env (skip if it already exists).
+            install = cls._env_install_block(env, env_manager, biopipelines)
+            env_check = cls._env_exists_check(env, env_manager)
+            env_block = f"""# Create the {env} env (skip if it already exists).
 if ! {env_check}; then
     {install}
 else
-    echo "gnina environment already exists, skipping creation."
+    echo "{env} environment already exists, skipping creation."
 fi
 """
 
@@ -164,7 +169,7 @@ if [ -x "{binary}" ] && {env_check}; then
     touch "$INSTALL_SUCCESS"
     echo "=== GNINA installation complete ==="
 else
-    echo "ERROR: GNINA verification failed (binary missing/not executable or gnina env absent)"
+    echo "ERROR: GNINA verification failed (binary missing/not executable or {env} env absent)"
     exit 1
 fi
 """
@@ -192,6 +197,7 @@ fi
                  structures: Union[DataStream, StandardizedOutput],
                  compounds: Union[DataStream, StandardizedOutput],
                  mode: str = "docking",
+                 scoring: str = "vina",
                  autobox_ligand: Union[DataStream, StandardizedOutput, str, None] = None,
                  center: Optional[str] = None,
                  size: Union[float, str, None] = None,
@@ -206,7 +212,7 @@ fi
                  energy_window: float = 2.0,
                  conformer_rmsd: float = 1.0,
                  conformer_energies: Optional[tuple] = None,
-                 cnn_score_threshold: float = 0.5,
+                 cnn_score_threshold: float = 0.0,
                  rmsd_threshold: float = 2.0,
                  protonate: bool = True,
                  pH: float = 7.4,
@@ -275,7 +281,16 @@ fi
                 is False but the input SDF contains multiple pre-computed
                 conformers with known energies.
             cnn_score_threshold: Minimum CNNscore to accept a pose (0–1).
-                Poses below this threshold are discarded (default 0.5).
+                Poses below this threshold are discarded (default 0.0, keep
+                everything). GNINA itself has no such filter — it sorts poses by
+                CNNscore and returns them all — so a non-zero value is a choice
+                this wrapper adds, not upstream behaviour. CNNscore answers "is
+                this pose near the crystal pose", which is uncorrelated with
+                binding strength (measured rho +0.025 over 578 de novo designs)
+                and is trained on natural complexes, so designed pockets and
+                synthetic ligands score low across the board. Set it only to
+                screen for pose confidence; leave it at 0 when every input needs
+                a score.
             rmsd_threshold: RMSD cutoff (Å) for pose consistency clustering
                 across runs. Larger clusters indicate more reproducible poses
                 (default 2.0).
@@ -306,7 +321,14 @@ fi
                     scores: id | structures.id | compounds.id | vina_affinity | cnn_score | cnn_affinity | cnn_vs | cnn_affinity_variance
                     missing: id | removed_by | kind | cause
         """
+        if "backend" in kwargs:
+            raise ValueError(
+                "backend was removed; use the Gnina class for GNINA and the "
+                "Vina class for AutoDock Vina.")
+
         self.mode = mode
+        self.backend = self.BACKEND
+        self.scoring = scoring
 
         # Keep original input for upstream missing table detection
         self.structures_input = structures
@@ -335,18 +357,21 @@ fi
         self.autobox_ligand_id = None
         self.autobox_ligand_path = None  # Only set for string paths (no runtime resolution needed)
         if autobox_ligand is not None:
+            # Dispatch on type before asking anything about the stream: hanging the
+            # str case and the type error off a length test made an empty DataStream
+            # report "must be DataStream ... got DataStream".
             if isinstance(autobox_ligand, StandardizedOutput):
                 self.autobox_ligand_stream = autobox_ligand.streams.structures
-                if len(self.autobox_ligand_stream) > 0:
-                    self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
             elif isinstance(autobox_ligand, DataStream):
                 self.autobox_ligand_stream = autobox_ligand
-                if len(self.autobox_ligand_stream) > 0:
-                    self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
             elif isinstance(autobox_ligand, str):
                 self.autobox_ligand_path = autobox_ligand
             else:
                 raise ValueError(f"autobox_ligand must be DataStream, StandardizedOutput, or str, got {type(autobox_ligand)}")
+            # Only a single-item stream is a global reference; a per-structure
+            # stream is resolved by id at runtime.
+            if self.autobox_ligand_stream is not None and len(self.autobox_ligand_stream) == 1:
+                self.autobox_ligand_id = self.autobox_ligand_stream.ids[0]
 
         # Box parameters
         self.center = center
@@ -388,6 +413,14 @@ fi
         if self.mode not in self.MODES:
             raise ValueError(f"mode must be one of {self.MODES}, got {self.mode!r}")
 
+        if self.backend == "vina":
+            self._validate_vina_backend()
+        elif self.scoring != "vina":
+            raise ValueError(
+                "scoring only applies to Vina; Gnina selects its scoring "
+                "function with cnn_scoring instead."
+            )
+
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
 
@@ -424,6 +457,32 @@ fi
         if self.num_conformers <= 0:
             raise ValueError("num_conformers must be positive")
 
+    VINA_SCORING = ("vina", "vinardo", "ad4")
+
+    def _validate_vina_backend(self):
+        """Reject GNINA-only parameters on the Vina tool.
+
+        Vina has no CNN, so these knobs cannot be honored. Raising keeps a run
+        that set them from looking like it applied them.
+        """
+        if self.scoring not in self.VINA_SCORING:
+            raise ValueError(
+                f"scoring must be one of {self.VINA_SCORING}, got {self.scoring!r}")
+
+        # Defaults come from Gnina's own signature: hard-coding them here meant a
+        # change to one (85d3134 moved cnn_score_threshold to 0.0) turned the
+        # inherited default into an "offender" and Vina stopped constructing at all.
+        import inspect
+        inherited = inspect.signature(Gnina.__init__).parameters
+        cnn_only = ("cnn_scoring", "cnn_score_threshold")
+        offenders = [name for name in cnn_only
+                     if getattr(self, name) != inherited[name].default]
+        if offenders:
+            raise ValueError(
+                f"Vina has no CNN scoring; remove "
+                f"{', '.join(sorted(offenders))} (these only apply to Gnina)."
+            )
+
     def _validate_no_search_mode(self):
         """Reject docking-only parameters set non-default in score/minimize mode.
 
@@ -453,6 +512,17 @@ fi
                 f"{', '.join(sorted(offenders))} (these only apply to mode='docking')."
             )
 
+    @property
+    def docking_binary(self) -> str:
+        """The binary to invoke.
+
+        Vina is installed by conda into the tool env, so it resolves off PATH and
+        has no repo folder; GNINA is a standalone download under folders["Gnina"].
+        """
+        if self.backend == "vina":
+            return "vina"
+        return self.gnina_binary
+
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input files and folder paths."""
         self.folders = pipeline_folders
@@ -461,19 +531,24 @@ fi
         """Get GNINA configuration display lines."""
         config_lines = super().get_config_display()
         config_lines.extend([
+            f"BACKEND: {self.backend}",
             f"MODE: {self.mode}",
             f"STRUCTURES: {len(self.structures_stream)} proteins",
             f"COMPOUNDS: {len(self.compounds_stream)} ligands",
             f"SEED: {self.seed}",
-            f"CNN SCORING: {self.cnn_scoring}",
         ])
+        config_lines.append(
+            f"SCORING: {self.scoring}" if self.backend == "vina"
+            else f"CNN SCORING: {self.cnn_scoring}"
+        )
         if self.mode == "docking":
             config_lines.extend([
                 f"EXHAUSTIVENESS: {self.exhaustiveness}",
                 f"NUM RUNS: {self.num_runs}",
                 f"NUM MODES: {self.num_modes}",
-                f"CNN SCORE THRESHOLD: {self.cnn_score_threshold}",
             ])
+            if self.backend != "vina":
+                config_lines.append(f"CNN SCORE THRESHOLD: {self.cnn_score_threshold}")
         else:
             config_lines.append(f"AUTOBOX ADD: {self.autobox_add}")
         if self.center is not None:
@@ -510,7 +585,15 @@ fi
         if self.autobox_ligand_stream is not None:
             # Serialize autobox ligand DataStream for runtime resolution
             self.autobox_ligand_stream.save_json(self.autobox_ds_json)
-            box_config["autobox_ligand"] = "__RESOLVE_AUTOBOX_LIGAND__"
+            if len(self.autobox_ligand_stream) == 1:
+                # One shared reference: the generated script rewrites this sentinel
+                # with the resolved path before the runtime reads it.
+                box_config["autobox_ligand"] = "__RESOLVE_AUTOBOX_LIGAND__"
+            else:
+                # Per-structure references are looked up by receptor id at runtime,
+                # so there is no single path to name here -- leaving the sentinel
+                # would make every receptor try to open it literally.
+                box_config["autobox_ligand_ds"] = self.autobox_ds_json
         elif self.autobox_ligand_path is not None:
             box_config["autobox_ligand"] = self.autobox_ligand_path
 
@@ -518,9 +601,13 @@ fi
 
         config = {
             "mode": self.mode,
+            "backend": self.backend,
+            "scoring": self.scoring,
             "output_folder": self.execution_folder,
             "best_poses_dir": self.stream_folder("structures"),
-            "gnina_binary": self.gnina_binary,
+            # Vina comes from its conda env's PATH; GNINA is a standalone
+            # download under its own repo folder.
+            "gnina_binary": self.docking_binary,
             "structures_json": self.structures_json,
             "compounds_json": self.compounds_json,
             "docking_results_csv": self.docking_results_csv,
@@ -547,6 +634,9 @@ fi
             "rmsd_threshold": self.rmsd_threshold,
             "protonate": self.protonate,
             "pH": self.pH,
+            # Argv tokens, not a shell string: the pipe script appends them to the list it hands to
+            # subprocess.run with no shell, so nothing re-parses them.
+            "extra_args": self.extra_args_tokens(),
         }
 
         with open(self.config_json, 'w') as f:
@@ -562,6 +652,12 @@ fi
         """
         config_manager = ConfigManager()
         overrides = config_manager._config.get('tool_overrides', {}) or {}
+        # Keyed on 'gnina' because that is what sites configure, but the settings
+        # are CUDA modules and library paths for the GPU binary. Vina is CPU-only
+        # conda-forge software in its own env, so loading GNINA's CUDA stack into
+        # its step is at best noise and at worst a library conflict.
+        if self.BACKEND != "gnina":
+            return {}
         return overrides.get('gnina', {}) or {}
 
     def _get_gnina_modules(self) -> List[str]:
@@ -613,6 +709,16 @@ fi
         if self.autobox_ligand_stream is None:
             return ""
 
+        # A stream of one is a single shared reference and can be resolved here.
+        # A stream with one entry per structure must be resolved per receptor at
+        # runtime -- resolving index 0 and reusing that path silently boxed every
+        # receptor on the first structure's ligand.
+        if len(self.autobox_ligand_stream) != 1:
+            return f"""# Per-structure autobox: the runtime resolves one reference per receptor id
+jq --arg ds "{self.autobox_ds_json}" '.box.autobox_ligand_ds = $ds' "{self.config_json}" > "{self.config_json}.tmp" && mv "{self.config_json}.tmp" "{self.config_json}"
+
+"""
+
         return f"""# Resolve autobox ligand file at runtime (valid_set skips filtered ids)
 AUTOBOX_LIGAND_ID={Resolve.stream_ids(self.autobox_ds_json, index=0, valid_set=True)}
 AUTOBOX_LIGAND={Resolve.stream_item(self.autobox_ds_json, '$AUTOBOX_LIGAND_ID')}
@@ -636,23 +742,31 @@ python {self.helper_py} {self.config_json}
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after GNINA execution."""
+        # Vina has no CNN, so those columns are absent rather than blank.
+        is_vina = self.backend == "vina"
+        cnn_pose_cols = [] if is_vina else ["cnn_score", "cnn_affinity"]
+        cnn_summary_cols = [] if is_vina else [
+            "best_cnn_score", "mean_cnn_affinity", "std_cnn_affinity"]
+        cnn_score_cols = [] if is_vina else [
+            "cnn_score", "cnn_affinity", "cnn_vs", "cnn_affinity_variance"]
+        engine = "Vina" if is_vina else "GNINA"
+
         if self.mode == "docking":
             tables = {
                 "docking_results": TableInfo(
                     name="docking_results",
                     path=self.docking_results_csv,
                     columns=["id", "structures.id", "compounds.id", "conformer_id",
-                             "run", "pose", "vina_score", "cnn_score", "cnn_affinity"],
-                    description="All accepted docked poses with Vina and CNN scores"
+                             "run", "pose", "vina_score"] + cnn_pose_cols,
+                    description=f"All accepted docked poses with {engine} scores"
                 ),
                 "docking_summary": TableInfo(
                     name="docking_summary",
                     path=self.docking_summary_csv,
                     columns=["id", "structures.id", "compounds.id", "conformer_id",
-                             "best_vina", "mean_vina", "std_vina", "best_cnn_score",
-                             "mean_cnn_affinity", "std_cnn_affinity",
-                             "pose_consistency", "conformer_energy",
-                             "pseudo_binding_energy", "best_pose_file"],
+                             "best_vina", "mean_vina", "std_vina"] + cnn_summary_cols
+                            + ["pose_consistency", "conformer_energy",
+                               "pseudo_binding_energy", "best_pose_file"],
                     description="Per-conformer aggregated docking statistics across runs"
                 ),
             }
@@ -662,9 +776,8 @@ python {self.helper_py} {self.config_json}
                     name="scores",
                     path=self.scores_csv,
                     columns=["id", "structures.id", "compounds.id",
-                             "vina_affinity", "cnn_score", "cnn_affinity",
-                             "cnn_vs", "cnn_affinity_variance"],
-                    description=f"GNINA {self.mode} scores for the in-pocket ligand pose"
+                             "vina_affinity"] + cnn_score_cols,
+                    description=f"{engine} {self.mode} scores for the in-pocket ligand pose"
                 ),
             }
 
@@ -710,6 +823,8 @@ python {self.helper_py} {self.config_json}
         base_dict.update({
             "gnina_params": {
                 "mode": self.mode,
+                "backend": self.backend,
+                "scoring": self.scoring,
                 "center": self.center,
                 "size": self.size,
                 "autobox_ligand": self.autobox_ligand_id or self.autobox_ligand_path,
@@ -730,3 +845,137 @@ python {self.helper_py} {self.config_json}
             }
         })
         return base_dict
+
+
+class Vina(Gnina):
+    """AutoDock Vina docking — the same pipeline as Gnina without CNN scoring.
+
+    Vina runs on CPU and has aarch64 builds, so it is the docking route on
+    architectures where GNINA's prebuilt x86-64 binary cannot run. It keeps the
+    box definition, conformer generation, multi-run pose-consistency analysis and
+    the three modes; the CNN parameters are absent because Vina has no CNN, and
+    the score tables carry no ``cnn_*`` columns.
+
+    Vina reads PDBQT only, so receptors and ligands are converted with OpenBabel
+    on the way in and the poses converted back to SDF on the way out. Receptor
+    preparation via OpenBabel is the pragmatic route rather than the
+    Meeko/ADFR-preferred one — adequate for ranking, but note it if you need
+    publication-grade absolute affinities.
+
+    Usage:
+        with Pipeline(...):
+            Resources(cpus=32, memory="16GB", time="4:00:00")
+            protein = PDB("9RTM", convert="pdb")
+            ligand = Ligand(smiles="CN(C)c1ccc2...", ids="TMR")
+            docking = Vina(structures=protein, compounds=ligand)
+    """
+
+    TOOL_NAME = "Vina"
+    TOOL_VERSION = "2.2"
+    ENV_NAME = "vina"
+    BACKEND = "vina"
+
+    @classmethod
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        """Install AutoDock Vina from conda-forge.
+
+        Unlike GNINA there is no binary to download: conda-forge ships `vina`
+        for every platform including linux-aarch64, alongside the RDKit and
+        OpenBabel the pipe script needs.
+        """
+        env = cls._install_env(env_manager)
+        biopipelines = folders.get("biopipelines", "")
+        env_check = cls._env_exists_check(env, env_manager)
+        install = cls._env_install_block(env, env_manager, biopipelines)
+
+        run = cls._env_run(env, env_manager)
+
+        # The skip path tests the binary, not just the env: a venv shim can exist
+        # while the symlinks below are missing.
+        skip = "" if force_reinstall else f"""# Check if already installed
+if {env_check} && {run}vina --version >/dev/null 2>&1; then
+    echo "Vina already installed, skipping. Use force_reinstall=True to reinstall."
+    touch "$INSTALL_SUCCESS"
+    exit 0
+fi
+"""
+        return f"""echo "=== Installing AutoDock Vina ==="
+{skip}{install}
+{cls._link_conda_binaries(env, env_manager, ("vina", "vina_split", "obabel"))}
+# Verify installation: the binary must run and OpenBabel must be present for the
+# PDBQT conversions the wrapper depends on.
+if {run}vina --version >/dev/null 2>&1 && {run}obabel -V >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== Vina installation complete ==="
+else
+    echo "ERROR: Vina verification failed (vina or obabel not runnable in the env)"
+    exit 1
+fi
+"""
+
+    def __init__(self,
+                 structures: Union[DataStream, StandardizedOutput],
+                 compounds: Union[DataStream, StandardizedOutput],
+                 mode: str = "docking",
+                 scoring: str = "vina",
+                 autobox_ligand: Union[DataStream, StandardizedOutput, str, None] = None,
+                 center: Optional[str] = None,
+                 size: Union[float, str, None] = None,
+                 autobox_add: float = 4.0,
+                 exhaustiveness: int = 8,
+                 num_modes: int = 9,
+                 num_runs: int = 1,
+                 seed: int = 42,
+                 generate_conformers: bool = False,
+                 num_conformers: int = 50,
+                 energy_window: float = 2.0,
+                 conformer_rmsd: float = 1.0,
+                 conformer_energies: Optional[tuple] = None,
+                 rmsd_threshold: float = 2.0,
+                 protonate: bool = True,
+                 pH: float = 7.4,
+                 dock_timeout: Optional[int] = 1800,
+                 **kwargs):
+        """AutoDock Vina docking. See Gnina for the shared argument details.
+
+        Args:
+            scoring: Vina scoring function — "vina" (default), "vinardo", or
+                "ad4". Replaces Gnina's cnn_scoring, which has no counterpart.
+
+        Output:
+            mode="docking":
+                Streams: structures (.pdb) — best-pose complexes.
+                Tables:
+                    docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score
+                    docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
+                    missing: id | removed_by | kind | cause
+            mode="score"/"minimize":
+                Streams: structures (.pdb) — the scored complex.
+                Tables:
+                    scores: id | structures.id | compounds.id | vina_affinity
+                    missing: id | removed_by | kind | cause
+        """
+        super().__init__(
+            structures=structures,
+            compounds=compounds,
+            mode=mode,
+            scoring=scoring,
+            autobox_ligand=autobox_ligand,
+            center=center,
+            size=size,
+            autobox_add=autobox_add,
+            exhaustiveness=exhaustiveness,
+            num_modes=num_modes,
+            num_runs=num_runs,
+            seed=seed,
+            generate_conformers=generate_conformers,
+            num_conformers=num_conformers,
+            energy_window=energy_window,
+            conformer_rmsd=conformer_rmsd,
+            conformer_energies=conformer_energies,
+            rmsd_threshold=rmsd_threshold,
+            protonate=protonate,
+            pH=pH,
+            dock_timeout=dock_timeout,
+            **kwargs,
+        )

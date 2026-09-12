@@ -22,7 +22,7 @@ Usage (via the nested alias on the tool)::
     from biopipelines import RFdiffusionAllAtom as RFAA
 
     RFAA(
-        pdb=poses, ligand=Ligand(code="LIG"), contigs="40-60,A84-182",
+        pdb=poses, ligand=Ligand(codes="LIG"), contigs="40-60,A84-182",
         guiding_potentials=RFAA.GuidingPotential.ligand_ncontacts(
             weight=3, r_0=8, d_0=4),
         guide_decay="quadratic",

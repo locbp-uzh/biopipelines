@@ -30,8 +30,8 @@ with Pipeline(project="ToolParameters",
     Resources(gpu="A100", time="2:00:00", memory="16GB")
 
     backbone = PDB("1A3N", ids="HBA")
-    hem = Ligand(code="HEM")
-    atp = Ligand(code="ATP")
+    hem = Ligand(codes="HEM")
+    atp = Ligand(codes="ATP")
 
     # 1: defaults with HEM ligand
     Suffix("hem_default")

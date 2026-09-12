@@ -19,7 +19,8 @@ typed streams, the cluster-vs-Colab differences, and which tools exist:
 - `docs/user_manual.md`
 - `docs/tool_reference.md`
 - `docs/tool/*.md`
-- `README.md` — the tool table records, per tool, the hardware (CPU/GPU), the environments it has been tested on (HPC/Colab), and the upstream references (repo + paper). Read all of this off the badge markup on each row, never the base64 `<img src=...>` blobs (those carry no information): the `alt="..."` attributes give the status (`alt="CPU"`, `alt="GPU"`, `alt="HPC ok"`, `alt="Colab ok"`), and the `<a href="...">` wrapping a badge whose `alt` is `repo` or `paper` gives the reference URL. A BP-native tool shows a `BP` badge and has no repo/paper link. The HPC/Colab badges are presence-means-supported: a tool runs only in the modes whose badge it carries, so a missing badge means that mode is unsupported (not merely unverified). Only MMseqs2/MMseqs2Server is currently HPC-only — don't propose it in a Colab pipeline.
+- `README.md` — the tool table records, per tool, the hardware (CPU/GPU), the platforms it has been verified on (HPC x86-64 / HPC aarch64 / Colab), and the upstream references (repo + paper). Read all of this off the badge markup on each row, never the base64 `<img src=...>` blobs (those carry no information): the `alt="..."` attributes give the status — `alt="CPU"`, `alt="GPU"`, `alt="HPC x86-64 ok"`, `alt="HPC aarch64 ok"`, `alt="Colab ok"` — and the `<a href="...">` wrapping a badge whose `alt` is `repo` or `paper` gives the reference URL. A BP-native tool carries `alt="BioPipelines native tool"` and has no repo/paper link. (The prose legend above the table uses the shorter forms `alt="HPC x86-64"`, `alt="HPC aarch64"`, `alt="Colab"`, `alt="BP"` — those are the legend swatches, not tool rows. Tool rows are the ones inside `<td><sub><b>Name</b>` blocks.)
+  A platform badge means **verified**; a missing badge means **not verified**, which is not the same as unsupported. Three rows currently carry no Colab badge (MMseqs2/MMseqs2Server, Vina, RFdiffusion2) and seven carry no HPC badge (PocketGen, Frame2Seq, DiffDock, DynamicBind, NeuralPLexer, GEMS, RTMScore) — yet all seven of the latter have an `environments:` entry in `config.cluster.yaml` and cluster bring-up pipelines, so they do run there. So: prefer a tool whose badge covers the user's mode, and when only the badge is missing say the combination is unverified and ask, rather than refusing the tool.
 
 Do not announce that you've read them, do not summarise
 them, do not list what you found. Just have the context loaded so your
@@ -36,7 +37,9 @@ infrastructure:
   Read `cluster.md` for more information.
 - **Colab** — `.ipynb` cells executed inline, `micromamba` envs installed
   per session, runtime ephemeral (~12 h cap, anything not saved to Drive or
-  downloaded is lost).
+  downloaded is lost). Read `colab.md` for more information, including whether this session can drive the runtime itself.
+
+A third variant, `daint` (CSCS Alps, aarch64), is also a SLURM cluster but differs enough to have its own file — read `daint.md` if the user is on Daint.
 
 The auto-loaded config differs (`config.cluster.yaml` vs `config.colab.yaml`).
 If the user hasn't made it clear which mode applies, infer from context
@@ -130,10 +133,28 @@ renderers — the format is a presentation choice, not a content choice.
 - Recycle MSAs across runs whenever the inputs allow it.
 
 ### Reporting back
+
+**Show results, do not only describe them.** When a step has produced anything renderable — structures, images, plots, a scores table — do not answer with prose alone. Render it and open it. `bp-visualize <tool folder>` writes a self-contained HTML page for that one step; it runs on a login node, needs no scheduler, and works while the rest of the job is still queued, so a mid-run step can be shown the moment it finishes.
+
+- **Mid-run, per step:** `bp-visualize` on the step that just completed. This is the one to reach for while a job is still going, and for "show me the best N" questions, which it answers directly: `--descending <table>.<column>` orders by any column of any of the step's tables and `--max-items N` caps it, overriding the structure viewer's default 5-item sample.
+- **Whole run, at the end:** `pipeline.html` (below). `bp-visualize` does not replace it — one is a step, the other is the run.
+- **Then actually open it. Do not just report a path.** Opening it is part of reporting the result, not an optional extra; a path in the transcript is something the user has to go and act on, which is the work you were asked to do.
+  - Windows: `Start-Process -FilePath <browser.exe> -ArgumentList '"<page>"'` from PowerShell. Do **not** use `cmd.exe /c start` — it blocks while cold-starting a browser that is not already running (measured: one call sat 120 s and was backgrounded), and it exits 0 as soon as the shell accepts the file, so its exit code says nothing about whether a window appeared. Find the real browser from the `ProgId` under `HKCU:\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice`; the default handler is not necessarily the browser that happens to be running.
+  - macOS: `open <page>`. Linux: `xdg-open <page>`.
+- **Verify the window, not the launcher's exit code.** A launcher returning 0 is not evidence the page opened. On Windows confirm with `Get-Process <browser> | Where-Object MainWindowTitle | Select-Object MainWindowTitle` — the title is the page's own `<title>`, so it proves both that a window exists and that it holds the right page. Only then tell the user it is open.
+- **Put it somewhere stable before you open it.** A session scratchpad or `/tmp` is wiped and is not findable later. Copy pulled pages into `outputs/_views/` in the repo (gitignored), keep the step's own filename, and tell the user that folder. On the cluster the page already lives at `<step>/_extras/<step>_view.html`, which is its permanent home.
+- **If you cannot render or cannot open it — no renderable output, the page fails to build, or a backend with no browser — say so and give the exact command the user can run.** Silently falling back to a prose summary is the failure mode this exists to remove.
+
+The sort key must be qualified as `<table>.<column>` (`--descending confidence.plddt`, not `--descending plddt`); a bare column name is refused, naming the qualified spellings that would have worked. Look the columns up in `docs/tool_reference.md` or in the step's own `.expected_outputs.json`.
+
+- **Always hand over the run page after any new result.** Every run writes `<Job>/RunTime/pipeline.html`, a self-contained record of the pipeline: one lane per batch with its resources, one card per step carrying its paths, tool version, environment and completion marker, arrows for the dataflow that was actually recovered, a completed-against-failed donut, and the machine the run used. It embeds the rendered outputs — table values and, when the 3D viewers are kept, the coordinates themselves — so it is the artifact to show, not a summary of it.
+  - After a run finishes, refresh it: `regenerate_pipeline_page("<Job>/RunTime")`. `save()` writes the page at configuration time, when nothing has run and every node reads "pending", so an unrefreshed page is a plan rather than a result.
+  - The 3D structure and grid viewers work offline: the py3Dmol library is vendored in the repo and inlined once per page, so a normal page is self-contained *with* working viewers (~695 KB against 28 KB without). `allow_external=True` is only needed if that vendored copy is absent.
+  - *Cluster:* copy just that one file back. It needs no sibling files and no network, which is the whole point of it being self-contained — do not try to serve the output tree or link into it over SSH.
+  - Tell the user the path and that it opens in a browser. Do not paraphrase the page in prose instead of providing it; the point is that they can look.
 - Summarise what was run, the resource choices, and why.
-- Surface any failures from success markers (`SUCCESS` / `FAILURE` /
-  `WARNING`) rather than claiming success blind, and read the relevant tool
-  `_log` files.
+- Surface any failures from the completion markers rather than claiming success blind. The markers are empty files written **one level above** each tool's output folder, named `<NNN>_<ToolName>_COMPLETED`, `<NNN>_<ToolName>_FAILED` or `<NNN>_<ToolName>_WARNING` (`<NNN>` is the tool's zero-padded step number, e.g. `003_Boltz2_COMPLETED`; see `pipe_scripts/pipe_check_completion.py`). So glob `*_FAILED` and `*_WARNING` in the job folder — there are no files named `SUCCESS`, `FAILURE` or `WARNING`.
+- Then read the per-tool log. There are two copies of the same stream: `<Job>/Logs/<NNN>_<ToolName>.log` collects them job-wide, and `<tool output folder>/_log` sits next to the tool's own outputs (`pipeline.py:507` on the fly, and the `| tee` at `:764`). Reach for `_log` when you already have a tool folder open, and `Logs/` when you are scanning a whole job. There are no files named `SUCCESS`, `FAILURE` or `WARNING`.
 - *Cluster:* pull only a subset of artifacts locally — enough to inspect,
   not the full output tree.
 - *Colab:* remind the user to save what they want to keep before the runtime
@@ -142,7 +163,7 @@ renderers — the format is a presentation choice, not a content choice.
 ### Output recycling
 - If a stage of the pipeline fails and has to be repeated, prefer loading
   results from upstream tools instead of running them again. This can be done
-  with the *Load* tool: *Load("/path/to/tool_output_folder)*
+  with the *Load* tool: `Load("/path/to/tool_output_folder")`
 ---
 
 ## Cluster mode
@@ -212,14 +233,26 @@ Typical idioms (assume an ssh alias `cluster` and a remote repo at
 | Sync remote repo to a branch      | `llm/log.sh ssh cluster "cd ~/biopipelines && git fetch && git reset --hard origin/<branch>"` |
 | Copy a personal pipeline / inputs | `llm/log.sh scp my_pipelines/foo.py cluster:~/biopipelines/my_pipelines/`              |
 | Submit                            | `llm/log.sh ssh cluster "cd ~/biopipelines && ./submit my_pipelines/foo.py"`           |
-| Resume after cancel/fail          | `llm/log.sh ssh cluster "cd ~/biopipelines && ./resubmit <slurm.sh>"`                  |
+| Resume after cancel/fail          | `llm/log.sh ssh cluster "cd ~/biopipelines && ./resubmit <RunTime>/<job script>"`      |
 | Watch the queue                   | `llm/log.sh ssh cluster 'squeue -u $(whoami)'`                                         |
-| Inspect logs                      | `llm/log.sh ssh cluster "tail -n 100 <RunTime>/slurm.out"`                             |
-| Pull a result artifact            | `llm/log.sh scp cluster:<RunTime>/slurm.out ./`                                        |
+| List the scheduler output files   | `llm/log.sh ssh cluster "ls <RunTime>/*.out"`                                          |
+| Inspect a scheduler log           | `llm/log.sh ssh cluster "tail -n 100 <RunTime>/job_batch1.out"`                        |
+| Inspect a tool log                | `llm/log.sh ssh cluster "tail -n 100 <Job>/Logs/<NNN>_<ToolName>.log"`                 |
 | Cancel a job                      | `llm/log.sh ssh cluster "scancel <jobid>"`                                             |
+| Refresh the run page after a run  | `llm/log.sh ssh cluster "cd ~/biopipelines && python -c 'from biopipelines.pipeline import regenerate_pipeline_page as r; r(\"<RunTime>\")'"` |
+| Fetch the run page                | `llm/log.sh scp cluster:<RunTime>/pipeline.html ./`                                    |
+| Render one step (top 5 by a score) | `llm/log.sh ssh cluster "cd ~/biopipelines && bp-visualize <Job>/<NNN>_<Tool> --descending <table>.<column> --max-items 5"` |
+| Fetch a step's page               | `llm/log.sh scp cluster:<Job>/<NNN>_<Tool>/_extras/<NNN>_<Tool>_view.html ./`           |
 
-Outputs land at the path configured on the cluster
-(typically `/shares/<group>/<user>/BioPipelines/<Project>/<Job>_NNN/`).
+**Which `.out` file to tail.** Every `Resources()` call in the pipeline opens a new batch, and each batch is submitted as its own job. `submit` writes one scheduler output per batch: `<RunTime>/job_batch<N>.out` (from `<RunTime>/slurm_batch<N>.sh`). Only a pipeline that ended up with a *single* batch gets `<RunTime>/slurm.out` (from `<RunTime>/slurm.sh`). Since most pipelines call `Resources()` more than once, `ls <RunTime>/*.out` first rather than assuming `slurm.out` exists — and pass the matching `slurm_batch<N>.sh` to `resubmit` when resuming.
+
+The scheduler `.out` files carry the submission and batch-driver output; the per-tool stdout/stderr is in `<Job>/Logs/<NNN>_<ToolName>.log`.
+
+**Render and hand over individual steps as they finish.** `bp-visualize <Job>/<NNN>_<Tool>` writes `<...>/_extras/<NNN>_<Tool>_view.html` — one self-contained page for that step, built from its exported `ToolOutputs/` manifest and whatever is on disk. It needs no scheduler and no pipeline script, so it runs on the login node against a job that is still in progress. Copy that one file back and open it; do not wait for the whole run to describe a finished step in prose.
+
+**Hand over `pipeline.html` once the run is done.** Refresh it on the cluster first, then copy that single file back and give the user its local path — it is self-contained, so it needs nothing else beside it and no network. This is the one artifact to pull whole; everything else should be a subset chosen for inspection.
+
+Outputs land at the path configured on the cluster (typically `/shares/<group>/<user>/BioPipelines/<Project>/<Job>_NNN/`). Inside that job folder: one `<NNN>_<ToolName>/` directory per step, the completion markers, `Logs/` and `RunTime/` — so `<RunTime>` above is `<...>/<Job>_NNN/RunTime`.
 
 ---
 
@@ -241,8 +274,7 @@ Outputs land at the path configured on the cluster
 
 ### Writing the pipeline
 
-- Produce a Jupyter notebook (`.ipynb`), not a `.py` script. Example notebooks
-  live in `examples/notebooks`, and personal development is in `my_pipelines/`
+- Produce a Jupyter notebook (`.ipynb`), not a `.py` script. Example notebooks live in `example_pipelines/notebooks/`, and personal development is in `my_pipelines/`
 - First cell: clone the repo, install BioPipelines, and call `.install()` on
   the tools the pipeline needs. See the "Google Colab" section in
   `docs/user_manual.md` for the canonical setup snippet.
@@ -251,8 +283,7 @@ Outputs land at the path configured on the cluster
   ordinary notebook code that happens to use the BioPipelines API.
 - Inputs: small files can be uploaded directly to the runtime
   (`/content/`); larger or persistent inputs should be mounted from Drive.
-- The auto-detected config is `config.colab.yaml` — confirm it's selected
-  by checking `Pipeline(...).config` in an early cell if anything looks off.
+- The auto-detected config is `config.colab.yaml`. `Pipeline` takes a `config=` argument but never stores it, so `Pipeline(...).config` raises `AttributeError` — to confirm which variant is active, run `from biopipelines.config_manager import ConfigManager; ConfigManager().get_variant()` in an early cell, or `!bp-config show`.
 
 ### Running the pipeline
 
@@ -261,14 +292,17 @@ notebook cells in order. `llm/log.sh` does not apply in Colab mode — the
 notebook itself is the audit trail (cell outputs are saved with the
 `.ipynb`).
 
+**Who executes the cells depends on whether the Colab MCP server is registered.** If `mcp__colab-mcp__*` tools are in this session's tool list, you create the notebook, add cells and run them yourself, and read the outputs back directly — see `colab.md` for the full workflow. If they are not, you cannot touch the runtime: hand the user the notebook, ask them to run it, and work from what they paste back. Check the tool list; do not assume either.
+
 Things to remind the user about during execution:
 
 | Concern                | What to do                                                                  |
 | ---------------------- | --------------------------------------------------------------------------- |
 | Save the notebook      | File → Save in Drive, periodically. The autosave is *to Colab*, not Drive. |
-| Save outputs           | All tools implement `.download(...)`.    |
+| Save outputs           | All tools implement `.download()` — no arguments; it zips the tool's output folder and triggers a browser download on Colab. |
 | Long-running tools     | Run the long cell, then check on it — Colab will idle-disconnect a tab.    |
 | Reinstalling each session | Tools install once per kernel; budget ~5–15 min of setup at the start.   |
+| See the run page       | `regenerate_pipeline_page("<Job>/RunTime")`, then display it inline or download it. The 3D viewers are embedded, so no network is needed. |
 
 Outputs land in `/content/BioPipelines/<Project>/<Job>_NNN/` by default,
 which is **ephemeral**. Anything the user wants to keep must be copied to

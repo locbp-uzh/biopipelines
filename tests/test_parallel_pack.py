@@ -148,8 +148,10 @@ def test_each_tool_is_its_own_step_with_explicit_cpus(
 def test_failed_packed_tasks_make_the_batch_fail(
     slurm_packed_config, isolated_cwd, new_packed_pipeline,
 ):
-    """After waiting for every sibling, any failed task must make the packed
-    script exit non-zero so SLURM and afterok dependencies see the failure."""
+    """After waiting for every sibling, any failed task must make the packed script exit non-zero so SLURM and afterok dependencies see the failure.
+
+    It must not exit from inside the pack body, though: the page refresh and the exit check are appended after it, so exiting there skipped both and left the reader the pre-run plan page for a run that failed. The failures are folded into `BP_FAILED_STEPS`, which the appended check turns into the non-zero exit.
+    """
     from biopipelines.pipeline import Resources, Parallel, Run
     from biopipelines.mock import Mock
 
@@ -165,7 +167,17 @@ def test_failed_packed_tasks_make_the_batch_fail(
     body = (Path(pipeline.folders["runtime"]) / "pipeline.sh").read_text(encoding="utf-8")
     failure_block = body.split('if [ "$_pack_failed" -gt 0 ]; then', 1)[1].split("fi", 1)[0]
     assert 'echo "$_pack_failed of ${#_pack_pids[@]} packed tasks failed"' in failure_block
-    assert "exit 1" in failure_block
+    assert "BP_FAILED_STEPS=$((BP_FAILED_STEPS + _pack_failed))" in failure_block
+    assert "exit 1" not in failure_block, "exiting here skips the page refresh appended after the body"
+
+    # The exit still happens, after the refresh: the appended check reads the counter the pack fed.
+    # rindex, because the kill trap installed at the top of the script carries a refresh of its own.
+    refresh_at = body.rindex("regenerate_pipeline_page")
+    check_at = body.index('if [ "${BP_FAILED_STEPS:-0}" -ne 0 ]')
+    assert body.index("_pack_failed") < refresh_at < check_at, (
+        "order must be: pack body, page refresh, exit check"
+    )
+    assert "exit 1" in body[check_at:]
 
 
 def test_run_cpus_overrides_derived_share(

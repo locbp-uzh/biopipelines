@@ -34,14 +34,14 @@ def parse_info(info_path: str):
     current = None
     with open(info_path) as f:
         for line in f:
-            line = line.rstrip()
+            line = line.strip()
             if line.startswith("Pocket"):
                 if current is not None:
                     pockets.append(current)
                 current = {"pocket_idx": int(line.split()[1].rstrip(":"))}
             elif current is not None and "\t" in line:
                 key, val = line.split("\t", 1)
-                key = key.strip().lower().replace(" ", "_").rstrip(":")
+                key = key.strip().rstrip(":").strip().lower().replace(" ", "_")
                 try:
                     current[key] = float(val.strip())
                 except ValueError:

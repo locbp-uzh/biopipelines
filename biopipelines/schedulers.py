@@ -124,7 +124,7 @@ class SchedulerBackend:
         raise NotImplementedError
 
     def gpu_setup(self, gpu_spec: Optional[str]) -> str:
-        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
+        if gpu_spec is None or str(gpu_spec).strip().lower() in ("none", ""):
             return ""
         return """
 # Display GPU information
@@ -154,7 +154,9 @@ class SlurmBackend(SchedulerBackend):
     def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
                       single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         n = gpus if gpus else 1
-        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
+        # Anything but a real spec must decline outright: a stray 'None' used to reach the generic
+        # branch and emit `--gpus=None:1`, which SLURM can only reject.
+        if gpu_spec is None or str(gpu_spec).strip().lower() in ("none", ""):
             return "", []
         # A single-GPU-type site has no model to select on, and its GRES is the
         # untyped `gpu:N` — a typed request there is rejected outright.
@@ -251,7 +253,7 @@ class LsfBackend(SchedulerBackend):
                       single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         n = gpus if gpus else 1
         warnings: List[str] = []
-        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
+        if gpu_spec is None or str(gpu_spec).strip().lower() in ("none", ""):
             return "", warnings
         if gpu_spec in ("gpu", "any"):
             return f'#BSUB -gpu "num={n}"', warnings
@@ -332,7 +334,7 @@ class PbsBackend(SchedulerBackend):
                       single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         n = gpus if gpus else 1
         warnings: List[str] = []
-        if gpu_spec is None or gpu_spec == "none" or gpu_spec == "":
+        if gpu_spec is None or str(gpu_spec).strip().lower() in ("none", ""):
             return "", warnings
         if gpu_spec in ("gpu", "any"):
             return f"#PBS -l select=1:ngpus={n}", warnings

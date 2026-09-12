@@ -74,7 +74,8 @@ class VespaG(BaseConfig):
     """
 
     TOOL_NAME = "VespaG"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "vespag"
 
     # ------------------------------------------------------------------
     # Install
@@ -88,15 +89,16 @@ class VespaG(BaseConfig):
         package, and `load_model` resolves them relative to the runtime cwd, so
         the pipe script runs `vespag predict` from this clone). The heavy ESM-2
         3B embedding weights download lazily on first prediction."""
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("VespaG", "")
         parent_dir = os.path.dirname(repo_dir)
         weight_check = f'[ -f "{repo_dir}/model_weights/v2/esm2.pt" ]'
-        env_check = cls._env_exists_check("vespag", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {weight_check} \\
-   && {cls._env_run("vespag", env_manager)}python -c "import vespag, torch" >/dev/null 2>&1; then
-    echo "vespag environment already installed, skipping. Use force_reinstall=True to reinstall."
+   && {cls._env_run(env, env_manager)}python -c "import vespag, torch" >/dev/null 2>&1; then
+    echo "{env} environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
@@ -105,21 +107,21 @@ fi
 if [ ! -d "{repo_dir}/.git" ]; then
     git clone https://github.com/JSchlensok/VespaG.git "{repo_dir}"
 fi"""
-        remove_block = cls._env_remove_block("vespag", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("vespag", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing VespaG ==="
 {skip}{remove_block}
 {clone_block}
 
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create vespag environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
 # Verify: package importable AND committed FNN weights present in the clone.
 if {weight_check} \\
-   && {cls._env_run("vespag", env_manager)}python -c "import vespag, torch" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import vespag, torch" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== VespaG installation complete ==="
 else

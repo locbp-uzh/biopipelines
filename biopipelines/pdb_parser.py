@@ -10,6 +10,7 @@ Lightweight PDB parsing functionality without external dependencies.
 Provides atom selection and distance calculation utilities.
 """
 
+import os
 import math
 import re
 from typing import List, Dict, Any, Optional, Tuple, NamedTuple, Set
@@ -64,29 +65,85 @@ class Atom(NamedTuple):
 # offsets, so a future format change is a one-file edit, not a repo-wide sweep.
 # ---------------------------------------------------------------------------
 
+def _residue_shift(line: str) -> int:
+    """Columns every field past the residue name is pushed right by.
+
+    The residue field is 3 wide, but the PDB now issues 5-character CCD codes
+    (A1EI4 and similar). A record carrying one keeps the layout otherwise intact
+    and simply shifts everything after the code right by its excess width, so
+    the shift is derived rather than assumed -- measured against RCSB's own
+    output for 9RTM, a 5-character code gives exactly 2.
+
+    Parsing by shifted column rather than by ``split()`` is what makes a blank
+    chain id, an insertion code, and two adjacent full-width coordinates all
+    still readable: tokenizing collapses those cases into the wrong fields.
+    """
+    if len(line) <= 21 or line[20] == " ":
+        return 0
+    code = line[17:].split(" ", 1)[0]
+    return max(len(code) - 3, 0)
+
+
+def _overflows_residue_field(line: str) -> bool:
+    """True when a >3-character CCD code has shifted the columns right."""
+    return _residue_shift(line) > 0
+
+
 def field_atom_name(line: str) -> str:
     """Atom name (cols 13-16)."""
     return line[12:16].strip()
 
 
 def field_res_name(line: str) -> str:
-    """Residue / CCD code (cols 18-20 in fixed-column PDB)."""
-    return line[17:20].strip()
+    """Residue / CCD code (cols 18-20, wider when it overflows)."""
+    return line[17:20 + _residue_shift(line)].strip()
 
 
 def field_chain(line: str) -> str:
-    """Chain identifier (col 22)."""
-    return line[21:22].strip()
+    """Chain identifier (col 22). Empty when the record leaves it blank."""
+    s = _residue_shift(line)
+    return line[21 + s:22 + s].strip()
 
 
 def field_res_seq(line: str) -> str:
     """Residue sequence number as a string (cols 23-26), icode excluded."""
-    return line[22:26].strip()
+    s = _residue_shift(line)
+    return line[22 + s:26 + s].strip()
 
 
 def field_coords(line: str) -> Tuple[float, float, float]:
     """(x, y, z) coordinates (cols 31-54)."""
-    return (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+    s = _residue_shift(line)
+    return (float(line[30 + s:38 + s]),
+            float(line[38 + s:46 + s]),
+            float(line[46 + s:54 + s]))
+
+
+def _report_dropped(path: str, dropped: "List[Tuple[str, Exception]]") -> None:
+    """Warn about unparseable ATOM/HETATM records instead of dropping them mutely.
+
+    A silently skipped record is how the 5-character CCD bug stayed invisible: an
+    entire ligand vanished from the parse and every distance, box and atom count
+    downstream was computed on what was left.
+    """
+    if not dropped:
+        return
+    import sys as _sys
+    print(f"WARNING: {os.path.basename(path)}: skipped {len(dropped)} unparseable "
+          f"ATOM/HETATM record(s)", file=_sys.stderr)
+    for line, err in dropped[:3]:
+        print(f"    {type(err).__name__}: {err}  in  {line[:60]!r}", file=_sys.stderr)
+    if len(dropped) > 3:
+        print(f"    ... and {len(dropped) - 3} more", file=_sys.stderr)
+
+
+def field_element(line: str) -> str:
+    """Element symbol (cols 77-78), falling back to the atom name's first letter."""
+    s = _residue_shift(line)
+    if len(line) > 76 + s and line[76 + s:78 + s].strip():
+        return line[76 + s:78 + s].strip()
+    name = field_atom_name(line)
+    return name[0] if name else ""
 
 def _tokenize_cif_line(line: str) -> List[str]:
     """Split one mmCIF data line into tokens by CIF rules, not shell rules.
@@ -265,6 +322,7 @@ def parse_models_file(path: str, records: Tuple[str, ...] = ("ATOM", "HETATM")) 
     starts = tuple(records)
     pdb_models: List[List[Atom]] = []
     current: List[Atom] = []
+    dropped: List[Tuple[str, Exception]] = []
     seen_model_record = False
     with open(path, 'r') as f:
         for line in f:
@@ -285,10 +343,12 @@ def parse_models_file(path: str, records: Tuple[str, ...] = ("ATOM", "HETATM")) 
                         res_name=field_res_name(line),
                         res_num=int(field_res_seq(line)),
                         chain=field_chain(line),
-                        element=line[76:78].strip() if len(line) > 76 else atom_name[0],
+                        element=field_element(line),
                     ))
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    dropped.append((line.rstrip(), e))
                     continue
+    _report_dropped(path, dropped)
     if current:
         pdb_models.append(current)
     if not seen_model_record and pdb_models:
@@ -316,6 +376,7 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
         return parse_cif_file(pdb_path)
 
     atoms = []
+    dropped: List[Tuple[str, Exception]] = []
     with open(pdb_path, 'r') as f:
         for line in f:
             # Only parse ATOM and HETATM records
@@ -327,7 +388,7 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
                     chain = field_chain(line)
                     res_num = int(field_res_seq(line))
                     x, y, z = field_coords(line)
-                    element = line[76:78].strip() if len(line) > 76 else atom_name[0]
+                    element = field_element(line)
 
                     atom = Atom(
                         x=x, y=y, z=z,
@@ -340,9 +401,10 @@ def parse_pdb_file(pdb_path: str) -> List[Atom]:
                     atoms.append(atom)
 
                 except (ValueError, IndexError) as e:
-                    # Skip malformed lines
+                    dropped.append((line.rstrip(), e))
                     continue
 
+    _report_dropped(pdb_path, dropped)
     return atoms
 
 def get_protein_sequence(atoms: List[Atom]) -> Dict[str, str]:

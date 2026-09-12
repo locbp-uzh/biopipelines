@@ -20,24 +20,26 @@ def _build(local_config, isolated_cwd, new_pipeline, **kwargs):
     return read_all_emitted_artifacts(script_path)
 
 
+# Assertions pair the flag with its value: a bare number is subsumed by numbers already in the artifacts (default length=80 satisfies "8"; "100" satisfies "10") and passes regardless of the parameter.
+
 def test_length(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, length=120)
-    assert "120" in content
+    assert '"length": "120"' in content
 
 
 def test_num_designs(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, num_designs=8)
-    assert "8" in content
+    assert "--num_designs 8" in content
 
 
 def test_num_models(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, num_models=2)
-    assert "2" in content
+    assert "--num_models 2" in content
 
 
 def test_design_startnum(local_config, isolated_cwd, new_pipeline):
     content = _build(local_config, isolated_cwd, new_pipeline, design_startnum=99)
-    assert "99" in content
+    assert "--design_startnum 99" in content
 
 
 def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
@@ -48,7 +50,12 @@ def test_smoke_all_params(local_config, isolated_cwd, new_pipeline):
         num_models=3,
         design_startnum=10,
     )
-    assert_substrings_in(content, ["100", "10"])
+    assert_substrings_in(content, [
+        '"length": "100"',
+        "--num_designs 4",
+        "--num_models 3",
+        "--design_startnum 10",
+    ])
 
 
 def test_symmetry_string(local_config, isolated_cwd, new_pipeline):
@@ -72,6 +79,14 @@ def test_cfg_and_sampler_knobs(local_config, isolated_cwd, new_pipeline):
         "inference_sampler.gamma_0=0.6",
         "inference_sampler.num_timesteps=200",
     ])
+
+
+def test_contigs_is_a_synonym_for_contig(local_config, isolated_cwd, new_pipeline):
+    # The plural its three sibling wrappers take must bind the parameter, not
+    # reach hydra as an unknown `contigs=` override with the motif discarded.
+    content = _build(local_config, isolated_cwd, new_pipeline, contigs="80-150")
+    assert '"contig": "80-150"' in content
+    assert "contigs=" not in content
 
 
 def test_unindex_motif(local_config, isolated_cwd, new_pipeline):

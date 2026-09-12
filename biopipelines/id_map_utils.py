@@ -10,25 +10,29 @@ This module provides a unified approach to parsing and applying ID mapping patte
 across different tools. The pattern format is {"*": "<pattern>"} where <pattern>
 describes how to map structure IDs to table IDs.
 
-Pattern syntax:
+Pattern syntax. These are match classes, not id_patterns' slots: there, angle brackets hold a finite
+set of literal values used to compact a *predictable* id, so "<N>" is the one-element set {"N"} and
+expand_pattern("prot_<N>") is ["prot_N"]. A class cannot be spelled with a letter without becoming
+ambiguous in this domain -- "<N><S E>" reads as serine or glutamate at position N, while "<15 16><N>"
+reads as asparagine at positions 15 and 16 -- so the classes here are punctuation only.
 - "*" in both key and value represents the base ID
-- "<N>" represents a numeric suffix (one or more digits)
-- "<S>" represents any non-underscore segment (alphanumeric suffixes like "19A")
-- Everything else is treated as literal text
+- "<#>" represents a numeric suffix (one or more digits)
+- "<?>" represents any single segment not containing the delimiter (e.g. "19A")
+- Everything else is treated as literal text, "<N>" included: it is the letter N
 - Patterns are applied RECURSIVELY until no more matches
 
 Examples:
 - {"*": "*"}           -> no mapping (identity)
-- {"*": "*_<S>"}       -> strip ALL trailing "_segment" suffixes recursively (DEFAULT)
+- {"*": "*_<?>"}       -> strip ALL trailing "_segment" suffixes recursively (DEFAULT)
                         -> "protein_1_19A" -> "protein_1" -> "protein"
                         -> "rifampicin_1_2_3" -> "rifampicin"
-- {"*": "*_<N>"}       -> strip only trailing "_123" numeric suffixes recursively
+- {"*": "*_<#>"}       -> strip only trailing "_123" numeric suffixes recursively
                         -> "protein_1_19A" -> NO MATCH (19A is not purely numeric)
-- {"*": "*-<N>"}       -> strip ALL trailing "-123" suffixes recursively
-- {"*": "*_seq_<N>"}   -> strip ALL trailing "_seq_123" patterns recursively
+- {"*": "*-<#>"}       -> strip ALL trailing "-123" suffixes recursively
+- {"*": "*_seq_<#>"}   -> strip ALL trailing "_seq_123" patterns recursively
 
-Note: The default pattern {"*": "*_<S>"} works for any kind of suffix (numeric
-or alphanumeric). Use {"*": "*_<N>"} if you need to restrict to numeric-only suffixes.
+Note: The default pattern {"*": "*_<?>"} works for any kind of suffix (numeric
+or alphanumeric). Use {"*": "*_<#>"} if you need to restrict to numeric-only suffixes.
 
 Multi-axis combinatorics IDs use "+" as a separator (e.g., "prot1+lig1" for a
 protein-ligand pair). When generating candidate IDs, "+" components are expanded
@@ -47,8 +51,31 @@ Matching priority order (when using get_mapped_ids with unique=True):
 """
 
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple, Union
+
+try:
+    from .id_patterns import SEGMENT_REGEX, SUFFIX_DELIMITER
+except ImportError:
+    import os
+    import sys
+    sys.path.append(os.path.dirname(__file__))
+    from id_patterns import SEGMENT_REGEX, SUFFIX_DELIMITER
+
+try:
+    from . import contract_enforcement as _contract
+except ImportError:
+    import contract_enforcement as _contract
+
+
+# Punctuation only: a lettered slot is a literal value set in id_patterns, so `<N>` is the letter N here too.
+DIGIT_CLASSES = ('<#>',)
+SEGMENT_CLASSES = ('<?>',)
+
+# Strip any trailing delimiter-separated segment, recursively. Built from id_patterns' delimiter so
+# the two modules cannot disagree about what separates a parent from a child.
+DEFAULT_ID_MAP = {"*": f"*{SUFFIX_DELIMITER}<?>"}
 
 
 def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
@@ -56,23 +83,23 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
     Parse ID mapping pattern and generate regex for extracting base ID.
 
     Args:
-        id_map: ID mapping dictionary (e.g., {"*": "*_<N>_<N>"})
+        id_map: ID mapping dictionary (e.g., {"*": "*_<#>_<#>"})
 
     Returns:
         Compiled regex pattern that captures the base ID, or None if no mapping needed
 
     Examples:
-        >>> pattern = parse_id_map_pattern({"*": "*_<N>"})
+        >>> pattern = parse_id_map_pattern({"*": "*_<#>"})
         >>> match = pattern.match("rifampicin_1")
         >>> match.group(1)
         'rifampicin'
 
-        >>> pattern = parse_id_map_pattern({"*": "*_<S>"})
+        >>> pattern = parse_id_map_pattern({"*": "*_<?>"})
         >>> match = pattern.match("protein_19A")
         >>> match.group(1)
         'protein'
 
-        >>> pattern = parse_id_map_pattern({"*": "*-seq-<N>"})
+        >>> pattern = parse_id_map_pattern({"*": "*-seq-<#>"})
         >>> match = pattern.match("protein-seq-42")
         >>> match.group(1)
         'protein'
@@ -98,7 +125,7 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
         return None
 
     # Build regex pattern by:
-    # 1. Replace "<N>" and "<S>" placeholders with temporary markers
+    # 1. Replace "<#>" and "<?>" placeholders with temporary markers
     # 2. Escape special regex characters in the literal parts
     # 3. Replace markers back with regex patterns
     # 4. Anchor to end of string
@@ -107,16 +134,29 @@ def parse_id_map_pattern(id_map: Dict[str, str]) -> Optional[re.Pattern]:
     DIGIT_PLACEHOLDER = '\x00DIGIT_PATTERN\x00'
     SEGMENT_PLACEHOLDER = '\x00SEGMENT_PATTERN\x00'
 
-    # Replace <N> and <S> with placeholders before escaping
-    temp_pattern = suffix_pattern.replace('<N>', DIGIT_PLACEHOLDER)
-    temp_pattern = temp_pattern.replace('<S>', SEGMENT_PLACEHOLDER)
+    temp_pattern = suffix_pattern
+    for spelling in DIGIT_CLASSES:
+        temp_pattern = temp_pattern.replace(spelling, DIGIT_PLACEHOLDER)
+    for spelling in SEGMENT_CLASSES:
+        temp_pattern = temp_pattern.replace(spelling, SEGMENT_PLACEHOLDER)
+
+    # A leftover slot would be escaped into the literal text "<N>", which matches no real id, so the
+    # pattern would silently strip nothing. `<N>`/`<S>` were the retired class spellings.
+    leftover = re.findall(r'<[^<>]*>', temp_pattern)
+    if leftover:
+        raise ValueError(
+            f"ID map pattern '{pattern_str}' uses {', '.join(sorted(set(leftover)))}, which is not a "
+            f"match class. The classes are {DIGIT_CLASSES[0]} for digits and {SEGMENT_CLASSES[0]} for "
+            f"one segment; a lettered slot is a literal value set in id_patterns, so it cannot be a "
+            f"class here. Rewrite '<N>' as '<#>' and '<S>' as '<?>'."
+        )
 
     # Escape regex special characters
     regex_suffix = re.escape(temp_pattern)
 
     # Replace placeholders with regex patterns
     regex_suffix = regex_suffix.replace(re.escape(DIGIT_PLACEHOLDER), r'\d+')
-    regex_suffix = regex_suffix.replace(re.escape(SEGMENT_PLACEHOLDER), r'[^_]+')
+    regex_suffix = regex_suffix.replace(re.escape(SEGMENT_PLACEHOLDER), SEGMENT_REGEX)
 
     # Build full pattern: capture everything before the suffix
     full_pattern = f'^(.+){regex_suffix}$'
@@ -205,25 +245,25 @@ def map_table_ids_to_ids(structure_id: str, id_map: Dict[str, str]) -> list:
 
     Args:
         structure_id: Structure ID (e.g., "RFDAA_Hit_Screen_007_1_1" or "prot1+lig1_2")
-        id_map: ID mapping dictionary (e.g., {"*": "*_<N>"} or {"*": "*_<S>"})
+        id_map: ID mapping dictionary (e.g., {"*": "*_<#>"} or {"*": "*_<?>"})
 
     Returns:
         List of candidate IDs to try, from most specific to least specific.
 
     Examples:
-        >>> map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<N>"})
+        >>> map_table_ids_to_ids("rifampicin_1_2", {"*": "*_<#>"})
         ['rifampicin_1_2', 'rifampicin_1', 'rifampicin']
 
-        >>> map_table_ids_to_ids("protein_1_19A", {"*": "*_<S>"})
+        >>> map_table_ids_to_ids("protein_1_19A", {"*": "*_<?>"})
         ['protein_1_19A', 'protein_1', 'protein']
 
-        >>> map_table_ids_to_ids("prot1+lig1", {"*": "*_<S>"})
+        >>> map_table_ids_to_ids("prot1+lig1", {"*": "*_<?>"})
         ['prot1+lig1', 'prot1', 'lig1']
 
-        >>> map_table_ids_to_ids("prot1+lig1_2", {"*": "*_<S>"})
+        >>> map_table_ids_to_ids("prot1+lig1_2", {"*": "*_<?>"})
         ['prot1+lig1_2', 'prot1+lig1', 'prot1', 'lig1_2', 'lig1']
 
-        >>> map_table_ids_to_ids("protein-seq-42", {"*": "*-seq-<N>"})
+        >>> map_table_ids_to_ids("protein-seq-42", {"*": "*-seq-<#>"})
         ['protein-seq-42', 'protein']
 
         >>> map_table_ids_to_ids("no_change", {"*": "*"})
@@ -255,20 +295,19 @@ def _map_table_ids_to_ids_cached(structure_id: str, pattern_str: str) -> Tuple[s
     if not suffix_pattern:
         return (structure_id,)
 
-    # Determine placeholder type: <S> (any segment) or <N> (digits only)
-    has_s = '<S>' in suffix_pattern
-    has_n = '<N>' in suffix_pattern
-
-    if not has_s and not has_n:
+    # Either class spelling, canonical or retired: a segment class, else a digits class.
+    placeholder = next((c for c in SEGMENT_CLASSES if c in suffix_pattern), None)
+    has_s = placeholder is not None
+    if placeholder is None:
+        placeholder = next((c for c in DIGIT_CLASSES if c in suffix_pattern), None)
+    if placeholder is None:
         return (structure_id,)
 
-    # Find the position of the placeholder
-    placeholder = '<S>' if has_s else '<N>'
     p_pos = suffix_pattern.find(placeholder)
 
     # Extract delimiter
     if p_pos == 0:
-        return (structure_id,)  # Pattern like "*<N>" doesn't make sense
+        return (structure_id,)  # Pattern like "*<#>" doesn't make sense
 
     delimiter = suffix_pattern[p_pos - 1]
     literal_with_delim = suffix_pattern[:p_pos - 1] if p_pos > 1 else ""
@@ -423,6 +462,118 @@ def _build_target_index(target_ids: Tuple[str, ...], pattern_str: str):
     return target_set, target_bases_cache, base_to_targets
 
 
+
+# =============================================================================
+# Match tiers and lookup-consistency scoring
+# =============================================================================
+# The ladder's last three tiers match on the id string alone, so they can return a DIFFERENT row's value; keeping the tier that answered lets a whole lookup be judged, which is the only level where a systematic rename and a stray mismatch look different.
+
+TIER_EXACT = "exact"
+TIER_PROVENANCE = "provenance"
+TIER_CHILD = "child"
+TIER_PARENT = "parent"
+TIER_SIBLING = "sibling"
+TIER_GROUP = "group"
+TIER_NONE = "none"
+
+# The answering tiers in ladder order; TIER_GROUP is the closest_siblings_only branch, which replaces the ladder rather than extending it.
+MATCH_TIERS: Tuple[str, ...] = (
+    TIER_EXACT, TIER_PROVENANCE, TIER_CHILD, TIER_PARENT, TIER_SIBLING, TIER_GROUP,
+)
+
+# Share of a lookup at which a non-majority tier stops reading as a handful of exceptions and starts reading as a population of its own.
+MINORITY_POPULATION_SHARE = 0.5
+
+# A lookup answered by more than one tier never scores as well as a uniform one, however balanced the mix.
+MIXED_LOOKUP_CEILING = 0.9
+
+
+def _tier_rank(tier: str) -> int:
+    return MATCH_TIERS.index(tier) if tier in MATCH_TIERS else len(MATCH_TIERS)
+
+
+@dataclass(frozen=True)
+class IdMatchScore:
+    """How consistently one lookup's ids resolved, and which ones stood out.
+
+    ``tier_counts`` is ordered along the ladder, so it renders as the story of the lookup; ``minority_ids`` are the ids that did NOT resolve at the majority tier, i.e. exactly the ids a user would have to check by hand.
+    """
+
+    total: int
+    tier_counts: Dict[str, int]
+    unmatched: Tuple[str, ...]
+    majority_tier: Optional[str]
+    minority_ids: Tuple[str, ...]
+    score: float
+
+    @property
+    def resolved(self) -> int:
+        return sum(self.tier_counts.values())
+
+
+def score_id_match_tiers(tiers: Dict[str, str]) -> IdMatchScore:
+    """Score one whole lookup by the CONSISTENCY of the tiers that answered it, not by their depth.
+
+    Depth is the wrong signal. A tool that renames every id downgrades every row to the same tier, and that is the case the permissive ladder exists to serve; scoring it badly would only teach people to ignore the score. What actually predicts a wrong value is a row resolving differently from its neighbors: if 497 of 500 ids match exactly and 3 arrive via the sibling tier, those 3 did not follow the rule the other 497 established, and a sibling match is precisely the tier that can hand back another row's cell.
+
+    So the statistic is the size of the non-majority population, read as evidence about whether it is a rule or an exception. Let ``resolved`` be the ids some tier answered and ``minority`` those that did not resolve at the majority tier:
+
+      * ``minority == 0`` -> ``1.0``. One tier answered everything. Uniform is uniform whether it is uniformly exact or uniformly sibling.
+      * otherwise -> ``min(1, minority / resolved / MINORITY_POPULATION_SHARE) * MIXED_LOOKUP_CEILING``, so the score RISES with the minority's share and a rare minority is the worst case of all.
+
+    The rise is the counter-intuitive part and it is deliberate: three odd rows out of 500 score 0.01 while an even 250/250 split scores 0.9, because a tier that answers half a lookup is a second systematic rule (two input axes, two upstream tools) whereas a tier that answers three rows out of 500 is three accidents. Fewer rows affected therefore scores WORSE, which is the ordering the maintainer asked for. The step down from 1.0 at the first inconsistent row is intentional too: a mixed lookup is a qualitatively different object from a uniform one, and no mix earns the top score.
+
+    Unmatched ids are counted and reported but kept out of the score. They cannot return the wrong value — they return ``None``, which ``lookup_table_value`` turns into a ``KeyError`` and stream filtering drops — so folding them in would confuse "this lookup answered wrongly" with "this lookup did not answer".
+    """
+    counts: Dict[str, int] = {}
+    unmatched: List[str] = []
+    for source_id, tier in tiers.items():
+        if tier == TIER_NONE:
+            unmatched.append(source_id)
+        else:
+            counts[tier] = counts.get(tier, 0) + 1
+
+    ordered = {tier: counts[tier] for tier in sorted(counts, key=_tier_rank)}
+    resolved = sum(ordered.values())
+    if resolved == 0:
+        return IdMatchScore(len(tiers), ordered, tuple(unmatched), None, (), 1.0)
+
+    # Largest population wins; a tie goes to the shallower tier, which is the one that made fewer string assumptions.
+    majority_tier = min(ordered, key=lambda tier: (-ordered[tier], _tier_rank(tier)))
+    if len(ordered) == 1:
+        minority_ids: Tuple[str, ...] = ()
+    else:
+        minority_ids = tuple(
+            source_id for source_id, tier in tiers.items()
+            if tier != TIER_NONE and tier != majority_tier
+        )
+    if not minority_ids:
+        score = 1.0
+    else:
+        share = len(minority_ids) / resolved
+        score = min(1.0, share / MINORITY_POPULATION_SHARE) * MIXED_LOOKUP_CEILING
+    return IdMatchScore(
+        len(tiers), ordered, tuple(unmatched), majority_tier, minority_ids, score
+    )
+
+
+def report_id_match_consistency(tiers: Dict[str, str], where: str = "") -> IdMatchScore:
+    """Score a lookup and hand the result to the framework's one contract reporter.
+
+    Log-only by design: the returned score is informational and no matching decision is taken from it. Returns the score so a caller (or a test) can look at the numbers without re-deriving them.
+    """
+    summary = score_id_match_tiers(tiers)
+    from biopipelines.contract_enforcement import check_id_match_consistency, report
+    report(check_id_match_consistency(
+        tier_counts=summary.tier_counts,
+        minority_ids=summary.minority_ids,
+        score=summary.score,
+        unmatched=len(summary.unmatched),
+        where=where,
+    ))
+    return summary
+
+
 def get_mapped_ids(
     source_ids: List[str],
     target_ids: List[str],
@@ -445,7 +596,7 @@ def get_mapped_ids(
     Args:
         source_ids: List of source IDs to match from
         target_ids: List of target IDs to match against
-        id_map: ID mapping pattern (default: {"*": "*_<S>"})
+        id_map: ID mapping pattern (default: {"*": "*_<?>"})
                 Supports recursive suffix matching
         unique: If True (default), return the single most specific match or None.
                 If False, return list of all matches.
@@ -499,9 +650,45 @@ def get_mapped_ids(
         >>> # Provenance match (Panda auto-renamed IDs)
         >>> get_mapped_ids(["Panda_1"], ["LID_001_1"], map_table_paths=["/path/to/map.csv"])
         {'Panda_1': 'LID_001_1'}
+
+    A call whose ids did not all resolve at the same tier also scores itself through ``report_id_match_consistency`` and prints one line naming the ids that went a different way. That is log-only: no matching decision is taken from the score.
     """
+    resolved = _get_mapped_ids_with_tiers(
+        source_ids, target_ids, id_map, unique, map_table_paths, closest_siblings_only
+    )
+    return {source_id: value for source_id, (value, _tier) in resolved.items()}
+
+
+def get_mapped_ids_with_tiers(
+    source_ids: List[str],
+    target_ids: List[str],
+    id_map: Dict[str, str] = None,
+    unique: bool = True,
+    map_table_paths: Optional[List[str]] = None,
+    closest_siblings_only: bool = False
+) -> Dict[str, Tuple[Union[None, str, List[str]], str]]:
+    """:func:`get_mapped_ids`, but each match arrives paired with the tier that produced it.
+
+    Same matching, same values, same order — the only difference is that the tier is not thrown away. A caller that wants to know how much to trust a match (or to score a whole lookup with :func:`score_id_match_tiers`) needs this; a caller that only wants the value should keep using :func:`get_mapped_ids`.
+
+    Returns ``{source_id: (value, tier)}`` where ``tier`` is one of :data:`MATCH_TIERS` or :data:`TIER_NONE`, and ``value`` has whatever shape ``unique`` implies.
+    """
+    return _get_mapped_ids_with_tiers(
+        source_ids, target_ids, id_map, unique, map_table_paths, closest_siblings_only
+    )
+
+
+def _get_mapped_ids_with_tiers(
+    source_ids: List[str],
+    target_ids: List[str],
+    id_map: Dict[str, str] = None,
+    unique: bool = True,
+    map_table_paths: Optional[List[str]] = None,
+    closest_siblings_only: bool = False
+) -> Dict[str, Tuple[Union[None, str, List[str]], str]]:
+    """The ladder itself, tagging every answer with the tier that gave it."""
     if id_map is None:
-        id_map = {"*": "*_<S>"}
+        id_map = dict(DEFAULT_ID_MAP)
 
     result = {}
 
@@ -510,7 +697,7 @@ def get_mapped_ids(
     # many times against the *same* target list pay the O(N) index build only
     # once instead of once per call.
     target_set, target_bases_cache, base_to_targets = _build_target_index(
-        tuple(target_ids), id_map.get("*", "*_<S>")
+        tuple(target_ids), id_map.get("*", DEFAULT_ID_MAP["*"])
     )
 
     for source_id in source_ids:
@@ -528,13 +715,13 @@ def get_mapped_ids(
                     if tdist == 1 and tid not in seen_g:
                         group.append(tid)
                         seen_g.add(tid)
-            result[source_id] = group
+            result[source_id] = (group, TIER_GROUP if group else TIER_NONE)
             continue
 
         # Priority 1: Exact match
         if source_id in target_set:
             if unique:
-                result[source_id] = source_id
+                result[source_id] = (source_id, TIER_EXACT)
             else:
                 # Collect exact match + all other targets whose base list
                 # contains the source id.
@@ -544,7 +731,7 @@ def get_mapped_ids(
                     if tid not in seen_match:
                         matches.append(tid)
                         seen_match.add(tid)
-                result[source_id] = matches
+                result[source_id] = (matches, TIER_EXACT)
             continue
 
         # Priority 2: Provenance match via map_table columns
@@ -553,9 +740,9 @@ def get_mapped_ids(
             matched = resolve_id_by_provenance(source_id, target_set, map_table_paths)
             if matched is not None:
                 if unique:
-                    result[source_id] = matched
+                    result[source_id] = (matched, TIER_PROVENANCE)
                 else:
-                    result[source_id] = [matched]
+                    result[source_id] = ([matched], TIER_PROVENANCE)
                 continue
 
         # Build candidate IDs: source_id + provenance identities
@@ -577,9 +764,9 @@ def get_mapped_ids(
             if child_matches:
                 child_matches.sort(key=lambda x: x[1])
                 if unique:
-                    result[source_id] = child_matches[0][0]
+                    result[source_id] = (child_matches[0][0], TIER_CHILD)
                 else:
-                    result[source_id] = [m[0] for m in child_matches]
+                    result[source_id] = ([m[0] for m in child_matches], TIER_CHILD)
                 found = True
                 break
 
@@ -593,9 +780,9 @@ def get_mapped_ids(
             if parent_matches:
                 parent_matches.sort(key=lambda x: x[1])
                 if unique:
-                    result[source_id] = parent_matches[0][0]
+                    result[source_id] = (parent_matches[0][0], TIER_PARENT)
                 else:
-                    result[source_id] = [m[0] for m in parent_matches]
+                    result[source_id] = ([m[0] for m in parent_matches], TIER_PARENT)
                 found = True
                 break
 
@@ -621,7 +808,7 @@ def get_mapped_ids(
             # Sort by combined distance, then by source distance
             sibling_matches.sort(key=lambda x: (x[1], x[2]))
             if unique:
-                result[source_id] = sibling_matches[0][0]
+                result[source_id] = (sibling_matches[0][0], TIER_SIBLING)
             else:
                 # Remove duplicates while preserving order
                 seen = set()
@@ -630,15 +817,18 @@ def get_mapped_ids(
                     if m[0] not in seen:
                         seen.add(m[0])
                         unique_matches.append(m[0])
-                result[source_id] = unique_matches
+                result[source_id] = (unique_matches, TIER_SIBLING)
             continue
 
         # No match found
         if unique:
-            result[source_id] = None
+            result[source_id] = (None, TIER_NONE)
         else:
-            result[source_id] = []
+            result[source_id] = ([], TIER_NONE)
 
+    # A lookup whose ids all resolved the same way has nothing to report, and this is a hot path (one call per table cell), so pay for the score only once a second tier appears.
+    if len({tier for _value, tier in result.values()}) > 1:
+        report_id_match_consistency({sid: tier for sid, (_value, tier) in result.items()})
     return result
 
 
@@ -733,7 +923,7 @@ def get_mapped_ids_grouped(
     Args:
         source_ids: List of source IDs to match from
         target_ids: List of target IDs to match against
-        id_map: ID mapping pattern (default: {"*": "*_<S>"})
+        id_map: ID mapping pattern (default: {"*": "*_<?>"})
 
     Returns:
         Dict with structure: {base_id: {"sources": [...], "targets": [...]}}
@@ -742,7 +932,7 @@ def get_mapped_ids_grouped(
         >>> get_mapped_ids_grouped(
         ...     ["protein_1", "protein_2"],
         ...     ["protein_1_1", "protein_1_2", "protein_2_1"],
-        ...     {"*": "*_<S>"}
+        ...     {"*": "*_<?>"}
         ... )
         {
             'protein_1': {'sources': ['protein_1'], 'targets': ['protein_1_1', 'protein_1_2']},
@@ -750,7 +940,7 @@ def get_mapped_ids_grouped(
         }
     """
     if id_map is None:
-        id_map = {"*": "*_<S>"}
+        id_map = dict(DEFAULT_ID_MAP)
 
     # Build base-to-ids mapping for both source and target
     source_by_base = {}

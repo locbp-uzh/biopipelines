@@ -186,6 +186,25 @@ def test_strain_table_declared_only_with_structures(record_case):
     assert "descriptors" not in tables
 
 
+def test_max_iters_defaults_to_2000_and_is_settable(record_case):
+    """max_iters is the same cap conformer_strain uses internally (see
+    test_non_convergence_raises_rather_than_scoring in this file) -- this
+    only checks the tool actually exposes and validates it."""
+    from biopipelines.rdkit_descriptors import RDKit
+
+    default_tool = RDKit(structures=_poses(), smiles=FLEXIBLE_SMILES)
+    custom_tool = RDKit(structures=_poses(), smiles=FLEXIBLE_SMILES, max_iters=5000)
+    record_case(input="RDKit(...) default vs RDKit(..., max_iters=5000)",
+                expected=(2000, 5000),
+                actual=(default_tool.max_iters, custom_tool.max_iters))
+
+    assert default_tool.max_iters == 2000
+    assert custom_tool.max_iters == 5000
+
+    with pytest.raises(ValueError, match="max_iters must be a positive integer"):
+        RDKit(structures=_poses(), smiles=FLEXIBLE_SMILES, max_iters=0)
+
+
 def test_compounds_only_behaviour_unchanged(record_case):
     """Regression: the SMILES-only descriptors path keeps its table and schema."""
     from biopipelines.rdkit_descriptors import RDKit, DEFAULT_DESCRIPTORS
@@ -339,3 +358,42 @@ def test_strain_uses_filtered_runtime_map_ids(tmp_path, monkeypatch, record_case
         actual=actual,
     )
     assert actual == survivors
+
+
+def test_compute_strain_threads_max_iters_to_each_task(tmp_path, monkeypatch, record_case):
+    """The tool's max_iters must reach conformer_strain via the task tuple
+    _strain_one unpacks -- a config-JSON round trip, not just a stored attribute.
+    Absent from cfg (an older config) falls back to the 2000 default."""
+    import pandas as pd
+    from biopipelines.datastream import DataStream
+
+    mod = _load_pipe()
+    (tmp_path / "pose_1.pdb").write_text("END\n")
+    structures_map = tmp_path / "structures_map.csv"
+    pd.DataFrame([{"id": "pose_1", "file": str(tmp_path / "pose_1.pdb")}]).to_csv(structures_map, index=False)
+    structures = DataStream(name="structures", ids=["pose_1"], files=[str(tmp_path / "<id>.pdb")],
+                            map_table=str(structures_map), format="pdb")
+    structures_json = tmp_path / "structures.json"
+    structures.save_json(str(structures_json))
+
+    captured = []
+
+    def fake_strain_one(task):
+        captured.append(task[-1])  # max_iters is the last task element
+        return {"id": task[0], "smiles": task[2], "e_pose": 1.0,
+                "e_relaxed": 0.0, "strain": 1.0, "ff_engine": "test"}, None
+
+    monkeypatch.setattr(mod, "_strain_one", fake_strain_one)
+
+    mod.compute_strain({
+        "structures_json": str(structures_json), "strain_csv": str(tmp_path / "custom.csv"),
+        "smiles": "CCO", "cpus": 1, "max_iters": 7500,
+    })
+    mod.compute_strain({
+        "structures_json": str(structures_json), "strain_csv": str(tmp_path / "default.csv"),
+        "smiles": "CCO", "cpus": 1,
+    })
+
+    record_case(input="cfg with max_iters=7500, then cfg with no max_iters key",
+                expected=[7500, 2000], actual=captured)
+    assert captured == [7500, 2000]

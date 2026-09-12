@@ -66,7 +66,9 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.2"
+    # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -251,7 +253,7 @@ fi
             Tables:
                 structures: id | file
                 confidence: id | structure | plddt | max_pae | ptm
-                msas: id | sequences.id | sequence | msa_file
+                msas: id | sequences.id | sequence | file
                 missing: id | removed_by | kind | cause
         """
         # Store original input for upstream missing table lookup and
@@ -349,6 +351,7 @@ fi
         script_content += self.activate_environment()
         script_content += self._generate_script_prepare_sequences()
         script_content += self._generate_msa_copy_section()
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_alphafold()
         script_content += self._generate_script_extract_best_rank()
         script_content += self._generate_script_extract_confidence()
@@ -433,6 +436,11 @@ python "{self.msa_copy_py}" \\
         if self.rand_seed != 0:
             af_options += f" --random-seed {self.rand_seed}"
 
+        # Kept out of af_options so the "Options:" echo below stays free of the bash quoting the forwarded tokens carry.
+        forwarded = self.extra_args_bash()
+        if forwarded:
+            forwarded = " " + forwarded
+
         # Determine colabfold_batch command
         if scheduler == "colab":
             # Colab: colabfold installed into system python; run via /usr/local/bin
@@ -447,9 +455,9 @@ python "{self.msa_copy_py}" \\
         if scheduler == "colab":
             # Run in a clean subshell without conda env vars to avoid interference
             # with Colab's JAX/GPU/tensorflow stack
-            run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options})"""
+            run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{forwarded})"""
         else:
-            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}"""
+            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{forwarded}"""
 
         # On Colab, colabfold_batch runs as the system Python and downloads its
         # AF2 params into $HOME/.cache/colabfold/params (i.e. /root/.cache/...),
@@ -641,7 +649,7 @@ python {self.unsanitize_ids_py} \\
             "msas": TableInfo(
                 name="msas",
                 path=self.msa_csv,
-                columns=["id", "sequences.id", "sequence", "msa_file"],
+                columns=["id", "sequences.id", "sequence", "file"],
                 description="MSA files for sequence recycling between predictions"
             )
         }

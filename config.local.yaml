@@ -47,9 +47,38 @@ folders:
     cache: "./cache"
     containers: "./containers"
 
-  repositories: {}
-  cache: {}
-  server: {}
+  # Installation files. Every tool that reads its checkout as a hard
+  # folders["<Tool>"] subscript must appear here or constructing it raises
+  # KeyError before anything runs. <data> is "." on this variant, so an
+  # install() clones next to the repository.
+  repositories:
+    AlphaFold: "<data>/localcolabfold"
+    DiffDock: "<data>/DiffDock"
+    DynamicBind: "<data>/DynamicBind"
+    GEMS: "<data>/GEMS"
+    Gnina: "<data>/gnina"
+    LASErMPNN: "<data>/LASErMPNN"
+    MMseqs2: "<data>/mmseqs"
+    NeuralPLexer: "<data>/NeuralPLexer"
+    PLACER: "<data>/PLACER"
+    PocketGen: "<data>/PocketGen"
+    ProteinMPNN: "<data>/ProteinMPNN"
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion2: "<data>/RFdiffusion2"
+    RFdiffusion3: "<data>/rfdiffusion3"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RTMScore: "<data>/RTMScore"
+
+  cache:
+    BoltzCache: "<cache>/Boltz"
+    ColabFoldDatabases: "<cache>/colabfold_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
+    # AF2 params shared by every AF2-consuming tool; its params/ subdir holds
+    # params_model_*.npz.
+    AlphaFoldParams: "<data>/localcolabfold/colabfold"
+
+  server:
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
 
 # Controls how tool outputs are displayed in Jupyter notebooks.
 # Maps stream formats (or stream names) to renderer scripts in the renderers/ folder.

@@ -1,6 +1,6 @@
 """A range pattern states the design space; at runtime the map_table states what exists.
 
-ids_expanded already read the map for LAZY ids (bracket segments, `design[_<chain>]`), but
+ids_expanded already read the map for LAZY ids (bracket segments, `design[_<?>]`), but
 a RANGE pattern (`12_Panda_1_<1..200>_<1..2>`) took the arithmetic branch and re-declared
 every id the design space allows -- including the ones an upstream filter had dropped.
 

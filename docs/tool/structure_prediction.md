@@ -38,18 +38,23 @@ rm install_colabbatch_linux.sh
 **Tables**:
 - `structures`:
 
-  | id | source_id | sequence |
-  |----|-----------|----------|
+  | id | file |
+  |----|------|
 
 - `confidence`:
 
   | id | structure | plddt | max_pae | ptm |
   |----|-----------|-------|---------|-----|
 
-- `msas` (only when MSAs are generated):
+- `msas`:
 
-  | id | sequences.id | sequence | msa_file |
+  | id | sequences.id | sequence | file |
   |----|--------------|----------|----------|
+
+- `missing` (only when an input axis carries an upstream manifest):
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 **Example**:
 ```python
@@ -100,7 +105,6 @@ pip install boltz[cuda] -U
   Supports recycling from AlphaFold via `MSA(af_result, convert="csv")`.
 - `affinity`: bool = True - Calculate binding affinity predictions
 - `output_format`: str = "pdb" - Output format (pdb, mmcif)
-- `msa_server`: str = "public" - MSA generation (public, local)
 - `recycling_steps`: Optional[int] = None - Number of recycling steps (default: model-specific)
 - `diffusion_samples`: Optional[int] = None - Number of diffusion samples (default: model-specific)
 - `top_only`: bool = True - When True (default), keep only the top model as `<id>`. When False, surface every diffusion sample as a separate structure `<id>_1..N` — e.g. to feed a Boltz2 pose ensemble (with native covalent linkage / full scaffold) into downstream design. Pair with `diffusion_samples=N` to control how many.
@@ -118,22 +122,47 @@ pip install boltz[cuda] -U
 - `disulfide_bonds`: Optional[List[Dict[str, Any]]] = None - Disulfide bond constraints
 - `metal_coord`: Optional[List[Dict[str, Any]]] = None - Metal-coordination bond constraints
 
-**Streams**: `structures`
+**Streams**: `structures`, `sequences`, `compounds` (only when ligands are folded), `msas` (empty when `single_sequence=True`)
 
 **Tables**:
+- `structures`:
+
+  | id | file |
+  |----|------|
+
 - `confidence`:
 
-  | id | sequences.id | compounds.id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt |
-  |----|--------------|--------------|------------|------------------|-----|------|---------------|----------------|
+  | id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt |
+  |----|------------|------------------|-----|------|---------------|----------------|
 
-- `affinity`:
+- `affinity` (only when `affinity=True`):
 
-  | id | sequences.id | compounds.id | input_file | affinity_pred_value | affinity_probability_binary |
-  |----|--------------|--------------|------------|---------------------|----------------------------|
+  | id | input_file | affinity_pred_value | affinity_probability_binary |
+  |----|------------|---------------------|-----------------------------|
 
   Prefer `affinity_probability_binary` (binder probability, higher = more likely a binder) for ranking — it is more reliable than the `affinity_pred_value` regression score in most cases.
 
-  Provenance columns (`sequences.id`, `compounds.id`) track which protein and ligand produced each row, enabling filtering and joins without parsing the ID string.
+- `sequences`:
+
+  | id | sequence |
+  |----|----------|
+
+- `msas` (only when `single_sequence=False`):
+
+  | id | sequences.id | sequence | file |
+  |----|--------------|----------|----------|
+
+- `compounds` (only when ligands are folded; `code` carries the residue code Boltz assigned):
+
+  | id | format | code | smiles | ccd |
+  |----|--------|------|--------|-----|
+
+- `missing` (only when an input axis carries an upstream manifest):
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  Beyond the declared columns above, `structures`, `confidence` and `affinity` each gain one `<axis>.id` provenance column per input axis (`sequences.id`, `compounds.id`, …), appended at runtime by the postprocessing step (`pipe_boltz_postprocessing.py:334`, `:364`, `:393`). They track which protein and ligand produced each row, so filtering and joins need no ID-string parsing. The same step also writes an undeclared `value` column onto `structures` (`:327`); treat it as an implementation detail rather than part of the contract.
 
 **Example**:
 ```python
@@ -233,7 +262,7 @@ Blind diffusion-based docking: samples candidate ligand poses over translation, 
 
 **Tables**:
 - `confidence`: | id | structures.id | compounds.id | rank | confidence |
-- `missing`: | id | removed_by | cause |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -273,7 +302,7 @@ Flexible-backbone docking. DynamicBind is an equivariant generative model that p
 
 **Tables**:
 - `affinity`: | id | structures.id | compounds.id | rank | lddt | affinity |
-- `missing`: | id | removed_by | cause |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -341,6 +370,8 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: DataStream | StandardizedOutput = None — Nucleic-acid sequences (double-stranded axes add the reverse-complement chain automatically).
 - `ligands`: DataStream | StandardizedOutput = None — Compounds stream (`Ligand` / `CompoundLibrary`); folded by CCD code (SMILES ligands supported too).
 - `msas`: StandardizedOutput = None — Precomputed MSAs to recycle per protein chain (e.g. from MMseqs2 or a previous run). Omit for single-sequence folding.
+- `modifications`: Optional[List[Dict]] = None — Per-residue CCD substitutions on a polymer chain, e.g. `[{"chain": "A", "position": 122, "ccd": "SEP"}]`. The residue is replaced by its CCD entry and atom-tokenized, so `SEP` / `TPO` / `PTR` give real phospho-residues with their phosphate rather than the unmodified parent. Works on DNA/RNA chains too (`PSU`, …). CCD codes only — the upstream `Modification.smiles` field is not implemented, and a `smiles` key is rejected rather than ignored.
+- `covalent_bonds`: Optional[List[Dict]] = None — Inter-entity covalent links, e.g. `[{"atom1": ["A", 122, "SG"], "atom2": ["C", 1, "C1"]}]`. Atom names are resolved against the residue's CCD atoms at runtime; an unknown chain, residue, or atom name raises instead of being silently dropped.
 - `num_loops`: int = 10 — Recurrent folding loops (inference-time scaling).
 - `num_sampling_steps`: int = 100 — Diffusion sampling steps.
 - `num_diffusion_samples`: int = 1 — Diffusion samples per seed.
@@ -353,8 +384,12 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 **Streams**: `structures` (mmCIF), `compounds` (ligand passthrough when ligands are folded)
 
 **Tables**:
-- `structures`: | id | file | *(+ {axis}.id provenance)* |
-- `confidence`: | id | file | plddt | ptm | iptm | *(max_pae if `include_pae`)* |
+- `structures`: | id | file |
+- `confidence`: | id | file | plddt | ptm | iptm | max_pae | — `max_pae` is present only with `include_pae=True`.
+- `compounds` (only when ligands are folded): | id | format | code | smiles | ccd |
+- `missing` (only when an input axis carries an upstream manifest): | id | removed_by | kind | cause |
+
+`structures` gains one `<axis>.id` provenance column per input axis at runtime, appended after the declared columns (`pipe_esmfold2_postprocessing.py:79`). `confidence` does not — it is written without them.
 
 **Example**:
 ```python
@@ -367,7 +402,18 @@ cplx = ESMFold2(proteins=Each(rec, binders), num_seeds=4)
 
 # Protein + ligand complex with recycled MSAs and PAE
 holo = ESMFold2(proteins=rec, ligands=Ligand("ATP"), msas=prev_run, include_pae=True)
+
+# Phospho-substrate folded against a phosphatase
+pair = ESMFold2(
+    proteins=Each(substrate, phosphatase),
+    modifications=[{"chain": "A", "position": 122, "ccd": "SEP"}],
+    include_pae=True,
+)
 ```
+
+Chain ids in `modifications` and `covalent_bonds` are assigned in axis order — proteins, then ssDNA/dsDNA/ssRNA/dsRNA, then ligands — starting at `A`, with a double-stranded axis taking two consecutive letters. They name a position in the complex rather than a sequence id, so when an axis iterates, the same constraint applies to every item of that axis.
+
+There is no `pocket` parameter. Upstream defines `PocketConditioning` and stores it on `StructurePredictionInput`, but as of esm 3.3.0 `build_feature_tensors` sets `pocket_feature` to zeros unconditionally and never reads it, so the constraint would be accepted and discarded rather than applied. Verify that path before adding one.
 
 ---
 
@@ -384,7 +430,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 
 **Resources**: GPU recommended (CPU fallback available but slow).
 
-**Environment**: `biopipelines` (plus CUDA modules configured in `config.yaml` under `gnina:`)
+**Environment**: `biopipelines` (plus CUDA modules configured under `gnina:` in your `config.<variant>.yaml`)
 
 **Installation**: Downloads pre-built `gnina.1.3.2` binary from GitHub.
 
@@ -392,6 +438,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 - `structures`: Union[DataStream, StandardizedOutput] (required) - Protein structures. In `score`/`minimize` mode, complexes that already carry the ligand as HETATM.
 - `compounds`: Union[DataStream, StandardizedOutput] (required) - Ligands (from `Ligand()`, `CompoundLibrary()`, etc.). In `score`/`minimize` mode must carry SMILES.
 - `mode`: str = "docking" - One of `"docking"`, `"score"`, `"minimize"`.
+- `scoring`: str = "vina" - Vina force field (`"vina"`, `"vinardo"`, `"ad4"`); only valid on [Vina](#vina), which selects the engine without a CNN.
 - `autobox_ligand`: Union[DataStream, StandardizedOutput, str, None] = None - Reference ligand for automatic box (docking only)
 - `center`: Optional[str] = None - Explicit box center as `"x,y,z"`
 - `size`: Union[float, str, None] = None - Box dimensions in Angstroms (single float = cubic, `"x,y,z"` = asymmetric)
@@ -406,7 +453,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 - `energy_window`: float = 2.0 - Max relative MMFF94 energy (kcal/mol) for conformer filtering
 - `conformer_rmsd`: float = 1.0 - Heavy-atom RMSD cutoff (Angstroms) for Butina clustering
 - `conformer_energies`: Optional[tuple] = None - Pre-computed energies as `(TableInfo, "column_name")`
-- `cnn_score_threshold`: float = 0.5 - Min CNNscore to accept a pose (0-1)
+- `cnn_score_threshold`: float = 0.0 - Min CNNscore to accept a pose (0-1); 0 keeps every pose. GNINA has no such filter of its own — it sorts by CNNscore and returns all poses — so any non-zero value is a choice this wrapper adds. CNNscore predicts whether a pose is near the *crystal* pose, which is uncorrelated with binding strength (rho +0.025 over 578 de novo designs) and is trained on natural complexes, so designed pockets with synthetic ligands score low throughout. Raise it to screen for pose confidence; leave it at 0 when every input must be scored.
 - `rmsd_threshold`: float = 2.0 - RMSD cutoff (Angstroms) for pose consistency clustering
 - `protonate`: bool = True - Add hydrogens with OpenBabel before docking
 - `pH`: float = 7.4 - Protonation pH
@@ -482,6 +529,56 @@ refined = Gnina(structures=boltz, compounds=Ligand("STI"), mode="minimize")
 
 ---
 
+### Vina
+
+AutoDock Vina docking. `Vina` is the AutoDock Vina engine as its own class: it keeps the box definition, conformer generation, multi-run pose-consistency analysis and the three `mode` values, and drops everything CNN-specific. Use it where the GNINA binary cannot run — GNINA publishes only prebuilt x86-64 releases, while conda-forge builds `vina` for linux-aarch64, so this is the docking route on ARM clusters such as CSCS Daint (GH200).
+
+Two behavioural differences follow from Vina having no CNN:
+- `cnn_scoring` and `cnn_score_threshold` are rejected (setting either raises), and `scoring` selects the force field instead: `"vina"` (default), `"vinardo"`, or `"ad4"`.
+- The output tables carry **no `cnn_*` columns** — they are absent, not blank. `docking_results` is `id | structures.id | compounds.id | conformer_id | run | pose | vina_score`, and `docking_summary` drops the three CNN aggregates.
+
+Vina reads and writes PDBQT only, so the wrapper converts the receptor and ligand in and the poses back to SDF with OpenBabel, re-attaching each affinity so the shared parsing and aggregation stages are unchanged. Vina's own `--autobox` has no reference-file form, so an `autobox_ligand` (or an auto-detected crystal ligand) is turned into an explicit centre and size from its coordinates. Receptor PDBQT is prepared with OpenBabel rather than the Meeko/ADFR route — adequate for ranking and pose selection, but treat absolute affinities with caution.
+
+**Resources**: CPU only. On a whole-node-billed cluster, pack several runs with `Parallel(pack=N)` rather than giving one dock an idle-GPU node. The thread pool is sized from `SLURM_CPUS_PER_TASK`.
+
+**Environment**: `vina` (conda-forge: `vina`, `rdkit`, `openbabel`)
+
+**Installation**: Creates the `vina` env from conda-forge; no binary download.
+
+**Parameters**: as `Gnina`, except `cnn_scoring` / `cnn_score_threshold` are absent and `scoring: str = "vina"` is added.
+
+**Streams**: `structures` (combined protein+ligand PDB files; best poses in `docking` mode, the scored pose in `score`/`minimize` mode)
+
+**Tables** (`mode="docking"`):
+- `docking_results` — one row per accepted pose: | id | structures.id | compounds.id | conformer_id | run | pose | vina_score |
+- `docking_summary` — one row per (protein, ligand, conformer) group: | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
+
+**Tables** (`mode="score"` / `"minimize"`):
+- `scores` — one row per scored complex: | id | structures.id | compounds.id | vina_affinity |
+
+**Tables** (all modes):
+- `missing` — IDs removed upstream or that failed locally: | id | removed_by | kind | cause |
+
+Column meanings are as `Gnina`'s tables of the same name, minus every `cnn_*` term.
+
+```python
+from biopipelines import Vina
+
+protein = PDB("9RTM", ids="rhotag", convert="pdb")
+tmr = Ligand(smiles="CN(C)c1ccc2c(c1)OC1=CC(=[N+](C)C)C=CC1=C2c1ccccc1C(=O)O",
+             ids="TMR", codes="LIG")
+
+# Box recovered from the crystal ligand already in the PDB
+docked = Vina(structures=protein, compounds=tmr, exhaustiveness=16)
+
+# Explicit box, vinardo scoring, repeated runs for pose consistency
+docked = Vina(structures=protein, compounds=tmr,
+              center="22.87,8.65,55.72", size=24.0,
+              scoring="vinardo", num_runs=2)
+```
+
+---
+
 ### NeuralPLexer
 
 Predicts protein–ligand complex structures from a protein sequence/structure plus a ligand (SMILES/SDF), using a physics-inspired flow-based generative model — no binding-box hint required. Output IDs follow `<protein>+<ligand>_rank<N>`.
@@ -507,7 +604,7 @@ Predicts protein–ligand complex structures from a protein sequence/structure p
 
 **Tables**:
 - `confidence`: | id | structures.id | compounds.id | rank | confidence |
-- `missing`: | id | removed_by | cause |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -554,7 +651,7 @@ PLACER reads PDB and RCSB mmCIF directly — no SDF staging. Each input produces
 - `scores` — one row per sample.
   - ligand mode: `id | structures.id | compounds.id | sample | prmsd | plddt | plddt_pde | fape | rmsd | kabsch`
   - apo mode: `id | structures.id | sample | plddt | plddt_pde | fape`
-- `missing` — `id | removed_by | cause` for inputs PLACER could not process.
+- `missing` — `id | removed_by | kind | cause` for inputs PLACER could not process.
 
 Output IDs: `<structure>+<ligand>_<sample>` (ligand mode) or `<structure>_<sample>` (apo mode).
 

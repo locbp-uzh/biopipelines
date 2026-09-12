@@ -108,6 +108,12 @@ class PDB(BaseConfig):
     Supports operations that are applied to structures after loading, similar to
     PyMOL and Plot tools. Operations are passed as positional arguments.
 
+    Also exported as ``Structure`` — the same tool under the name of the stream it
+    emits, since "PDB" is a file format and this tool already reads mmCIF too. Both
+    spellings are first-class. Outputs keep the original name either way: the step
+    folder is ``<n>_PDB/``, the logs and the config's ``environments:`` / ``folders:``
+    keys say ``PDB``, because TOOL_NAME is what drives all of them.
+
     Example:
         # Simple fetch
         pdb = PDB(pdbs="4ufc")
@@ -127,7 +133,7 @@ class PDB(BaseConfig):
     """
 
     TOOL_NAME = "PDB"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -398,7 +404,7 @@ echo "=== PDB ready ==="
         Output:
             Streams: structures (.pdb/.cif), sequences (.csv), compounds (.csv)
             Tables:
-                structures: id | pdb_id | file_path | format | file_size | source
+                structures: id | pdb_id | file | format | file_size | source
                 sequences: id | sequence
                 compounds: id | code | format | smiles | ccd
                 failed: pdb_id | error_message | source | attempted_path
@@ -979,7 +985,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 stream_format = "pdb|cif"
 
         # One file template, expanded per resolved id by the framework — works for
-        # literal ids and lazy patterns (e.g. "_<1..10>" or "[_<chain>]") alike.
+        # literal ids and lazy patterns (e.g. "_<1..10>" or "[_<?>]") alike.
         structure_files = [os.path.join(structures_dir, f"<id>{extension}")]
         if self.split_chains and isinstance(self.chain, list):
             # Explicit chain list -> deterministic per-chain ids.
@@ -988,7 +994,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
                                      for ch in self.chain]
         elif self.split_chains:
             # chain="all" -> chain letters resolved at runtime; lazy id pattern.
-            structure_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
+            structure_id_patterns = [f"{cid}[_<?>]" for cid in self.custom_ids]
         elif self._sweep_suffixes():
             # A sweeping rotate_bond emits one structure per grid point; the angles are
             # known at config time, so the ids are literal rather than a lazy pattern.
@@ -1002,7 +1008,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             "structures": TableInfo(
                 name="structures",
                 path=self.structures_csv,
-                columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
+                columns=["id", "pdb_id", "file", "format", "file_size", "source"],
                 description="Successfully fetched structure files"
             ),
             "sequences": TableInfo(
@@ -1055,7 +1061,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
                                     for cid in self.custom_ids
                                     for ch in self.chain]
         elif self.chain == "all":
-            sequence_id_patterns = [f"{cid}[_<chain>]" for cid in self.custom_ids]
+            sequence_id_patterns = [f"{cid}[_<?>]" for cid in self.custom_ids]
         else:
             sequence_id_patterns = list(self.custom_ids)
         sequences = DataStream(
@@ -1101,3 +1107,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             }
         })
         return base_dict
+
+
+# Same class under a second name: the tool emits a `structures` stream, and "PDB" names a file format rather than a concept. TOOL_NAME stays "PDB", so a pipeline written with Structure(...) still produces <n>_PDB/ and still logs "PDB".
+Structure = PDB

@@ -44,12 +44,14 @@ class Prodigy(BaseConfig):
     """
 
     TOOL_NAME = "Prodigy"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "prodigy"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("prodigy", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "Prodigy already installed, skipping. Use force_reinstall=True to reinstall."
@@ -57,13 +59,13 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("prodigy", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("prodigy", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing Prodigy ==="
 {skip}{remove_block}
 {env_block}
 
-if {cls._env_run("prodigy", env_manager)}python -c "import prodigy_prot" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import prodigy_prot" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Prodigy installation complete ==="
 else

@@ -24,6 +24,7 @@ Reference:
 
 import os
 import json
+import shlex
 from typing import Dict, List, Any, Optional, Union, Tuple
 
 try:
@@ -77,7 +78,10 @@ class LASErMPNN(BaseConfig):
     """LASErMPNN: ligand-conditioned inverse folding + all-atom packing."""
 
     TOOL_NAME = "LASErMPNN"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
+    # run_batch_inference is argparse and takes far more flags than the wrapper types; an untyped kwarg joins the free-form --run-options string.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "lasermpnn"
 
     # ------------------------------------------------------------------
     # Install
@@ -101,17 +105,19 @@ class LASErMPNN(BaseConfig):
         """
         if device not in ("gpu", "cpu"):
             raise ValueError(f"device must be 'gpu' or 'cpu', got {device!r}")
+        env = cls._install_env(env_manager)
+        named = cls._env_create_name_flag(env, env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("LASErMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
         env_yaml = f"{biopipelines}/environments/lasermpnn.{device}.yaml"
         env_pip = f"{biopipelines}/environments/lasermpnn.{device}.pip.txt"
 
-        env_check = cls._env_exists_check("lasermpnn", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -d "{repo_dir}/.git" ]'
         weights_check = f'[ -f "{repo_dir}/model_weights/{MODEL_WEIGHTS["default"]}" ]'
         import_check = (
-            f'PYTHONPATH="{parent_dir}" {cls._env_run("lasermpnn", env_manager)}'
+            f'PYTHONPATH="{parent_dir}" {cls._env_run(env, env_manager)}'
             f'python -c "import LASErMPNN"'
         )
         # Env name is shared across devices, so the skip must also match the
@@ -128,7 +134,7 @@ fi
 """
         # Unconditional (not just force_reinstall): the skip also declines on a
         # device switch, and env create fails on an existing env.
-        remove_block = cls._env_remove_block("lasermpnn", env_manager)
+        remove_block = cls._env_remove_block(env, env_manager)
 
         return f"""echo "=== Installing LASErMPNN ({device}) ==="
 {skip}{remove_block}
@@ -138,13 +144,13 @@ if [ ! -d "{repo_dir}/.git" ]; then
     git clone https://github.com/polizzilab/LASErMPNN.git "{repo_dir}"
 fi
 
-# Create the lasermpnn env from the device-matching vendored spec + pip layer.
-{env_manager} env create -f "{env_yaml}" -y
+# Create the {env} env from the device-matching vendored spec + pip layer.
+{env_manager} env create -f "{env_yaml}"{named} -y
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create lasermpnn environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
-{cls._env_run("lasermpnn", env_manager)}pip install -r "{env_pip}"
+{cls._env_run(env, env_manager)}pip install -r "{env_pip}"
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to install lasermpnn pip layer."
     exit 1
@@ -359,6 +365,7 @@ fi
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self._generate_device_detection()
+        script_content += self.extra_args_echo()
         if has_positions:
             script_content += self._generate_resolve_positions()
         script_content += self._generate_run_and_collect(has_positions)
@@ -426,6 +433,9 @@ python {self.positions_py} resolve "{self.positions_args_json}"
                 f" --ala_budget {self.ala_budget}"
                 f" --gly_budget {self.gly_budget}"
             )
+        # shlex.quote because the pipe script shlex-splits this string: an unquoted forwarded value containing a space would become two argv tokens.
+        for token in self.extra_args_tokens():
+            opts += " " + shlex.quote(token)
         return opts
 
     def _generate_run_and_collect(self, has_positions: bool) -> str:

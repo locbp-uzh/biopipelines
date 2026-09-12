@@ -32,7 +32,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                         ids="EYFP") 
     cam = Sequence("ADQLTEEQIAEFKEAFSLFDKDGDGTITTKELGTVMRSLGQNPTEAELQDMINEVDADGNGTIDFPEFLTMMARKMKDTDSEEEIREAFRVFDKDGNGYISAAELRHVMTNLGEKLTDEEVDEMIREADIDGDGQVNYEEFVQMMTAK", ids="CaM")  
     fusions = Fuse(sequences=[donor, cam, acceptor],
-                   name="CaFRET",
+                   prefix="CaFRET",
                    linker="GGG",
                    linker_lengths=["0-2", "0-2"]) # reduced to 0-2
     mutants = Mutagenesis(original=fusions,

@@ -25,14 +25,14 @@ Inputs:
         new_aa). mutation_positions is PyMOL-style ("50" or "57+58"); new_aa is
         the per-position substituted residue(s) ("A" or "AS"). Empty for
         passthrough (selection) rows.
-    --input-msas: MSA map_table with columns id, sequences.id, msa_file. Keyed
+    --input-msas: MSA map_table with columns id, sequences.id, file. Keyed
         by the ORIGINAL protein id (matched against the mutants' original.id).
     --output-folder: where per-mutant MSA files are written.
     --output: output MSA map_table (id, sequences.id, original.id, sequence,
-        msa_file), keyed by mutant id.
+        file), keyed by mutant id.
 
 Output map columns mirror the MSA stream contract used elsewhere
-(id | sequences.id | sequence | msa_file): both `id` and `sequences.id` are the
+(id | sequences.id | sequence | file): both `id` and `sequences.id` are the
 mutant id, so downstream MSA consumers (AlphaFold/Boltz copy step, which name
 the copied A3M after `sequences.id`) match the mutant query correctly. An extra
 `original.id` column records the parent protein the MSA was derived from.
@@ -161,8 +161,8 @@ def main():
             sys.exit(1)
 
     input_msas = pd.read_csv(args.input_msas)
-    if "msa_file" not in input_msas.columns:
-        print("Error: input MSA table missing 'msa_file' column", file=sys.stderr)
+    if "file" not in input_msas.columns:
+        print("Error: input MSA table missing 'file' column", file=sys.stderr)
         sys.exit(1)
 
     # Map original protein id -> its MSA file. The input map's own `id` column
@@ -170,7 +170,7 @@ def main():
     parent_msa = {}
     for _, row in input_msas.iterrows():
         parent_id = str(row.get("id", ""))
-        msa_file = row.get("msa_file", "")
+        msa_file = row.get("file", "")
         if parent_id and isinstance(msa_file, str) and msa_file:
             parent_msa[parent_id] = msa_file
 
@@ -224,10 +224,10 @@ def main():
             "sequences.id": mutant_id,
             "original.id": original_id,
             "sequence": new_query,
-            "msa_file": out_file,
+            "file": out_file,
         })
 
-    out_df = pd.DataFrame(out_rows, columns=["id", "sequences.id", "original.id", "sequence", "msa_file"])
+    out_df = pd.DataFrame(out_rows, columns=["id", "sequences.id", "original.id", "sequence", "file"])
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     out_df.to_csv(args.output, index=False)
 

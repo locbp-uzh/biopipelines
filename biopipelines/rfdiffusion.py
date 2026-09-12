@@ -143,7 +143,10 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.2"
+    # RFdiffusion's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
+    FORWARD_UNKNOWN_KWARGS = "hydra"
+    ENV_NAME = "SE3nv"
 
     # Typed builder for guiding potentials, e.g.
     #   RFdiffusion.GuidingPotential.olig_contacts(weight_intra=1, weight_inter=0.1)
@@ -191,6 +194,8 @@ class RFdiffusion(BaseConfig):
                      DEFAULT_WEIGHTS (["Base", "Complex_base"]).
                      Valid names are the keys of WEIGHTS.
         """
+        env = cls._install_env(env_manager)
+        named = cls._env_create_name_flag(env, env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("RFdiffusion", "")
         parent_dir = os.path.dirname(repo_dir)
@@ -218,14 +223,14 @@ class RFdiffusion(BaseConfig):
         # weights-file test on top so we don't skip when checkpoints are missing.
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}/models" ] && [ -f "{repo_dir}/models/Base_ckpt.pt" ] \\
-   && {cls._env_run("SE3nv", env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1; then
     echo "RFdiffusion already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("SE3nv", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("SE3nv", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing RFdiffusion ==="
 {skip}mkdir -p {parent_dir}
 cd {parent_dir}
@@ -239,30 +244,30 @@ mkdir -p models && cd models
 {wget_lines}
 cd ..
 
-# Create SE3nv environment from BioPipelines specification
+# Create {env} environment from BioPipelines specification
 {remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "WARNING: BioPipelines SE3nv env creation failed. Trying official RFdiffusion environment..."
-    {env_manager} env create -f env/SE3nv.yml
+    echo "WARNING: BioPipelines {env} env creation failed. Trying official RFdiffusion environment..."
+    {env_manager} env create -f env/SE3nv.yml{named}
     if [ $? -ne 0 ]; then
-        echo "ERROR: SE3nv environment creation failed with both methods."
+        echo "ERROR: {env} environment creation failed with both methods."
         echo "This is likely a CUDA version mismatch for your system."
         exit 1
     fi
 fi
 
 # Install DGL from pre-built wheel (special --find-links syntax)
-{cls._env_run("SE3nv", env_manager)}pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
+{cls._env_run(env, env_manager)}pip install dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html --no-deps
 
 # Install SE3Transformer and RFdiffusion (editable)
 cd env/SE3Transformer
-{cls._env_run("SE3nv", env_manager)}pip install --no-deps .
+{cls._env_run(env, env_manager)}pip install --no-deps .
 cd ../..
-{cls._env_run("SE3nv", env_manager)}pip install -e .
+{cls._env_run(env, env_manager)}pip install -e .
 
 # Verify installation
-if {cls._env_run("SE3nv", env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1 || [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
+if {cls._env_run(env, env_manager)}python -c "import rfdiffusion" >/dev/null 2>&1 || [ -f "{repo_dir}/models/Base_ckpt.pt" ]; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFdiffusion installation complete ==="
 else
@@ -312,6 +317,7 @@ fi
                  cyclic: bool = False,
                  cyc_chains: Optional[str] = None,
                  provide_seq: Optional[str] = None,
+                 length: Optional[str] = None,
                  noise_scale_ca: Optional[float] = None,
                  noise_scale_frame: Optional[float] = None,
                  inpaint_str_helix: Optional[str] = None,
@@ -405,6 +411,12 @@ fi
             provide_seq: Residue range(s) whose sequence is kept fixed during
                          partial diffusion (``contigmap.provide_seq``, e.g.
                          ``"100-119"``). Requires ``partial_steps > 0``.
+            length: Total output length, exact or a range (``contigmap.length``,
+                    e.g. ``"309"`` or ``"309-311"``). Constrains the sum of the
+                    diffused segments while each keeps its own range, so a
+                    two-linker contig of ``4-1/…/1-4`` with ``length`` pinning
+                    the total to 5 admits (1,4) and (4,1) but not (1,1) or (4,4).
+                    Applies to the whole chain, motif residues included.
             noise_scale_ca: Translational noise scale (``denoiser.noise_scale_ca``).
                             Values < 1 reduce diversity but improve quality
                             (binder design often uses ~0).
@@ -484,6 +496,7 @@ fi
         self.cyclic = cyclic
         self.cyc_chains = cyc_chains
         self.provide_seq = provide_seq
+        self.length = length
         self.noise_scale_ca = noise_scale_ca
         self.noise_scale_frame = noise_scale_frame
         self.inpaint_str_helix = inpaint_str_helix
@@ -586,7 +599,7 @@ fi
         # Free-form strings reaching bash as raw interpolation.
         for i, res in enumerate(self.hotspot_res):
             _validate_freeform_string(f"hotspot_res[{i}]", res)
-        for name in ("cyc_chains", "provide_seq", "guide_decay",
+        for name in ("cyc_chains", "provide_seq", "length", "guide_decay",
                      "inpaint_str_helix", "inpaint_str_strand",
                      "scaffold_dir", "target_ss", "target_adj", "target_path"):
             _validate_freeform_string(name, getattr(self, name))
@@ -656,6 +669,7 @@ fi
         # e3nn 0.3.3 uses torch.load() without weights_only=False,
         # which fails on PyTorch 2.6+ where the default flipped to True
         script_content += "export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1\n" 
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
@@ -704,6 +718,8 @@ fi
 
         if self.provide_seq:
             opts.append(f"contigmap.provide_seq=[{self.provide_seq}]")
+        if self.length:
+            opts.append(f"contigmap.length={self.length}")
         if self.inpaint_str_helix:
             opts.append(f"contigmap.inpaint_str_helix=[{self.inpaint_str_helix}]")
         if self.inpaint_str_strand:
@@ -715,6 +731,7 @@ fi
             opts.append(f"denoiser.noise_scale_frame={self.noise_scale_frame}")
 
         opts += self._scaffold_options()
+        opts += self.extra_args_tokens()
         return opts
 
     def _scaffold_options(self) -> List[str]:
@@ -957,6 +974,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 "cyclic": self.cyclic,
                 "cyc_chains": self.cyc_chains,
                 "provide_seq": self.provide_seq,
+                "length": self.length,
                 "noise_scale_ca": self.noise_scale_ca,
                 "noise_scale_frame": self.noise_scale_frame,
                 "inpaint_str_helix": self.inpaint_str_helix,

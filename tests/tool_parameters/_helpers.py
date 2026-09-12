@@ -31,11 +31,26 @@ def read_pipeline_sh(script_path: str) -> str:
     return "\n".join(parts)
 
 
+def _argv_spelling(substring: str) -> str:
+    """The argv-token form of a ``--flag value`` substring, or the substring unchanged.
+
+    A wrapper that builds a shell string writes ``--seed 7``; one that builds an argv token array
+    writes ``"--seed" "7"``, which is stronger because nothing re-parses it. Both spell the same
+    invocation, so a test asking for one accepts the other.
+    """
+    tokens = substring.split()
+    if len(tokens) < 2 or not tokens[0].startswith("-"):
+        return substring
+    return " ".join(f'"{t}"' for t in tokens)
+
+
 def assert_substrings_in(content: str, substrings: Iterable[str], label: str = ""):
     """Assert every substring appears in content; raise with the missing ones listed."""
-    missing = [s for s in substrings if s not in content]
+    missing = [s for s in substrings
+               if s not in content and _argv_spelling(s) not in content]
     assert not missing, (
-        f"{label or 'pipeline.sh'} missing expected substrings: {missing}"
+        f"{label or 'pipeline.sh'} missing expected substrings: {missing} "
+        f"(each also tried as argv tokens, e.g. '\"--flag\" \"value\"')"
     )
 
 
@@ -68,12 +83,20 @@ def assert_kwarg_emitted(content: str, kwarg_name: str, value, *, flag: str = No
 
     ``flag`` is the upstream CLI flag string the value should appear next to;
     when ``flag`` is omitted we only check for the value.
+
+    A flag is accepted in either spelling. A wrapper that builds a shell string writes
+    ``--seed 4242``; one that builds an argv token array writes ``"--seed" "4242"``, which is
+    stronger because nothing re-parses it. Pinning only the first spelling made every wrapper that
+    moved to an array look broken.
     """
     str_value = str(value)
     assert str_value in content, (
         f"value {str_value!r} for kwarg {kwarg_name!r} not found in pipeline.sh"
     )
     if flag is not None:
-        assert flag in content, (
-            f"flag {flag!r} for kwarg {kwarg_name!r} not found in pipeline.sh"
+        tokens = flag.split()
+        argv_form = " ".join(f'"{t}"' for t in tokens)
+        assert flag in content or argv_form in content, (
+            f"flag {flag!r} for kwarg {kwarg_name!r} not found in pipeline.sh, "
+            f"as a shell string or as the argv tokens {argv_form!r}"
         )

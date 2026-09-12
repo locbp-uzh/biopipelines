@@ -41,7 +41,7 @@ def create_alphafold_msas_table(msas_folder, queries_csv, msa_csv):
     if not os.path.exists(msas_folder):
         print(f"Warning: MSAs folder does not exist: {msas_folder}")
         # Create empty MSAs CSV
-        msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'msa_file'])
+        msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'file'])
         msa_df.to_csv(msa_csv, index=False)
         print(f"Created empty MSAs CSV: {msa_csv}")
         return
@@ -58,7 +58,7 @@ def create_alphafold_msas_table(msas_folder, queries_csv, msa_csv):
             'id': seq_id,
             'sequences.id': seq_id,
             'sequence': sequences_data.get(seq_id, ''),  # Add actual protein sequence
-            'msa_file': os.path.join(msas_folder, msa_file)
+            'file': os.path.join(msas_folder, msa_file)
         }
         msa_entries.append(msa_entry)
         print(f"Added MSA file: {msa_file} (sequence_id: {seq_id})")
@@ -70,7 +70,7 @@ def create_alphafold_msas_table(msas_folder, queries_csv, msa_csv):
         print(f"Created MSAs CSV with {len(msa_entries)} entries: {msa_csv}")
     else:
         print("Warning: No MSA files found, creating empty MSAs CSV")
-        msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'msa_file'])
+        msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'file'])
         msa_df.to_csv(msa_csv, index=False)
         print(f"Created empty MSAs CSV: {msa_csv}")
 

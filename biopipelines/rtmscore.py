@@ -63,16 +63,18 @@ class RTMScore(BaseConfig):
     """
 
     TOOL_NAME = "RTMScore"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "rtmscore"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("RTMScore", "")
         # Verify the env can actually import the heavy deps (dgl/torch), not
         # just that the env directory exists — a half-built or ABI-broken env
         # must not be mistaken for a working install.
-        import_check = (f'{cls._env_run("rtmscore", env_manager)}python -c '
+        import_check = (f'{cls._env_run(env, env_manager)}python -c '
                         f'"import torch, dgl, rdkit, torch_scatter" >/dev/null 2>&1')
         repo_check = f'[ -d "{repo_dir}/RTMScore" ]'
         model_check = f'[ -f "{repo_dir}/trained_models/rtmscore_model1.pth" ]'
@@ -106,8 +108,8 @@ fi"""
             f'''C_batch = th.tensor(range(B), device=C_mask.device).unsqueeze|' '''
             f'"{repo_dir}/RTMScore/model/model2.py"'
         )
-        remove_block = cls._env_remove_block("rtmscore", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("rtmscore", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         # torch_scatter comes from the conda yaml (pytorch_scatter pinned to a
         # cuda118 build) so it matches conda-forge pytorch's libtorch ABI — the
         # PyG pip wheel is built against PyPI torch and dies with an
@@ -116,7 +118,7 @@ fi"""
         # breaks `import dgl`'s graphbolt), so force 0.9.0 (--no-deps leaves
         # torch untouched; 0.9.0 still ships datapipes).
         pip_block = (
-            f'{cls._env_run("rtmscore", env_manager)}pip install --no-deps "torchdata==0.9.0"'
+            f'{cls._env_run(env, env_manager)}pip install --no-deps "torchdata==0.9.0"'
         )
         return f"""echo "=== Installing RTMScore ==="
 {skip}{clone_block}

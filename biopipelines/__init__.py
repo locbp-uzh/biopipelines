@@ -9,12 +9,14 @@ Unified pipeline system for protein modeling workflows.
 Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 from .pipeline import Pipeline, Bundle, Each, Folder, Resources, Suffix, Save, Dependencies, Parallel, Run, Service
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
 from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
+from .datastream_resolver import DataStreamResolver, resolve_to_datastream, resolve_input_to_datastream
+from .idset import IdSet, compose_axes
 from .file_paths import Path
 from .table_utils import get_table, get_table_path, list_tables, table_exists, get_indexed_table
 from .rfdiffusion import RFdiffusion
@@ -25,7 +27,7 @@ from .hbdesigner import HBDesigner
 from .protein_mpnn import ProteinMPNN, SolubleMPNN
 from .frame2seq import Frame2Seq
 from .alphafold import AlphaFold
-from .ligand import Ligand
+from .ligand import Ligand, Compound
 from .sequence import Sequence
 from .ligand_mpnn import LigandMPNN
 from .lasermpnn import LASErMPNN
@@ -51,7 +53,7 @@ from .msa import MSA
 from .mmseqs2 import MMseqs2, MMseqs2Server
 from .remap import ReMap
 from .mock import Mock
-from .gnina import Gnina
+from .gnina import Gnina, Vina
 from .diffdock import DiffDock
 from .pocketgen import PocketGen
 from .placer import PLACER
@@ -60,6 +62,7 @@ from .neuralplexer import NeuralPLexer
 from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
 from .aizynthfinder import AiZynthFinder
+from .binding_data import BindingData
 from .esmfold import ESMFold
 from .esmfold2 import ESMFold2
 from .uniprot import UniProt
@@ -81,15 +84,17 @@ from .gems import GEMS
 from .bioemu import BioEmu
 from .cabsflex import CABSflex
 from .ensemble_analysis import EnsembleAnalysis
+from .structure_cluster import StructureCluster
 from .scripting import Scripting
 from .mutagenesis import Mutagenesis
 from .selection import Selection
 from .distance_selector import DistanceSelector
+from .ligand_atom_selector import LigandAtomSelector
 from .consensus import Consensus
 from .mutation_profiler import MutationProfiler
 from .mutation_composer import MutationComposer
 from .pool import Pool
-from .pdb import PDB
+from .pdb import PDB, Structure
 from .sasa import SASA
 from .pose_change import PoseChange
 from .bayesian_adjuster import BayesianAdjuster
@@ -121,6 +126,10 @@ __all__ = [
     'resolve_to_datastream',
     'resolve_input_to_datastream',
 
+    # Id sets
+    'IdSet',
+    'compose_axes',
+
     # File path descriptor
     'Path',
 
@@ -151,6 +160,7 @@ __all__ = [
     'Frame2Seq',
     'AlphaFold',
     'Ligand',
+    'Compound',  # same tool as Ligand, named for the compounds stream it emits
     'Sequence',
     'LigandMPNN',
     'LASErMPNN',
@@ -179,15 +189,16 @@ __all__ = [
     'ReMap',
     'Mock',
     'Gnina',
+    'Vina',
     'DiffDock',
     'PocketGen',
     'PLACER',
     'DynamicBind',
     'NeuralPLexer',
     'PoseBusters',
-    'PoseBustersTool',
     'ADMETAI',
     'AiZynthFinder',
+    'BindingData',
     'ESMFold',
     'ESMFold2',
     'UniProt',
@@ -209,15 +220,20 @@ __all__ = [
     'BioEmu',
     'CABSflex',
     'EnsembleAnalysis',
+    'StructureCluster',
     'Scripting',
     'Mutagenesis',
     'Selection',
     'DistanceSelector',
+    'LigandAtomSelector',
     'Consensus',
     'MutationProfiler',
     'MutationComposer',
     'Pool',
     'PDB',
+    'Structure',  # same tool as PDB, named for the structures stream it emits
+    'RCSB',
+    'Table',
     'SASA',
     'PoseChange',
     'BayesianAdjuster',

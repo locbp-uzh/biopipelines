@@ -2,7 +2,7 @@
 name: biopipelines
 description: >-
   Author and run BioPipelines (locbp-uzh, CSBJ 2026) computational protein &
-  ligand design pipelines on a GPU. BioPipelines gives ~76 comp-bio tools one
+  ligand design pipelines on a GPU. BioPipelines gives 86 comp-bio tools one
   common Pipeline/Resources API: structure prediction and docking (AlphaFold,
   Boltz2, ESMFold2, DiffDock, GNINA, NeuralPLexer, DynamicBind), de novo
   generation (RFdiffusion 1/2/3, RFdiffusionAllAtom, BoltzGen, PocketGen,
@@ -20,10 +20,7 @@ description: >-
 
 [BioPipelines](https://github.com/locbp-uzh/biopipelines) (Quargnali &
 Rivera-Fuentes, LOC-BP UZH; CSBJ [10.34133/csbj.0129](https://spj.science.org/doi/10.34133/csbj.0129))
-is a Python framework that puts ~76 protein/ligand-modeling tools behind one
-declarative `Pipeline` API. You describe a workflow as a chain of tools; the
-framework generates and runs the per-tool scripts, tracks IDs through typed
-data streams, and materializes outputs.
+is a Python framework that puts 86 protein/ligand-modeling tools behind one declarative `Pipeline` API — the authoritative count lives in `docs/tool_index.md` and is CI-enforced against the sources. You describe a workflow as a chain of tools; the framework generates and runs the per-tool scripts, tracks IDs through typed data streams, and materializes outputs.
 
 This skill ships *inside the repo* so that adding it to any agent is one step
 (import the skill from this repository) and it tracks the framework as it
@@ -40,8 +37,8 @@ duplicate their content into your own notes — point at them:
 
 - `llm/pipelines.md` — how to author a `Pipeline`, the tool/data-stream model, ID tracking.
 - `llm/development.md` — conventions, gotchas, how tools are structured.
-- `llm/cluster.md`, `llm/colab.md` — the two backends the repo ships natively.
-- `llm/daint.md` — CSCS Alps/Daint: access, storage, and the verified findings behind `config.daint.yaml`.
+- `llm/cluster.md`, `llm/colab.md` — two of the three backend references (see `llm/daint.md` for the third). The repo ships five config variants: cluster, colab, daint, container and local.
+- `llm/daint.md` — CSCS Alps/Daint: access, storage, and which tools have actually been verified by running there. `config.daint.yaml`'s `environments:` block is a routing table, not a verification record.
 - `docs/tool_index.md`, `docs/tool_reference.md` — the full tool catalog and per-tool signatures.
 - `references/container_backend.md` (in this skill) — the generic single-node GPU backend.
 - `references/daint_backend.md` (in this skill) — the CSCS Alps/Daint backend (aarch64, venv, Container Engine).
@@ -49,18 +46,20 @@ duplicate their content into your own notes — point at them:
 ## The API in one screen
 
 ```python
-from biopipelines import Pipeline, Resources, Sequence, Ligand, Boltz2
+from biopipelines import Pipeline, Resources, Sequence, Ligand, UniProt, Boltz2
 
 with Pipeline("Project", "job_name", description="..."):
     Resources(gpu="A100", memory="64GB", time="6:00:00", cpus=8)
-    prot = Sequence("MSEQ...", type="protein")           # or Sequence.from_uniprot("Q15436")
+    prot = Sequence("MSEQ...", type="protein")           # or UniProt("Q15436") to fetch it
     lig  = Ligand(smiles="C[N+]1=C(...)...")
-    Boltz2(prot, lig, affinity=True, output_format="mmcif")
+    Boltz2(proteins=prot, ligands=lig, output_format="mmcif")
 ```
 
-`Resources(...)` is set once per pipeline. `Tool.install()` is called **inside**
-the `with Pipeline(...)` block (a bare `Boltz2.install()` at module scope is a
-silent no-op) — or just use `bp-warm` (below), which wraps it for you.
+Every tool takes its inputs **by keyword**. `Boltz2`'s first positional parameter is `config` (a raw YAML string), so `Boltz2(prot, lig, ...)` binds the protein to `config` and the ligand to `proteins` — always write `proteins=` / `ligands=`. Check the real signature in `docs/tool_reference.md` before passing anything positionally; an unknown keyword is swallowed by `**kwargs` rather than rejected.
+
+Each `Resources(...)` call **opens a new batch** (one scheduler job), inheriting whatever it does not specify from the previous batch. So call it once per resource profile — a CPU-only stage after a GPU stage gets its own `Resources(gpu="none", ...)` rather than inheriting the GPU and walltime of the heaviest stage. Inside a plain `Parallel()` block every sibling iteration **must** call `Resources()` to open its own batch; inside `Parallel(pack=N)` it is called **once** to describe the whole node allocation and `Run(...)` delimits each task.
+
+`Tool.install()` is called **inside** the `with Pipeline(...)` block (a bare `Boltz2.install()` at module scope is a silent no-op) — or just use `bp-warm` (below), which wraps it for you.
 
 ## Running on any single-node GPU host (the `container` backend)
 
@@ -74,9 +73,7 @@ export BIOPIPELINES_OTF=1                       # run tools inline (no scheduler
 export BIOPIPELINES_LOCAL_OUTPUT=0              # honor configured output dir, NOT cwd
 ```
 
-In `config.container.yaml` edit only `folders.base.root:` to your persistent
-mount (default `/workspace`); every other path — env root, weight caches,
-outputs — derives from it. First, warm the tools you need onto that mount once:
+In `config.container.yaml` edit `folders.base.root:` to your persistent mount (default `/workspace`); the config's own paths — `home`, `data`, `scratch`, weight caches, `biopipelines_output` — all derive from it. The one path that does **not** is the micromamba env root: that is `MAMBA_ROOT_PREFIX`, hardcoded to `/workspace/micromamba` in `Dockerfile.container`, so a different `root:` needs `MAMBA_ROOT_PREFIX=<root>/micromamba` exported alongside it (see `references/container_backend.md`). First, warm the tools you need onto that mount once:
 
 ```bash
 bp-warm Boltz2 ProteinMPNN        # builds per-tool micromamba envs + downloads weights
@@ -95,9 +92,11 @@ persistent mount.
 
 ## Reporting back
 
+Check the completion markers before reporting anything as successful: they are empty files named `<NNN>_<ToolName>_COMPLETED` / `_FAILED` / `_WARNING`, written one level above each tool's output folder, and the per-tool log is `<Job>/Logs/<NNN>_<ToolName>.log`.
+
 Save the structure (`.cif`/`.pdb`), the confidence/affinity JSON, and a summary
 figure as artifacts. For a co-fold, report pTM, ipTM/ligand-ipTM, complex pLDDT,
-and (if `affinity=True`) `affinity_probability_binary`. Note that Boltz2 has no
+and `affinity_probability_binary` (`affinity` defaults to `True`). Note that Boltz2 has no
 covalent-mechanism knowledge: an unconstrained co-fold of a covalent ligand
 finds a non-covalent pocket, not the reactive residue — use Boltz2's
 `covalent_linkage` constraint when the mechanism is covalent.

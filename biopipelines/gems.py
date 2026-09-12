@@ -58,15 +58,17 @@ class GEMS(BaseConfig):
     """
 
     TOOL_NAME = "GEMS"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "gems"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("GEMS", "")
         # Verify torch + ankh actually import (catches the MKL ABI breakage)
         # rather than just probing that the env directory exists.
-        import_check = (f'{cls._env_run("gems", env_manager)}python -c '
+        import_check = (f'{cls._env_run(env, env_manager)}python -c '
                         f'"import torch, ankh, torch_geometric" >/dev/null 2>&1')
         repo_check = f'[ -d "{repo_dir}/model" ]'
         skip = "" if force_reinstall else f"""# Check if already installed
@@ -90,8 +92,8 @@ fi"""
             '''    model.eval()  # Set the model to evaluation mode (CPU too)|' '''
             f'"{repo_dir}/inference.py"'
         )
-        remove_block = cls._env_remove_block("gems", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("gems", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing GEMS ==="
 {skip}{clone_block}
 

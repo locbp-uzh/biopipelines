@@ -23,7 +23,7 @@ from typing import Dict, List, Any, Optional, Tuple
 # Import unified I/O utilities for runtime DataStream expansion
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
-from biopipelines.id_map_utils import get_mapped_ids, map_table_ids_to_ids, prune_redundant_provenance_columns
+from biopipelines.id_map_utils import DEFAULT_ID_MAP, get_mapped_ids, map_table_ids_to_ids, prune_redundant_provenance_columns
 
 # Mirror of biopipelines.panda.Panda.SOURCE — kept inline to avoid a
 # config-time import dependency in pipe scripts.
@@ -324,7 +324,7 @@ def execute_merge(dataframes: List[pd.DataFrame], params: Dict[str, Any]) -> pd.
     order = list(range(len(dataframes)))
     if grain in ("finest", "coarsest"):
         def _depth(df):
-            return max((len(map_table_ids_to_ids(i, {"*": "*_<S>"}))
+            return max((len(map_table_ids_to_ids(i, DEFAULT_ID_MAP))
                         for i in df[merge_key].astype(str)), default=0)
         depths = [_depth(df) for df in dataframes]
         counts = [df[merge_key].astype(str).nunique() for df in dataframes]
@@ -624,6 +624,7 @@ def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict[str, 
     Per-id and templated streams populate the inner {id: file_path} dict.
     Shared-file streams (one artifact for the whole stream) are excluded
     here — call ``build_shared_streams_from_stream_jsons`` to discover them.
+    Value-based streams are excluded too: their content lives in the map_table.
 
     Args:
         stream_jsons: {stream_name: json_path} from config
@@ -635,6 +636,9 @@ def build_file_map_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict[str, 
     for stream_name, json_path in stream_jsons.items():
         ds = load_datastream(json_path)
         if ds.is_shared_file:
+            continue
+        # files == [] is the value-based signal, not the format string.
+        if not ds.files:
             continue
         file_map[stream_name] = {}
         for sid, fpath in iterate_files(ds):

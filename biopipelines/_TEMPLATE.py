@@ -21,6 +21,10 @@ except ImportError:
     from datastream import DataStream
 
 
+# The accepted values of a validated string choice live next to the tool, so the constructor, validate_params and the docs read from one list.
+RESIDUE_SCOPES = ("all", "polymer", "hetatm")
+
+
 class TemplateTool(BaseConfig):
     # Document EVERY input param and EVERY output stream/table with its columns.
     """
@@ -28,6 +32,7 @@ class TemplateTool(BaseConfig):
 
     Inputs:
         structures: PDB structures.
+        residue_scope: which residues to count - "all", "polymer" or "hetatm" (default: "all").
 
     Outputs:
         Streams:
@@ -54,6 +59,8 @@ class TemplateTool(BaseConfig):
     # Editing this wrapper (or its pipe scripts) requires bumping TOOL_VERSION and registering the tool in versions/tool_changelog.yaml and adding a CHANGELOG.md bullet.
     TOOL_NAME = "TemplateTool"
     TOOL_VERSION = "0.1"
+    # ENV_NAME is the env this tool builds and runs in. It must have an environments: entry keyed by TOOL_NAME in every config.<variant>.yaml the tool is installable under; cls._install_env() reads that entry so install and runtime cannot diverge, and only env_manager "pip" falls back to this literal.
+    ENV_NAME = "templatetool"
 
     """INSTALLATION.
     Triggered by <Tool>.install() inside an install pipeline (see example_pipelines/install_tools.py), submitted like any pipeline. 
@@ -63,12 +70,13 @@ class TemplateTool(BaseConfig):
     - shares another tool's env > DELEGATE: `return PyMOL._install_script(folders, env_manager=env_manager, force_reinstall=force_reinstall, **kwargs)`. A PyMOL-only tool (uses PyMOL/ProteinEnv, no deps of its own) should reuse that env instead of shipping its own yaml, so a user calling YourTool.install() doesn't need to know the dependency. Exemplars: contacts.py, sasa.py, conformational_change.py.
     - container/.sif > keep this method too: it still installs. Add the image SOURCE to environments/_containers.yaml (keyed by TOOL_NAME; a docker:// URI or a direct .sif URL) and call cls._container_pull_block(folders, force_reinstall) in the install; it pulls to the DESTINATION path the user configured under `containers:` in config.<variant>.yaml. Execution then flows through container_prefix() automatically (see generate_script). ⚠ Emit the pull BEFORE any early-exit "already installed" skip, or a user who enables a container after an env-mode install never pulls the image. (No tool wires this yet; rfdiffusion2.py is not a model - its image ships with the repo.)
     Colab fork: if either installation or execution diverges on Colab, guard on scheduler == "colab" rather than duplicating logic. 
-    ⚠ Gate on _env_exists_check so re-installs are cheap; honor force_reinstall via _env_remove_block; verify the binary/imports and `touch "$INSTALL_SUCCESS"` or the installer reports failure.
+    ⚠ Never hardcode the env name in this method: declare it in ENV_NAME and resolve it with cls._install_env(env_manager). Gate on _env_exists_check so re-installs are cheap; honor force_reinstall via _env_remove_block; verify the binary/imports and `touch "$INSTALL_SUCCESS"` or the installer reports failure.
     """
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("templatetool", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "TemplateTool already installed, skipping. Use force_reinstall=True to reinstall."
@@ -76,13 +84,13 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("templatetool", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("templatetool", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing TemplateTool ==="
 {skip}{remove_block}
 {env_block}
 
-if {cls._env_run("templatetool", env_manager)}python -c "import sys" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import sys" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== TemplateTool installation complete ==="
 else
@@ -118,9 +126,9 @@ fi
     """
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
-                 mode: str = "default",
+                 residue_scope: str = "all",
                  **kwargs):
-        self.mode = mode
+        self.residue_scope = residue_scope
         self.structures = structures  # raw handle kept for missing-propagation
         if isinstance(structures, StandardizedOutput):
             self.structures_stream: DataStream = structures.streams.structures
@@ -131,20 +139,24 @@ fi
         super().__init__(**kwargs)
 
     """PARAMETERS VALIDATION - fail fast and loud at pipeline-build time for bad inputs, before a cluster job is queued. Raise ValueError with an actionable message. Check emptiness, mutually-exclusive options, out-of-range numbers here.
+    A parameter that selects among a fixed set of behaviours is a string checked against an explicit tuple, as `residue_scope` is below - and it is named for the CONCEPT it selects (residue_scope, aggregation, ranking_metric, ...), never `mode`. `mode` says nothing at the API level: it already appears in eleven tools with almost as many unrelated vocabularies - optimization direction, distance aggregation, docking-vs-rescoring, mutagenesis strategy, interaction partner, which surface to measure - sharing no value between any two of them, so a reader who knows one tool's `mode` knows nothing about the next one's.
     """
     def validate_params(self):
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
+        if self.residue_scope not in RESIDUE_SCOPES:
+            raise ValueError(
+                f"residue_scope must be one of {RESIDUE_SCOPES}, got {self.residue_scope!r}")
 
     # configure_inputs (ABSTRACT - required) - receive the pipeline's resolved folders (install paths, container images, caches) and stash what you need. Most tools just keep self.folders; container tools rely on it so container_prefix() can find the image.
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         self.folders = pipeline_folders
 
-    # get_config_display (optional override) - one line per notable setting, printed in the pipeline summary and the tool-metadata JSON. Always start from super().get_config_display(). Keep it to human-meaningful facts (modes, key params), not every kwarg.
+    # get_config_display (optional override) - one line per notable setting, printed in the pipeline summary and the tool-metadata JSON. Always start from super().get_config_display(). Keep it to human-meaningful facts (the parameters that change what runs), not every kwarg.
     # ⚠ Runs at build time: do not do work here. Printing len(self.structures_stream) forces the stream to materialize just for a count - report static params instead.
     def get_config_display(self) -> List[str]:
         lines = super().get_config_display()
-        lines.append(f"MODE: {self.mode}")
+        lines.append(f"RESIDUE SCOPE: {self.residue_scope}")
         return lines
 
     """SCRIPT GENERATION
@@ -208,7 +220,7 @@ python "{self.helper_py}" \\
         """Dump the tool's parameters to configuration/config.yaml for the pipe to read."""
         import yaml
         with open(self.config_yaml, "w") as f:
-            yaml.safe_dump({"mode": self.mode}, f, sort_keys=False)
+            yaml.safe_dump({"residue_scope": self.residue_scope}, f, sort_keys=False)
 
     """OUTPUT ID SHAPE - two DISTINCT mechanisms, only if the tool is not 1:1 (this file is 1:1: output ids == input ids)
 

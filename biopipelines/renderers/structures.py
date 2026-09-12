@@ -1,9 +1,23 @@
 # Renderer for pdb/cif structure streams: interactive 3D viewer (py3Dmol)
 
 import glob
+import hashlib
 import os
 import json
 import random
+
+
+_LIB_3DMOL_URL = "https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"
+
+# The data-bp-lib marker lets a page assembler swap this tag for one inlined copy of renderers/vendor/3Dmol-min.js; standalone (notebook) output keeps the CDN URL.
+_LIB_3DMOL_TAG = f'<script data-bp-lib="3dmol" src="{_LIB_3DMOL_URL}"></script>'
+
+def _script_json(value):
+    """``json.dumps`` for a value going inside an inline ``<script>``.
+
+    An inline script ends at the first ``</script``, and ``json.dumps`` escapes quotes and backslashes but not that sequence -- so a PDB REMARK containing it would close the viewer's script early and execute whatever followed as markup. ``pipeline_report`` neutralizes the same sequence in the vendored library it inlines; file contents need it for the same reason.
+    """
+    return json.dumps(value).replace("</", "<\\/")
 
 
 def _resolve_path(file_path):
@@ -42,12 +56,51 @@ def _iter_id_file(stream):
         yield struct_id, file_path
 
 
+SAMPLE_HEAD = 3
+SAMPLE_RANDOM = 2
+MAX_EMBEDDED = SAMPLE_HEAD + SAMPLE_RANDOM
+
+
+def _embed_budget(stream, output):
+    """How many structures may be embedded: the default, or a caller's explicit cap.
+
+    bp-visualize sets ``rendering_parameters[<stream>]["max_embedded"]`` when the user asked
+    for a specific count. An explicit ask is a request, not a hint -- returning a sample of a
+    requested top-20 would answer a different question than the one put.
+    """
+    params = getattr(output, "rendering_parameters", None) or {}
+    requested = (params.get(stream.name) or {}).get("max_embedded")
+    if isinstance(requested, int) and requested > 0:
+        return requested
+    return MAX_EMBEDDED
+
+
+def sample_positions(total, seed="", budget=None):
+    """Which indices of a structure stream to embed: the first few, plus a few from the rest.
+
+    The page is meant to be copied off the cluster and opened locally, where a file:// link to a
+    compute node's filesystem resolves to nothing -- so a structure is only inspectable if its
+    contents are inline. That caps how many can go in: whole PDB files, embedded. The first few show
+    what the run produced; sampling the rest is what shows whether quality holds across the run,
+    which the head alone cannot.
+
+    Deterministic in ``seed`` so regenerating a page from the same graph reproduces it exactly.
+    """
+    budget = MAX_EMBEDDED if budget is None else budget
+    if total <= budget:
+        return list(range(total))
+    # An explicit budget is an ordered top-N: take the head and keep the caller's order.
+    if budget != MAX_EMBEDDED:
+        return list(range(budget))
+    tail = random.Random(seed).sample(range(SAMPLE_HEAD, total), SAMPLE_RANDOM)
+    return list(range(SAMPLE_HEAD)) + sorted(tail)
+
+
 def render(stream, output):
     """Render an interactive 3D structure viewer for pdb/cif/pqr streams."""
     if not stream.has_only_formats("pdb", "cif", "pqr"):
         return ""
 
-    max_structures = 50
     pdb_data = []
     if stream.is_shared_file:
         # One shared structure file — render once. The stream's ids label
@@ -60,7 +113,13 @@ def render(stream, output):
             except Exception:
                 pass
     else:
-        for struct_id, file_path in _iter_id_file(stream):
+        # List first, then read only the sampled files: reading all of them to throw most away is
+        # what made this slow on a large campaign.
+        pairs = list(_iter_id_file(stream))
+        sampled = sample_positions(len(pairs), seed=f"{stream.name}:{len(pairs)}",
+                                   budget=_embed_budget(stream, output))
+        for idx in sampled:
+            struct_id, file_path = pairs[idx]
             resolved = _resolve_path(file_path)
             if resolved:
                 try:
@@ -68,8 +127,6 @@ def render(stream, output):
                         pdb_data.append((struct_id, f.read(), resolved))
                 except Exception:
                     pass
-            if len(pdb_data) >= max_structures:
-                break
 
     if not pdb_data:
         return ""
@@ -82,21 +139,28 @@ def render(stream, output):
 
     fmt = _detect_fmt(pdb_data[0][2])
 
-    viewer_id = f"bp3d_{random.randint(100000, 999999)}"
+    # Derived, not random: the page is regenerated after every step, and a fresh id each time made
+    # two renders of an unchanged run differ.
+    viewer_id = "bp3d_" + hashlib.sha1(
+        f"{stream.name}:{[sid for sid, _, _fp in pdb_data]}".encode("utf-8")
+    ).hexdigest()[:10]
 
-    struct_ids_json = json.dumps([sid for sid, _, _fp in pdb_data])
-    struct_data_json = json.dumps([content for _, content, _fp in pdb_data])
+    struct_ids_json = _script_json([sid for sid, _, _fp in pdb_data])
+    struct_data_json = _script_json([content for _, content, _fp in pdb_data])
 
-    truncated = len(stream) > max_structures
+    truncated = len(stream) > len(pdb_data)
     total_label = f"{len(pdb_data)} structure{'s' if len(pdb_data) != 1 else ''}"
     if truncated:
-        total_label += f" (of {len(stream)} total)"
+        total_label += (
+            f" (of {len(stream)} total — first {SAMPLE_HEAD}"
+            f" plus {SAMPLE_RANDOM} sampled)"
+        )
 
     colors = [
         "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
         "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
     ]
-    colors_json = json.dumps(colors)
+    colors_json = _script_json(colors)
 
     # Check for pLDDT coloring from rendering_parameters
     plddt_upper = None
@@ -106,7 +170,7 @@ def render(stream, output):
         if stream_params.get("color_by") == "plddt":
             plddt_upper = stream_params.get("plddt_upper", 100)
 
-    plddt_upper_json = json.dumps(plddt_upper)
+    plddt_upper_json = _script_json(plddt_upper)
 
     # pLDDT color legend (shown only when pLDDT coloring is active)
     plddt_legend = ""
@@ -130,7 +194,7 @@ def render(stream, output):
     )
 
     return f"""
-<script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"></script>
+{_LIB_3DMOL_TAG}
 <div style="margin-top: 12px;">
   <strong>3D Structure Viewer</strong> ({total_label})
 </div>
@@ -276,15 +340,19 @@ def render(stream, output):
     applyStyles();
     viewer.zoomTo();
     viewer.render();
-    // Update label
+    // Update label. An id comes from a map_table, so it is not markup: escape before innerHTML.
+    var esc = function(s) {{
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }};
     var labelHtml;
     if (plddtUpper !== null) {{
-      labelHtml = ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
+      labelHtml = esc(ids[idx]) + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
     }} else {{
       var color = colors[idx % colors.length];
-      labelHtml = '<span style="display:inline-block;width:12px;height:12px;background:' + color +
+      labelHtml = '<span style="display:inline-block;width:12px;height:12px;background:' + esc(color) +
         ';border-radius:2px;vertical-align:middle;margin-right:6px;"></span>' +
-        ids[idx] + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
+        esc(ids[idx]) + '  <span style="color:#888;">(' + (idx+1) + '/' + ids.length + ')</span>';
     }}
     document.getElementById("{viewer_id}_label").innerHTML = labelHtml;
   }}

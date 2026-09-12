@@ -50,6 +50,7 @@ Predict protein and complex structures, and dock ligands.
 - [ESMFold](tool/structure_prediction.md#esmfold) — Single-sequence prediction (no MSA)
 - [ESMFold2](tool/structure_prediction.md#esmfold2) — All-atom complex prediction (proteins/NA/ligands), inference-time scaling
 - [Gnina](tool/structure_prediction.md#gnina) — Docking or no-search pose scoring (score/minimize) with CNN
+- [Vina](tool/structure_prediction.md#vina) — AutoDock Vina docking on CPU; the aarch64 route (no CNN)
 - [NeuralPLexer](tool/structure_prediction.md#neuralplexer) — Protein–ligand complex prediction
 - [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket
 
@@ -64,6 +65,7 @@ Analyze structures, interactions, stability, and fitness.
 - [Aggrescan3D](tool/analysis.md#aggrescan3d) — Structure-based aggregation propensity
 - [Angle](tool/analysis.md#angle) — Bond, torsional, and vector angles
 - [APBS](tool/analysis.md#apbs) — Electrostatic surface potential
+- [BindingData](tool/analysis.md#bindingdata) — Measured binding affinities (ChEMBL, BindingDB)
 - [BioEmu](tool/analysis.md#bioemu) — Equilibrium ensemble sampling
 - [CABSflex](tool/analysis.md#cabsflex) — Fast flexibility simulation
 - [ConformationalChange](tool/analysis.md#conformationalchange) — Structural changes
@@ -71,8 +73,10 @@ Analyze structures, interactions, stability, and fitness.
 - [Contacts](tool/analysis.md#contacts) — Contact analysis
 - [Distance](tool/analysis.md#distance) — Distance measurements
 - [DistanceSelector](tool/analysis.md#distanceselector) — Proximity-based selection
+- [LigandAtomSelector](tool/analysis.md#ligandatomselector) — Proximity selection around named ligand atoms
 - [DSSP](tool/analysis.md#dssp) — Secondary-structure assignment
 - [EnsembleAnalysis](tool/analysis.md#ensembleanalysis) — Per-residue RMSF from any ensemble
+- [StructureCluster](tool/analysis.md#structurecluster) — Cluster designs by fold and rank the families by mean metrics
 - [FPocket](tool/analysis.md#fpocket) — Alpha-sphere pocket detection
 - [GEMS](tool/analysis.md#gems) — Protein–ligand affinity (GNN)
 - [OpenMM](tool/analysis.md#openmm) — Energy minimization
@@ -139,9 +143,9 @@ Filter, transform, and route tables and streams.
 Bring data into a pipeline and take results out.
 
 - [CompoundLibrary](tool/inputs_io.md#compoundlibrary) — Create compound collections
-- [Ligand](tool/inputs_io.md#ligand) — Fetch small molecules
+- [Ligand](tool/inputs_io.md#ligand) — Fetch small molecules (also exported as `Compound`)
 - [Load / LoadMultiple](tool/inputs_io.md#load) — Reload previous outputs
-- [PDB](tool/inputs_io.md#pdb) — Fetch protein structures
+- [PDB](tool/inputs_io.md#pdb) — Fetch protein structures, PDB or mmCIF (also exported as `Structure`)
 - [Plot](tool/inputs_io.md#plot) — Plots
 - [PyMOL](tool/inputs_io.md#pymol) — Session creation and rendering
 - [RCSB](tool/inputs_io.md#rcsb) — Search RCSB PDB and download

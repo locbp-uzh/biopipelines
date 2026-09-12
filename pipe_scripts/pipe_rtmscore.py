@@ -25,6 +25,14 @@ from biopipelines.ligand_utils import write_ligand_sdf  # noqa: E402
 SCORE_COLS = ["id", "structures.id", "ligands.id", "pose", "rtmscore"]
 
 
+def compose_pair_id(prot_id, lig_id):
+    """Compose the scores-table `id` for one (protein, ligand) pair.
+
+    Both axes are always iterated: RTMScore's constructor takes only a DataStream or a StandardizedOutput, so a `Bundle`/`Each` wrapper is refused before this runs and neither axis can collapse into a single prefix. Nothing predicts these ids either — `get_output_files` declares tables only, no streams — so this id reaches no completion check; it is the join key of the scores table, and the "+" convention is what keeps it joinable by `id_map_utils`.
+    """
+    return f"{prot_id}+{lig_id}"
+
+
 def load_smiles_lookup(smiles_json):
     """Build {ligand_id: smiles} from the optional smiles stream."""
     if not smiles_json:
@@ -139,36 +147,48 @@ def main():
 
     rows, missing = [], []
     step_id = step_id_from_table_path(args.missing_csv)
-    for prot_id, prot_pdb in prot_pairs:
-        for lig_id, lig_file in lig_pairs:
-            pair_id = f"{prot_id}+{lig_id}"
-            work = os.path.join(args.scratch_dir, pair_id)
-            try:
-                # Stage a bond-order-correct SDF for the reference ligand and a
-                # protein-only PDB for the pocket graph (the input is a complex).
-                os.makedirs(work, exist_ok=True)
-                lig_sdf = os.path.join(work, f"{lig_id}.sdf")
-                write_ligand_sdf(lig_file, lig_sdf, smiles_lookup.get(lig_id))
-                prot_clean = os.path.join(work, f"{prot_id}_protein.pdb")
-                prepare_protein_pdb(prot_pdb, prot_clean)
-                out_csv = run_rtmscore(args.rtmscore_script, args.model_path,
-                                       prot_clean, lig_sdf, args.cutoff, work,
-                                       args.container_prefix)
-                df = pd.read_csv(out_csv)
-                # rtmscore.py writes columns id,score where id is the
-                # SDF molecule name (pose label).
-                for _, r in df.iterrows():
-                    rows.append({
-                        "id": pair_id,
-                        "structures.id": prot_id,
-                        "ligands.id": lig_id,
-                        "pose": str(r.get("id", "")),
-                        "rtmscore": float(r["score"]),
-                    })
-                print(f"  {pair_id}: {len(df)} pose(s), best={df['score'].max():.3f}")
-            except Exception as e:
-                print(f"WARNING: {pair_id} RTMScore failed: {e}", file=sys.stderr)
-                missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": str(e)[:200]})
+
+    # Cross-product screens N ligands against M proteins, which is the point when the
+    # two streams are independent. But a ligand CARVED from each complex has the same
+    # id as its structure, and then only the diagonal is meaningful: pairing 376x376
+    # would be 141376 runs of which 375/376 score a pose against the wrong protein.
+    paired = ([pid for pid, _ in prot_pairs] == [lid for lid, _ in lig_pairs]
+              and len(prot_pairs) > 1)
+    if paired:
+        print(f"ids match 1:1 across {len(prot_pairs)} entries -- pairing, not cross-producing")
+        combos = [(pp, lp) for pp, lp in zip(prot_pairs, lig_pairs)]
+    else:
+        combos = [(pp, lp) for pp in prot_pairs for lp in lig_pairs]
+
+    for (prot_id, prot_pdb), (lig_id, lig_file) in combos:
+        pair_id = compose_pair_id(prot_id, lig_id)
+        work = os.path.join(args.scratch_dir, pair_id)
+        try:
+            # Stage a bond-order-correct SDF for the reference ligand and a
+            # protein-only PDB for the pocket graph (the input is a complex).
+            os.makedirs(work, exist_ok=True)
+            lig_sdf = os.path.join(work, f"{lig_id}.sdf")
+            write_ligand_sdf(lig_file, lig_sdf, smiles_lookup.get(lig_id))
+            prot_clean = os.path.join(work, f"{prot_id}_protein.pdb")
+            prepare_protein_pdb(prot_pdb, prot_clean)
+            out_csv = run_rtmscore(args.rtmscore_script, args.model_path,
+                                   prot_clean, lig_sdf, args.cutoff, work,
+                                   args.container_prefix)
+            df = pd.read_csv(out_csv)
+            # rtmscore.py writes columns id,score where id is the
+            # SDF molecule name (pose label).
+            for _, r in df.iterrows():
+                rows.append({
+                    "id": pair_id,
+                    "structures.id": prot_id,
+                    "ligands.id": lig_id,
+                    "pose": str(r.get("id", "")),
+                    "rtmscore": float(r["score"]),
+                })
+            print(f"  {pair_id}: {len(df)} pose(s), best={df['score'].max():.3f}")
+        except Exception as e:
+            print(f"WARNING: {pair_id} RTMScore failed: {e}", file=sys.stderr)
+            missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": str(e)[:200]})
 
     all_missing = read_upstream_missing(args.upstream_missing) + missing
 

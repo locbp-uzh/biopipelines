@@ -8,6 +8,19 @@ import json
 import random
 
 
+_LIB_3DMOL_URL = "https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"
+
+# The data-bp-lib marker lets a page assembler swap this tag for one inlined copy of renderers/vendor/3Dmol-min.js; standalone (notebook) output keeps the CDN URL.
+_LIB_3DMOL_TAG = f'<script data-bp-lib="3dmol" src="{_LIB_3DMOL_URL}"></script>'
+
+def _script_json(value):
+    """``json.dumps`` for a value going inside an inline ``<script>``.
+
+    An inline script ends at the first ``</script``, and ``json.dumps`` escapes quotes and backslashes but not that sequence -- so a PDB REMARK containing it would close the viewer's script early and execute whatever followed as markup. ``pipeline_report`` neutralizes the same sequence in the vendored library it inlines; file contents need it for the same reason.
+    """
+    return json.dumps(value).replace("</", "<\\/")
+
+
 def _iter_id_file(stream):
     """Yield (id, file_path) pairs for a per-id stream.
 
@@ -74,13 +87,13 @@ def render(stream, output):
     if truncated:
         total_label += f" (of {len(stream)} total)"
 
-    grid_ids_json = json.dumps(grid_ids)
-    grid_data_json = json.dumps(grid_data)
-    struct_data_json = json.dumps(struct_data)
-    has_struct_json = json.dumps(has_structure)
+    grid_ids_json = _script_json(grid_ids)
+    grid_data_json = _script_json(grid_data)
+    struct_data_json = _script_json(struct_data)
+    has_struct_json = _script_json(has_structure)
 
     return f"""
-<script src="https://cdn.jsdelivr.net/npm/3dmol@2.5.2/build/3Dmol-min.js"></script>
+{_LIB_3DMOL_TAG}
 <div style="margin-top: 12px;">
   <strong>Electrostatic potential / volumetric grid</strong> ({total_label})
 </div>

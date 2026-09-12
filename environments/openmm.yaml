@@ -1,5 +1,7 @@
-# OpenMM environment - energy minimisation only.
+# OpenMM environment - energy minimisation, with small-molecule parameterisation.
 # CPU build is sufficient for the minimisation use-case; GPU not required.
+# The OpenFF/AmberTools stack adds ~740MB but ships here rather than in a separate
+# env so ligand= works on every config variant; AmberTools builds for linux-aarch64.
 name: openmm
 channels:
   - conda-forge
@@ -7,6 +9,10 @@ dependencies:
   - python>=3.10,<3.13
   - pip
   - openmm>=8.0
+  - openmmforcefields>=0.14
+  - openff-toolkit
+  - ambertools
   - pdbfixer
+  - rdkit
   - pandas
   - numpy

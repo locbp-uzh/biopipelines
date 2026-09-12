@@ -26,7 +26,7 @@ from biopipelines.pdb_parser import (
     get_protein_sequence, parse_pdb_file,
     field_atom_name, field_res_name, field_chain, field_res_seq,
 )
-from biopipelines.id_patterns import expand_ids, contains_pattern, expand_file_pattern
+from biopipelines.id_patterns import partial_expand_ids, expand_file_pattern, is_lazy
 
 
 def _is_rcsb_pdb_code(s: str) -> bool:
@@ -1658,9 +1658,10 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         Number of failed fetches
     """
     raw_pdb_ids = config_data['pdb_ids']
-    pdb_ids = expand_ids(raw_pdb_ids) if any(contains_pattern(s) for s in raw_pdb_ids) else raw_pdb_ids
+    # Deterministic slots only: a lazy [...] bracket keeps its brackets here and the upstream map below is what makes it concrete.
+    pdb_ids = partial_expand_ids(raw_pdb_ids)
     raw_custom_ids = config_data.get('custom_ids', raw_pdb_ids)
-    custom_ids = expand_ids(raw_custom_ids) if any(contains_pattern(s) for s in raw_custom_ids) else raw_custom_ids
+    custom_ids = partial_expand_ids(raw_custom_ids)
     convert = config_data.get('convert')  # May be None (keep whatever format is found)
     local_folder = config_data.get('local_folder')
     repo_pdbs_folder = config_data['repo_pdbs_folder']
@@ -1680,8 +1681,8 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
     raw_upstream_files = config_data.get('upstream_files', [])
     if raw_upstream_files and len(raw_upstream_files) == 1 and '<id>' in raw_upstream_files[0]:
         upstream_files = [expand_file_pattern(raw_upstream_files[0], eid) for eid in pdb_ids]
-    elif raw_upstream_files and any(contains_pattern(s) for s in raw_upstream_files):
-        upstream_files = expand_ids(raw_upstream_files)
+    elif raw_upstream_files:
+        upstream_files = partial_expand_ids(raw_upstream_files)
     else:
         upstream_files = raw_upstream_files
     upstream_wildcards = config_data.get('upstream_files_contain_wildcards', False)  # Legacy, ignored
@@ -1694,11 +1695,11 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         try:
             import pandas as _pd
             _df = _pd.read_csv(_map)
-            if 'id' in _df.columns and 'file_path' in _df.columns:
+            if 'id' in _df.columns and 'file' in _df.columns:
                 upstream_id_to_file = {
-                    str(r['id']): str(r['file_path'])
+                    str(r['id']): str(r['file'])
                     for _, r in _df.iterrows()
-                    if str(r['file_path']) and str(r['file_path']) != 'nan'
+                    if str(r['file']) and str(r['file']) != 'nan'
                 }
         except Exception as e:
             print(f"  Warning: could not read upstream map table ({e}); falling back to file-list resolution")
@@ -1712,7 +1713,8 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         mapped = [i for i in pdb_ids if i in upstream_id_to_file]
         extra = [i for i in upstream_id_to_file if i not in set(pdb_ids)]
         resolved = mapped + extra
-        if resolved and len(resolved) != len(pdb_ids):
+        # A still-lazy id names no map row literally, so the map's ids are the only concrete ones — even when the two counts happen to agree.
+        if resolved and (len(resolved) != len(pdb_ids) or any(is_lazy(i) for i in pdb_ids)):
             id_rename = dict(zip(pdb_ids, custom_ids)) if len(pdb_ids) == len(custom_ids) else {}
             print(f"  PDB: upstream map lists {len(resolved)} structure(s); "
                   f"declared ids expanded to {len(pdb_ids)} (upstream filter applied)")
@@ -1873,7 +1875,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                     successful_downloads.append({
                         'id': custom_id,
                         'pdb_id': pdb_id,
-                        'file_path': file_path,
+                        'file': file_path,
                         'format': actual_format,
                         'file_size': metadata['file_size'],
                         'source': metadata['source'],
@@ -1888,7 +1890,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                         successful_downloads.append({
                             'id': f"{custom_id}_{ch_letter}",
                             'pdb_id': pdb_id,
-                            'file_path': chain_path,
+                            'file': chain_path,
                             'format': actual_format,
                             'file_size': os.path.getsize(chain_path),
                             'source': metadata['source'] + f" (split chain {ch_letter})",
@@ -1914,7 +1916,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                     successful_downloads.append({
                         'id': f"{custom_id}{suffix}",
                         'pdb_id': pdb_id,
-                        'file_path': variant_path,
+                        'file': variant_path,
                         'format': actual_format,
                         'file_size': os.path.getsize(variant_path),
                         'source': metadata['source'] + f" (rotation sweep {suffix})",
@@ -1929,7 +1931,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
                 successful_downloads.append({
                     'id': custom_id,
                     'pdb_id': pdb_id,
-                    'file_path': file_path,
+                    'file': file_path,
                     'format': actual_format,
                     'file_size': metadata['file_size'],
                     'source': metadata['source'],
@@ -2025,7 +2027,7 @@ def fetch_structures(config_data: Dict[str, Any]) -> int:
         print(f"\nSuccessful fetches saved: {structures_table} ({len(successful_downloads)} structures)")
     else:
         # Create empty table with proper columns
-        empty_df = pd.DataFrame(columns=["id", "pdb_id", "file_path", "format", "file_size", "source"])
+        empty_df = pd.DataFrame(columns=["id", "pdb_id", "file", "format", "file_size", "source"])
         empty_df.to_csv(structures_table, index=False)
         print(f"No successful fetches - created empty table: {structures_table}")
 

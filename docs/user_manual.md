@@ -17,10 +17,14 @@
   - [Combinatorics: Bundle and Each](#combinatorics-bundle-and-each)
   - [Table Column References](#table-column-references)
 - [Resources](#resources)
+- [Naming Runs with Suffix](#naming-runs-with-suffix)
 - [Grouping Outputs with Folder](#grouping-outputs-with-folder)
 - [On-the-fly Execution](#on-the-fly-execution)
 - [Job Submission](#job-submission)
+- [Saving Without Submitting, and Background Services](#saving-without-submitting-and-background-services)
 - [Data Management with Panda](#data-management-with-panda)
+- [When IDs Disappear: the `missing` Table](#when-ids-disappear-the-missing-table)
+- [Reading Tables Back in Python](#reading-tables-back-in-python)
 - [Filesystem Structure](#filesystem-structure)
 - [Troubleshooting](#troubleshooting)
 
@@ -95,7 +99,7 @@ Any repository-aware assistant works (Claude Code, Codex, Cursor, Copilot Chat, 
 
 ### 3. Point the assistant at the right prompt and state your goal
 
-The `llm/` folder contains two prompts, depending on what you want to do:
+The `llm/` folder holds two session prompts, depending on what you want to do, backed by three per-backend references (`cluster.md`, `colab.md`, `daint.md`):
 
 - **`llm/pipelines.md`** — to *use* the framework: design and run a pipeline for a specific biological problem. This is what most users want.
 - **`llm/development.md`** — to *change* the framework itself: add a tool wrapper, fix a bug, refactor internals.
@@ -240,7 +244,7 @@ Run this cell at the top of your Colab notebook:
 
 On Colab the `biopipelines` env is **not** created: tools mapped to it run in base Python, where `pip install -e ".[colab]"` installed the deps (the `colab` extra adds conda-only packages like `openbabel-wheel`). That env is never activated on Colab, so creating it just wastes setup time. The `micromamba` binary is still needed — each per-tool `.install()` creates its own env with it.
 
-BioPipelines automatically detects the Colab environment and loads `colab.yaml` instead of `config.yaml`. This sets `env_manager: "micromamba"`, which means:
+BioPipelines automatically detects the Colab environment and loads `config.colab.yaml` instead of the site variant it would otherwise pick. This sets `env_manager: "micromamba"`, which means:
 
 - Each tool gets its own isolated conda environment (same as on the cluster)
 - Tool installation uses `micromamba` to create environments from YAML specs
@@ -301,7 +305,7 @@ Daint needs its own variant because three of its properties break the assumption
 Use a venv, not conda, and put it on `$SCRATCH`. `$STORE` is backed up and shared with your project, but its quota allows only 150,000 files, and Python environments exhaust that long before the 1 TB of space — 13 tools' venvs come to ~101,000 files for 15 GB. Scratch has 1M inodes; the cost is its 30-day access-time purge, so a tool left unused for a month needs reinstalling.
 
 ```bash
-git clone https://gitlab.uzh.ch/locbp/public/biopipelines-locbp
+git clone https://github.com/locbp-uzh/biopipelines
 cd biopipelines-locbp
 
 # There is no `python` on the login nodes — only python3 (3.6) and python3.11.
@@ -333,7 +337,7 @@ BIOPIPELINES_CONFIG_VARIANT=daint biopipelines-submit my_pipeline.py
 
 GPU tools do not use a conda env. Each is mapped in `config.daint.yaml`'s `edf:` block to an Environment Definition File, and its whole script runs via `srun --environment=<edf>`. The image comes from NVIDIA NGC, which publishes GH200-native PyTorch, so torch and CUDA arrive prebuilt rather than being ported. A tool's venv is layered on the image with `--system-site-packages` and must be built inside the same container.
 
-Not every tool is available. Tools needing conda binaries (PyMOL, mkdssp) or x86-64-only container images (ProteinMPNN, RFdiffusion — the RosettaCommons images have no arm64 build) do not run on Daint. `config.daint.yaml`'s `environments:` block lists what is supported; see `llm/daint.md` for the evidence behind each.
+Not every tool is available. Tools needing an x86-64-only container image do not run on Daint — RFdiffusion is the clearest case, since the RosettaCommons images have no arm64 build. PyMOL, mkdssp and ProteinMPNN *do* run there, supplied by their EDF image. `config.daint.yaml`'s `environments:` block is a routing table, not a record of what has been verified: it names an env for every tool that has one, whether or not the tool has been run. `llm/daint.md` carries the list actually verified by running, and the blocked list with a reason for each.
 
 ### Nodes are billed whole
 
@@ -433,6 +437,12 @@ Basic input types can be imported from `biopipelines/entities.py`. Importantly, 
 | `CompoundLibrary` | Create compound collections |
 | `Table` | Load existing CSV files |
 
+#### Structure and Compound
+
+`Structure` is another name for `PDB` and `Compound` for `Ligand` — the same tools, named for the streams they emit (`structures`, `compounds`), and `PDB` accepts mmCIF as readily as PDB. Both spellings are first-class and neither is deprecated; `Structure is PDB` and `Compound is Ligand` are literally true, because each is a bare alias rather than a subclass.
+
+Outputs keep the original name either way. `TOOL_NAME` stays `"PDB"` and `"Ligand"`, and that single value drives the step's output folder name, the config's `environments:` and `folders:` keys, the log lines, and any `Load()` pointing at an existing folder. So a `Structure(...)` step still writes `001_PDB/` and still logs `PDB`, and a `Compound(...)` step still writes `001_Ligand/`. That is the cost of keeping one registry entry per tool: if you rename a step in your script, the paths on disk do not follow.
+
 **PDB** - Fetches from local folders or RCSB with priority: `local_folder` → `<biopipelines>/pdbs/` → RCSB download.
 It also generates protein sequences for each of the proteins.
 If an RCSB code is provided, ligands will also be downloaded and will be available with their smiles/ccd.
@@ -473,18 +483,47 @@ aspirin = Ligand("aspirin", codes="ASP")
 # Direct SMILES
 ethanol = Ligand(smiles="CCO", ids="ethanol", codes="ETH")
 
-# From CDXML file: each molecule is a separate ligand; ChemDraw names used as IDs
-ligands = Ligand(cdxml="my_ligands.cdxml")
+# From CDXML file: each molecule is a separate ligand; ChemDraw names used as IDs.
+# There is no cdxml= parameter — pass the path as the lookup value and the
+# .cdxml suffix is recognized automatically (a .txt of SMILES works the same way).
+ligands = Ligand("my_ligands.cdxml")
 
 # Code-only: name an existing HETATM residue code (no download, no SMILES).
 # Produces a compounds stream you hand to tools that read a ligand's code
 # (LigandMPNN, PoseBusters, PLIP, RFdiffusionAllAtom, RFdiffusion3, …).
-lig = Ligand(code="ZIT")
+lig = Ligand(codes="ZIT")
+
+# Carve a bound ligand out of complexes, keeping the crystal coordinates.
+posed = Ligand(codes="STI", structures=complexes)
 ```
 
-A `code`-only Ligand has no SMILES, so it cannot be converted to 3-D. To get a
-3-D ligand (e.g. an SDF for docking-adjacent tools), start from a Ligand that
-carries a SMILES and run OpenBabel:
+**One `codes` parameter, and the rest of the call selects the mode.** `codes` is the residue code, and what you pass *alongside* it decides what the `Ligand` is:
+
+| Call | Mode |
+|---|---|
+| `Ligand(codes="UNL")` | code-only — names an existing HETATM residue: no chemistry, no `structures` stream |
+| `Ligand(smiles=…, ids=…, codes="BGD")` | chemistry you supplied, plus the residue label it carries downstream (the dominant real usage) |
+| `Ligand(codes="STI", structures=complexes)` | carves that residue out of the given structures, keeping their coordinates |
+| `Ligand("aspirin")` | `lookup` is the first positional, so this fetches chemistry — **not** code-only |
+
+This used to be two parameters: `codes=` for the label on a ligand with chemistry, `code=` for code-only construction. One letter apart, mutually exclusive, and confusing them silently produced a chemistry-free stub. `code=` still binds `codes=` so old scripts keep running, but it will soon be deprecated and each use prints one line:
+
+```
+[contract:deprecated_alias] Ligand: code= is a synonym for codes= and will soon be deprecated.
+```
+
+Because a forgotten `smiles=` now yields a stub instead of an error, the code-only path announces itself too:
+
+```
+[contract:code_only_ligand] Ligand(codes='UNL') carries no chemistry, only a residue code
+    Pass lookup or smiles to retrieve chemical information.
+```
+
+Both lines are severity-gated like every other contract check — `BIOPIPELINES_ENFORCE_CODE_ONLY_LIGAND=off` or `BIOPIPELINES_ENFORCE_DEPRECATED_ALIAS=off` silences one for a run.
+
+**Two calls that used to raise and now work.** `Ligand(codes=…, structures=…)` was rejected as "not compatible" and is now the carve path; `Ligand(code=…, smiles=…)` was rejected as "mutually exclusive" and is now the labelled-chemistry case. A script written against the old API does not fail on these — it does something, so check it against the table above.
+
+A code-only Ligand has no SMILES, so it cannot be converted to 3-D. To get a 3-D ligand (e.g. an SDF for docking-adjacent tools), start from a Ligand that carries a SMILES and run OpenBabel:
 
 ```python
 aspirin = Ligand("aspirin")                       # has SMILES
@@ -492,12 +531,12 @@ sdf = OpenBabel(compounds=aspirin, convert_3d="sdf")
 # sdf.streams.structures -> the SDF; sdf.streams.compounds -> chemistry passthrough
 ```
 
-**Ligand string shorthand.** Tools that read a ligand by its residue code (LigandMPNN, PLIP, PoseBusters, RFdiffusionAllAtom, RFdiffusion3) accept a bare string in place of a `Ligand`: `ligand="LIG"` is shorthand for `ligand=Ligand(code="LIG")`. It creates a code-only ligand — no chemistry, no SMILES — and is exactly equivalent to constructing the `Ligand` yourself. For a ligand with chemistry (to fetch SMILES, or to convert to 3-D), pass an explicit `Ligand("ATP")` / `Ligand(smiles=...)` instead; the string shorthand never fetches or downloads. The auto-created ligand is registered as an internal step (see [Filesystem Structure](#filesystem-structure)).
+**Ligand string shorthand.** Tools that read a ligand by its residue code (LigandMPNN, PLIP, PoseBusters, RFdiffusionAllAtom, RFdiffusion3) accept a bare string in place of a `Ligand`: `ligand="LIG"` is shorthand for `ligand=Ligand(codes="LIG")`. It creates a code-only ligand — no chemistry, no SMILES — and is exactly equivalent to constructing the `Ligand` yourself. Filtering by residue code is the whole point of the shorthand, so the `code_only_ligand` notice is deliberately suppressed for it; write `Ligand(codes="LIG")` out by hand and you get the notice, because there the omission of `smiles=` might be an accident. For a ligand with chemistry (to fetch SMILES, or to convert to 3-D), pass an explicit `Ligand("ATP")` / `Ligand(smiles=...)` instead; the string shorthand never fetches or downloads. The auto-created ligand is registered as an internal step (see [Filesystem Structure](#filesystem-structure)).
 
 ```python
 # These two are equivalent:
 LigandMPNN(structures=rfd, ligand="STI")
-LigandMPNN(structures=rfd, ligand=Ligand(code="STI"))
+LigandMPNN(structures=rfd, ligand=Ligand(codes="STI"))
 ```
 
 **CompoundLibrary** - Creates compound collections:
@@ -542,13 +581,15 @@ Panda(
 # Use column reference for per-structure data
 ProteinMPNN(
     structures=proteins,
-    redesigned=(metrics.tables.data, "designed_positions")
+    redesigned=metrics.tables.data.designed_positions
 )
 
 # Custom table name
-previous = Table("/path/to/results.csv", name="previous_run")
+previous = Table("/path/to/results.csv", table_name="previous_run")
 # Access via: previous.tables.previous_run
 ```
+
+The parameter is `table_name`, not `name`: `name` is framework-reserved as the job name, and `Table` used to capture it, so the job name of every `Table` step silently vanished. `name=` still works as a deprecated synonym — it names the handle a downstream step reaches the table by (`previous.tables.previous_run`), and silently changing that would have broken every consumer — but it prints a `[contract:deprecated_alias]` line and now also sets the job name. Pass both and `table_name` names the table while `name` is only the job name.
 
 ### Combinatorics: Bundle and Each
 
@@ -582,9 +623,9 @@ boltz = Boltz2(
 )
 ```
 
-**Output ID naming**: Output IDs are always the full cartesian product of all iterated axis IDs joined with `_`. For example, 1 protein (`prot1`) × 3 ligands (`lig1`, `lig2`, `lig3`) produces IDs `prot1_lig1`, `prot1_lig2`, `prot1_lig3`. There are no shortcuts — even with a single protein, the protein ID is always included.
+**Output ID naming**: Output IDs are always the full cartesian product of all iterated axis IDs joined with `+`. For example, 1 protein (`prot1`) × 3 ligands (`lig1`, `lig2`, `lig3`) produces IDs `prot1+lig1`, `prot1+lig2`, `prot1+lig3`. There are no shortcuts — even with a single protein, the protein ID is always included. The `+` separator is deliberately distinct from `_`, which is reserved for parent→child suffixes (`protein_1`, `protein_2`), so a multi-axis ID is never mistaken for a suffixed one.
 
-**Provenance columns**: All output tables include `{stream_name}.id` columns (e.g., `sequences.id`, `compounds.id`) that track which input from each axis produced each output row. This enables easy filtering and joining:
+**Provenance columns**: A tool's postprocessing step can append one `{stream_name}.id` column per input axis (e.g. `sequences.id`, `compounds.id`), tracking which input produced each output row. These are added at runtime, so they are not in the table's declared columns — and which tables get them is per-tool: Boltz2 adds them to `structures`, `confidence` and `affinity`, while ESMFold2 adds them to `structures` only. Check the tool's page. Where present they make filtering and joining direct:
 
 ```python
 # Filter Boltz2 results for a specific protein
@@ -607,7 +648,7 @@ rfd = RFdiffusion(contigs="50-100", num_designs=5)
 # Pass column reference to downstream tool
 lmpnn = LigandMPNN(
     structures=rfd,
-    ligand=Ligand(code="LIG"),  # code read from the compounds stream at runtime
+    ligand=Ligand(codes="LIG"),  # code read from the compounds stream at runtime
     redesigned=rfd.tables.structures.designed  # Tuple: (TableInfo, "designed")
 )
 ```
@@ -692,6 +733,30 @@ with Parallel(pack=4):
 `chunks(4)` gives 4 chunks with any remainder spread over the leading ones (10 items → 3/3/2/2); `chunks(size=50)` fixes the items per chunk and derives the count. Chunks carry the stream's name, format, and files, and a shared-file stream keeps every chunk pointing at the same artifact.
 
 Lazy ids split on their deterministic outer axis and keep their `[...]` suffix, so a stream of `prot_<0..9>[_<N><A V>]` chunks into groups of `prot_N[_<N><A V>]` whose runtime fan-out is still deferred — you do not need to wait for a stream to be fully expanded to split it. An id that is lazy at the top level has no such axis and raises.
+
+---
+
+## Naming Runs with Suffix
+
+`Suffix("label")` sets a label that is appended to the folder and script names of every tool created after it, until you change or clear it. It is the only way to tell two runs of the *same* tool apart: without it, `002_Boltz2/` and `005_Boltz2/` differ only by step number, and after you insert a step upstream those numbers shift.
+
+```python
+with Pipeline("Project", "Job"):
+    Resources(gpu="A100")
+
+    Suffix("apo")
+    apo = Boltz2(proteins=target)                    # 001_Boltz2_apo/
+
+    Suffix("holo")
+    holo = Boltz2(proteins=target, ligands=lig)      # 002_Boltz2_holo/
+
+    Suffix()                                          # clears it
+    Panda(tables=[apo, holo])                        # 003_Panda/
+```
+
+The label lands on the output folder (`NNN_<Tool>_<suffix>/`) and on the matching `RunTime/NNN_<Tool>_<suffix>.sh`, `Logs/NNN_<Tool>_<suffix>.log`, and `ToolOutputs/NNN_<Tool>_<suffix>.json`, so a run is identifiable from any of them. `LoadMultiple(..., suffix="holo")` (see [Troubleshooting](#troubleshooting)) then reloads exactly that run.
+
+`Suffix()` must be called inside a `Pipeline` block, and it applies from that point forward — it is a cursor, not a per-tool argument. Set it again before each group of tools you want labelled, and call `Suffix()` with no argument to go back to unlabelled names. Prefer a short, meaningful label (`apo`, `cycle3`, `batch1`) over a number, since the step number is already in the name.
 
 ---
 
@@ -795,6 +860,10 @@ Generated scripts are stemmed by scheduler: `slurm_batch*.sh`, `lsf_batch*.sh`, 
 ./resubmit /path/to/job/RunTime/slurm_batch1.sh   # or lsf_batch1.sh / pbs_batch1.sh
 ```
 
+`resubmit` **strips the script's dependency directives** and says which ones it removed. It has to: `submit` writes the real job ids into the batch scripts when it resolves their placeholders, so the script on disk waits on the *original* run's jobs — ids that have since completed, failed, or aged out of the scheduler. Left in place they leave the resubmitted job pending on a dependency that can never be satisfied, or get it rejected outright. Pass `--keep-dependencies` for the one case where they still mean something: the parent batch is still queued or running and you want the resubmission chained behind it.
+
+The script itself is never modified — it is piped to the scheduler — so `RunTime/` stays an accurate record of what the original run submitted.
+
 **External dependencies** - Wait for other scheduler jobs:
 
 ```python
@@ -803,6 +872,48 @@ with Pipeline("Project", "Job", "Description"):
     Resources(gpu="V100", time="4:00:00")
     ...
 ```
+
+---
+
+## Saving Without Submitting, and Background Services
+
+### `Save()`
+
+By default a pipeline submits itself when its `with` block exits. Calling `Save()` inside the block writes all the scripts and manifests but **suppresses that auto-submission**, so you can inspect (or hand-edit) what was generated before anything runs:
+
+```python
+with Pipeline("Project", "Job", description="Dry run"):
+    Resources(gpu="A100")
+    rfd = RFdiffusion(...)
+    seqs = LigandMPNN(structures=rfd)
+    Save()          # writes RunTime/, Logs/, pipeline.sh — submits nothing
+```
+
+You can then submit the generated `pipeline.sh` by hand later, or just read the scripts to check the commands. `Save()` must be called inside a `Pipeline` block; where you put it in the block does not matter, since it is the exit that would otherwise submit.
+
+### `Service()`
+
+Some tools are **servers**: they start up, stay running, and are consumed by a later step while still alive. `MMseqs2Server` is the canonical case. Submitting such a server as an ordinary step does not work, because the chain would wait for it to *finish* — and a server only exits on its own idle timeout.
+
+`Service()` is a context manager for exactly this. The batch inside it keeps its normal dependency on whatever precedes it, but the chain does not wait for it to complete: the first batch *after* the block waits only for the server to be **running**. That also removes the scheduling race you get from submitting a server separately, where the server sits queued at low priority while the client's allocation burns wall-clock.
+
+```python
+with Pipeline("Project", "Job"):
+    Resources(gpu="A100")
+    seqs = LigandMPNN(structures=rfd)          # runs first
+
+    with Service():
+        Resources(memory="900GB", cpus=32, time="24:00:00")
+        MMseqs2Server(mode="cpu")              # starts, then stays up
+
+    Resources(memory="16GB")
+    msas = MMseqs2(sequences=seqs)             # starts once the server is up
+
+    Resources(gpu="A100")
+    Boltz2(proteins=seqs, msas=msas)           # waits for the MSAs normally
+```
+
+Three rules: a `Service()` block must contain **exactly one** batch (one `Resources()` plus the daemon tool); it cannot be nested or placed inside a `Parallel()` block, and it cannot contain `Dependencies()`. Because nothing waits for the daemon's exit code, the pipeline's success never hinges on it — the server self-terminates on its idle timeout once its consumer has drained the queue.
 
 ---
 
@@ -863,6 +974,125 @@ Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_
 
 ---
 
+## When IDs Disappear: the `missing` Table
+
+A pipeline step can finish successfully with **fewer ids than it started with**. A filter drops rows, a structure fails to converge, a compound has no SMILES — and the ids concerned simply stop appearing downstream. This is normal and intended, but it is also the usual answer to "my run finished, so why do I have 260 designs instead of 300?"
+
+The mechanism is a standard table called `missing`, written to `<tool folder>/tables/missing.csv` by over forty tools. Its schema is fixed:
+
+| Column | Meaning |
+|---|---|
+| `id` | The id that was removed |
+| `removed_by` | The step that removed it, as `<NNN>_<Tool>` (e.g. `005_Panda`) |
+| `kind` | `filter` if the tool dropped it on purpose, `failure` if the tool tried and failed |
+| `cause` | A short human-readable reason |
+
+Two things follow from this being a real table rather than a log message.
+
+**It propagates.** Each tool merges its inputs' `missing` tables into its own, de-duplicating by id, so the `missing.csv` of the *last* step in a chain is a complete account of everything lost anywhere upstream, with the step that lost it named. You do not have to walk back through the pipeline — read the last one:
+
+```python
+import pandas as pd
+
+if "missing" in final_step.tables:                       # not declared when nothing upstream lost an id
+    lost = pd.read_csv(final_step.tables.missing.info.path)
+    print(lost.groupby(["removed_by", "kind"]).size())   # who dropped how many, and why
+    print(lost[lost["kind"] == "failure"])               # the ones that are actually errors
+```
+
+**It is what keeps the completion check honest.** Without it, a tool that declared 300 outputs and wrote 260 files would be reported FAILED. The check reads `missing.csv` and excuses exactly the ids it accounts for: rows propagated from an upstream step, and rows this step marked `kind="filter"`. A row this step itself wrote with `kind="failure"` is **not** excused — that is a genuine failure and the step is still reported FAILED. So a green run with a populated `missing.csv` means "these ids were deliberately dropped", not "these ids broke silently".
+
+When you want to know where your ids went, read `missing.csv` first and the logs second.
+
+---
+
+## Reading Tables Back in Python
+
+Every tool exposes its output tables through `.tables`, and every table carries its own metadata. The path is the thing you actually want — hand it to `pandas` and analyze the run like any other CSV:
+
+```python
+import pandas as pd
+
+df = pd.read_csv(boltz.tables.confidence.info.path)
+best = df.sort_values("confidence_score", ascending=False).head(10)
+```
+
+`.tables` supports the operations you would expect of a mapping, which is how you explore a tool's output without looking it up in the reference:
+
+```python
+list(boltz.tables.keys())              # ['structures', 'confidence', 'sequences', 'msas', 'affinity', 'compounds']
+"affinity" in boltz.tables             # True
+boltz.tables["confidence"]             # the path, as a string
+boltz.tables.confidence.info.columns   # ['id', 'input_file', 'confidence_score', 'ptm', 'iptm', ...]
+boltz.tables.confidence.info.name      # 'confidence'
+```
+
+Note the two access styles: `boltz.tables["confidence"]` returns the **path string**, while `boltz.tables.confidence` returns the **table object** whose `.info` holds `path`, `columns`, `name`, and `description`. Streams work the same way through `.streams` (`list(boltz.streams.keys())` → `['structures', 'sequences', 'compounds', 'msas']`).
+
+For a run that has already finished, `Load()` reaches the same tables on disk — but how you get at them depends on where you call it. **Inside** a `Pipeline` block it returns the usual object, so `.tables` works exactly as above:
+
+```python
+with Pipeline("Project", "Analysis"):
+    Resources()
+    prev = Load("/path/to/job/003_Boltz2")
+    df = pd.read_csv(prev.tables.confidence.info.path)
+```
+
+**Outside** a pipeline — the common case in a notebook or a one-off analysis script — `Load()` returns the tool object itself, which has no `.tables`. Go through `get_output_files()`, whose `"tables"` entry is a plain dict of table objects:
+
+```python
+from biopipelines import Load, list_tables, get_table_path, table_exists
+
+prev = Load("/path/to/job/003_Boltz2")
+tables = prev.get_output_files()["tables"]
+
+list_tables(tables)                                  # ['structures', 'confidence', ...]
+table_exists(tables, "affinity")                     # True / False
+df = pd.read_csv(get_table_path(tables, "confidence"))
+```
+
+### The Five Table Helpers
+
+`get_table`, `get_table_path`, `get_indexed_table`, `list_tables` and `table_exists` are exported from `biopipelines`, and all five accept **any container you might be holding**, not just the dict above:
+
+| You have | Where it comes from |
+|---|---|
+| a plain `{name: table}` dict | `Load(folder).get_output_files()["tables"]` |
+| a `TableContainer` | any tool's `.tables` |
+| a `StandardizedOutput` | what a tool constructor returns inside a `Pipeline` block |
+| a `ToolOutput` | the framework's own wrapper around a registered tool (`ToolOutput(config)`); accepted so code holding one need not reach for its `.output` |
+
+All five route through one resolver, so a container that one helper accepts is accepted by all of them — there is no need to unwrap `.tables` yourself, and no helper is fussier than its neighbors:
+
+```python
+get_table_path(boltz, "confidence")           # the StandardizedOutput a tool returns
+get_table_path(boltz.tables, "confidence")    # its TableContainer
+get_table_path(tables, "confidence")          # the plain dict from get_output_files()
+```
+
+**Anything else raises, and the message says what you passed.** Hand a helper a list, a string, or an unrelated object and you get a `TypeError` naming the type and listing the four accepted shapes. That includes `table_exists`, which raises rather than answering `False` — `False` here would read as "this run has no such table", which is a wrong answer rather than an error, and wrong answers are the ones that cost you an afternoon.
+
+**Ordinary tables and indexed tables have separate accessors.** Most tables are one CSV, so `get_table_path(source, name)` returns its path. A tool that writes *one table per input ID* declares the collection as a single named entry (an `IndexedTableContainer`), and there is no single path to return — you have to say which entry you want:
+
+```python
+list_tables(prev_output)                             # ['rmsf', ...]
+get_indexed_table(prev_output, "rmsf", "1gfl")       # -> the TableInfo for that ID
+get_indexed_table(prev_output, "rmsf", "1gfl").info.path
+
+get_table(prev_output, "rmsf")                       # -> the IndexedTableContainer itself
+```
+
+Call the wrong one and the error points at the right one, in both directions:
+
+- `get_table_path(source, "rmsf")` on an indexed collection → `TypeError: Table 'rmsf' is an IndexedTableContainer with 2 entries. Use get_indexed_table(source, 'rmsf', entry_id) to get one entry's path.`
+- `get_indexed_table(source, "scores", "1gfl")` on an ordinary table → `TypeError: Table 'scores' is a TableInfo, not an IndexedTableContainer. Use get_table_path(source, 'scores') for its single path.`
+
+`get_table` is the one helper that is indifferent to the distinction: it returns whatever is stored under that name, a `TableInfo` or an `IndexedTableContainer`, so use it when you want to inspect (`.info.columns`, `.ids`) rather than to read a file. A name that is not there raises `KeyError` listing the names that are.
+
+This is the whole loop: run the pipeline, `Load` the step you care about, read its tables with `pandas`, and check `missing.csv` for anything that is not there.
+
+---
+
 ## Filesystem Structure
 
 Each tool's output folder follows a predictable sub-layout so you always
@@ -871,8 +1101,10 @@ their own stream's folder; standalone tables live under `tables/`.
 
 ```
 <biopipelines_output>/<project>/<job>_<NNN>/
-├── RunTime/                    # Execution scripts
+├── RunTime/                    # Execution scripts and the run page
 │   ├── pipeline.sh
+│   ├── pipeline.html           # self-contained record of the run — open it in a browser
+│   ├── pipeline_graph.json     # the same content as data, for regenerating the page
 │   ├── 001_<tool>.sh
 │   ├── 002_<tool>.sh
 │   └── .internal/              # scripts for auto-generated internal tools
@@ -914,12 +1146,60 @@ their own stream's folder; standalone tables live under `tables/`.
 | Input JSONs / YAMLs sent to the tool's CLI | `_configuration/` |
 | Raw model dumps (Boltz's `boltz_results_*`, ColabFold's Folding dump, etc.) | `_execution/` |
 | The tool's quick-glance status manifest | `.expected_outputs.json` (root) |
+| The tool's own console log | `_log` (root) — the same stream as `Logs/<NNN>_<Tool>.log`, kept beside the outputs so you don't have to leave the folder |
 | Outputs grouped under `Folder("x")` | `x/<NNN>_<Tool>/` |
 | Auto-generated internal tools (e.g. a `Ligand` from `ligand="LIG"`) | `.internal/<NNN>_<Tool>/` |
 
+### Visualizing one step: `bp-visualize`
+
+`pipeline.html` covers the whole run. `bp-visualize` covers one step, and takes selection and ordering arguments the run page has no way to express:
+
+```bash
+bp-visualize /path/to/job/003_Boltz2
+bp-visualize /path/to/job/003_Boltz2 --descending confidence.confidence_score --max-items 5
+bp-visualize /path/to/job/002_ESMFold --ascending confidence.plddt --streams structures
+```
+
+It writes `<tool folder>/_extras/<step>_view.html` by default (`-o` to choose), and the page is self-contained exactly as `pipeline.html` is — the vendored py3Dmol copy is inlined, so the 3D viewers work from a `file://` URL with no network. Copy the one file off the cluster and open it.
+
+Two properties make it usable mid-run: it reads the step's exported `ToolOutputs/<step>.json` plus whatever is on disk, so it needs neither the scheduler nor the pipeline script, and it does not care whether the rest of the job has finished. Run it on a login node against a job that is still queued.
+
+| Option | Meaning |
+|---|---|
+| `--descending TABLE.COLUMN` / `--ascending TABLE.COLUMN` | Order items by a column of one of the step's tables |
+| `--max-items N` | Render at most N items; **default 10**. `0` means no cap, leaving each renderer its own sampling |
+| `--ids id1,id2` | Render only these ids |
+| `--streams a,b` / `--tables a,b` | Render only these streams / tables |
+| `-o PATH` | Where to write the page |
+| `--open` | Open the page in a browser (for local runs, not a login node) |
+| `--allow-external` | Keep a renderer's CDN `<script>` when no vendored copy exists |
+
+**The sort key must be qualified.** `--descending confidence.plddt`, not `--descending plddt`: one tool's tables can carry the same column name twice, and picking one silently is a wrong answer rather than an error. A bare name is refused and the message names the qualified spellings that would work. The available columns are in `docs/tool_reference.md`, and in the step's own `.expected_outputs.json`.
+
+Ordering and capping apply to the streams *and* the tables on the page, so a top-5-by-pLDDT view shows the same five items in the viewer and in every table beside it.
+
+The default is **10**, not the run page's 5. A single-step page carries one step's structures rather than every node's, and 5 hides exactly one item of a 6-item stream — the least useful place to stop. Pass `--max-items 0` for no cap.
+
+**A cap alongside an ordering means "the top N of what was ranked."** It applies only to the streams the sort table actually keys — a Boltz2 step ordered by `confidence.confidence_score` caps its structures and leaves its `sequences`, `compounds` and `msas` whole, since the confidence table keys structures and cutting the others would drop items on no criterion at all. The page says which streams were spared and why. With no ordering, `--max-items` is purely a page-size limit and applies to every stream.
+
+### The run page
+
+`RunTime/pipeline.html` is a record of the run you can open in a browser. It lays the pipeline out as one lane per batch with that batch's resources, one collapsible card per step carrying its paths, tool version, environment and completion marker, and arrows for the dataflow between steps. A donut summarises completed against failed, and a Machine panel records the scheduler and environment manager the run actually used.
+
+It is **self-contained**: no network, no sibling files. Copy that one file off a cluster and it still works, which is what it is for.
+
+Two things worth knowing:
+
+- **It is written twice.** `save()` writes it at configuration time, when nothing has run yet — useful for checking the wiring, but every step reads "pending". Refresh it afterwards with `regenerate_pipeline_page("<job>/RunTime")` to fill in the results. On-the-fly runs refresh it after each step automatically.
+- **The 3D viewers work with no network.** The structure and grid renderers need the py3Dmol library, and a copy is vendored in the repo at `biopipelines/renderers/vendor/3Dmol-min.js`, inlined once per page however many structure nodes it has. A page with viewers is around 695 KB against 28 KB without — still one file you can copy off a cluster and open anywhere. If that vendored copy is missing, the page falls back to the CDN when you pass `allow_external=True`, and to a metadata table otherwise, naming what it dropped either way.
+
+`allow_external` therefore does **not** decide whether structures render. It means "allow renderer output that fetches from the network", which now only matters for a renderer that fetches *data*.
+
+An arrow appears only where the consuming tool holds an object stamped with its producer. A stream derived inside `DataStream` itself (`stream.chunks(...)`, iterating a bare stream) is a fresh object with no back-reference, so its edge is left out rather than guessed — the graph shows what the framework could prove, not everything that is true.
+
 Each public tool carries the same step number across its output folder, its `RunTime/`/`Logs/` scripts, and its `ToolOutputs/` manifest, so `002_LigandMPNN/` pairs with `RunTime/002_LigandMPNN.sh`. Internal tools (auto-generated, e.g. a `Ligand` from `ligand="LIG"`) are numbered separately under their own `.internal/` subdirectories and don't consume a public step number.
 
-Configure paths and environments in `config.yaml` at repository root.
+Configure paths and environments in the repository root's `config.<variant>.yaml` — there is no single `config.yaml`. One file ships per site variant (`config.cluster.yaml`, `config.local.yaml`, `config.container.yaml`, `config.daint.yaml`, `config.colab.yaml`); a gitignored `.config.<variant>.yaml` overlay next to it holds your machine-specific paths and wins over the committed defaults. Edit them with the `bp-config` command rather than by hand. The active variant is detected automatically and can be forced with `BIOPIPELINES_CONFIG_VARIANT=<variant>`.
 
 ---
 

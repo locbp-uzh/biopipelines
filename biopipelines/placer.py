@@ -111,7 +111,8 @@ class PLACER(BaseConfig):
     """
 
     TOOL_NAME = "PLACER"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "placer"
 
     RERANK_CHOICES = ("prmsd", "plddt", "plddt_pde")
 
@@ -131,12 +132,13 @@ class PLACER(BaseConfig):
         Verification: env exists + repo present + ``import PLACER`` succeeds +
         the default weights file is on disk.
         """
+        env = cls._install_env(env_manager)
         repo_dir = folders.get("PLACER", "")
         parent_dir = os.path.dirname(repo_dir)
         biopipelines = folders.get("biopipelines", "")
         weights_path = os.path.join(repo_dir, "weights", "PLACER_model_1.pt")
 
-        env_check = cls._env_exists_check("placer", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -f "{repo_dir}/PLACER.py" ]'
         weights_check = f'[ -f "{weights_path}" ]'
         # Verify the heavy binary deps are actually present, not just that the
@@ -145,7 +147,7 @@ class PLACER(BaseConfig):
         # success — importing them explicitly makes that fail loudly. The
         # imports are echoed (no >/dev/null) so a failure is visible in the log.
         import_check = (
-            f'{cls._env_run("placer", env_manager)}python -c '
+            f'{cls._env_run(env, env_manager)}python -c '
             f'"import torch, dgl, e3nn; import sys; sys.path.insert(0, \'{repo_dir}\'); import PLACER; '
             f'print(\'PLACER verify OK; torch\', torch.__version__)"'
         )
@@ -163,8 +165,8 @@ if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/baker-laboratory/PLACER.git "{repo_dir}"
 fi"""
 
-        remove_block = cls._env_remove_block("placer", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("placer", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
 
         return f"""echo "=== Installing PLACER ==="
 {skip}{clone_block}
@@ -172,7 +174,7 @@ fi"""
 {remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create placer environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 

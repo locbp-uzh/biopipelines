@@ -41,7 +41,7 @@ with Pipeline(project="Examples",
     
     adenylate_kinase_boltz_renamed = PDB(adenylate_kinase_boltz,
                                          PDB.rename("LIG","UNL")) # code UNL (atomworks DO_NOT_MATCH_CCD) so RFD3 reads atoms from the structure, not a CCD conformer
-    ligand_L = Ligand(code="UNL")  # names the renamed HETATM code for the code-consuming tools
+    ligand_L = Ligand(codes="UNL")  # names the renamed HETATM code for the code-consuming tools
 
     rfd3 = RFdiffusion3(pdb=adenylate_kinase_boltz_renamed, #RFdiffusion3 often needs some PDB cleanup. The easiest solution is to start from a Boltz prediction
                         ligand=ligand_L,

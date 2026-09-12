@@ -31,6 +31,7 @@ my_scripts/*
 !my_scripts/README.md
 !my_scripts/count_atoms.py
 !my_scripts/filter_structures.py
+!my_scripts/align_protein_openings.py
 
 # Ligands folder (cached ligand files)
 ligands/*
@@ -63,6 +64,9 @@ site/
 docs/.claude/
 CLAUDE.md
 
+# Codex
+#.agents
+
 # LLM workflow — user-local artefacts
 llm/resources.md
 
@@ -80,7 +84,16 @@ tmp_pytest/
 
 # OS
 .DS_Store
+._*
 Thumbs.db
+
+# PDB files (input/output structures, not committed)
+*.pdb
+
+# Legacy pablo-main layout (replaced by lowercase counterparts in Hub)
+MyPipelines/
+ExamplePipelines/
+PDBs/
 wip.py
 wip.txt
 nbt.pdf
@@ -100,3 +113,6 @@ comments.md
 comparison.txt
 package-two.md
 .mcp.json
+
+# Build artifacts from `pip wheel` / `python -m build`
+build/

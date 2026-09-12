@@ -85,6 +85,11 @@ class PyMOLSessionBuilder:
         self.config = config
         self.output_folder = config.get("output_folder", ".")
         self.session_name = config.get("session_name", "session")
+        # Sessions go to _extras/, renders to the renders/ stream folder, so a
+        # relative Save filename must not resolve against output_folder.
+        self.session_file = config.get("session_file") or os.path.join(
+            self.output_folder, f"{self.session_name}.pse")
+        self.session_folder = config.get("session_folder") or os.path.dirname(self.session_file)
 
         # Current naming map: id -> pymol_name
         self.naming_map: Dict[str, str] = {}
@@ -884,11 +889,11 @@ class PyMOLSessionBuilder:
         Args:
             op: Operation dict with filename
         """
-        filename = op.get("filename", f"{self.session_name}.pse")
-
-        # Make path absolute if relative
-        if not os.path.isabs(filename):
-            filename = os.path.join(self.output_folder, filename)
+        filename = op.get("filename")
+        if not filename:
+            filename = self.session_file
+        elif not os.path.isabs(filename):
+            filename = os.path.join(self.session_folder, filename)
 
         try:
             cmd.save(filename)
@@ -1207,9 +1212,8 @@ class PyMOLSessionBuilder:
         if not has_save:
             print("\n" + "=" * 60)
             print("Auto-saving session...")
-            session_path = self.config.get("session_file") or os.path.join(self.output_folder, f"{self.session_name}.pse")
-            cmd.save(session_path)
-            print(f"Saved: {session_path}")
+            cmd.save(self.session_file)
+            print(f"Saved: {self.session_file}")
 
         print("\n" + "=" * 60)
         print(f"Session complete: {len(self.loaded_objects)} structures loaded")

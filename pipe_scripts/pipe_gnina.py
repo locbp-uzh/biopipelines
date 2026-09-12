@@ -33,6 +33,7 @@ from rdkit.ML.Cluster import Butina
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from biopipelines.biopipelines_io import (
     load_datastream, iterate_files, iterate_values, load_table,
     read_upstream_missing, MISSING_COLUMNS, step_id_from_table_path,
@@ -40,6 +41,24 @@ from biopipelines.biopipelines_io import (
 from biopipelines.pdb_parser import field_atom_name, field_res_name
 from biopipelines.ligand_utils import write_ligand_sdf
 from biopipelines.id_map_utils import get_mapped_ids
+
+import pipe_vina_backend as vina_backend
+
+
+def _allocated_cpus():
+    """Cores this step may use, from SLURM's own allocation.
+
+    Vina otherwise sizes its thread pool from the visible core count, which on an
+    exclusive node is all 288 even when the step was given a slice of them.
+    Returns None off SLURM, letting Vina choose.
+    """
+    value = os.environ.get("SLURM_CPUS_PER_TASK") or os.environ.get("SLURM_CPUS_ON_NODE")
+    if not value:
+        return None
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return None
 
 
 @contextmanager
@@ -177,8 +196,8 @@ def _clean_protein_pdb(input_pdb, output_pdb, crystal_ligand_pdb=None):
         for chain_id in keep_chains:
             for line in chains[chain_id]:
                 f.write(line)
-            f.write("TER\n")
-        f.write("END\n")
+            f.write("TER".ljust(80) + "\n")
+        f.write("END".ljust(80) + "\n")
 
     # Extract crystal ligands closest to the kept chains (for autoboxing).
     # HETATM chain IDs can be unreliable when CCD codes overflow the residue
@@ -229,7 +248,7 @@ def _clean_protein_pdb(input_pdb, output_pdb, crystal_ligand_pdb=None):
             with open(crystal_ligand_pdb, 'w') as f:
                 for line in ligand_lines_kept:
                     f.write(line)
-                f.write("END\n")
+                f.write("END".ljust(80) + "\n")
             print(f"  Extracted crystal ligand ({len(ligand_lines_kept)} atoms) "
                   f"-> {os.path.basename(crystal_ligand_pdb)}")
         else:
@@ -615,6 +634,27 @@ def _load_external_energies(ligand_id, conformer_energies_ref):
 # 3. Docking execution
 # ---------------------------------------------------------------------------
 
+def resolve_autobox_references(protein_ids, autobox_by_id, structures_json=None):
+    """Map each receptor id to its own autobox reference file.
+
+    Resolved in ONE pass, and through the structures map_table when one is
+    available: an upstream rename leaves no string relation between the ids
+    (Panda_1 vs design_3), so suffix matching alone silently finds nothing and
+    every receptor falls back to its own crystal HETATM.
+    """
+    if not autobox_by_id:
+        return {}
+    maps = None
+    if structures_json and os.path.exists(structures_json):
+        sds = load_datastream(structures_json)
+        maps = [sds.map_table] if sds.map_table else None
+    mapped = get_mapped_ids(source_ids=list(protein_ids),
+                            target_ids=list(autobox_by_id),
+                            map_table_paths=maps, unique=True)
+    return {pid: (autobox_by_id.get(pid) or autobox_by_id.get(mapped.get(pid)))
+            for pid in protein_ids}
+
+
 def run_docking(prepared_proteins, conformers, config):
     """
     Run GNINA docking for each (protein, conformer) pair.
@@ -626,6 +666,7 @@ def run_docking(prepared_proteins, conformers, config):
         list of pose record dicts.
     """
     output_folder = config["output_folder"]
+    backend = config["backend"]
     gnina_binary = config["gnina_binary"]
     exhaustiveness = config["exhaustiveness"]
     num_modes = config["num_modes"]
@@ -633,6 +674,8 @@ def run_docking(prepared_proteins, conformers, config):
     seed = config["seed"]
     cnn_scoring = config["cnn_scoring"]
     cnn_score_threshold = config["cnn_score_threshold"]
+    scoring = config["scoring"]
+    cpus = _allocated_cpus()
     box = config["box"]
     # Per-run wall-clock cap (seconds). A flexible-ligand search can occasionally
     # never terminate; kill that run and move on rather than hanging the job.
@@ -644,23 +687,70 @@ def run_docking(prepared_proteins, conformers, config):
 
     explicit_box_args = _build_box_args(box)
 
+    # Per-structure autobox references, when the caller passed a stream with one
+    # entry per receptor. Resolving a single index-0 path and reusing it would box
+    # every receptor on the first structure's ligand.
+    autobox_by_id = {}
+    _ab_ds = box.get("autobox_ligand_ds")
+    if _ab_ds and os.path.exists(_ab_ds):
+        try:
+            _ds = load_datastream(_ab_ds)
+            autobox_by_id = {i: p for i, p in iterate_files(_ds)}
+            print(f"Per-structure autobox references: {len(autobox_by_id)}")
+        except Exception as e:
+            print(f"Warning: could not load autobox datastream {_ab_ds}: {e}")
+
+    autobox_for = resolve_autobox_references(
+        list(prepared_proteins), autobox_by_id, config.get("structures_json"))
+
     all_poses = []
+
+    # Local drops, so a receptor or pair that failed here still leaves a row in
+    # missing.csv instead of vanishing from every output table.
+    dock_failures = []
     total_pairs = len(prepared_proteins) * len(conformers)
     pair_idx = 0
 
     for protein_id, prot_info in prepared_proteins.items():
         protein_file = prot_info["protein"]
         crystal_ligand = prot_info.get("crystal_ligand")
+        # An explicit per-structure reference wins over the HETATM extracted from
+        # the receptor itself.
+        if autobox_by_id:
+            _ref = autobox_for.get(protein_id)
+            if _ref:
+                crystal_ligand = _ref
+            else:
+                print(f"  Warning: no autobox reference for {protein_id}")
 
-        if explicit_box_args:
-            box_args = explicit_box_args
-        elif crystal_ligand:
-            print(f"  Using crystal ligand for autobox: {os.path.basename(crystal_ligand)}")
-            box_args = ["--autobox_ligand", crystal_ligand,
-                        "--autobox_add", str(box.get("autobox_add", 4.0))]
+        if backend == "vina":
+            # Vina needs a PDBQT receptor and an explicit numeric box; the
+            # crystal ligand becomes center+size rather than a reference path.
+            receptor_input = os.path.join(dock_dir, f"{protein_id}_receptor.pdbqt")
+            try:
+                vina_backend.receptor_pdbqt(protein_file, receptor_input)
+            except RuntimeError as e:
+                print(f"  Warning: receptor conversion failed for {protein_id}: {e}")
+                dock_failures.append({"id": protein_id, "removed_by": "Gnina",
+                                      "kind": "failure",
+                                      "cause": f"receptor PDBQT conversion failed: {e}"})
+                continue
+            vina_box = dict(box)
+            if "center" not in vina_box and crystal_ligand:
+                print(f"  Using crystal ligand for autobox: {os.path.basename(crystal_ligand)}")
+                vina_box["autobox_ligand"] = crystal_ligand
+            box_args = None  # resolved per conformer (may fall back to the ligand itself)
         else:
-            print(f"  Warning: No box defined and no crystal ligand for {protein_id}")
-            box_args = []
+            receptor_input = protein_file
+            if explicit_box_args:
+                box_args = explicit_box_args
+            elif crystal_ligand:
+                print(f"  Using crystal ligand for autobox: {os.path.basename(crystal_ligand)}")
+                box_args = ["--autobox_ligand", crystal_ligand,
+                            "--autobox_add", str(box.get("autobox_add", 4.0))]
+            else:
+                print(f"  Warning: No box defined and no crystal ligand for {protein_id}")
+                box_args = []
 
         for conf in conformers:
             pair_idx += 1
@@ -676,9 +766,46 @@ def run_docking(prepared_proteins, conformers, config):
                     dock_dir,
                     f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}.sdf"
                 )
+                label = f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}"
+
+                if backend == "vina":
+                    try:
+                        lig_pdbqt = vina_backend.ligand_pdbqt(
+                            conf_sdf, os.path.join(dock_dir, f"{label}_lig.pdbqt"))
+                        run_box = vina_backend.box_args(vina_box, ligand_sdf=conf_sdf,
+                                                        receptor_file=protein_file)
+                        out_pdbqt = os.path.join(dock_dir, f"{label}.pdbqt")
+                        result = vina_backend.run(
+                            gnina_binary, receptor_input, lig_pdbqt, out_pdbqt,
+                            run_box, scoring=scoring, exhaustiveness=exhaustiveness,
+                            num_modes=num_modes, seed=seed + run_idx, cpu=cpus,
+                            mode="docking", timeout=dock_timeout,
+                            extra_args=config.get("extra_args"),
+                        )
+                    except subprocess.TimeoutExpired:
+                        print(f"Warning: Vina timed out (>{dock_timeout}s), skipping run {label}")
+                        continue
+                    except RuntimeError as e:
+                        print(f"Warning: Vina input preparation failed for {label}: {e}")
+                        continue
+                    if result.returncode != 0:
+                        print(f"Warning: Vina failed for {label}")
+                        print(f"  stderr: {result.stderr[:500]}")
+                        continue
+                    if vina_backend.pdbqt_to_sdf(out_pdbqt, out_sdf,
+                                                 template_sdf=conf_sdf) is None:
+                        print(f"Warning: could not convert Vina output for {label}")
+                        continue
+                    poses = _parse_gnina_output(
+                        out_sdf, protein_id, ligand_id, conformer_id,
+                        run_idx, cnn_score_threshold
+                    )
+                    all_poses.extend(poses)
+                    continue
+
                 cmd = [
                     gnina_binary,
-                    "-r", protein_file,
+                    "-r", receptor_input,
                     "-l", conf_sdf,
                 ] + box_args + [
                     "--exhaustiveness", str(exhaustiveness),
@@ -686,18 +813,17 @@ def run_docking(prepared_proteins, conformers, config):
                     "--cnn_scoring", cnn_scoring,
                     "--seed", str(seed + run_idx),
                     "-o", out_sdf,
-                ]
+                # Forwarded kwargs as argv tokens; no shell is involved, so nothing re-parses them.
+                ] + list(config.get("extra_args") or [])
 
                 try:
                     result = subprocess.run(cmd, capture_output=True, text=True,
                                             timeout=dock_timeout)
                 except subprocess.TimeoutExpired:
-                    print(f"Warning: GNINA timed out (>{dock_timeout}s), skipping run "
-                          f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}")
+                    print(f"Warning: GNINA timed out (>{dock_timeout}s), skipping run {label}")
                     continue
                 if result.returncode != 0:
-                    print(f"Warning: GNINA failed for "
-                          f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}")
+                    print(f"Warning: GNINA failed for {label}")
                     print(f"  stderr: {result.stderr[:500]}")
                     continue
 
@@ -708,7 +834,7 @@ def run_docking(prepared_proteins, conformers, config):
                 all_poses.extend(poses)
 
     print(f"Docking complete: {len(all_poses)} accepted poses")
-    return all_poses
+    return all_poses, dock_failures
 
 
 def _build_box_args(box):
@@ -892,16 +1018,17 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
     output_folder = config["output_folder"]
     docking_results_csv = config["docking_results_csv"]
     docking_summary_csv = config["docking_summary_csv"]
+    is_vina = config["backend"] == "vina"
+    cnn_pose_cols = [] if is_vina else ["cnn_score", "cnn_affinity"]
 
+    results_cols = ["id", "structures.id", "compounds.id", "conformer_id",
+                    "run", "pose", "vina_score"] + cnn_pose_cols
     if all_poses:
-        results_df = pd.DataFrame(all_poses)
+        results_df = pd.DataFrame(all_poses)[results_cols]
         results_df.to_csv(docking_results_csv, index=False)
         print(f"Wrote {len(results_df)} poses to {docking_results_csv}")
     else:
-        pd.DataFrame(columns=[
-            "id", "structures.id", "compounds.id", "conformer_id",
-            "run", "pose", "vina_score", "cnn_score", "cnn_affinity"
-        ]).to_csv(docking_results_csv, index=False)
+        pd.DataFrame(columns=results_cols).to_csv(docking_results_csv, index=False)
         print("Warning: No poses passed filtering")
 
     energy_lookup = {
@@ -976,7 +1103,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
                 _write_complex_pdb(protein_pdb, src_sdf, best_pose["pose"], dst_pdb)
                 best_pose_file = dst_pdb
 
-        summary_rows.append({
+        row = {
             "id": f"{protein_id}_{ligand_id}",
             "structures.id": protein_id,
             "compounds.id": ligand_id,
@@ -984,14 +1111,20 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             "best_vina": best_vina,
             "mean_vina": mean_vina,
             "std_vina": std_vina,
-            "best_cnn_score": best_cnn,
-            "mean_cnn_affinity": mean_cnn_affinity,
-            "std_cnn_affinity": std_cnn_affinity,
+        }
+        if not is_vina:
+            row.update({
+                "best_cnn_score": best_cnn,
+                "mean_cnn_affinity": mean_cnn_affinity,
+                "std_cnn_affinity": std_cnn_affinity,
+            })
+        row.update({
             "pose_consistency": pose_cons,
             "conformer_energy": conf_energy,
             "pseudo_binding_energy": pseudo_be,
             "best_pose_file": best_pose_file,
         })
+        summary_rows.append(row)
 
     summary_df = pd.DataFrame(summary_rows)
     if not summary_df.empty and "mean_vina" in summary_df.columns:
@@ -1082,14 +1215,14 @@ def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
         # drops the TER record, and without it viewers/parsers bond the protein
         # C-terminus straight into the chain-Z ligand (the protein renders broken).
         if wrote_protein:
-            out.write("TER\n")
+            out.write("TER".ljust(80) + "\n")
 
         for line in ligand_atoms:
             old_serial = int(line[6:11].strip())
             new_serial = old_serial + serial_offset
             hetatm = f"HETATM{new_serial:5d}" + line[11:17] + "LIG Z" + line[22:]
             out.write(hetatm + "\n")
-        out.write("TER\n")
+        out.write("TER".ljust(80) + "\n")
 
         for line in ligand_conects:
             parts = line.split()
@@ -1101,7 +1234,7 @@ def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
                     conect_line += part
             out.write(conect_line + "\n")
 
-        out.write("END\n")
+        out.write("END".ljust(80) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -1131,16 +1264,27 @@ def _extract_ligand_hetatm(complex_pdb, ligand_code, out_pdb):
 
     Returns out_pdb if any were found, else None.
     """
-    lines = []
+    lines, serials = [], set()
+    conect = []
     with open(complex_pdb, 'r') as f:
         for line in f:
             if line.startswith("HETATM") and field_res_name(line).upper() == ligand_code.upper():
                 lines.append(line)
+                serials.add(line[6:11].strip())
+            elif line.startswith("CONECT"):
+                conect.append(line)
     if not lines:
         return None
+    # Carry the declared bonds across. Without them the ligand is a bag of atoms and
+    # perception falls back to distance, which misses long bonds like Si-C (1.87 A);
+    # the molecule then fragments and OpenBabel writes one PDBQT ROOT per piece.
+    kept = [c for c in conect
+            if c[6:11].strip() in serials
+            and any(c[i:i + 5].strip() in serials for i in range(11, min(len(c.rstrip()), 31), 5))]
     with open(out_pdb, 'w') as f:
         f.writelines(lines)
-        f.write("END\n")
+        f.writelines(kept)
+        f.write("END".ljust(80) + "\n")
     return out_pdb
 
 
@@ -1180,6 +1324,55 @@ def _parse_score_output(sdf_path):
     return scores, mol
 
 
+def _run_vina_score(vina_binary, clean_protein, lig_sdf, scratch, structure_id,
+                    mode, scoring, cpus, timeout, out_sdf, autobox_add=4.0):
+    """Score or locally minimize an in-pocket pose with Vina.
+
+    ``--score_only`` prints its affinity and writes no file, so the input pose is
+    re-emitted as the scored pose; ``--local_only`` writes the refined pose.
+    Returns (scores_dict, pose_sdf).
+    """
+    receptor = vina_backend.receptor_pdbqt(
+        clean_protein, os.path.join(scratch, f"{structure_id}_receptor.pdbqt"))
+    lig_pdbqt = vina_backend.ligand_pdbqt(
+        lig_sdf, os.path.join(scratch, f"{structure_id}_lig.pdbqt"))
+    out_pdbqt = os.path.join(scratch, f"{structure_id}_{mode}.pdbqt")
+
+    # Vina needs an explicit box even for --score_only, unlike gnina which autoboxes
+    # on the input ligand. Box the pose being scored.
+    box_args = vina_backend.box_args({"autobox_add": autobox_add}, ligand_sdf=lig_sdf,
+                                     receptor_file=clean_protein)
+
+    try:
+        result = vina_backend.run(
+            vina_binary, receptor, lig_pdbqt, out_pdbqt, box_args, scoring=scoring,
+            cpu=cpus, mode=mode, timeout=timeout,
+            extra_args=config.get("extra_args"),
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"vina {mode} timed out (>{timeout}s)")
+    if result.returncode != 0:
+        raise RuntimeError(f"vina {mode} failed: {result.stderr[:300]}")
+
+    if mode == "score":
+        affinity = vina_backend.parse_score_stdout(result.stdout)
+        if affinity is None:
+            raise RuntimeError("could not parse vina --score_only output")
+        return {"vina_affinity": affinity}, lig_sdf
+
+    if vina_backend.pdbqt_to_sdf(out_pdbqt, out_sdf, template_sdf=lig_sdf) is None:
+        raise RuntimeError(f"could not convert vina output {out_pdbqt}")
+    # gnina tags the SDF with its scores; vina --local_only prints the affinity to
+    # stdout exactly as --score_only does and writes no such tags.
+    scores, _ = _parse_score_output(out_sdf)
+    if not scores:
+        affinity = vina_backend.parse_score_stdout(result.stdout)
+        if affinity is None:
+            raise RuntimeError(f"could not parse vina output {out_sdf}")
+        scores = {"vina_affinity": affinity}
+    return scores, out_sdf
+
+
 def run_score_mode(structures_ds, compounds_ds, config):
     """Score (or locally minimize then score) the in-pocket ligand of each complex.
 
@@ -1189,8 +1382,11 @@ def run_score_mode(structures_ds, compounds_ds, config):
     ligand. Writes scores.csv, the scored-complex PDBs, and the structures map.
     """
     mode = config["mode"]
+    backend = config["backend"]
     gnina_binary = config["gnina_binary"]
     cnn_scoring = config["cnn_scoring"]
+    scoring = config["scoring"]
+    cpus = _allocated_cpus()
     autobox_add = config.get("box", {}).get("autobox_add", 4.0)
     dock_timeout = config.get("dock_timeout", 1800) or None
     output_folder = config["output_folder"]
@@ -1204,6 +1400,8 @@ def run_score_mode(structures_ds, compounds_ds, config):
 
     chem = _load_score_chemistry(compounds_ds)
     step_id = step_id_from_table_path(scores_csv)
+    # Vina emits a single affinity; the CNN terms have no counterpart.
+    score_terms = ["vina_affinity"] if backend == "vina" else list(_SCORE_TERMS)
 
     # Pair each complex with the ONE compound it carries. A complex already holds
     # a single posed ligand; scoring another compound's SMILES against those
@@ -1246,26 +1444,35 @@ def run_score_mode(structures_ds, compounds_ds, config):
             write_ligand_sdf(lig_pdb, lig_sdf, smiles=template_smiles)
 
             out_sdf = os.path.join(scratch, f"{structure_id}_{mode}.sdf")
-            cmd = [
-                gnina_binary,
-                "-r", clean_protein,
-                "-l", lig_sdf,
-                gnina_flag,
-                "--autobox_ligand", lig_sdf,
-                "--autobox_add", str(autobox_add),
-                "--cnn_scoring", cnn_scoring,
-                "-o", out_sdf,
-            ]
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=dock_timeout)
-            except subprocess.TimeoutExpired:
-                raise RuntimeError(f"gnina {mode} timed out (>{dock_timeout}s)")
-            if result.returncode != 0:
-                raise RuntimeError(f"gnina {mode} failed: {result.stderr[:300]}")
 
-            scores, scored_mol = _parse_score_output(out_sdf)
+            if backend == "vina":
+                scores, out_sdf = _run_vina_score(
+                    gnina_binary, clean_protein, lig_sdf, scratch, structure_id,
+                    mode, scoring, cpus, dock_timeout, out_sdf,
+                    autobox_add=autobox_add,
+                )
+            else:
+                cmd = [
+                    gnina_binary,
+                    "-r", clean_protein,
+                    "-l", lig_sdf,
+                    gnina_flag,
+                    "--autobox_ligand", lig_sdf,
+                    "--autobox_add", str(autobox_add),
+                    "--cnn_scoring", cnn_scoring,
+                    "-o", out_sdf,
+                # Forwarded kwargs as argv tokens; no shell is involved, so nothing re-parses them.
+                ] + list(config.get("extra_args") or [])
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=dock_timeout)
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError(f"gnina {mode} timed out (>{dock_timeout}s)")
+                if result.returncode != 0:
+                    raise RuntimeError(f"gnina {mode} failed: {result.stderr[:300]}")
+
+                scores, scored_mol = _parse_score_output(out_sdf)
             if scores is None:
-                raise RuntimeError(f"could not parse gnina output {out_sdf}")
+                raise RuntimeError(f"could not parse {backend} output {out_sdf}")
 
             # "score" leaves the pose untouched; re-emit the input ligand SDF so the
             # complex reflects exactly what was scored. "minimize" emits the refined
@@ -1275,7 +1482,7 @@ def run_score_mode(structures_ds, compounds_ds, config):
             _write_complex_pdb(clean_protein, pose_sdf, 0, dst_pdb)
 
             row = {"id": structure_id, "structures.id": structure_id, "compounds.id": compound_id}
-            for col in _SCORE_TERMS:
+            for col in score_terms:
                 row[col] = scores.get(col, "")
             rows.append(row)
             map_rows.append({"id": structure_id, "file": dst_pdb,
@@ -1286,7 +1493,7 @@ def run_score_mode(structures_ds, compounds_ds, config):
             failed.append({"id": structure_id, "removed_by": step_id, "kind": "failure",
                            "cause": str(e)[:200]})
 
-    score_cols = ["id", "structures.id", "compounds.id"] + list(_SCORE_TERMS)
+    score_cols = ["id", "structures.id", "compounds.id"] + list(score_terms)
     os.makedirs(os.path.dirname(scores_csv), exist_ok=True)
     pd.DataFrame(rows, columns=score_cols).to_csv(scores_csv, index=False)
     print(f"Wrote {len(rows)} scores to {scores_csv}")
@@ -1313,8 +1520,9 @@ def main():
         config = json.load(f)
 
     mode = config.get("mode", "docking")
+    engine = "Vina" if config["backend"] == "vina" else "GNINA"
     print("=" * 60)
-    print(f"GNINA {mode} pipeline")
+    print(f"{engine} {mode} pipeline")
     print("=" * 60)
 
     structures_ds = load_datastream(config["structures_json"])
@@ -1352,7 +1560,7 @@ def main():
             pd.DataFrame(all_missing, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
             print(f"Wrote missing manifest: {missing_csv} ({len(all_missing)} rows)")
         print("\n" + "=" * 60)
-        print(f"GNINA {mode} pipeline complete")
+        print(f"{engine} {mode} pipeline complete")
         print("=" * 60)
         return
 
@@ -1369,7 +1577,7 @@ def main():
         sys.exit(1)
 
     print("\n--- Step 3: Docking Execution ---")
-    all_poses = run_docking(prepared_proteins, conformers, config)
+    all_poses, dock_failures = run_docking(prepared_proteins, conformers, config)
 
     print("\n--- Step 4: Pose Consistency Analysis ---")
     consistency = analyze_pose_consistency(all_poses, config)
@@ -1380,11 +1588,14 @@ def main():
     missing_csv = config.get("missing_csv")
     if missing_csv:
         os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
-        pd.DataFrame(upstream_missing_rows, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
-        print(f"Wrote missing manifest: {missing_csv} ({len(upstream_missing_rows)} rows)")
+        docked_ids = {str(p.get("structures.id")) for p in all_poses}
+        rows = list(upstream_missing_rows) + [
+            f for f in dock_failures if str(f["id"]) not in docked_ids]
+        pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
+        print(f"Wrote missing manifest: {missing_csv} ({len(rows)} rows)")
 
     print("\n" + "=" * 60)
-    print("GNINA docking pipeline complete")
+    print(f"{engine} docking pipeline complete")
     print("=" * 60)
 
 

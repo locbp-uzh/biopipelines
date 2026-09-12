@@ -131,6 +131,7 @@ environments:
   HBDesigner: "hbdesigner"
   LASErMPNN: "lasermpnn"
   Ligand: "biopipelines"
+  LigandAtomSelector: "biopipelines"
   LigandMPNN: "ligandmpnn_env"
   Load: "biopipelines"
   MMseqs2: "biopipelines"
@@ -172,6 +173,7 @@ environments:
   ThermoMPNN: "thermompnn"
   UniProt: "biopipelines"
   VespaG: "vespag"
+  Vina: "vina"
   XTB: "xtb"
 
 renderers:

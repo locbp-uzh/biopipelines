@@ -67,7 +67,8 @@ class DiffDock(BaseConfig):
     """
 
     TOOL_NAME = "DiffDock"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "diffdock"
 
     # ------------------------------------------------------------------
     # Install
@@ -88,17 +89,18 @@ class DiffDock(BaseConfig):
         Verification: (a) repo cloned, (b) esm side-clone present,
         (c) torch + torch_geometric importable in the env.
         """
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("DiffDock", "")
         parent_dir = os.path.dirname(repo_dir)
         esm_dir = os.path.join(repo_dir, "esm")  # side-clone, used via PYTHONPATH
 
-        env_check = cls._env_exists_check("diffdock", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -f "{repo_dir}/inference.py" ]'
         esm_check = f'[ -f "{esm_dir}/setup.py" ]'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {esm_check} && {env_check} \\
-   && {cls._env_run("diffdock", env_manager)}python -c "import torch, torch_geometric" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, torch_geometric" >/dev/null 2>&1; then
     echo "DiffDock already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -119,8 +121,8 @@ if [ ! -d "{esm_dir}" ]; then
     git checkout ca8a710
 fi"""
 
-        remove_block = cls._env_remove_block("diffdock", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("diffdock", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
 
         # PyG wheels are pinned against whatever torch the env ends up with.
         # Following the notebook recipe: uninstall any prior PyG bits (no-op
@@ -129,14 +131,14 @@ fi"""
         # PyPI dist; the notebook installs torch-geometric from git for the
         # newest features.
         pyg_block = f"""# Install PyG wheels against the active torch in the env.
-TORCH_VER=$({cls._env_run("diffdock", env_manager)}python -c "import torch; print(torch.__version__)")
+TORCH_VER=$({cls._env_run(env, env_manager)}python -c "import torch; print(torch.__version__)")
 PYG_URL="https://data.pyg.org/whl/torch-${{TORCH_VER}}.html"
 echo "PyG wheel index: $PYG_URL"
-{cls._env_run("diffdock", env_manager)}pip uninstall -y torch-scatter torch-sparse torch-geometric torch-cluster torch-spline-conv >/dev/null 2>&1 || true
-{cls._env_run("diffdock", env_manager)}pip install --quiet torch-scatter -f "$PYG_URL"
-{cls._env_run("diffdock", env_manager)}pip install --quiet torch-sparse -f "$PYG_URL"
-{cls._env_run("diffdock", env_manager)}pip install --quiet torch-cluster -f "$PYG_URL"
-{cls._env_run("diffdock", env_manager)}pip install --quiet git+https://github.com/pyg-team/pytorch_geometric.git
+{cls._env_run(env, env_manager)}pip uninstall -y torch-scatter torch-sparse torch-geometric torch-cluster torch-spline-conv >/dev/null 2>&1 || true
+{cls._env_run(env, env_manager)}pip install --quiet torch-scatter -f "$PYG_URL"
+{cls._env_run(env, env_manager)}pip install --quiet torch-sparse -f "$PYG_URL"
+{cls._env_run(env, env_manager)}pip install --quiet torch-cluster -f "$PYG_URL"
+{cls._env_run(env, env_manager)}pip install --quiet git+https://github.com/pyg-team/pytorch_geometric.git
 """
 
         return f"""echo "=== Installing DiffDock ==="
@@ -145,7 +147,7 @@ echo "PyG wheel index: $PYG_URL"
 {remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create diffdock environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
@@ -153,7 +155,7 @@ fi
 
 # Verify installation
 if {repo_check} && {esm_check} \\
-   && {cls._env_run("diffdock", env_manager)}python -c "import torch, torch_geometric" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, torch_geometric" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== DiffDock installation complete ==="
 else

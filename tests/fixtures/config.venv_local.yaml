@@ -1,0 +1,75 @@
+# Local run with the venv env manager.
+#
+# Derived from config.local.yaml, changing only machine.env_manager and adding an `environments:` block, because config.local.yaml is env_manager=pip with no `environments:` -- under which every tool resolves to [] and no activation is ever emitted.
+
+
+machine:
+  email: ""
+  env_manager:
+    name: "venv"
+    venv_root: "<biopipelines>/_stub_venvs"
+    init: []
+  scheduler:
+    name: "none"
+    init: []
+    modules: []
+  container_executor: "none"
+folders:
+  base:
+    home: "."
+    data: "."
+    scratch: "."
+    biopipelines: "<cwd>"
+    biopipelines_output: "./outputs"
+
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "./cache"
+    containers: "./containers"
+
+  # Stub repository paths for tool_parameters tests. The paths don't have to
+  # exist on disk — config-time pipeline.save() only needs them to resolve
+  # without raising KeyError, since no upstream binary is executed.
+  repositories:
+    ProteinMPNN: "<biopipelines>/_stub_repos/ProteinMPNN"
+    LASErMPNN: "<biopipelines>/_stub_repos/LASErMPNN"
+    LigandMPNN: "<biopipelines>/_stub_repos/LigandMPNN"
+    Boltz2: "<biopipelines>/_stub_repos/boltz"
+    RFdiffusion: "<biopipelines>/_stub_repos/RFdiffusion"
+    RFdiffusionAllAtom: "<biopipelines>/_stub_repos/rf_diffusion_all_atom"
+    RFdiffusion2: "<biopipelines>/_stub_repos/RFdiffusion2"
+    RFdiffusion3: "<biopipelines>/_stub_repos/RFdiffusion3"
+    AlphaFold: "<biopipelines>/_stub_repos/AlphaFold"
+    BoltzGen: "<biopipelines>/_stub_repos/boltzgen"
+    Gnina: "<biopipelines>/_stub_repos/gnina"
+    CABSflex: "<biopipelines>/_stub_repos/CABSflex"
+    PoseBusters: "<biopipelines>/_stub_repos/posebusters"
+    PyMOL: "<biopipelines>/_stub_repos/pymol"
+    MMseqs2: "<biopipelines>/_stub_repos/mmseqs2"
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+    RBSDesigner: "<biopipelines>/_stub_repos/RBSDesigner"
+    DNAEncoder: "<biopipelines>/_stub_repos/DNAEncoder"
+    DiffDock: "<biopipelines>/_stub_repos/DiffDock"
+    DynamicBind: "<biopipelines>/_stub_repos/DynamicBind"
+    PocketGen: "<biopipelines>/_stub_repos/PocketGen"
+    PLACER: "<biopipelines>/_stub_repos/PLACER"
+    GEMS: "<biopipelines>/_stub_repos/GEMS"
+    RTMScore: "<biopipelines>/_stub_repos/RTMScore"
+    NeuralPLexer: "<biopipelines>/_stub_repos/NeuralPLexer"
+    AF2BIND: "<biopipelines>/_stub_repos/af2bind"
+  cache:
+    BoltzCache: "./cache/boltz"
+    AlphaFoldParams: "<biopipelines>/_stub_repos/alphafold_params"
+    ColabFoldDatabases: "<cache>/colabfold_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
+  server: {}
+environments:
+  Mock: "MockEnv"
+  Sequence: "SeqEnv"
+  Panda: "biopipelines"
+  # Redirected away from the install script's hardcoded "dssp".
+  DSSP: "MyDSSPEnv"

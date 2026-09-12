@@ -76,10 +76,10 @@ def test_mock_rejects_ids_and_source_together(record_case):
 def test_mock_rejects_lazy_children_without_produce(record_case):
     from biopipelines.mock import Mock
 
-    record_case(input="Mock(children='[_<N><A V>]') without produce",
+    record_case(input="Mock(children='[_<?><A V>]') without produce",
                 expected="ValueError", actual="ValueError")
     with pytest.raises(ValueError):
-        Mock(ids=["a"], children="[_<N><A V>]")
+        Mock(ids=["a"], children="[_<?><A V>]")
 
 
 # ── config-time: deterministic children ───────────────────────────────────────
@@ -119,14 +119,14 @@ def test_mock_lazy_children_keeps_lazy_pattern(
     with pipeline:
         m = Mock(
             ids=["prot_0", "prot_1"],
-            children="[_<N><A V>]",
+            children="[_<?><A V>]",
             produce=["_1A", "_1V"],
             streams={"mut": {"format": "pdb", "file": "<id>.pdb"}},
         )
         pipeline.save()
 
     ids = list(m.streams.mut.ids)
-    record_case(input="lazy children=[_<N><A V>]",
+    record_case(input="lazy children=[_<?><A V>]",
                 expected=("all lazy", True),
                 actual=("all lazy", all(id_patterns.is_lazy(i) for i in ids)))
     assert all(id_patterns.is_lazy(i) for i in ids)
@@ -184,10 +184,10 @@ def test_mock_runtime_lazy_children_with_produce(tmp_path, record_case):
     cfg = {
         "output_folder": str(out_dir),
         "parent_ids": ["prot_0", "prot_1"],
-        "output_ids": ["prot_0[_<N><A V>]", "prot_1[_<N><A V>]"],
+        "output_ids": ["prot_0[_<?><A V>]", "prot_1[_<?><A V>]"],
         "provenance": {},
         "axis_names": [],
-        "children": "[_<N><A V>]",
+        "children": "[_<?><A V>]",
         "produce": ["_1A", "_1V"],
         "streams": {
             "mut": {"format": "pdb", "file": "<id>.pdb", "values": None,
@@ -381,14 +381,16 @@ def test_mock_source_single_each_axis_provenance(
     create_map_table(str(a_map), ids=["a1", "a2", "a3"])
     a = DataStream(name="sequences", ids=["a1", "a2", "a3"], map_table=str(a_map))
 
-    parents, prov, axes = Mock._resolve_from_source(Each(a))
+    parents, prov, axis_names, axes = Mock._resolve_from_source(Each(a))
     record_case(input="source=Each(a[3])",
                 expected=(["a1", "a2", "a3"], ["sequences"],
                           {"sequences": ["a1", "a2", "a3"]}),
-                actual=(parents, axes, prov))
+                actual=(parents, axis_names, prov))
     assert parents == ["a1", "a2", "a3"]
-    assert axes == ["sequences"]
+    assert axis_names == ["sequences"]
     assert prov == {"sequences": ["a1", "a2", "a3"]}
+    assert axes == [{"name": "sequences", "mode": "each", "streams": [0],
+                     "static_streams": [], "static_first": False}]
 
 
 def test_mock_source_bare_datastream(
@@ -402,12 +404,15 @@ def test_mock_source_bare_datastream(
     create_map_table(str(a_map), ids=["p1", "p2"])
     a = DataStream(name="structures", ids=["p1", "p2"], map_table=str(a_map))
 
-    parents, prov, axes = Mock._resolve_from_source(a)
+    parents, prov, axis_names, axes = Mock._resolve_from_source(a)
     record_case(input="source=<bare DataStream>",
                 expected=(["p1", "p2"], ["structures"]),
-                actual=(parents, axes))
+                actual=(parents, axis_names))
     assert parents == ["p1", "p2"]
-    assert axes == ["structures"]
+    assert axis_names == ["structures"]
+    # A bare stream is an iterated axis, same as Each(stream); streams are recorded by index.
+    assert axes == [{"name": "structures", "mode": "each", "streams": [0],
+                     "static_streams": [], "static_first": False}]
 
 
 # -- map_table_strategy = "both" ----------------------------------------------

@@ -1,3 +1,4 @@
+import pytest
 """Unit tests for the ReMap tool — several `onto` specifications.
 
 These test the pure-logic path: given a source StandardizedOutput with per-ID
@@ -158,6 +159,7 @@ def _wrap_stream(stream):
     return StandardizedOutput({stream.name: stream})
 
 
+@pytest.mark.network
 def test_remap_source_pdb_script_emitted(
     local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
 ):

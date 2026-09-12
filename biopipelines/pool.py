@@ -33,7 +33,7 @@ the combined rows: ids become ``name_1``, ``name_2``, ..., ``name_N``,
 the original ids are kept in an ``original.id`` column, and ``pool.path``
 still records the source run. Counted at config time when every input run
 has fully-resolved ids; otherwise the framework emits a lazy
-``name_[<N>]`` pattern that pipe_pool resolves at runtime.
+``name_[<#>]`` pattern that pipe_pool resolves at runtime.
 """
 
 import os
@@ -62,7 +62,7 @@ class Pool(BaseConfig):
     """
 
     TOOL_NAME = "Pool"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -92,7 +92,7 @@ echo "=== Pool ready ==="
                 all rows of the pool, producing ids `<recount_prefix>_1`,
                 `<recount_prefix>_2`, ..., `<recount_prefix>_N`. Counted at
                 config time when every input run has fully-resolved ids;
-                otherwise the framework emits a lazy `<recount_prefix>_[<N>]`
+                otherwise the framework emits a lazy `<recount_prefix>_[<#>]`
                 pattern that pipe_pool resolves at runtime.
             streams: Stream names to pool. ``None`` (default) is strict: every
                 input must expose the same stream set. A list keeps exactly
@@ -267,14 +267,9 @@ echo "=== Pool ready ==="
 
     def _content_file_col(self, stream_name: str) -> Optional[str]:
         """Name of the file column in a content stream's table, or None when
-        the content stream carries no per-id files (value-based). Read from
-        the upstream TableInfo so the pooled table keeps the same schema
-        (PDB's ``structures`` uses ``file_path``, not the generic ``file``)."""
+        the content stream carries no per-id files (value-based)."""
         cols = self.runs[0].tables._tables.get(stream_name).info.columns or []
-        for cand in ("file_path", "file"):
-            if cand in cols:
-                return cand
-        return None
+        return "file" if "file" in cols else None
 
     def _content_path(self, stream_name: str) -> str:
         """Combined-file path for a content-bearing stream, following the
@@ -393,7 +388,7 @@ echo "=== Pool ready ==="
 
         # Decide once whether any input stream carries lazy ids. If yes,
         # config-time counting for recount mode is impossible — we have to
-        # emit a lazy `<prefix>_[<N>]` pattern and let pipe_pool resolve.
+        # emit a lazy `<prefix>_[<#>]` pattern and let pipe_pool resolve.
         any_lazy = any(
             getattr(r.streams.get(name), "is_lazy", False)
             for name in self._shared_streams
@@ -435,7 +430,7 @@ echo "=== Pool ready ==="
             # In recount mode with lazy upstream ids, emit a single lazy
             # pattern; pipe_pool fills the count at runtime.
             if recount and any_lazy:
-                lazy_pattern_ids = [f"{self.recount_prefix}_[<N>]"]
+                lazy_pattern_ids = [f"{self.recount_prefix}_[<#>]"]
 
             # No config-time map: pipe_pool writes every map_table at runtime
             # (declarative get_output_files, per the Map Table Contract).

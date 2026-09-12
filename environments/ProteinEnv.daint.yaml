@@ -1,0 +1,47 @@
+# BioPipelines ProteinEnv - `daint` variant (aarch64/GH200), venv env_manager.
+#
+# Byte-identical in content to ProteinEnv.container.yaml; it exists because the
+# env-file lookup is keyed on the CONFIG VARIANT. Under variant "daint" the
+# resolver tries ProteinEnv.daint.yaml and then falls back to a bare
+# ProteinEnv.yaml -- and neither existed, so it resolved to NO dependencies at
+# all, took the pure-venv path, and ran `pip install pymol`, which has no
+# linux-aarch64 wheel. The install "completed" and only the verification caught
+# it ("cannot import pymol").
+#
+# Naming the conda packages here is what routes this env through the
+# conda-then-venv path in _env_install_block: micromamba (env_manager.conda_binary)
+# builds the conda layer under conda_env_root, then a venv is created BY that
+# interpreter with --system-site-packages. pymol-open-source 3.1.0 has 37
+# linux-aarch64 builds on conda-forge (checked against the anaconda.org API).
+#
+# Same role as ProteinEnv.cluster.yaml: the lightweight analysis/visualization
+# env behind ConformationalChange, Contacts, PoseChange, PyMOL, SASA and
+# Selection. Two differences from the cluster spec, both forced by aarch64:
+#
+#   1. The `schrodinger` channel is dropped. It publishes no linux-aarch64
+#      builds, and the cluster spec pairs it with channel_priority: strict,
+#      which would make the solve fail rather than fall through to conda-forge.
+#      conda-forge's pymol-open-source is what is wanted here anyway: it has a
+#      linux-aarch64 build (3.1.0), verified against the anaconda.org API.
+#   2. No version ceiling on python. Nothing in this env needs one on aarch64,
+#      and pinning <3.13 only narrows the solver's room on a platform with
+#      fewer builds to choose from.
+#
+# Everything here has a conda-forge linux-aarch64 build, so this resolves under
+# micromamba with no pip layer and no EDF.
+name: ProteinEnv
+channels:
+  - conda-forge
+
+dependencies:
+  - python>=3.10
+  - pymol-open-source
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - biopython
+  - rdkit
+  - openbabel
+  - requests
+  - pyyaml

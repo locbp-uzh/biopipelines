@@ -5,36 +5,86 @@
 
 # Resubmit a batch job with correct output path and incremental naming.
 # Scheduler (slurm/lsf/pbs) is detected from the directives in the script.
-# Usage: resubmit.sh <path_to_job_script.sh>
+# Usage: resubmit [--keep-dependencies] <path_to_job_script.sh>
 
-if [ $# -eq 0 ]; then
-    echo "Error: No SLURM script provided"
-    echo "Usage: resubmit.sh <path_to_slurm.sh>"
+usage() {
+    echo "Usage: resubmit [--keep-dependencies] <path_to_job_script.sh>"
+    echo ""
+    echo "Resubmit one generated batch script (slurm_batch<N>.sh, lsf_batch<N>.sh,"
+    echo "pbs_batch<N>.sh, or the single-batch script) to its scheduler."
+    echo ""
+    echo "Options:"
+    echo "  --keep-dependencies  Submit with the script's dependency directives intact."
+    echo "                       Only useful when the parent job is still queued or running."
+    echo "  -h, --help           Show this help."
+    echo ""
+    echo "By default every dependency directive is removed. submit resolves the"
+    echo "<JOBID_BATCH_NNN> placeholders in place, so the script on disk names the"
+    echo "job ids of the ORIGINAL run — ids that have since completed, failed, or"
+    echo "aged out of the scheduler. Resubmitting with those intact leaves the job"
+    echo "pending on a dependency that can never be satisfied, or gets it rejected."
+}
+
+KEEP_DEPENDENCIES=0
+JOB_SCRIPT=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --keep-dependencies)
+            KEEP_DEPENDENCIES=1
+            shift
+            ;;
+        -*)
+            echo "Error: unknown option: $1"
+            usage
+            exit 1
+            ;;
+        *)
+            JOB_SCRIPT="$1"
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$JOB_SCRIPT" ]; then
+    echo "Error: No job script provided"
+    usage
     exit 1
 fi
 
-SLURM_SCRIPT="$1"
-
-if [ ! -f "$SLURM_SCRIPT" ]; then
-    echo "Error: SLURM script not found: $SLURM_SCRIPT"
+if [ ! -f "$JOB_SCRIPT" ]; then
+    echo "Error: job script not found: $JOB_SCRIPT"
     exit 1
 fi
 
-# Get the directory containing the SLURM script
-SCRIPT_DIR=$(dirname "$SLURM_SCRIPT")
+# Get the directory containing the job script
+SCRIPT_DIR=$(dirname "$JOB_SCRIPT")
 SCRIPT_DIR=$(cd "$SCRIPT_DIR" && pwd)  # Get absolute path
 
 # Detect the scheduler from the directives present in the script.
-if grep -q "^#SBATCH" "$SLURM_SCRIPT"; then
+if grep -q "^#SBATCH" "$JOB_SCRIPT"; then
     SCHEDULER="slurm"
-elif grep -q "^#BSUB" "$SLURM_SCRIPT"; then
+elif grep -q "^#BSUB" "$JOB_SCRIPT"; then
     SCHEDULER="lsf"
-elif grep -q "^#PBS" "$SLURM_SCRIPT"; then
+elif grep -q "^#PBS" "$JOB_SCRIPT"; then
     SCHEDULER="pbs"
 else
-    echo "Error: no #SBATCH/#BSUB/#PBS directives in $SLURM_SCRIPT — cannot tell the scheduler"
+    echo "Error: no #SBATCH/#BSUB/#PBS directives in $JOB_SCRIPT — cannot tell the scheduler"
     exit 1
 fi
+
+# ERE matching this scheduler's dependency directive. SLURM accepts both the
+# long and the short spelling; PBS reserves -W for other attributes too, so only
+# depend= is matched.
+case "$SCHEDULER" in
+    slurm) DEPENDENCY_RE='^#SBATCH[[:space:]]+(--dependency[=[:space:]]|-d[[:space:]])' ;;
+    lsf)   DEPENDENCY_RE='^#BSUB[[:space:]]+-w[[:space:]]' ;;
+    pbs)   DEPENDENCY_RE='^#PBS[[:space:]]+-W[[:space:]]+depend=' ;;
+esac
 
 # Use the parent folder name as the job name.
 JOB_NAME=$(basename "$(dirname "$SCRIPT_DIR")")
@@ -47,16 +97,42 @@ done
 
 OUTPUT_FILE="$SCRIPT_DIR/${SCHEDULER}_$N.out"
 
-# Submit job with output redirected to the script's directory
-echo "Submitting job from: $SLURM_SCRIPT"
+echo "Submitting job from: $JOB_SCRIPT"
 echo "Scheduler: $SCHEDULER"
 echo "Job name: $JOB_NAME"
 echo "Output will be written to: $OUTPUT_FILE"
 
+FOUND_DEPENDENCIES=$(grep -E "$DEPENDENCY_RE" "$JOB_SCRIPT" || true)
+if [ -n "$FOUND_DEPENDENCIES" ]; then
+    if [ "$KEEP_DEPENDENCIES" -eq 1 ]; then
+        echo "Dependencies: KEPT (--keep-dependencies), the job will wait on:"
+    else
+        echo "Dependencies: STRIPPED, the job will start as soon as resources allow."
+        echo "  Removed (job ids from the original run, pass --keep-dependencies to retain them):"
+    fi
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        echo "    $line"
+    done <<< "$FOUND_DEPENDENCIES"
+else
+    echo "Dependencies: none in this script."
+fi
+
+# Feed the (possibly filtered) script through stdin rather than editing it, so
+# the on-disk record of what the original run submitted stays intact. sbatch,
+# bsub and qsub all read a job script from stdin.
+emit_script() {
+    if [ "$KEEP_DEPENDENCIES" -eq 1 ]; then
+        cat "$JOB_SCRIPT"
+    else
+        sed -E "/$DEPENDENCY_RE/d" "$JOB_SCRIPT"
+    fi
+}
+
 case "$SCHEDULER" in
-    slurm) sbatch --job-name="$JOB_NAME" --output="$OUTPUT_FILE" "$SLURM_SCRIPT" ;;
-    lsf)   bsub -J "$JOB_NAME" -o "$OUTPUT_FILE" < "$SLURM_SCRIPT" ;;
-    pbs)   qsub -N "$JOB_NAME" -o "$OUTPUT_FILE" "$SLURM_SCRIPT" ;;
+    slurm) emit_script | sbatch --job-name="$JOB_NAME" --output="$OUTPUT_FILE" ;;
+    lsf)   emit_script | bsub -J "$JOB_NAME" -o "$OUTPUT_FILE" ;;
+    pbs)   emit_script | qsub -N "$JOB_NAME" -o "$OUTPUT_FILE" ;;
 esac
 
 if [ $? -eq 0 ]; then

@@ -159,6 +159,18 @@ class SymmetryType(Enum):
     HETEROMERIC       = "Heteromeric"
 
 
+class BindingAffinityType(Enum):
+    """Binding Affinity Type — mirrors RCSB 'rcsb_binding_affinity.type' values."""
+    IC50              = "IC50"
+    EC50              = "EC50"
+    KD                = "Kd"
+    KA                = "Ka"
+    KI                = "Ki"
+    DELTA_G           = "&Delta;G"
+    DELTA_H           = "&Delta;H"
+    MINUS_T_DELTA_S   = "-T&Delta;S"
+
+
 class ExperimentalMethod(Enum):
     """Experimental Method — mirrors RCSB 'Experimental Method' attribute values."""
     X_RAY_DIFFRACTION      = "X-RAY DIFFRACTION"
@@ -201,8 +213,10 @@ class _Attr:
         params: Dict[str, Any] = {
             "attribute": self._path,
             "operator": operator,
-            "value": value,
         }
+        # The API's schema rejects a value key on exists.
+        if operator != "exists":
+            params["value"] = value
         if negation:
             params["negation"] = True
         return RCSBQuery({
@@ -353,6 +367,27 @@ class StructureAttribute:
         ExperimentalMethod          = _Attr("exptl.method")
         Resolution                  = _Attr("rcsb_entry_info.resolution_combined")
 
+    # --- Binding Affinity ---
+    class BindingAffinity:
+        """
+        Measured binding affinities (Binding MOAD / BindingDB / PDBBind).
+
+        An entry carries a *list* of affinity records, and Value and Type are
+        matched independently against that list: combining them selects entries
+        having some record of that type and some record in that range, not
+        necessarily the same record. Filter the exact pairing downstream on the
+        entry's own affinity data when it matters.
+
+        Only Value and Type are usable. unit, symbol, provenance_code and
+        reference_sequence_identity are not search-enabled, and comp_id matches
+        nothing outside a nested group, so none are exposed here.
+
+        Units follow the measurement type: nM for the concentration and binding
+        constants (IC50, EC50, Kd, Ka, Ki), kJ/mol for the thermodynamic ones.
+        """
+        Value                       = _Attr("rcsb_binding_affinity.value")
+        Type                        = _Attr("rcsb_binding_affinity.type")
+
 
 class RCSB(BaseConfig):
     """
@@ -422,7 +457,7 @@ class RCSB(BaseConfig):
     """
 
     TOOL_NAME = "RCSB"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.5"
 
     # Aliased to the module-level definitions, which the execution-time search
     # shares — keep one source of truth for the request shape.
@@ -485,7 +520,7 @@ echo "=== RCSB ready ==="
         })
 
     @staticmethod
-    def Attribute(attribute: str, operator: str, value: Any, negation: bool = False) -> RCSBQuery:
+    def Attribute(attribute: str, operator: str, value: Any = None, negation: bool = False) -> RCSBQuery:
         """
         Search by a specific RCSB attribute.
 
@@ -498,7 +533,8 @@ echo "=== RCSB ready ==="
                       "equals", "range", "exists", "in"
             value: Value to compare against. For "range", use dict with
                    "from", "to", "include_lower", "include_upper" keys.
-                   For "in", use a list of values.
+                   For "in", use a list of values. Unused for "exists", which
+                   takes no value.
             negation: If True, invert the operator logic (default: False)
 
         Returns:
@@ -513,8 +549,10 @@ echo "=== RCSB ready ==="
         params = {
             "attribute": attribute,
             "operator": operator,
-            "value": value
         }
+        # The API's schema rejects a value key on exists.
+        if operator != "exists":
+            params["value"] = value
         if negation:
             params["negation"] = True
 
@@ -738,7 +776,7 @@ echo "=== RCSB ready ==="
         Output:
             Streams: structures (.pdb/.cif), sequences (.csv), compounds (.csv)
             Tables:
-                structures: id | pdb_id | file_path | format | file_size | source
+                structures: id | pdb_id | file | format | file_size | source
                 sequences: id | sequence
                 compounds: id | code | format | smiles | ccd
                 search_results: id | pdb_id | result_id | score | title | resolution | method | molecular_weight_kda | organism | entity_description | protein_entity_count | residue_count | citation_title | citation_journal | citation_year | citation_authors | release_date | deposit_date
@@ -1041,7 +1079,7 @@ echo "=== RCSB ready ==="
             # The descriptor is only known once the upstream stream is written, so
             # the search runs at execution time and the ids stay lazy until then.
             self.pdb_ids = []
-            self.output_ids = ["[<hits>]"]
+            self.output_ids = ["[<?>]"]
             self.entry_metadata = []
             return
 
@@ -1312,8 +1350,8 @@ python "{self.pdb_py}" --config "{self.config_file}"
                 except (pd.errors.EmptyDataError, pd.errors.ParserError, OSError):
                     df = None
                 if df is not None:
-                    if {"id", "file_path"}.issubset(df.columns):
-                        by_id = dict(zip(df["id"].astype(str), df["file_path"].astype(str)))
+                    if {"id", "file"}.issubset(df.columns):
+                        by_id = dict(zip(df["id"].astype(str), df["file"].astype(str)))
                         structure_files = [by_id.get(oid, structure_files[i])
                                            for i, oid in enumerate(self.output_ids)]
                     if "format" in df.columns:
@@ -1325,7 +1363,7 @@ python "{self.pdb_py}" --config "{self.config_file}"
             "structures": TableInfo(
                 name="structures",
                 path=self.structures_csv,
-                columns=["id", "pdb_id", "file_path", "format", "file_size", "source"],
+                columns=["id", "pdb_id", "file", "format", "file_size", "source"],
                 description="Successfully fetched structure files from RCSB search"
             ),
             "sequences": TableInfo(

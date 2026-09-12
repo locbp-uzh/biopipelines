@@ -17,6 +17,13 @@ Reverse-translates protein sequences to DNA with organism-specific codon optimiz
   - "SC" (Saccharomyces cerevisiae)
   - "HS" (Homo sapiens)
   - Combinations: "EC&HS", "EC&SC", "HS&SC", "EC&HS&SC"
+- `exclude_sites`: Optional[List[str]] = None - Recognition sequences to keep out of the coding DNA, e.g. `["GAATTC", "GGTCTC"]` for EcoRI and BsaI. Each site is matched in **both orientations** (its reverse complement is added automatically) and written in IUPAC, so degenerate sites work: `"GGTCTC"`, `"CCWGG"`, `"GCGGCCGC"`. Minimum 4 bases.
+
+  Codons are redrawn from the same frequency-thresholded pool, so exclusion does not push the sequence toward rare codons; only a codon that would complete a forbidden site is rejected. Since a site can straddle a codon boundary, the check runs over a window around each newly placed codon rather than the codon alone.
+
+  A peptide whose amino-acid sequence makes a site unavoidable raises after the redraw budget is exhausted — it is not silently emitted with the site present. **Verify the ordered sequence yourself before synthesis**: this excludes the sites you name, and nothing else.
+
+**Streams**: `sequences` (value-based DNA sequences, read from the `sequences` table)
 
 **Tables**:
 - `sequences`:
@@ -33,6 +40,13 @@ from biopipelines.dna_encoder import DNAEncoder
 dna = DNAEncoder(
     sequences=lmpnn,
     organism="EC&HS"  # Conservative optimization for both E. coli and human
+)
+
+# Keep the cloning sites out of the insert
+dna = DNAEncoder(
+    sequences=lmpnn,
+    organism="EC",
+    exclude_sites=["GAATTC", "CTCGAG", "GGTCTC"],  # EcoRI, XhoI, BsaI
 )
 ```
 
@@ -64,10 +78,10 @@ Fast structure-conditioned inverse folding. Frame2Seq is a non-autoregressive ma
 **Tables**:
 - `sequences`:
 
-  | id | sequence | score | recovery | structures.id |
-  |----|----------|-------|----------|---------------|
+  | id | structures.id | sequence | score | recovery |
+  |----|---------------|----------|-------|----------|
 
-- `missing`: | id | removed_by | cause |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -86,11 +100,11 @@ Concatenates multiple sequences with flexible linkers. Creates fusion sequences 
 
 **Parameters**:
 - `sequences`: Union[List[str], str] (required) - List of sequences or PDB file paths
-- `name`: str = "" - Job name for output files
+- `prefix`: str = "" - Label for the fused construct, used as the base of the output file names (default: `"fuse"`). **This was spelled `name=`, and there is no alias:** `name` is framework-reserved as the job name, so on `Fuse` it now means the job name exactly as it does on every other tool. A script still passing `name=` sets the job name and leaves the construct label at its default `"fuse"` — nothing raises, so the rename has to be made deliberately rather than discovered from a failure.
 - `linker`: str = "GGGGSGGGGSGGGGSGGGGS" - Linker sequence that will be cut based on `linker_lengths` if specified
 - `linker_lengths`: List[str] = None - List of length ranges for each junction to generate multiple variants by cutting the linker (e.g., ["1-6", "1-6"])
 
-**Streams**: `sequences`
+**Streams**: `sequences`, `fasta` (one multi-record FASTA of the fused sequences)
 
 **Tables**:
 - `sequences`:
@@ -115,9 +129,11 @@ fused = Fuse(
     sequences=[N, mid, C],
     linker="GSGAG",
     linker_lengths=["2-4", "2-4"],
-    name="protein_fusion"
+    prefix="protein_fusion"
 )
 ```
+
+**Why `Fuse` dropped `name` while [`Table`](inputs_io.md#table) kept it.** Both tools were capturing the framework's `name` key, so the job name vanished; both got their own spelling. `Fuse`'s label only feeds output *file names*, so a script that keeps passing `name=` gets differently named files and nothing else — cheap enough that a clean break is better than a permanent synonym. `Table`'s value is the *handle a downstream step reaches the table by* (`tool.tables.<name>`), so silently redirecting it would break a consumer somewhere down the pipeline; `Table` therefore keeps `name` as a deprecated synonym. The asymmetry is deliberate: the blast radius of the old spelling differs.
 
 ---
 
@@ -196,7 +212,7 @@ pip3 install -r requirements.txt
 
 **Parameters**:
 - `structures`: Union[DataStream, StandardizedOutput] (required) - Input structures
-- `ligand`: Optional[Union[str, DataStream, StandardizedOutput]] = None - Compounds stream (`Ligand(code="LIG")` or any compounds-producing tool) or a 3-letter code naming the bound ligand for binding-site focus; the residue `code` is read from the stream at runtime
+- `ligand`: Optional[Union[str, DataStream, StandardizedOutput]] = None - Compounds stream (`Ligand(codes="LIG")` or any compounds-producing tool) or a 3-letter code naming the bound ligand for binding-site focus; the residue `code` is read from the stream at runtime
 - `num_sequences`: int = 1 - Number of sequences per batch
 - `fixed`: str | (TableInfo, column) = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
 - `redesigned`: str | (TableInfo, column) = "" - Designed positions (LigandMPNN format or table reference)
@@ -209,14 +225,22 @@ pip3 install -r requirements.txt
 - `temperature`: float = 0.0 - Sampling temperature (0.0 = argmax / deterministic)
 - `bias_AA_per_residue`: str = "" - Per-residue amino-acid bias (LigandMPNN JSONL path or spec)
 - `seed`: int = 0 - Random seed (0 = random)
+- `pack_side_chains`: bool = False - Build side-chain atoms for the designed sequence. LigandMPNN otherwise emits sequence only, so a structure taken downstream keeps the *input* rotamers under the new residue identities — the pocket that gets scored is not the one the sequence encodes. Adds a `structures` stream.
+- `packs_per_design`: int = 1 - Independent packing samples per sequence (upstream default is 4). Each multiplies the `structures` stream.
+- `pack_with_ligand_context`: bool = True - Pack in the ligand's presence rather than against the bare backbone. For a ligand-binding pocket the ligand is the context that matters.
 
-**Streams**: `sequences`
+**Streams**: `sequences`, `fasta` (one multi-record FASTA of the designs), `structures` (only when `pack_side_chains=True`)
 
 **Tables**:
 - `sequences`:
 
   | id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps |
   |----|----------|--------|---|------|-------------------|-------------------|---------|------|
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 **Example**:
 ```python
@@ -225,7 +249,7 @@ from biopipelines.ligand import Ligand
 
 lmpnn = LigandMPNN(
     structures=rfdaa,
-    ligand=Ligand(code="LIG"),
+    ligand=Ligand(codes="LIG"),
     num_sequences=5,
     redesigned=rfdaa.tables.structures.designed
 )
@@ -269,19 +293,19 @@ Performs mutagenesis at specified positions. Generates systematic amino acid sub
 **Tables**:
 - `sequences`:
 
-  | id | sequences.id | sequence | mutations | mutation_positions | original_aa | new_aa |
-  |----|--------------|----------|-----------|--------------------|-------------|--------|
+  | id | original.id | sequence | mutations | mutation_positions | original_aa | new_aa |
+  |----|-------------|----------|-----------|--------------------|-------------|--------|
 
   When chaining multiple Mutagenesis steps, `mutations` accumulates (e.g., `A42V,G50L`) and `mutation_positions` uses PyMOL selection format (e.g., `42+50`).
 
-- `missing`:
+- `missing` (only when `include_original=False`):
 
-  | id | removed_by | cause |
-  |----|------------|-------|
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 - `msas` (only when `msas=` is given):
 
-  | id | sequences.id | original.id | sequence | msa_file |
+  | id | sequences.id | original.id | sequence | file |
   |----|--------------|-------------|----------|----------|
 
   `id` and `sequences.id` are both the mutant id (so downstream folding tools match the mutant query); `original.id` records the parent protein the MSA was derived from; `sequence` is the mutated query sequence.
@@ -386,13 +410,18 @@ git clone https://github.com/dauparas/ProteinMPN
 - `seed`: int = 0 - Random seed (0 = random)
 - `ca_noise_std`: float = 0.0 - Std. dev. of Gaussian noise added to Cα coordinates before design
 
-**Streams**: `sequences`
+**Streams**: `sequences`, `fasta` (one multi-record FASTA of the designs)
 
 **Tables**:
 - `sequences`:
 
-  | id | structures.id | source_pdb | sequence | score | seq_recovery | rmsd | gaps |
-  |----|---------------|------------|----------|-------|--------------|------|------|
+  | id | structures.id | source_pdb | sequence | score | seq_recovery | gaps |
+  |----|---------------|------------|----------|-------|--------------|------|
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 **Note**: Sample 0 is the original/template sequence, samples 1+ are designs.
 
@@ -447,11 +476,13 @@ RBSDesigner.install()
 - `pre_sequence`: str = "" — Optional fixed 5'UTR DNA to prepend before the designed RBS
 - `add_start_codon`: bool = False — Prepend an ATG start codon to the gene if absent
 
+**Streams**: `sequences` (value-based, the RBS-prefixed genes)
+
 **Tables**:
 - `rbs`:
 
-  | id | sequence | rbs_sequence | full_gene | dg_total | tir_predicted | target_tir | target_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
-  |----|-------------|--------------|-----------|----------|---------------|------------|-----------|---------|-------------|----------|------------|---------|------------|
+  | id | sequence | rbs_sequence | full_gene | converged | dg_total | tir_predicted | target_tir | target_dg | min_achievable_dg | spacing | dg_mrna_rrna | dg_start | dg_spacing | dg_mrna | dg_standby |
+  |----|----------|--------------|-----------|-----------|----------|---------------|------------|-----------|-------------------|---------|--------------|----------|------------|---------|------------|
 
   - `full_gene` = `pre_sequence` + `rbs_sequence` + `sequence` (complete DNA ready for synthesis)
 
@@ -518,6 +549,13 @@ Combines a template sequence with two types of modifications: **substitutions** 
 
   | id | sequence |
   |----|----------|
+
+  One `sequences_<n>.id` provenance column is appended per tool-valued substitution/indel axis.
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 **Examples**:
 ```python

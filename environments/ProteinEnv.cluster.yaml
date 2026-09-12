@@ -10,6 +10,13 @@ channel_priority: strict
 dependencies:
   - python>=3.10,<3.13
   - pymol-open-source
+  # Runtime OpenGL, required for `import pymol` to load at all.
+  # pymol._cmd is a C extension link-time linked against libGL.so.1, so the import fails when it is absent even though nothing is ever rendered.
+  # conda-forge's pymol-open-source declares only `glew` and `glm`, so it silently relies on a system libGL; S3IT GPU nodes happen to ship one while CPU compute nodes do not, which is the whole origin of the "PyMOL needs a GPU" belief.
+  # The env already pulls mesa-libgl-cos7-x86_64 and libglvnd-glx-cos7-x86_64, but those install into x86_64-conda-linux-gnu/sysroot/usr/lib64/ as link-time stubs and are never on the runtime loader path.
+  # `libgl` brings libglx and libglvnd into $PREFIX/lib, which is the same libglvnd 1.7.0 the GPU node image carries.
+  # This is a software OpenGL implementation and needs no GPU: get_area and align/fit create no rendering context, and PyMOL's ray tracer is CPU-only.
+  - libgl
   - pandas
   - numpy
   - scipy

@@ -108,7 +108,7 @@ def test_required_column_raises(tmp_path, record_case):
     ds, _ = _seq_stream(tmp_path, [{"id": "a", "sequence": "AAA"}])
     record_case(input="require missing col", expected="KeyError", actual="KeyError")
     with pytest.raises(KeyError):
-        write_filtered_map_table(ds, str(tmp_path / "out.csv"), required_columns=["msa_file"])
+        write_filtered_map_table(ds, str(tmp_path / "out.csv"), required_columns=["file"])
 
 
 # ── combinatorics carries filtered ids ──────────────────────────────────────
@@ -182,7 +182,7 @@ def test_combinatorics_lazy_stream_carries_pattern(tmp_path, record_case):
     ]).to_csv(table, index=False)
     lazy = DataStream(
         name="sequences",
-        ids=["prot[_<N><A V>]"],
+        ids=["prot[_<?><A V>]"],
         files=[],
         map_table=str(table),
         format="csv",
@@ -192,7 +192,7 @@ def test_combinatorics_lazy_stream_carries_pattern(tmp_path, record_case):
     src = json.loads(cfg.read_text())["axes"]["proteins"]["sources"][0]
     ids = load_ids_from_sources([src])
     record_case(input="lazy stream pattern select", expected=["prot_1A", "prot_2V"], actual=ids)
-    assert src["ids"] == ["prot[_<N><A V>]"]
+    assert src["ids"] == ["prot[_<?><A V>]"]
     assert ids == ["prot_1A", "prot_2V"]  # 'other_1' excluded by the pattern
 
 
@@ -262,7 +262,7 @@ def test_stitch_lazy_pattern_selects_matching(tmp_path, record_case):
         {"id": "other_1", "sequence": "CCC"},
     ]).to_csv(csv, index=False)
 
-    info = {"type": "tool_output", "sequences_file": str(csv), "id_patterns": ["prot[_<N><A V>]"]}
+    info = {"type": "tool_output", "sequences_file": str(csv), "id_patterns": ["prot[_<?><A V>]"]}
     kept = mod.load_sequences_from_info(info)
     record_case(input="stitch lazy pattern", expected=["prot_1A", "prot_2V"], actual=list(kept))
     assert list(kept) == ["prot_1A", "prot_2V"]
@@ -382,7 +382,7 @@ def _af_seq_csv(tmp_path):
 def test_af_queries_lazy_pattern_selects(tmp_path, record_case):
     """A lazy source pattern selects matching rows instead of raising KeyError."""
     mod = _load_af_query_helper()
-    got = mod._load_id_to_seq(_af_seq_csv(tmp_path), patterns=["prot[_<N><A V>]"])
+    got = mod._load_id_to_seq(_af_seq_csv(tmp_path), patterns=["prot[_<?><A V>]"])
     record_case(input="af lazy pattern", expected=["prot_1A", "prot_2V"], actual=list(got))
     assert list(got) == ["prot_1A", "prot_2V"]  # 'other_1' excluded
 
@@ -422,7 +422,7 @@ def test_materializer_lazy_runtime_uses_map_rows(tmp_path, record_case):
         {"id": "prot_1A", "sequence": "MAAA"},
         {"id": "prot_2V", "sequence": "MVVV"},
     ]).to_csv(table, index=False)
-    ds = DataStream(name="sequences", ids=["prot[_<N><A V>]"], files=[],
+    ds = DataStream(name="sequences", ids=["prot[_<?><A V>]"], files=[],
                     map_table=str(table), format="csv", _runtime_mode=True)
     out = tmp_path / "out.csv"
     write_filtered_map_table(ds, str(out))

@@ -2,6 +2,7 @@
 
 import csv
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,67 @@ RESULTS_CSV = RESULTS_DIR / "test_results.csv"
 RESULTS_XLSX = RESULTS_DIR / "test_results.xlsx"
 
 _CASE_STASH_KEY = pytest.StashKey[dict]()
+
+
+# ── network tests: an RCSB outage must not read as a regression ──────────────
+
+# One probe per session against a structure that has existed since 1987. Only a
+# TRANSPORT failure skips: a 4xx/5xx from a reachable RCSB is a real answer and
+# must still fail the suite, or this fixture would hide the thing it guards.
+_RCSB_PROBE_URL = "https://data.rcsb.org/rest/v1/core/entry/1UBQ"
+
+
+@pytest.fixture(scope="session")
+def rcsb_reachable():
+    """(ok, reason). Retries, so one blip does not skip 25 tests."""
+    import time
+
+    try:
+        import requests
+    except ImportError as exc:  # pragma: no cover - requests is a hard dependency
+        return False, f"requests is not importable: {exc}"
+
+    last = ""
+    for attempt in range(3):
+        try:
+            response = requests.get(_RCSB_PROBE_URL, timeout=15)
+        except requests.exceptions.RequestException as exc:
+            last = f"{type(exc).__name__}: {exc}"
+            time.sleep(2 ** attempt)
+            continue
+        if response.status_code < 500:
+            # Reachable. A 4xx here is RCSB answering, which is all this proves.
+            return True, ""
+        last = f"HTTP {response.status_code}"
+        time.sleep(2 ** attempt)
+    return False, last
+
+
+@pytest.fixture(autouse=True)
+def _skip_when_rcsb_is_unreachable(request):
+    """Skip a `network` test when RCSB cannot be reached at all.
+
+    These tests gate the mirror: a red test stage on GitLab blocks the push to
+    the public GitHub repo, so an RCSB outage would stop a release on a tree
+    with nothing wrong with it. Skipping is the lesser harm, and `-ra` prints
+    the reason so a skipped run is never mistaken for a passing one.
+    """
+    if request.node.get_closest_marker("network") is None:
+        return
+    ok, reason = request.getfixturevalue("rcsb_reachable")
+    if not ok:
+        pytest.skip(f"RCSB unreachable ({reason}); cannot tell a regression from an outage")
+
+
+# ── default config variant ───────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _default_config_variant(monkeypatch):
+    """Pin the variant the suite has always implicitly run under.
+
+    Auto-detection used to fall back to the alphabetically first config whose ``machine.username`` was blank, which on a clean checkout is ``config.cluster.yaml``. Every test that constructs a tool without one of the ``*_config`` fixtures therefore loaded the shipped cluster config — and would have loaded a different one on a machine that had claimed a variant in its ``.config.<variant>.yaml`` overlay. Detection now refuses rather than guessing, so the dependency is named here instead: same file as before, on every machine. Tests that exercise detection itself override or delete this variable.
+    """
+    monkeypatch.setenv("BIOPIPELINES_CONFIG_VARIANT", "cluster")
 
 
 # ── active-pipeline isolation ─────────────────────────────────────────────────
@@ -76,6 +138,32 @@ def slurm_local_config(monkeypatch, tmp_path):
     from biopipelines.config_manager import ConfigManager
 
     config_path = FIXTURES_DIR / "config.slurm_local.yaml"
+    assert config_path.exists(), f"Missing fixture: {config_path}"
+
+    ConfigManager._instance = None
+    ConfigManager._config = None
+    ConfigManager._variant = None
+
+    monkeypatch.setattr(
+        ConfigManager, "_get_config_path",
+        classmethod(lambda cls, variant=None: str(config_path)),
+    )
+
+    yield config_path
+
+    ConfigManager._instance = None
+    ConfigManager._config = None
+    ConfigManager._variant = None
+
+
+@pytest.fixture
+def renderers_config(monkeypatch, tmp_path):
+    """Points at ``config.renderers_local.yaml``, the local fixture plus a
+    ``renderers:`` block. ``config.local.yaml`` declares none, so a page built under
+    it has no viewers at all -- which is what silenced an earlier viewer regression."""
+    from biopipelines.config_manager import ConfigManager
+
+    config_path = FIXTURES_DIR / "config.renderers_local.yaml"
     assert config_path.exists(), f"Missing fixture: {config_path}"
 
     ConfigManager._instance = None
@@ -204,18 +292,120 @@ def new_slurm_pipeline():
 
 
 @pytest.fixture
-def assert_valid_script():
-    """Assert that a saved pipeline.sh exists and contains expected markers."""
-    import os as _os
+def config_variant(monkeypatch):
+    """Load any ``tests/fixtures/config.<variant>.yaml`` and yield its ConfigManager.
 
+    The per-manager fixtures (mamba/conda/micromamba/venv/container) exist only to exercise environment resolution and container prefixing, which ``config.local.yaml`` cannot reach: it is ``env_manager: pip`` with no ``environments:`` block, so every tool resolves to no environment at all.
+    """
+    from biopipelines.config_manager import ConfigManager
+
+    def _reset():
+        ConfigManager._instance = None
+        ConfigManager._config = None
+        ConfigManager._variant = None
+
+    def _load(variant: str):
+        config_path = FIXTURES_DIR / f"config.{variant}.yaml"
+        assert config_path.exists(), f"Missing fixture: {config_path}"
+        _reset()
+        monkeypatch.setattr(
+            ConfigManager, "_get_config_path",
+            classmethod(lambda cls, variant=None, _p=str(config_path): _p),
+        )
+        # Named explicitly: auto-detection now refuses when no config claims the
+        # current user, and a fixture variant never does.
+        return ConfigManager(variant=variant)
+
+    _reset()
+    yield _load
+    _reset()
+
+
+# ── generated-script structure helpers ────────────────────────────────────────
+
+_TOOLS_HEADER_RE = re.compile(r"^#\s*Tools:\s*(.+)$", re.MULTILINE)
+
+# Steps are emitted as <runtime>/NNN_<Tool>[_<?>].sh and invoked by path.
+_STEP_PATH_RE = re.compile(r"(?:^|[/\\])(\d{3})_([A-Za-z0-9]+)(?:_[^\s/\\]*)?\.sh")
+
+
+def declared_tools(content: str) -> list:
+    """Tool names listed in the generated script's ``# Tools:`` comment header."""
+    match = _TOOLS_HEADER_RE.search(content)
+    if not match:
+        return []
+    return [name.strip() for name in match.group(1).split(",") if name.strip()]
+
+
+def script_body(content: str) -> str:
+    """The script with comment-only lines removed.
+
+    Every tool name appears in the ``# Tools:`` header, so a bare ``name in content`` test is satisfied by that comment even when the script invokes nothing; structural assertions must run against the body.
+    """
+    return "\n".join(
+        line for line in content.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def step_invocation_re(tool_name: str):
+    """Regex matching an emitted step-script invocation for ``tool_name``."""
+    return re.compile(
+        r"(?:^|[/\\])\d{3}_" + re.escape(tool_name) + r"(?:_[^\s/\\]*)?\.sh"
+    )
+
+
+def emitted_tool_order(content: str) -> list:
+    """Tool names in the order their step scripts are invoked."""
+    return [m.group(2) for m in _STEP_PATH_RE.finditer(script_body(content))]
+
+
+@pytest.fixture
+def assert_valid_script():
+    """Assert that a saved pipeline.sh exists and actually invokes its tools.
+
+    A marker naming a declared tool is checked against the emitted step invocation rather than a bare substring, and every tool the script declares must be invoked -- otherwise the ``# Tools:`` comment alone satisfies the assertion and a script with zero invocations passes.
+    """
     def _check(script_path: str, *markers: str):
-        assert _os.path.isfile(script_path), f"pipeline.sh missing: {script_path}"
+        assert os.path.isfile(script_path), f"pipeline.sh missing: {script_path}"
         content = open(script_path, encoding="utf-8").read()
         assert content.startswith("#!/bin/bash"), "missing shebang"
         assert len(content) > 200, "script suspiciously short"
+
+        declared = declared_tools(content)
+        assert declared, "generated script declares no tools in its '# Tools:' header"
+
+        body = script_body(content)
+
+        for tool in declared:
+            assert step_invocation_re(tool).search(body), (
+                f"tool {tool!r} is declared in the '# Tools:' header but is never "
+                f"invoked in the script body"
+            )
+
+        # The step scripts the body invokes must have been written to disk.
+        for path in re.findall(r"(\S*[/\\]\d{3}_[A-Za-z0-9_]+\.sh)", body):
+            assert os.path.isfile(path), f"invoked step script does not exist: {path}"
+
         for marker in markers:
-            assert marker in content, f"expected marker {marker!r} missing from script"
+            if marker in declared:
+                assert step_invocation_re(marker).search(body), (
+                    f"expected tool {marker!r} to be invoked, but the script body "
+                    f"has no step invocation for it"
+                )
+            else:
+                assert marker in body, (
+                    f"expected marker {marker!r} missing from script body "
+                    f"(comment lines excluded)"
+                )
     return _check
+
+
+@pytest.fixture
+def tool_order_in_script():
+    """Return the real step-invocation order of tools in a generated script."""
+    def _order(script_path: str) -> list:
+        return emitted_tool_order(open(script_path, encoding="utf-8").read())
+    return _order
 
 
 # ── record_case fixture (adds input/expected/actual to the report) ────────────

@@ -73,8 +73,8 @@ with Pipeline(project="Examples",
     # 6: Default behavior (Each) - Cartesian product
     Suffix("6")
     # With 2 proteins and 3 ligands: generates 6 predictions
-    # ProteinA_aspirin, ProteinA_caffeine, ProteinA_ibuprofen,
-    # ProteinB_aspirin, ProteinB_caffeine, ProteinB_ibuprofen
+    # ProteinA+aspirin, ProteinA+caffeine, ProteinA+ibuprofen,
+    # ProteinB+aspirin, ProteinB+caffeine, ProteinB+ibuprofen
     boltz_each = Boltz2(
         proteins=Each(protein_a, protein_b),  # Each is default, explicit here for clarity
         ligands=ligand_library
@@ -92,7 +92,7 @@ with Pipeline(project="Examples",
     # 8: Bundle proteins - All proteins together with each ligand
     Suffix("8")
     # With 2 proteins bundled and 3 ligands: generates 3 predictions
-    # (ProteinA+ProteinB)_aspirin, (ProteinA+ProteinB)_caffeine, (ProteinA+ProteinB)_ibuprofen
+    # ProteinA+ProteinB+aspirin, ProteinA+ProteinB+caffeine, ProteinA+ProteinB+ibuprofen
     boltz_bundle_proteins = Boltz2(
         proteins=Bundle(protein_a, protein_b),
         ligands=ligand_library
@@ -240,8 +240,8 @@ with Pipeline(project="Examples",
     # 20: Protein + dsDNA + ligand - three-axis combinatorics
     Suffix("20")
     # With 2 proteins, 1 dsDNA, and 2 ligands (all Each): generates 4 predictions
-    # ProteinA_DNA_target_aspirin, ProteinA_DNA_target_caffeine,
-    # ProteinB_DNA_target_aspirin, ProteinB_DNA_target_caffeine
+    # ProteinA+DNA_target+aspirin, ProteinA+DNA_target+caffeine,
+    # ProteinB+DNA_target+aspirin, ProteinB+DNA_target+caffeine
     boltz_three_axis = Boltz2(
         proteins=Each(protein_a, protein_b),
         dsDNA=dna_target,

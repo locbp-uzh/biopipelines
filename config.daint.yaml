@@ -81,10 +81,26 @@ folders:
     AlphaFold: "<data>/localcolabfold"
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
+    # The entries below are declared, not verified: their tools read the
+    # checkout as a hard folders["<Tool>"] subscript, so omitting the key
+    # makes the tool raise KeyError at config time instead of failing with
+    # the aarch64 reason recorded in llm/daint.md.
+    DiffDock: "<data>/DiffDock"
+    DynamicBind: "<data>/DynamicBind"
+    GEMS: "<data>/GEMS"
+    Gnina: "<data>/gnina"
+    LASErMPNN: "<data>/LASErMPNN"
     LigandMPNN: "<data>/LigandMPNN"
     MMseqs2: "<data>/mmseqs"
+    NeuralPLexer: "<data>/NeuralPLexer"
+    PLACER: "<data>/PLACER"
+    PocketGen: "<data>/PocketGen"
     ProteinMPNN: "<data>/ProteinMPNN"
+    RFdiffusion: "<data>/RFdiffusion"
+    RFdiffusion2: "<data>/RFdiffusion2"
     RFdiffusion3: "<data>/rfdiffusion3"
+    RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
+    RTMScore: "<data>/RTMScore"
 
   cache:
     BoltzCache: "<cache>/Boltz"
@@ -130,6 +146,15 @@ environments:
   SASA: "ProteinEnv"
   Selection: "ProteinEnv"
   DSSP: "dssp"
+  # CPU docking. GNINA is absent on purpose: it ships only a prebuilt x86-64
+  # binary. conda-forge builds vina, openbabel and rdkit for aarch64.
+  Vina: "vina"
+  # AmberTools has a native aarch64 build, so the ligand= stack solves here too.
+  OpenMM: "openmm"
+  # Sequence-logo plotting: seaborn and logomaker are absent from the base venv,
+  # so without this the tools fall back to it and die on import.
+  MutationComposer: "MutationEnv"
+  MutationProfiler: "MutationEnv"
   # All of these share the base `biopipelines` venv, whose aarch64 deps come from
   # environments/biopipelines.pip.daint.txt rather than the conda yaml. Every
   # BP-native tool needing nothing beyond it is listed, so the block reads as the
@@ -146,6 +171,8 @@ environments:
   Ligand: "biopipelines"
   Load: "biopipelines"
   LoadMultiple: "biopipelines"
+  MMseqs2: "biopipelines"
+  MMseqs2Server: "biopipelines"
   MSA: "biopipelines"
   Panda: "biopipelines"
   PDB: "biopipelines"
@@ -157,26 +184,34 @@ environments:
   Scripting: "biopipelines"
   Sequence: "biopipelines"
   StitchSequences: "biopipelines"
+  StructureCluster: "biopipelines"
   Table: "biopipelines"
   UniProt: "biopipelines"
 
 # CSCS Container Engine: the tool's whole script runs via `srun --environment=`.
+# NOTE ngc-pytorch-bp.toml, not ngc-pytorch.toml: the plain image mounts only
+# /capstor and /iopsstor, so the biopipelines clone in $HOME is invisible inside
+# it and every pipe script the generated bash calls fails to resolve
+# ("resolve_stream_item.sh: No such file or directory"). The -bp variant adds
+# ${HOME} and drops a workdir pointing at another user's scratch.
 # Absolute paths, not bare names — a bare name resolves against each user's private ~/.edf.
 # A tool here needs its venv built inside the container; the EDF mounts /capstor so <group> is visible.
 # Unrelated to `containers:` (apptainer, which Daint does not have).
 # CPU-only tools are omitted on purpose so they never pay the image pull.
 edf:
   BioEmu: "<group>/edf/md-bioemu.toml"
-  Boltz2: "<group>/edf/ngc-pytorch.toml"
-  BoltzGen: "<group>/edf/ngc-pytorch.toml"
-  BoltzGenImport: "<group>/edf/ngc-pytorch.toml"
-  BoltzGenMerge: "<group>/edf/ngc-pytorch.toml"
-  ESMFold2: "<group>/edf/ngc-pytorch.toml"
-  RFdiffusion3: "<group>/edf/ngc-pytorch.toml"
+  Boltz2: "<group>/edf/ngc-pytorch-bp.toml"
+  BoltzGen: "<group>/edf/ngc-pytorch-bp.toml"
+  BoltzGenImport: "<group>/edf/ngc-pytorch-bp.toml"
+  BoltzGenMerge: "<group>/edf/ngc-pytorch-bp.toml"
+  ESMFold2: "<group>/edf/ngc-pytorch-bp.toml"
+  RFdiffusion3: "<group>/edf/ngc-pytorch-bp.toml"
 
 containers: {}
 
-tool_overrides: {}
+tool_overrides:
+  # The RFD3 postprocess runs inside the tool's own container, where the activated biopipelines venv resolves to the container's interpreter and biopython is not importable. Set this to a `pip --target` install built inside that same image to put it back on PYTHONPATH — for this step only, never for the whole job. Leave unset unless the postprocess actually fails on `MMCIFParser`.
+  rfdiffusion3: {}
 
 renderers:
   streams:

@@ -41,6 +41,7 @@ per-sample files and builds the BioPipelines streams.
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -116,6 +117,14 @@ def _atom_sel_to_placer_tuple(sel, struct_path):
             # First matching residue wins.
             return (ln_chain, ln_resnum, ln_resname, atom_name.strip())
     raise ValueError(f"bond atom selection {sel!r} matched no residue in {struct_path}")
+
+
+def compose_output_id(struct_id, lig_id):
+    """Compose one output id from a (structure, ligand) selection, `lig_id=None` in sidechain/apo mode.
+
+    Both axes are always iterated: PLACER's constructor accepts only a DataStream or a StandardizedOutput, so a `Bundle`/`Each` wrapper is refused before any of this runs and neither axis can ask to collapse into a single prefix. That is why a flat product is correct here and no per-axis mode is carried in from configuration time. If PLACER ever learns to take a wrapper, this is the one place to switch over to `biopipelines.combinatorics.predict_single_output_id`, which is what `get_output_files` already predicts through.
+    """
+    return f"{struct_id}+{lig_id}" if lig_id is not None else struct_id
 
 
 def parse_target_res(s):
@@ -199,7 +208,7 @@ def main():
     for struct_id, struct_path in structures:
         ext = os.path.splitext(struct_path)[1].lower()
         for lig_id in ligand_ids:
-            out_id = f"{struct_id}+{lig_id}" if lig_id is not None else struct_id
+            out_id = compose_output_id(struct_id, lig_id)
             try:
                 pl = PLACER.PLACERinput()
                 if ext in (".cif", ".cif.gz"):

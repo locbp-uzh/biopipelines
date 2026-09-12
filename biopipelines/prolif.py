@@ -40,7 +40,7 @@ class ProLIF(BaseConfig):
                 AssignBondOrdersFromTemplate) and the residue `code` locates
                 the ligand in the structures PDBs. Both are read from the
                 stream's `smiles` / `code` columns at runtime. Supply as
-                Ligand("MK1"), Ligand(code="MK1"), or any compounds-producing
+                Ligand("MK1"), Ligand(codes="MK1"), or any compounds-producing
                 tool's output (the code must resolve to a single value).
 
     Outputs:
@@ -52,12 +52,14 @@ class ProLIF(BaseConfig):
     """
 
     TOOL_NAME = "ProLIF"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "prolif"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("prolif", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "ProLIF already installed, skipping. Use force_reinstall=True to reinstall."
@@ -65,13 +67,13 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("prolif", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("prolif", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing ProLIF ==="
 {skip}{remove_block}
 {env_block}
 
-if {cls._env_run("prolif", env_manager)}python -c "import prolif" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import prolif" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ProLIF installation complete ==="
 else

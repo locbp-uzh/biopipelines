@@ -1,0 +1,40 @@
+# BioPipelines Boltz2Env - `daint` variant (aarch64/GH200), venv env_manager.
+#
+# Boltz2Env.yaml declares only python + pip, and venv mode STRIPS both (the
+# `extra` list in _env_install_block excludes python/pip). That left no conda
+# layer, so the whole of boltz went through pip on a bare compute node and the
+# install died building gemmi from source:
+#     ERROR: Failed building wheel for gemmi
+#     ERROR: Boltz2 verification failed (cannot import boltz)
+# gemmi is a C++ extension with no linux-aarch64 wheel on PyPI; the container
+# variant gets away with pip because its image ships gcc/g++, which a bare node
+# does not.
+#
+# Naming gemmi (and the other compiled scientific deps) as conda packages routes
+# this env through the conda-then-venv path, so they arrive prebuilt and pip only
+# has to add boltz itself. gemmi 0.7.5 has 51 linux-aarch64 builds on conda-forge
+# (checked against the anaconda.org API).
+#
+# python matches biopipelines.daint.yaml deliberately -- see that file for why the
+# base interpreter version propagates to every venv-mode env.
+name: Boltz2Env
+channels:
+  - conda-forge
+
+# python 3.11 + pip only, deliberately. boltz[cuda] does NOT resolve on 3.12
+# (pip walks back to boltz 0.0.0 and gives ResolutionImpossible); the working
+# container env is 3.11.15 with boltz 2.2.1. RFdiffusion3 needs the opposite
+# (>=3.12,<3.13), which is why this env cannot inherit the base interpreter.
+# Seeding conda with gemmi/numpy/pandas/rdkit
+# was tried and made it worse: --system-site-packages exposed those versions to
+# pip, which then could not satisfy boltz's pins and failed with
+# ResolutionImpossible on every boltz version. And conda-forge has no
+# linux-aarch64 gemmi 0.6.5 (the exact pin) anyway -- only 0.5.8 and 0.7.1+.
+#
+# Boltz2Env is therefore built by `provision_venv.sh boltz2env`, NOT by bp-warm:
+# pip has to run inside the ngc-pytorch image so gemmi 0.6.5 can compile, while
+# the venv itself is created by the conda interpreter so its recorded path
+# resolves on a bare node.
+dependencies:
+  - python=3.11
+  - pip

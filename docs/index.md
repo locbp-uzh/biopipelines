@@ -68,7 +68,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     srun --mem=16GB --time=1:00:00 --pty bash
     ```
 
-    Edit `config.yaml` to match your cluster configuration.
+    Edit the configuration to match your cluster. There is no single `config.yaml`: the repository root ships one file per site variant (`config.cluster.yaml`, `config.local.yaml`, `config.container.yaml`, `config.daint.yaml`, `config.colab.yaml`), and each can be overridden by a gitignored `.config.<variant>.yaml` overlay holding your machine-specific paths. Edit them with `bp-config` rather than by hand; the active variant is picked automatically (or forced with `BIOPIPELINES_CONFIG_VARIANT`).
 
     Individual models have to be installed separately. We provide a pipeline (example_pipelines/install_tools.py) to install all the tools used in the repository at once, but please refer to the respective official documentation in case your particular cluster configuration requires adjustments:
 
@@ -92,7 +92,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     unused needs reinstalling.
 
     ```bash
-    git clone https://gitlab.uzh.ch/locbp/public/biopipelines-locbp
+    git clone https://github.com/locbp-uzh/biopipelines
     cd biopipelines-locbp
     /usr/bin/python3.11 -m venv $SCRATCH/venvs/biopipelines
     source $SCRATCH/venvs/biopipelines/bin/activate
@@ -110,9 +110,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     BIOPIPELINES_CONFIG_VARIANT=daint biopipelines-submit my_pipeline.py
     ```
 
-    GPU tools run in containers through the CSCS Container Engine rather than a
-    conda env — see `references/daint_backend.md` (or `llm/daint.md`) for the EDF
-    setup and which tools are supported.
+    GPU tools run in containers through the CSCS Container Engine rather than a conda env — see `skills/biopipelines/references/daint_backend.md` (or `llm/daint.md`) in the repository for the EDF setup and which tools are supported.
 
 === "Google Colab"
 
@@ -136,7 +134,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
         RFdiffusion.install()
     ```
 
-    The Colab configuration (`colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `micromamba` into isolated environments, matching the cluster behavior. See [Google Colab](user_manual.md#installation-google-colab) in the User Guide for details.
+    The Colab configuration (`config.colab.yaml`) is detected automatically — no manual config needed. Tools are installed via `micromamba` into isolated environments, matching the cluster behavior. See [Google Colab](user_manual.md#installation-google-colab) in the User Guide for details.
 
 ---
 
@@ -144,4 +142,5 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
 - **[User Guide](user_manual.md)** -- Core concepts, installation, and usage
 - **[Tool Reference](tool_reference.md)** -- Complete reference for all tools
+- **[Tool Index](tool_index.md)** -- Every tool in one table, with its category, version, and source file
 - **[Developer Guide](developer_manual.md)** -- Architecture and tool development

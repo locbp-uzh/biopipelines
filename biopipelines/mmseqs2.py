@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.6"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -95,7 +95,10 @@ echo "=== MMseqs2 ready ==="
 
         Args:
             sequences: Input sequences - can be sequence string, list, DataStream or StandardizedOutput
-            output_format: Output format ("csv" or "a3m", default: csv)
+            output_format: format requested FROM the search ("csv" or "a3m",
+                default csv). The step always emits <id>.csv either way — an a3m
+                result is converted on arrival. A ColabFold-protocol server
+                (server_url) returns a3m regardless of this setting.
             timeout: Timeout in seconds for server response
             server_url: ColabFold-protocol MSA server to query over HTTP (e.g.
                   "https://api.colabfold.com"). When set, no local MMseqs2 server
@@ -116,7 +119,7 @@ echo "=== MMseqs2 ready ==="
         Output:
             Streams: msas (.csv/.a3m)
             Tables:
-                msas: id | sequences.id | sequence | msa_file
+                msas: id | sequences.id | sequence | file
         """
         # Resolve sequences input
         self.sequences_input = sequences  # retained for upstream missing-table lookup
@@ -176,12 +179,10 @@ echo "=== MMseqs2 ready ==="
         if self.output_format not in ["csv", "a3m"]:
             raise ValueError("output_format must be 'csv' or 'a3m'")
 
-        # The ColabFold protocol returns a3m only; a csv request would have the
-        # harvester look for files the remote path never writes.
-        if self.server_url and self.output_format != "a3m":
-            raise ValueError(
-                f"server_url requires output_format='a3m' (got '{self.output_format}'): "
-                f"a ColabFold-protocol server returns a3m alignments.")
+        # A ColabFold-protocol server returns a3m regardless of what is asked for,
+        # so the remote path always fetches a3m and converts to csv on the way out
+        # (convert_a3m_to_csv_format, the same converter the local path uses).
+        # Both formats are therefore valid with server_url.
 
         if self.timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -320,7 +321,11 @@ echo "MMseqs2 processing completed"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after MMseqs2 execution."""
         sequence_ids = self._predict_sequence_ids()
-        ext = "csv" if self.output_format == "csv" else "a3m"
+        # The harvester writes <id>.csv whatever was requested: an a3m result is
+        # converted on the way out, so output_format selects the WIRE format, not
+        # the file this step emits. Declaring .a3m here would name files that are
+        # never written and fail the completion check.
+        ext = "csv"
 
         # One <id> template (not a concrete path per id) so the completion check
         # expands it against the resolved ids at runtime — lazy ids stay lazy.
@@ -336,7 +341,7 @@ echo "MMseqs2 processing completed"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msa_csv,
-                columns=["id", "sequences.id", "sequence", "msa_file", "file"],
+                columns=["id", "sequences.id", "sequence", "file"],
                 description="MSA files for sequence alignment"
             ),
             "missing": TableInfo(
@@ -382,7 +387,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,

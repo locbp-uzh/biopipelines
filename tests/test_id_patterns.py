@@ -25,7 +25,7 @@ def test_expand_pattern(record_case, pattern, expected):
 
 
 def test_expand_pattern_lazy_raises(record_case):
-    pattern = "prot_<0..2>[_<N><A V>]"
+    pattern = "prot_<0..2>[_<?><A V>]"
     record_case(input=pattern, expected="LazyPatternError", actual="LazyPatternError")
     with pytest.raises(idp.LazyPatternError):
         idp.expand_pattern(pattern)
@@ -45,7 +45,7 @@ def test_expand_ids(record_case, ids, expected):
 
 
 def test_expand_ids_lazy_raises(record_case):
-    ids = ["prot[_<N><A V>]"]
+    ids = ["prot[_<?><A V>]"]
     record_case(input=ids, expected="LazyPatternError", actual="LazyPatternError")
     with pytest.raises(idp.LazyPatternError):
         idp.expand_ids(ids)
@@ -55,8 +55,8 @@ def test_expand_ids_lazy_raises(record_case):
 
 @pytest.mark.parametrize("pattern, expected_ids, expected_complete", [
     ("base_<0..2>",              ["base_0", "base_1", "base_2"],     True),
-    ("prot_<0..1>[_<N><A V>]",   ["prot_0[_<N><A V>]", "prot_1[_<N><A V>]"], False),
-    ("base[_<N><A V>]",          ["base[_<N><A V>]"],                 False),
+    ("prot_<0..1>[_<?><A V>]",   ["prot_0[_<?><A V>]", "prot_1[_<?><A V>]"], False),
+    ("base[_<?><A V>]",          ["base[_<?><A V>]"],                 False),
 ])
 def test_try_expand(record_case, pattern, expected_ids, expected_complete):
     ids, complete = idp.try_expand(pattern)
@@ -67,8 +67,8 @@ def test_try_expand(record_case, pattern, expected_ids, expected_complete):
 
 
 def test_try_expand_ids_mixed(record_case):
-    ids = ["a_<0..1>", "b[_<N><X>]"]
-    expected = (["a_0", "a_1", "b[_<N><X>]"], False)
+    ids = ["a_<0..1>", "b[_<?><?>]"]
+    expected = (["a_0", "a_1", "b[_<?><?>]"], False)
     actual = idp.try_expand_ids(ids)
     record_case(input=ids, expected=expected, actual=actual)
     assert actual == expected
@@ -76,10 +76,10 @@ def test_try_expand_ids_mixed(record_case):
 
 @pytest.mark.parametrize("pattern, expected", [
     ("base_<0..2>",          ["base_0", "base_1", "base_2"]),
-    ("a_<1 2>[_<N>]",        ["a_1[_<N>]", "a_2[_<N>]"]),
-    ("a_<1 2>[_<N>]_5<A S>", ["a_1[_<N>]_5A", "a_1[_<N>]_5S", "a_2[_<N>]_5A", "a_2[_<N>]_5S"]),
-    ("base[_<N>]",           ["base[_<N>]"]),
-    ("base[_<N><A V>]",      ["base[_<N><A V>]"]),  # slots inside [...] stay lazy
+    ("a_<1 2>[_<?>]",        ["a_1[_<?>]", "a_2[_<?>]"]),
+    ("a_<1 2>[_<?>]_5<A S>", ["a_1[_<?>]_5A", "a_1[_<?>]_5S", "a_2[_<?>]_5A", "a_2[_<?>]_5S"]),
+    ("base[_<?>]",           ["base[_<?>]"]),
+    ("base[_<?><A V>]",      ["base[_<?><A V>]"]),  # slots inside [...] stay lazy
 ])
 def test_partial_expand_preserves_brackets(record_case, pattern, expected):
     actual = idp.partial_expand(pattern)
@@ -94,9 +94,9 @@ def test_partial_expand_preserves_brackets(record_case, pattern, expected):
 
 
 @pytest.mark.parametrize("patterns, rows, expected", [
-    (["a_<1 2>[_<N>]"], ["a_1_x", "a_2_y", "b_1"], ["a_1_x", "a_2_y"]),
+    (["a_<1 2>[_<?>]"], ["a_1_x", "a_2_y", "b_1"], ["a_1_x", "a_2_y"]),
     (["a_<0..2>"],      ["a_0", "a_2"],            ["a_0", "a_2"]),  # missing a_1 simply absent
-    (["a_1[_<N>]"],     ["a_1_p", "a_1_q", "a_2"], ["a_1_p", "a_1_q"]),
+    (["a_1[_<?>]"],     ["a_1_p", "a_1_q", "a_2"], ["a_1_p", "a_1_q"]),
     (["lig1", "lig3"],  ["lig1", "lig2", "lig3"],  ["lig1", "lig3"]),  # literals exact
 ])
 def test_select_ids(record_case, patterns, rows, expected):
@@ -111,7 +111,7 @@ def test_select_ids(record_case, patterns, rows, expected):
     ("base_<0..49>",              50),
     ("<0..2>_<A B>",              6),
     ("literal",                    1),
-    ("prot_<0..4>[_<N><A V>]",    5),  # lazy: counts prefix only
+    ("prot_<0..4>[_<?><A V>]",    5),  # lazy: counts prefix only
 ])
 def test_count_pattern(record_case, pattern, expected):
     actual = idp.count_pattern(pattern)
@@ -130,7 +130,7 @@ def test_count_ids_sums(record_case):
 # ── bracket / lazy handling ───────────────────────────────────────────────────
 
 @pytest.mark.parametrize("value, expected", [
-    ("x[_<N><A V>]",  True),
+    ("x[_<?><A V>]",  True),
     ("x_<0..2>",      False),
     ("plain",         False),
 ])
@@ -141,8 +141,8 @@ def test_is_lazy(record_case, value, expected):
 
 
 @pytest.mark.parametrize("value, expected", [
-    ("prot_<0..4>[_<N><S A L K>]",  "prot_<0..4>"),
-    ("base[_<N><A V>]",             "base"),
+    ("prot_<0..4>[_<?><S A L K>]",  "prot_<0..4>"),
+    ("base[_<?><A V>]",             "base"),
     ("literal",                     "literal"),
 ])
 def test_strip_brackets(record_case, value, expected):
@@ -152,8 +152,11 @@ def test_strip_brackets(record_case, value, expected):
 
 
 @pytest.mark.parametrize("value, expected", [
-    ("prot_<0..2>[_<N><A V>]+9DP",  "prot_<0..2>*+9DP"),
-    ("prot_<0..2>[_<N><A I L V>]",  "prot_<0..2>*"),
+    # Deliberately loose — a glob cannot express the optional repeatable bracket,
+    # so callers narrow with select_ids. See glob_from_lazy's docstring.
+    ("prot_<0..2>[_<?><A V>]+9DP",  "prot_<0..2>*+9DP"),
+    ("prot_<0..2>[_<?><A I L V>]",  "prot_<0..2>*"),
+    ("prot[abc]",                   "prot*"),
     ("literal",                     "literal"),
 ])
 def test_glob_from_lazy(record_case, value, expected):
@@ -163,7 +166,7 @@ def test_glob_from_lazy(record_case, value, expected):
 
 
 @pytest.mark.parametrize("ids, expected", [
-    (["prot_<0..1>[_<N><A V>]+X"],  ["prot_0*+X", "prot_1*+X"]),
+    (["prot_<0..1>[_<?><A V>]+X"],  ["prot_0*+X", "prot_1*+X"]),
     (["prot_<0..1>"],               ["prot_0", "prot_1"]),
 ])
 def test_glob_from_lazy_ids(record_case, ids, expected):
@@ -246,6 +249,53 @@ def test_file_has_glob(record_case, template, expected):
     assert actual is expected
 
 
+@pytest.mark.parametrize("template, expected", [
+    ("<id>.pdb",              "*.pdb"),
+    ("out/<id>_best.pdb",     "out/*_best.pdb"),
+    ("<id>_A3D.csv",          "*_A3D.csv"),
+])
+def test_glob_from_file_pattern(record_case, template, expected):
+    actual = idp.glob_from_file_pattern(template)
+    record_case(input=template, expected=expected, actual=actual)
+    assert actual == expected
+
+
+@pytest.mark.parametrize("template, path, expected", [
+    # The declared template says how a name is built from an id, so the id comes back out of it.
+    ("<id>.pdb",           "design_1.pdb",             "design_1"),
+    ("<id>_best.pdb",      "design_1_best.pdb",        "design_1"),
+    ("<id>_best.pdb",      "design_10_best.pdb",       "design_10"),
+    ("<id>_A3D.csv",       "design_1_A3D.csv",         "design_1"),
+    ("pdb_<id>.pdb",       "pdb_design_1.pdb",         "design_1"),
+    ("<id>.*",             "design_1.pdb",             "design_1"),
+    # The directory is ignored: the same file may be reached by another route.
+    ("/run/s/<id>.pdb",    "/elsewhere/design_1.pdb",  "design_1"),
+    ("/run/s/<id>.pdb",    r"C:\run\s\design_1.pdb",   "design_1"),
+    # A name that does not fit the template is not this stream's file.
+    ("<id>_best.pdb",      "design_1.pdb",             None),
+    ("<id>_A3D.csv",       "scores.csv",               None),
+    ("<id>_best.pdb",      "_best.pdb",                None),
+    ("no_slot.pdb",        "no_slot.pdb",              None),
+])
+def test_id_from_file_pattern(record_case, template, path, expected):
+    actual = idp.id_from_file_pattern(template, path)
+    record_case(input=(template, path), expected=expected, actual=actual)
+    assert actual == expected
+
+
+@pytest.mark.parametrize("template, item_id", [
+    ("<id>.pdb",             "design_10"),
+    ("out/<id>_best.pdb",    "design_10"),
+    ("<id>_A3D.csv",         "5HG6_0"),
+    ("pdb_<id>.pdb",         "design_1"),
+])
+def test_id_from_file_pattern_inverts_expand_file_pattern(record_case, template, item_id):
+    built = idp.expand_file_pattern(template, item_id)
+    actual = idp.id_from_file_pattern(template, built)
+    record_case(input=(template, item_id, built), expected=item_id, actual=actual)
+    assert actual == item_id
+
+
 def test_make_range(record_case):
     inp = ("design", 0, 49)
     expected = "design_<0..49>"
@@ -302,7 +352,7 @@ def test_id_patterns_lazy_children_stays_lazy_via_mock(
     with pipeline:
         m = Mock(
             ids=["p0", "p1"],
-            children="[_<N><A V>]",
+            children="[_<?><A V>]",
             produce=["_1A", "_2V"],
             streams={"s": {"format": "pdb", "file": "<id>.pdb"}},
         )

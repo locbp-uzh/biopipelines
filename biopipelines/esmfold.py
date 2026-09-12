@@ -70,7 +70,8 @@ class ESMFold(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "esmfold"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -80,27 +81,28 @@ class ESMFold(BaseConfig):
         forks of esm + openfold, no nvcc compile). The Colab variant uses
         phased pip files (esmfold.pip.colab.1.txt, .2.txt) so torch is
         installed before openfold's setup.py imports it."""
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("esmfold", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
-    echo "esmfold environment already installed, skipping. Use force_reinstall=True to reinstall."
+    echo "{env} environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("esmfold", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("esmfold", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing ESMFold ==="
 {skip}{remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create esmfold environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
 # Verify installation
-if {cls._env_run("esmfold", env_manager)}python -c "import esm" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import esm" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESMFold installation complete ==="
 else
@@ -309,7 +311,7 @@ fi
         return {
             "structures": structures,
             "sequences": DataStream.empty("sequences", "fasta"),
-            "compounds": DataStream.empty("compounds", "sdf"),
+            "compounds": DataStream.empty("compounds", "csv"),
             "tables": tables,
             "output_folder": self.output_folder,
             "rendering_parameters": {

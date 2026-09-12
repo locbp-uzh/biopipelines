@@ -72,7 +72,8 @@ class ThermoMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ThermoMPNN"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "thermompnn"
 
     # ------------------------------------------------------------------
     # Install
@@ -83,6 +84,7 @@ class ThermoMPNN(BaseConfig):
         """Clone Kuhlman-Lab/ThermoMPNN (model weights ship in the repo's
         models/ dir) and create the env. Verification: repo cloned with the
         bundled checkpoint present, env exists, and torch importable."""
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("ThermoMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
@@ -92,13 +94,13 @@ class ThermoMPNN(BaseConfig):
         ckpt_ckpt = os.path.join(repo_dir, "models", "thermoMPNN_default.ckpt")
         ckpt_pt = os.path.join(repo_dir, "models", "thermoMPNN_default.pt")
 
-        env_check = cls._env_exists_check("thermompnn", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -d "{repo_dir}/analysis" ]'
         ckpt_check = f'{{ [ -f "{ckpt_ckpt}" ] || [ -f "{ckpt_pt}" ]; }}'
 
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {ckpt_check} && {env_check} \\
-   && {cls._env_run("thermompnn", env_manager)}python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
     echo "ThermoMPNN already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -120,8 +122,8 @@ fi"""
             f'"{repo_dir}/local.yaml"'
         )
 
-        remove_block = cls._env_remove_block("thermompnn", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("thermompnn", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
 
         return f"""echo "=== Installing ThermoMPNN ==="
 {skip}{remove_block}
@@ -132,7 +134,7 @@ fi"""
 
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create thermompnn environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
@@ -141,7 +143,7 @@ fi
 # pytorch_lightning, torch — wandb is a real inference dep, not training-only).
 if {{ [ -f "{ckpt_ckpt}" ] || [ -f "{ckpt_pt}" ]; }} \\
    && [ -f "{repo_dir}/vanilla_model_weights/v_48_020.pt" ] \\
-   && {cls._env_run("thermompnn", env_manager)}python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch, wandb, pytorch_lightning, omegaconf" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ThermoMPNN installation complete ==="
 else

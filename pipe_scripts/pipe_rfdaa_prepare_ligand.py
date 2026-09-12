@@ -208,7 +208,7 @@ def combine_structures(ligand_pdb: str, peptide_pdb: str, output_pdb: str):
         for line in peptide_translated:
             f.write(line + '\n')
 
-        f.write("END\n")
+        f.write("END".ljust(80) + "\n")
 
     print(f"Successfully created combined structure with {len(ligand_lines) + len(peptide_translated)} atoms")
 

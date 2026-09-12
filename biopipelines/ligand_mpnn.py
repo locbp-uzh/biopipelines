@@ -11,7 +11,7 @@ import json
 from typing import Dict, List, Any, Union, Tuple, Optional
 
 try:
-    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
+    from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string, resolve_table_reference
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -21,7 +21,7 @@ try:
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
-    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
+    from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string, resolve_table_reference
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
@@ -36,14 +36,18 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.5"
+    # LigandMPNN's run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "ligandmpnn_env"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         repo_dir = folders.get("LigandMPNN", "")
         parent_dir = os.path.dirname(repo_dir)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("ligandmpnn_env", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ] && {env_check}; then
     echo "LigandMPNN already installed, skipping. Use force_reinstall=True to reinstall."
@@ -51,8 +55,8 @@ if [ -d "{repo_dir}" ] && [ -d "{repo_dir}/model_params" ] && {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("ligandmpnn_env", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("ligandmpnn_env", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         if env_manager == "venv":
             # requirements.txt pins torch 2.2.1 + x86 nvidia-*-cu12 wheels that do not
             # resolve on aarch64; the env's own pip file supplies these instead.
@@ -60,8 +64,8 @@ fi
             verify_py = "python"
         else:
             req_block = ('# LigandMPNN\'s own pinned requirements (lives in the cloned repo)\n'
-                         f'{cls._env_run("ligandmpnn_env", env_manager)}pip install -r "{repo_dir}/requirements.txt"')
-            verify_py = f'{cls._env_run("ligandmpnn_env", env_manager)}python'
+                         f'{cls._env_run(env, env_manager)}pip install -r "{repo_dir}/requirements.txt"')
+            verify_py = f'{cls._env_run(env, env_manager)}python'
         return f"""echo "=== Installing LigandMPNN ==="
 {skip}mkdir -p "{parent_dir}"
 cd "{parent_dir}"
@@ -94,6 +98,7 @@ fi
     #   tables/         — missing.
     lmpnn_out_folder = Path(lambda self: self.execution_folder)
     seqs_folder = Path(lambda self: self.execution_path("seqs"))
+    packed_folder = Path(lambda self: self.stream_folder("structures"))
     queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
@@ -124,16 +129,19 @@ fi
                  temperature: float = 0.0,
                  bias_AA_per_residue: str = "",
                  seed: int = 0,
+                 pack_side_chains: bool = False,
+                 packs_per_design: int = 1,
+                 pack_with_ligand_context: bool = True,
                  **kwargs):
         """
         Initialize LigandMPNN configuration.
 
         Args:
             structures: Input structures as DataStream or StandardizedOutput
-            ligand: Compounds stream (Ligand(code="LIG") or any
+            ligand: Compounds stream (Ligand(codes="LIG") or any
                     compounds-producing tool) naming the bound ligand to focus
                     the design around. A bare string ("LIG") is shorthand for
-                    Ligand(code="LIG") and creates an internal code-only Ligand.
+                    Ligand(codes="LIG") and creates an internal code-only Ligand.
                     The residue `code` is read from the stream's `code` column
                     at runtime.
             num_sequences: Number of sequences per batch (maps to --batch_size in LigandMPNN)
@@ -157,9 +165,21 @@ fi
                        {'A12': {'G': -0.3, 'C': -2.0}, ...}.
             seed: Random seed for reproducible sampling (upstream --seed). 0 (default) lets
                        LigandMPNN choose its own seed.
+            pack_side_chains: Build side-chain atoms for the designed sequence. Off by
+                       default, matching upstream. LigandMPNN otherwise emits sequence
+                       only, so a downstream structure keeps the INPUT rotamers under the
+                       new residue identities — the pocket that gets scored is not the one
+                       the sequence encodes.
+            packs_per_design: Independent packing samples per sequence (upstream
+                       --number_of_packs_per_design, whose default is 4). Each one
+                       multiplies the structures stream, so this defaults to 1.
+            pack_with_ligand_context: Pack in the ligand's presence rather than the bare
+                       backbone (upstream --pack_with_ligand_context). On by default: for a
+                       ligand-binding pocket the ligand is the context that matters.
 
         Output:
-            Streams: sequences (.csv), fasta (.fasta)
+            Streams: sequences (.csv), fasta (.fasta), structures (.pdb, only when
+                     pack_side_chains is set)
             Tables:
                 sequences: id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps
                 missing: id | removed_by | kind | cause
@@ -179,10 +199,10 @@ fi
         # code is resolved from its `code` column at runtime. A bare string is
         # promoted to an internal code-only Ligand.
         self.ligand_stream: Optional[DataStream] = resolve_basic_input(
-            ligand, Ligand, "compounds", "code")
+            ligand, Ligand, "compounds", "codes")
         self.num_sequences = num_sequences
-        self.fixed = fixed
-        self.redesigned = redesigned
+        self.fixed = resolve_table_reference(fixed, "fixed")
+        self.redesigned = resolve_table_reference(redesigned, "redesigned")
         self.design_within = design_within
         self.chain = chain
         self.model = model
@@ -192,6 +212,9 @@ fi
         self.temperature = temperature
         self.bias_AA_per_residue = bias_AA_per_residue
         self.seed = seed
+        self.pack_side_chains = pack_side_chains
+        self.packs_per_design = packs_per_design
+        self.pack_with_ligand_context = pack_with_ligand_context
 
         super().__init__(**kwargs)
 
@@ -200,8 +223,21 @@ fi
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
 
+        # Reaches the generated bash and the <1..N> id pattern, so a bad value
+        # surfaces as a broken pattern rather than a named error.
+        if (isinstance(self.packs_per_design, bool)
+                or not isinstance(self.packs_per_design, int)
+                or self.packs_per_design < 1):
+            raise ValueError(
+                f"packs_per_design must be a positive integer, got: "
+                f"{self.packs_per_design!r}")
+        if not isinstance(self.pack_side_chains, bool):
+            raise ValueError("pack_side_chains must be a bool")
+        if not isinstance(self.pack_with_ligand_context, bool):
+            raise ValueError("pack_with_ligand_context must be a bool")
+
         if not self.ligand_stream or len(self.ligand_stream) == 0:
-            raise ValueError("ligand (a compounds stream, e.g. Ligand(code=...)) is required and must not be empty")
+            raise ValueError("ligand (a compounds stream, e.g. Ligand(codes=...)) is required and must not be empty")
 
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
@@ -253,6 +289,7 @@ fi
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self._generate_script_setup_positions()
+        script_content += self.extra_args_echo()
         script_content += self._generate_script_run_ligandmpnn()
         script_content += self._generate_script_convert_outputs()
         script_content += self.generate_completion_check_footer()
@@ -304,22 +341,29 @@ python {self.runtime_positions_py} "{self.positions_args_json}"
 
     def _generate_script_run_ligandmpnn(self) -> str:
         """Generate the LigandMPNN execution part of the script."""
-        # Build base LigandMPNN options
-        base_options = f'--model_type "ligand_mpnn"'
-        base_options += f' --checkpoint_ligand_mpnn "./model_params/ligandmpnn_{self.model}_25.pt"'
-        base_options += f' --batch_size {self.num_sequences}'
-        base_options += f' --number_of_batches {self.num_batches}'
-        base_options += f' --ligand_mpnn_cutoff_for_score "{self.design_within}"'
-        base_options += f' --out_folder "{self.lmpnn_out_folder}"'
-
+        # An argv token list, not a shell string: the script expands it as a bash array so nothing
+        # is re-parsed, which is what the `eval` this replaced could not promise.
+        options = [
+            "--model_type", "ligand_mpnn",
+            "--checkpoint_ligand_mpnn", f"./model_params/ligandmpnn_{self.model}_25.pt",
+            "--batch_size", str(self.num_sequences),
+            "--number_of_batches", str(self.num_batches),
+            "--ligand_mpnn_cutoff_for_score", str(self.design_within),
+            "--out_folder", str(self.lmpnn_out_folder),
+        ]
         if self.temperature > 0:
-            base_options += f' --temperature {self.temperature}'
-
+            options += ["--temperature", str(self.temperature)]
         if self.bias_AA_per_residue:
-            base_options += f' --bias_AA_per_residue "{self.bias_AA_per_residue}"'
-
+            options += ["--bias_AA_per_residue", str(self.bias_AA_per_residue)]
         if self.seed > 0:
-            base_options += f' --seed {self.seed}'
+            options += ["--seed", str(self.seed)]
+        if self.pack_side_chains:
+            options += ["--pack_side_chains", "1",
+                        "--number_of_packs_per_design", str(self.packs_per_design),
+                        "--pack_with_ligand_context", "1" if self.pack_with_ligand_context else "0"]
+        options += self.extra_args_tokens()
+
+        option_array = " ".join('"' + token.replace('"', '\\"') + '"' for token in options)
 
         return f"""echo "Executing LigandMPNN commands..."
 cd {self.lmpnn_folder}
@@ -327,12 +371,12 @@ for struct_id in {Resolve.stream_ids(self.structures_json, valid_set=True)}; do
     echo "Processing structure: $struct_id"
     PDB_FILE=$(resolve_stream_item "{self.structures_json}" "$struct_id")
 
-    # Read position options from JSON
-    POSITIONS=$(python "{self.resolve_positions_py}" "{self.positions_json}" "$struct_id")
-    FIXED_OPTION=$(echo "$POSITIONS" | head -n1)
-    REDESIGNED_OPTION=$(echo "$POSITIONS" | sed -n '2p')
+    # NUL-separated tokens read into an array: a residue list with spaces stays one argument,
+    # and no `eval` re-parses the line the way it used to.
+    mapfile -d "" POSITION_OPTIONS < <(python "{self.resolve_positions_py}" "{self.positions_json}" "$struct_id")
 
-    eval {self.container_prefix()}python run.py {base_options} --pdb_path '"$PDB_FILE"' $FIXED_OPTION $REDESIGNED_OPTION
+    LMPNN_ARGS=({option_array} --pdb_path "$PDB_FILE" "${{POSITION_OPTIONS[@]}}")
+    {self.container_prefix()}python run.py "${{LMPNN_ARGS[@]}}"
 done
 
 """
@@ -349,9 +393,22 @@ done
         )
         upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
 
+        # Upstream names packed files <struct>_packed_<seq>_<pack>.pdb under its own
+        # out_folder; the declared stream ids are <struct>_<seq>_<pack>, so drop the
+        # infix and move them into the stream folder.
+        pack_block = "" if not self.pack_side_chains else f"""
+echo "Collecting packed side-chain structures"
+mkdir -p "{self.packed_folder}"
+for f in "{self.lmpnn_out_folder}"/packed/*.pdb; do
+    [ -e "$f" ] || continue
+    base=$(basename "$f" .pdb)
+    mv "$f" "{self.packed_folder}/${{base/_packed_/_}}.pdb"
+done
+"""
+
         return f"""echo "Converting FASTA outputs to CSV format"
 python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag} --ds-json "{self.structures_json}" --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
-
+{pack_block}
 """
 
     def get_output_files(self) -> Dict[str, Any]:
@@ -405,12 +462,28 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             )
         }
 
-        return {
+        result = {
             "sequences": sequences,
             "fasta": fasta,
             "tables": tables,
             "output_folder": self.output_folder
         }
+
+        if self.pack_side_chains:
+            # Upstream writes packed/<name>_packed_<seq>_<pack>.pdb, so the ids fan out
+            # over sequence then pack.
+            packed_ids = generate_multiplied_ids_pattern(
+                sequence_ids, f"<1..{self.packs_per_design}>",
+                input_stream_name="sequences"
+            )
+            result["structures"] = DataStream(
+                name="structures",
+                ids=packed_ids,
+                files=[os.path.join(self.packed_folder, "<id>.pdb")],
+                format="pdb",
+            )
+
+        return result
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""

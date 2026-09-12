@@ -123,6 +123,17 @@ def warm():
     main()
 
 
+def visualize():
+    """Entry point for bp-visualize.
+
+    Renders one tool's output folder as a self-contained HTML page. Unlike the
+    other entry points this needs no scheduler and no pipeline script, so it runs
+    on a login node against a job that is still in progress.
+    """
+    from biopipelines.visualize import main
+    raise SystemExit(main())
+
+
 def _resolve_folders():
     """Resolve all folder paths from config.yaml without creating directories."""
     from .config_manager import ConfigManager
@@ -218,29 +229,35 @@ def config():
     command = args[0]
     rest = args[1:]
 
-    if command == "show":
-        _cmd_show()
-    elif command == "list":
-        _cmd_list()
-    elif command == "path":
-        _cmd_path(rest)
-    elif command == "edit":
-        _cmd_edit(rest)
-    elif command == "set":
-        _cmd_set(rest)
-    elif command == "get":
-        _cmd_get(rest)
-    elif command == "auto":
-        _cmd_auto(rest)
-    elif command == "folder":
-        _cmd_folder(rest)
-    elif command == "env":
-        _cmd_env(rest)
-    elif command in ("machine", "cluster"):
-        _cmd_machine(rest)
-    else:
-        print(f"Unknown command: {command}")
-        print("Run 'biopipelines-config --help' for usage.")
+    # Variant resolution refuses rather than guessing, and its message already says
+    # how to choose one — so deliver it as a message, not a traceback.
+    try:
+        if command == "show":
+            _cmd_show()
+        elif command == "list":
+            _cmd_list()
+        elif command == "path":
+            _cmd_path(rest)
+        elif command == "edit":
+            _cmd_edit(rest)
+        elif command == "set":
+            _cmd_set(rest)
+        elif command == "get":
+            _cmd_get(rest)
+        elif command == "auto":
+            _cmd_auto(rest)
+        elif command == "folder":
+            _cmd_folder(rest)
+        elif command == "env":
+            _cmd_env(rest)
+        elif command in ("machine", "cluster"):
+            _cmd_machine(rest)
+        else:
+            print(f"Unknown command: {command}")
+            print("Run 'biopipelines-config --help' for usage.")
+            sys.exit(1)
+    except RuntimeError as e:
+        print(str(e), file=sys.stderr)
         sys.exit(1)
 
 

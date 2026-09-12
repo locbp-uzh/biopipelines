@@ -23,7 +23,7 @@ with Pipeline(project="Biosensor", job="CaFRET"):
                         ids="EYFP") 
     cam = Sequence("ADQLTEEQIAEFKEAFSLFDKDGDGTITTKELGTVMRSLGQNPTEAELQDMINEVDADGNGTIDFPEFLTMMARKMKDTDSEEEIREAFRVFDKDGNGYISAAELRHVMTNLGEKLTDEEVDEMIREADIDGDGQVNYEEFVQMMTAK", ids="CaM")  
     fusions = Fuse(sequences=[donor, cam, acceptor],
-                   name="CaFRET",
+                   prefix="CaFRET",
                    linker="GSG",
                    linker_lengths=["0-3", "0-3"])
     apo = Boltz2(proteins=fusions)

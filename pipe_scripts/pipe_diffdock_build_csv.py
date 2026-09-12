@@ -12,9 +12,7 @@ and runs one prediction per row. This script materialises the
 cartesian product of the upstream structures and compounds streams into
 that CSV.
 
-The `complex_name` we emit matches the `{protein_id}+{ligand_id}` pair-ID
-the BioPipelines wrapper predicts, so post-processing can map per-complex
-folders back to BioPipelines IDs without any extra bookkeeping.
+The `complex_name` we emit is the `{protein_id}+{ligand_id}` pair-ID the BioPipelines wrapper predicts, so post-processing can map per-complex folders back to BioPipelines IDs without any extra bookkeeping. The flat product below is that rule in full because DiffDock docks exactly one pair per CSV row: the wrapper accepts only a bare DataStream or StandardizedOutput per axis and refuses Bundle/Each, so both axes always iterate and no axis can collapse to a bundled prefix. Should a bundled axis ever become meaningful here, this join has to go through `biopipelines.combinatorics.predict_single_output_id` instead — see `pipe_mock.py` for the pattern.
 
 `ligand_description` is the SMILES when the compound stream is value-based
 (map_table has a `smiles` column) and the absolute SDF path otherwise.

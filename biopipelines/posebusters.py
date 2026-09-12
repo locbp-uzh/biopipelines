@@ -112,7 +112,8 @@ class PoseBusters(BaseConfig):
     """
 
     TOOL_NAME = "PoseBusters"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.2"
+    ENV_NAME = "posebusters"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -121,8 +122,9 @@ class PoseBusters(BaseConfig):
         Creates a ``posebusters`` conda environment with Python 3.10 and
         installs the ``posebusters`` package via pip.
         """
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("posebusters", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "PoseBusters already installed, skipping. Use force_reinstall=True to reinstall."
@@ -130,8 +132,8 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("posebusters", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("posebusters", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing PoseBusters ==="
 {skip}{remove_block}
 {env_block}
@@ -140,12 +142,12 @@ fi
 # and biopipelines/base_config both import pandas at module load, so a pandas that
 # can't import (e.g. missing python-dateutil) silently breaks every run while
 # `import posebusters` still succeeds.
-if {cls._env_run("posebusters", env_manager)}python -c "import posebusters, pandas, numpy, gemmi" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import posebusters, pandas, numpy, gemmi" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PoseBusters installation complete ==="
 else
     echo "ERROR: PoseBusters verification failed (import of posebusters/pandas/numpy/gemmi)"
-    {cls._env_run("posebusters", env_manager)}python -c "import posebusters, pandas, numpy, gemmi" 2>&1 | tail -5
+    {cls._env_run(env, env_manager)}python -c "import posebusters, pandas, numpy, gemmi" 2>&1 | tail -5
     exit 1
 fi
 """
@@ -170,7 +172,7 @@ fi
 
         Args:
             structures: Input protein-ligand complexes as DataStream or StandardizedOutput
-            ligand: Compounds stream (Ligand(code="LIG") or any compounds-producing
+            ligand: Compounds stream (Ligand(codes="LIG") or any compounds-producing
                     tool) naming the ligand. The residue `code` is read from the
                     stream's `code` column at runtime, and is also used as the
                     reference-structure residue code in redock mode.
@@ -185,7 +187,7 @@ fi
                     EVERY check — including the coordinate-based distance/overlap checks —
                     reports False (the whole step yields all_pass=False). For such ligands
                     you MUST pass a SMILES-bearing Ligand whose ``codes`` matches the
-                    residue code in the structures. Bare ``Ligand(code="LIG")`` (no SMILES)
+                    residue code in the structures. Bare ``Ligand(codes="LIG")`` (no SMILES)
                     is fine only for simple ligands RDKit can perceive from coordinates.
                     A bare code with no SMILES also triggers a (failing) RCSB SMILES
                     lookup unless the code is a real CCD code.
@@ -234,9 +236,9 @@ fi
 
         # Ligand naming — a compounds stream; the residue code is resolved from
         # its `code` column at runtime. A bare string is shorthand for an
-        # internal Ligand(code=...).
+        # internal Ligand(codes=...).
         self.ligand_stream: DataStream = resolve_basic_input(
-            ligand, Ligand, "compounds", "code", allow_none=False)
+            ligand, Ligand, "compounds", "codes", allow_none=False)
 
         # Resolve reference_ligand input
         self.reference_ligand_stream: Optional[DataStream] = None
@@ -313,7 +315,7 @@ fi
             raise ValueError("structures cannot be empty")
 
         if not self.ligand_stream or len(self.ligand_stream) == 0:
-            raise ValueError("ligand (a compounds stream, e.g. Ligand(code=...)) is required and must not be empty")
+            raise ValueError("ligand (a compounds stream, e.g. Ligand(codes=...)) is required and must not be empty")
 
         if self.mode not in ("dock", "redock"):
             raise ValueError(f"mode must be 'dock' or 'redock', got '{self.mode}'")

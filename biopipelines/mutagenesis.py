@@ -40,7 +40,7 @@ class Mutagenesis(BaseConfig):
     """
 
     TOOL_NAME = "Mutagenesis"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -341,12 +341,12 @@ echo "Synthetic MSAs saved to: {self.msas_folder}"
         if self.selection:
             # Selection mode: positions vary per row — use lazy bracket pattern
             aa_list = ' '.join(amino_acids)
-            bracket_suffix = f"[_<N><{aa_list}>]"
+            bracket_suffix = f"[_<#><{aa_list}>]"
             sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
         elif isinstance(self.position, str) and ('+' in self.position or '-' in self.position):
             # Multi-position string (e.g., "141+143+145-149") — use lazy bracket pattern
             aa_list = ' '.join(amino_acids)
-            bracket_suffix = f"[_<N><{aa_list}>]"
+            bracket_suffix = f"[_<#><{aa_list}>]"
             sequence_ids = [f"{pid}{bracket_suffix}" for pid in self.sequences_stream.ids]
         else:
             # Single fixed position (int or single-position string)
@@ -409,7 +409,7 @@ echo "Synthetic MSAs saved to: {self.msas_folder}"
             tables["msas"] = TableInfo(
                 name="msas",
                 path=self.msas_csv,
-                columns=["id", "sequences.id", "original.id", "sequence", "msa_file"],
+                columns=["id", "sequences.id", "original.id", "sequence", "file"],
                 description="Synthetic per-mutant MSAs (query-row substitution)"
             )
 

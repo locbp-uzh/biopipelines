@@ -44,7 +44,7 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -75,7 +75,7 @@ echo "=== MSA ready ==="
         Output:
             Streams: msas (.a3m or .csv)
             Tables:
-                msas: id | sequences.id | sequence | msa_file
+                msas: id | sequences.id | sequence | file
         """
         self.msas_input = msas
         self.msas_stream = resolve_input_to_datastream(msas, fallback_stream="msas")
@@ -159,7 +159,7 @@ python "{self.msa_py}" --config "{self.config_json}"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msas_csv,
-                columns=["id", "sequences.id", "sequence", "msa_file"],
+                columns=["id", "sequences.id", "sequence", "file"],
                 description="Converted MSA files"
             )
         }

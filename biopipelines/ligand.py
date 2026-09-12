@@ -18,6 +18,7 @@ from typing import Dict, List, Any, Optional, Union
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
+    from . import contract_enforcement
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids_pattern
 except ImportError:
@@ -25,6 +26,7 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
+    import contract_enforcement
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids_pattern
 
@@ -51,10 +53,19 @@ class Ligand(BaseConfig):
     Implements priority-based lookup: checks local_folder (if provided), then
     ligands/ folder, then downloads from RCSB or PubChem based on lookup type.
     Also supports direct SMILES input for custom molecules.
+
+    Also exported as ``Compound`` — the same tool under the name of the stream it
+    emits, since a fetched molecule is not yet bound to anything. Both spellings are
+    first-class. Outputs keep the original name either way: the step folder is
+    ``<n>_Ligand/``, the logs and the config's ``environments:`` / ``folders:`` keys
+    say ``Ligand``, because TOOL_NAME is what drives all of them.
     """
 
     TOOL_NAME = "Ligand"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.4"
+    # `code=` was one letter from `codes=` and a different object: a mistyped `codes` silently built a chemistry-free stub instead of naming a residue on a real ligand. The retired spelling still binds, with a deprecation line.
+    PARAMETER_ALIASES = {"code": "codes"}
+    DEPRECATED_ALIASES = ("code",)
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -83,11 +94,11 @@ echo "=== Ligand ready ==="
                  lookup: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  ids: Optional[Union[str, List[str]]] = None,
                  codes: Optional[Union[str, List[str]]] = None,
-                 code: Optional[Union[str, List[str]]] = None,
                  source: Optional[str] = None,
                  local_folder: Optional[str] = None,
                  smiles: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  structures: Optional[Union['DataStream', 'StandardizedOutput']] = None,
+                 template_smiles: Optional[str] = None,
                  generate_images: bool = False,
                  compounds: Optional[Union['DataStream', 'StandardizedOutput']] = None,
                  vendor_lookup: bool = False,
@@ -110,15 +121,9 @@ echo "=== Ligand ready ==="
                  If not provided, defaults to lookup values (for lookup), "smilesN" (for smiles),
                  or names/indices from CDXML (for cdxml).
                  Ignored when lookup or smiles is a dictionary (ids come from dict keys).
-            codes: residue code(s) to carry on the compounds stream (e.g., "LIG").
+            codes: residue code(s) for this ligand. What else you pass selects the mode: `codes` alone names an existing HETATM residue and carries no chemistry, `codes` with `lookup`/`smiles` labels the chemistry you supplied, and `codes` with `structures` carves that residue out. `code=` is a synonym that will soon be deprecated.
                    1-5 alphanumeric (extended CCD). If not provided, defaults to the
                    lookup value (for lookup) or "LIG" (for smiles/cdxml).
-            code: Code-only construction. `Ligand(code="ZIT")` builds a compounds
-                  stream that merely names an existing HETATM residue code — no
-                  download, no SMILES, no structures stream. The result is a
-                  value-based compounds csv (format="csv", code set, smiles empty),
-                  used to hand a residue code to HETATM-selector tools. Mutually
-                  exclusive with lookup / smiles / codes. Accepts a list.
             source: Force source ("rcsb" or "pubchem"). If None, auto-detects.
                     Ignored when using smiles or cdxml.
             local_folder: Custom local folder to check first (before ligands/). Default: None
@@ -129,15 +134,23 @@ echo "=== Ligand ready ==="
                     (PDB/CIF) to carve a bound ligand out of. Requires `codes` (the
                     HETATM residue code(s) to extract). For each input structure the
                     matching HETATM block is written to a coordinate file KEEPING the
-                    bound coordinates — no download, no SMILES, no bond-order
-                    templating (run OpenBabel(structures=..., convert_3d="sdf") after
-                    if a tool needs an SDF). The output fans out over the input
+                    bound coordinates — no download, and no chemistry unless
+                    `template_smiles` is given (run OpenBabel(structures=...,
+                    convert_3d="sdf") after if a tool needs an SDF). The output fans
+                    out over the input
                     structures: N structures × 1 code gives N ligands with the input
                     ids, N × M codes gives N*M ligands with ids `<structure_id>_<code>`.
                     The map_table carries a `structures.id` provenance column either
                     way. A code absent from a structure is routed to the `failed`
-                    table. Mutually exclusive with lookup/smiles/code.
+                    table. Mutually exclusive with lookup/smiles/codes.
                     Example: Ligand(structures=complex, codes="STI").
+            template_smiles: bond-order template for the carve path. Every carved
+                    copy is the same molecule, so one SMILES applies to all of them
+                    and lands in the compounds stream's `smiles` column. Without it
+                    that column is empty and tools needing a template (RTMScore,
+                    write_ligand_sdf) fall back to perception, which misses long
+                    bonds such as Si-C at 1.87 A. Only valid alongside
+                    structures= + codes=; use smiles= to build from chemistry.
             generate_images: Generate PNG images for each ligand using RDKit. Default: False
             **kwargs: Additional parameters
 
@@ -164,13 +177,23 @@ echo "=== Ligand ready ==="
             compounds, lookup = lookup, None
 
         self.vendor_lookup = bool(vendor_lookup)
+        # Only the carve path consumes this; reject it elsewhere rather than
+        # discarding it silently, since a dropped template is invisible until a
+        # downstream tool fails on a missing SMILES.
+        if template_smiles is not None and (structures is None or codes is None
+                                            or lookup is not None or smiles is not None):
+            raise ValueError(
+                "template_smiles only applies to the carve path, "
+                "Ligand(structures=..., codes=...). Use smiles= to build a ligand "
+                "from chemistry instead.")
+        self.template_smiles = None
         self.compounds_stream = None
         self.enrichment_mode = compounds is not None
         if self.enrichment_mode:
-            if any(value is not None for value in (lookup, smiles, code, codes, structures)):
+            if any(value is not None for value in (lookup, smiles, codes, structures)):
                 raise ValueError(
                     "compounds enrichment is mutually exclusive with lookup, smiles, "
-                    "code, codes, and structures")
+                    "codes, and structures")
             if not self.vendor_lookup:
                 raise ValueError("compounds enrichment requires vendor_lookup=True")
             if generate_images:
@@ -200,22 +223,25 @@ echo "=== Ligand ready ==="
                 self.dependencies.append(compounds.config)
             return
 
-        # Code-only construction: Ligand(code="ZIT"). Names an existing HETATM
-        # residue code with no chemistry — produces a value-based compounds csv
-        # (smiles empty) and no structures stream. Mutually exclusive with the
-        # download/generation paths.
+        # Code-only construction: Ligand(codes="ZIT") with no chemistry and no
+        # structures names an existing HETATM residue and produces a value-based
+        # compounds csv with an empty smiles column. What else you pass decides
+        # the mode, so there is one `codes` parameter rather than two spellings.
         self.code_only = False
         self._structures_only = False
-        if code is not None:
-            if lookup is not None or smiles is not None or codes is not None:
-                raise ValueError("code=... is mutually exclusive with lookup, smiles, and codes")
+        if codes is not None and lookup is None and smiles is None and structures is None:
             self.code_only = True
-            if isinstance(code, str):
-                code_list = [code]
+            # Not for the ligand="LIG" shorthand: that is a documented filter by
+            # residue code, so advising the user to add chemistry would be wrong.
+            if not kwargs.get("_internal"):
+                contract_enforcement.report(
+                    contract_enforcement.check_code_only_ligand(codes))
+            if isinstance(codes, str):
+                code_list = [codes]
             else:
-                code_list = list(code)
+                code_list = list(codes)
             if not code_list:
-                raise ValueError("code cannot be empty")
+                raise ValueError("codes cannot be empty")
             # Ligand is the sole validator of the code; enforce 1-5 alphanumeric.
             self.residue_codes = [_validate_ccd_code(c) for c in code_list]
             # ids default to the codes themselves
@@ -225,7 +251,7 @@ echo "=== Ligand ready ==="
                 self.custom_ids = list(self.residue_codes)
             if len(self.custom_ids) != len(self.residue_codes):
                 raise ValueError(
-                    f"Length mismatch: ids has {len(self.custom_ids)} items but code has {len(self.residue_codes)}")
+                    f"Length mismatch: ids has {len(self.custom_ids)} items but codes has {len(self.residue_codes)}")
             # No download/generation inputs in code-only mode
             self.lookup_values = []
             self.smiles_values = []
@@ -252,8 +278,7 @@ echo "=== Ligand ready ==="
         self.extract_structures_stream = None
         self._structures_arg = structures
         if structures is not None:
-            if code is not None:
-                raise ValueError("structures=... is not compatible with code=... (code-only names a HETATM, it has no coordinates to source)")
+            # No code-only guard here: with one `codes` parameter, code-only can only fire when structures is None, and structures= with codes= is the carve path below.
             if isinstance(structures, StandardizedOutput):
                 self.extract_structures_stream = structures.streams.structures
             elif isinstance(structures, DataStream):
@@ -263,10 +288,11 @@ echo "=== Ligand ready ==="
                     f"structures must be DataStream or StandardizedOutput, got {type(structures).__name__}")
 
             # structures= with only codes (no lookup/smiles): carve the bound
-            # HETATM, keeping coords. No chemistry source → compounds stream has
-            # the code but no SMILES, so downstream bond-order templating is not
-            # possible (perception is used instead). When lookup/smiles IS also
-            # given, fall through to the normal path: chemistry comes from there
+            # HETATM, keeping coords. Chemistry comes from template_smiles when
+            # given — every carved copy is the same molecule, so one template is
+            # unambiguous — and otherwise the compounds stream carries the code
+            # alone and downstream tools fall back to perception. When lookup/smiles
+            # IS given, fall through to the normal path: chemistry comes from there
             # and the coordinates are still carved (config carries the stream).
             if lookup is None and smiles is None:
                 if codes is None:
@@ -277,6 +303,7 @@ echo "=== Ligand ready ==="
                         "input structures, so ids are derived from the structure ids "
                         "(<structure_id>, or <structure_id>_<code> when several codes are extracted)")
                 self._structures_only = True
+                self.template_smiles = template_smiles
                 code_src = [codes] if isinstance(codes, str) else list(codes)
                 self.residue_codes = [_validate_ccd_code(c) for c in code_src]
                 # One output per (structure × code). A single code keeps the input id
@@ -576,6 +603,9 @@ echo "=== Ligand ready ==="
         if self.extract_structures_stream is not None and len(self.extract_structures_stream) == 0:
             raise ValueError("structures input must not be empty")
 
+        if self.template_smiles is not None:
+            _validate_freeform_string("template_smiles", self.template_smiles)
+
         # Overlay mode (structures= alongside lookup/smiles) pairs one chemistry
         # entry with one pose; several structures would make the source arbitrary.
         if (self.extract_structures_stream is not None and not self._structures_only
@@ -592,13 +622,13 @@ echo "=== Ligand ready ==="
             # code-only names a HETATM: one id per code, no coordinates.
             if len(self.custom_ids) != len(self.residue_codes):
                 raise ValueError(
-                    f"ids length ({len(self.custom_ids)}) must match code count ({len(self.residue_codes)})")
+                    f"ids length ({len(self.custom_ids)}) must match codes count ({len(self.residue_codes)})")
         elif self._structures_only:
             # ids are derived from the structures stream; nothing user-supplied to check.
             pass
         else:
             if not self.lookup_values and not self.smiles_values:
-                raise ValueError("Must have at least one of 'lookup', 'smiles', or 'code'")
+                raise ValueError("Must have at least one of 'lookup', 'smiles', or 'codes'")
 
             total_count = len(self.lookup_values) + len(self.smiles_values)
             if len(self.custom_ids) != total_count:
@@ -751,6 +781,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
             "residue_codes": self.residue_codes,
             "lookup_values": self.lookup_values,
             "smiles_values": self.smiles_values,
+            "template_smiles": self.template_smiles or "",
             "source": self.source,
             "local_folder": self.local_folder,
             "output_format": self.structures_format,
@@ -893,3 +924,7 @@ python "{self.ligand_py}" --config "{self.config_file}"
             }
         })
         return base_dict
+
+
+# Same class under a second name: the tool emits a `compounds` stream, and "ligand" presumes binding a compound library has not done yet. TOOL_NAME stays "Ligand", so a pipeline written with Compound(...) still produces <n>_Ligand/ and still logs "Ligand".
+Compound = Ligand

@@ -44,9 +44,10 @@ def resolve_arg(arg, struct_id, map_table_paths=None):
     ``map_table_paths`` carries the input stream's map_table so ids renamed
     upstream still resolve against the table's original id space.
 
-    A table cell is arbitrary user data that ends up in a bash ``eval``; reject
-    shell metacharacters here (literals were already validated at construction
-    time). This is the runtime counterpart to ``_validate_freeform_string``.
+    A table cell is arbitrary user data that ends up in a double-quoted bash
+    position; reject the characters that would break out of it (literals were
+    already validated at construction time). This is the runtime counterpart to
+    ``_validate_freeform_string``.
     """
     if arg == "-" or arg == "":
         return ""

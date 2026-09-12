@@ -39,7 +39,10 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.4"
+    # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "Boltz2Env"
 
     @classmethod
     def predict_atom_names(cls, ligand, *, path=None, size=(500, 500), scale=3):
@@ -186,7 +189,7 @@ class Boltz2(BaseConfig):
 
         if getattr(tool_obj, "code_only", False):
             raise ValueError(
-                "code-only Ligand(code=...) carries no chemistry, so atom names "
+                "code-only Ligand(codes=...) carries no chemistry, so atom names "
                 "cannot be predicted. Pass the SMILES or a CCD/name lookup instead.")
         if getattr(tool_obj, "_structures_only", False):
             raise ValueError(
@@ -411,8 +414,9 @@ class Boltz2(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("Boltz2Env", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "Boltz2 already installed, skipping. Use force_reinstall=True to reinstall."
@@ -420,14 +424,14 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("Boltz2Env", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("Boltz2Env", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing Boltz2 ==="
 {skip}{remove_block}
 {env_block}
 
 # Verify installation
-if {cls._env_run("Boltz2Env", env_manager)}python -c "import boltz" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import boltz" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Boltz2 installation complete ==="
 else
@@ -581,7 +585,7 @@ fi
                 structures: id | file
                 confidence: id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt
                 sequences: id | sequence
-                msas: id | sequences.id | sequence | msa_file
+                msas: id | sequences.id | sequence | file
                 affinity: id | input_file | affinity_pred_value | affinity_probability_binary
                 compounds: id | format | code | smiles | ccd  (code = residue code Boltz assigned)
                 missing: id | removed_by | kind | cause
@@ -872,12 +876,17 @@ echo "Using direct YAML configuration: {config_file_path}"
         if self.use_potentials:
             boltz_options += " --use_potentials"
 
+        forwarded = self.extra_args_bash()
+        if forwarded:
+            boltz_options += " " + forwarded
+
         # Run Boltz2 prediction (wrapped in container_prefix when configured).
         # boltz predict accepts a directory and iterates its .yaml/.fasta
         # files in a single process, avoiding the per-file startup cost of
         # a bash loop.
         cp = self.container_prefix()
         predict_input = self.config_files_dir if uses_unified_config else config_file_path
+        script_content += self.extra_args_echo()
         script_content += f"""
 echo "Running Boltz2 prediction"
 {cp}boltz predict {predict_input} {boltz_options}
@@ -1120,7 +1129,7 @@ python {self.boltz_compounds_py} \\
             tables["msas"] = TableInfo(
                 name="msas",
                 path=self.msas_csv,
-                columns=["id", "sequences.id", "sequence", "msa_file"],
+                columns=["id", "sequences.id", "sequence", "file"],
                 description="MSA files for recycling"
             )
 

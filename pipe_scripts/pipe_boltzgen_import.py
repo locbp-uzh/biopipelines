@@ -555,22 +555,24 @@ def apply_id_map(structure_id: str, id_map: dict) -> list:
     """
     Apply id_map pattern to generate possible sequence ID patterns.
 
-    The id_map pattern {"*": "*_<S>"} means structure ID can have
+    The id_map pattern {"*": "*_<?>"} means structure ID can have
     recursive suffixes added to match sequence IDs.
 
     Args:
         structure_id: ID of the structure
-        id_map: Mapping pattern, e.g., {"*": "*_<S>"}
+        id_map: Mapping pattern, e.g., {"*": "*_<?>"}
 
     Returns:
         List of matching patterns (regex patterns or exact strings)
     """
     patterns = [structure_id]  # Always include exact match
 
-    # Handle the default recursive pattern {"*": "*_<N>"}
+    from biopipelines.id_map_utils import DIGIT_CLASSES
+
     if "*" in id_map:
         pattern = id_map["*"]
-        if pattern == "*_<N>":
+        # Either digit-class spelling: comparing against one literal silently skipped the other.
+        if pattern in {f"*_{cls}" for cls in DIGIT_CLASSES}:
             # Recursive numeric suffix: matches structure_id_1, structure_id_1_1, etc.
             # Build regex pattern: structure_id followed by one or more _<number> suffixes
             escaped_id = re.escape(structure_id)
@@ -598,14 +600,14 @@ def find_sequence_for_structure(structure_id: str, sequences: dict, id_map: dict
     Args:
         structure_id: ID of the structure
         sequences: Dictionary mapping IDs to sequences
-        id_map: ID mapping pattern, e.g., {"*": "*_<S>"} for recursive suffixes.
-               Default: {"*": "*_<S>"}
+        id_map: ID mapping pattern, e.g., {"*": "*_<?>"} for recursive suffixes.
+               Default: {"*": "*_<?>"}
 
     Returns:
         Sequence string or None if not found
     """
     if id_map is None:
-        id_map = {"*": "*_<S>"}
+        id_map = {"*": "*_<?>"}
 
     # Get matching patterns from id_map
     patterns = apply_id_map(structure_id, id_map)
@@ -814,14 +816,14 @@ def import_structures(
         sequences_csv: Path to sequences CSV (for inverse_folding mode)
         ligand_csv: Path to ligand compounds CSV
         id_map: ID mapping pattern for matching structure IDs to sequence IDs.
-               Default {"*": "*_<S>"} handles recursive suffix stripping.
+               Default {"*": "*_<?>"} handles recursive suffix stripping.
         ligand_name: Residue name for ligand in output (default: "LIG")
 
     Returns:
         Dictionary with import statistics
     """
     if id_map is None:
-        id_map = {"*": "*_<S>"}
+        id_map = {"*": "*_<?>"}
     stats = {
         'processed': 0,
         'success': 0,
@@ -1002,8 +1004,8 @@ def main():
     )
     parser.add_argument(
         '--id-map',
-        default='{"*": "*_<S>"}',
-        help='JSON string for ID mapping pattern (default: {"*": "*_<S>"}). '
+        default='{"*": "*_<?>"}',
+        help='JSON string for ID mapping pattern (default: {"*": "*_<?>"}). '
              'Maps structure IDs to sequence IDs with recursive suffix stripping.'
     )
     parser.add_argument(

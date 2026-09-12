@@ -22,14 +22,22 @@ A Python framework for computational protein and ligand design workflows that ca
 
 **1. Install [Git](https://git-scm.com/downloads).**
 
-**2. Clone the repository.**
+**2. Clone the repository and install the package.**
 
 ```bash
 git clone https://github.com/locbp-uzh/biopipelines
 cd biopipelines
+pip install -e .
 ```
 
-**3. Open an AI coding assistant inside the repo.** Install a coding agent like [Claude Code](https://claude.com/claude-code) or [Codex](https://openai.com/codex/). Start it from the repository root. The framework provides work contracts under the `llm/` folder: `pipelines.md` (writing workflows), `development.md` (extending the framework), `cluster.md` (automated runs on HPCs), `colab.md` (automated runs on Colab).
+**3. Point the framework at your site.** `bp-config auto` writes a gitignored `.config.<variant>.yaml` overlay over the committed defaults. Variants: `cluster`, `local`, `container`, `daint`, `colab`.
+
+```bash
+bp-config list
+bp-config auto --variant cluster
+```
+
+**4. Open an AI coding assistant inside the repo.** Install [Claude Code](https://claude.com/claude-code) or [Codex](https://openai.com/codex/) and start it from the repository root. The `llm/` folder holds the work contracts: `pipelines.md` (writing workflows) and `development.md` (extending the framework).
 
 ```bash
 claude #or: codex
@@ -228,6 +236,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
+  <td><sub><b>Vina</b><br>Dock ligands into a pocket with AutoDock Vina; the CPU/aarch64 docking route.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/ccsb-scripps/AutoDock-Vina"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1021/acs.jcim.1c00203"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+</tr>
+<tr>
   <td><sub><b>NeuralPLexer</b></span><sup><i>n</i></sup><br>Predict protein-ligand complex structures from sequence and ligand graph.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/zrqiao/NeuralPLexer"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.nature.com/articles/s42256-024-00792-z"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
@@ -273,6 +287,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
+  <td><sub><b>BindingData</b><br>Fetch measured protein-ligand affinities from ChEMBL and BindingDB.</sub></td>
+  <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+</tr>
+<tr>
   <td><sub><b>BioEmu</b><br>Sample a protein's equilibrium conformational ensemble from its sequence.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/microsoft/bioemu"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.science.org/doi/10.1126/science.adv9817"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
@@ -283,6 +303,11 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="100" align="center"><sub><a href="https://github.com/lcbio/CABSflex"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/nar/gky356"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+</tr>
+<tr>
+  <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>ConformationalChange</b><br>Quantify backbone differences (RMSD, displacement) between paired structures.</sub></td>
@@ -315,7 +340,19 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
+  <td><sub><b>LigandAtomSelector</b><br>Select residues near a named subset of atoms inside one ligand residue.</sub></td>
+  <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+</tr>
+<tr>
   <td><sub><b>EnsembleAnalysis</b><br>Compute per-residue RMSF and ensemble metrics from a conformer set.</sub></td>
+  <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+</tr>
+<tr>
+  <td><sub><b>StructureCluster</b><br>Cluster designs by fold similarity and rank the families by mean metrics.</sub></td>
   <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>

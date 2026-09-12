@@ -19,6 +19,8 @@ We flatten this to BioPipelines IDs `<prot>+<lig>_rank<N>`, copy the pose SDFs
 into the structures stream folder, and build the affinity table by combining
 the parsed lDDT/affinity from each SDF filename with the ligand mapping in
 each protein's input CSV.
+
+`<prot>+<lig>` is the pair-ID rule in full because DynamicBind predicts exactly one complex per ligand-CSV row: the wrapper accepts only a bare DataStream or StandardizedOutput per axis and refuses Bundle/Each, so both axes always iterate and no axis can collapse to a bundled prefix. Should a bundled axis ever become meaningful here, this join has to go through `biopipelines.combinatorics.predict_single_output_id` instead — see `pipe_mock.py` for the pattern.
 """
 
 import argparse

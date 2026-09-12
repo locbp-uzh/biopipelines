@@ -58,7 +58,7 @@ def main():
 
     with open(args.config_yaml) as f:
         config = yaml.safe_load(f) or {}
-    mode = config.get("mode", "default")  # read every param the wrapper wrote
+    residue_scope = config.get("residue_scope", "all")  # read every param the wrapper wrote
 
     os.makedirs(args.annotated_dir, exist_ok=True)
 

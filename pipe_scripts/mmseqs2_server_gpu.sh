@@ -115,6 +115,65 @@ SUBMITTING_FILE="$MMSEQS_SERVER_DIR/GPU_SUBMITTING"
 # whole load period. So GPU_SUBMITTING stays held (covering queue + load) and
 # GPU_SERVER is written only after warm-up (see below).
 
+# Empty until the gpuservers are launched, so cleanup() can run before them.
+UNIREF_GPUSERVER_PID=""
+ENVDB_GPUSERVER_PID=""
+
+# 0 until the ready path writes GPU_SERVER, so a death during warm-up never deletes a peer's advertisement.
+SERVER_READY=0
+
+# Cleanup on exit; the trap is cleared first so the closing `exit` can't re-enter it.
+# Armed before the lock is claimed below: arming it after warm-up, where this block used to sit, leaked the lockdir for its full 3 h TTL on every death inside the install + warm-up window the lock covers.
+cleanup() {
+  # Captured first so a death during warm-up still reports FAILED to SLURM instead of exiting 0 through the trap.
+  local rc=$?
+  trap - EXIT SIGINT SIGTERM
+  log "MMseqs2 GPU server shutting down (exit status $rc)"
+  for pid in "$UNIREF_GPUSERVER_PID" "$ENVDB_GPUSERVER_PID"; do
+    [[ -n "$pid" ]] || continue
+    log "Stopping GPU server PID=$pid"
+    kill "$pid" 2>/dev/null || true
+  done
+  # Wait for graceful shutdown
+  if [[ -n "$UNIREF_GPUSERVER_PID$ENVDB_GPUSERVER_PID" ]]; then
+    sleep 5
+    # Force kill if still running
+    for pid in "$UNIREF_GPUSERVER_PID" "$ENVDB_GPUSERVER_PID"; do
+      [[ -n "$pid" ]] || continue
+      kill -9 "$pid" 2>/dev/null || true
+    done
+  fi
+  rm -f "$PID_FILE"
+  # Remove timestamp file on shutdown, but only the one we wrote ourselves.
+  if [[ "$SERVER_READY" == "1" ]]; then
+    rm -f "$SERVER_TIMESTAMP_FILE"
+    log "Removed server timestamp file"
+  fi
+  # Also drop the submission lock if we still hold it (died before ready), so a
+  # client is not blocked for the lock's 3h TTL by a server that never came up.
+  # The lockdir goes first: it is the primitive acquire_submit_lock() tests, and
+  # if the rmdir fails (NFS silly-rename, permissions) a surviving marker makes
+  # clients wait out the TTL instead of finding no submission in progress AND no
+  # acquirable lock, which is a silent no-op for every one of them.
+  rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
+  rm -f "$SUBMITTING_FILE"
+  exit "$rc"
+}
+trap cleanup EXIT SIGINT SIGTERM
+
+# Claim the submission lock if no client already holds it. A client-started
+# server inherits the client's lock, but one started directly (Service(), or by
+# hand) holds nothing, so during warm-up a client sees neither GPU_SERVER nor
+# GPU_SUBMITTING and submits a second, redundant server. mkdir is the atomic
+# primitive over NFS, matching acquire_submit_lock() in
+# pipe_mmseqs2_sequences.py.
+if mkdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null; then
+  date '+%H:%M:%S' > "$SUBMITTING_FILE"
+  log "Claimed submission lock while the DBs warm up (no client held it)"
+else
+  log "Submission lock already held by the client that submitted us"
+fi
+
 # Check and install MMseqs2 if needed
 check_mmseqs_installation
 
@@ -219,33 +278,13 @@ warm_page_cache
 # GPU_SUBMITTING, so there is never a window where a client sees neither (which
 # would let it submit a duplicate).
 date '+%H:%M:%S' > "$SERVER_TIMESTAMP_FILE"
+SERVER_READY=1
 log "Created server timestamp file at $SERVER_TIMESTAMP_FILE (server is ready to serve)"
+rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
 if [[ -f "$SUBMITTING_FILE" ]]; then
   log "Releasing submission lock"
   rm -f "$SUBMITTING_FILE"
 fi
-rmdir "${SUBMITTING_FILE}.lockdir" 2>/dev/null || true
-
-# Cleanup on exit
-cleanup() {
-  log "MMseqs2 GPU server shutting down"
-  for pid in "$UNIREF_GPUSERVER_PID" "$ENVDB_GPUSERVER_PID"; do
-    log "Stopping GPU server PID=$pid"
-    kill "$pid" 2>/dev/null || true
-  done
-  # Wait for graceful shutdown
-  sleep 5
-  # Force kill if still running
-  for pid in "$UNIREF_GPUSERVER_PID" "$ENVDB_GPUSERVER_PID"; do
-    kill -9 "$pid" 2>/dev/null || true
-  done
-  rm -f "$PID_FILE"
-  # Remove timestamp file on shutdown
-  rm -f "$SERVER_TIMESTAMP_FILE"
-  log "Removed server timestamp file"
-  exit 0
-}
-trap cleanup SIGINT SIGTERM
 
 cleanup_old_files() {
     # Delete files older than 24 hours

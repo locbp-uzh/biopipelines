@@ -16,7 +16,9 @@ final JSON from:
     with its resolved `input` path) — or, with no PDB, a single de-novo entry
     keyed by the given prefix and no `input`,
   - the ligand residue `code` resolved from the compounds stream (broadcast to
-    every entry), when a ligand was provided.
+    every entry), when a ligand was provided,
+  - a per-PDB `contig`, when one was given as a table-column reference rather
+    than a literal (the literal already sits in the template).
 
 It writes data only (the JSON) — never bash.
 
@@ -33,7 +35,9 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, get_value
+from pipe_rfdiffusion_contigs import resolve_arg
 
 
 def main():
@@ -46,6 +50,8 @@ def main():
                     help="Compounds-stream JSON; the residue `code` is read from it")
     ap.add_argument("--denovo-prefix", default=None,
                     help="Design key for the no-PDB (de novo) single-entry case")
+    ap.add_argument("--contig-reference", default=None,
+                    help="TABLE_REFERENCE:<path>:<column> holding one contig per pdb id")
     args = ap.parse_args()
 
     with open(args.template) as f:
@@ -69,9 +75,15 @@ def main():
 
     if args.structures_json:
         ds = load_datastream(args.structures_json)
+        maps = [ds.map_table] if ds.map_table else None
         for pdb_id, pdb_path in iterate_files(ds):
             entry = make_entry()
             entry["input"] = pdb_path
+            if args.contig_reference:
+                contig = resolve_arg(args.contig_reference, pdb_id, maps)
+                if not contig:
+                    raise ValueError(f"contig resolved to empty for {pdb_id}")
+                entry["contig"] = contig
             config[pdb_id] = entry
         if not config:
             raise ValueError(f"No structures found in DataStream: {args.structures_json}")

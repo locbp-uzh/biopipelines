@@ -20,12 +20,70 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from . import id_patterns
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    import id_patterns
+
+
+def _under_prefix(value, prefix: str) -> bool:
+    """True when a path sits inside prefix, matching whole components only.
+
+    A bare startswith() also matches a sibling run: with prefix /jobs/Job_001,
+    /jobs/Job_001_retry/pose.pdb is not under it but shares its string.
+    """
+    if not isinstance(value, str) or not value:
+        return False
+    p = os.path.normpath(value)
+    root = os.path.normpath(prefix)
+    return p == root or p.startswith(root + os.sep) or p.startswith(root + "/")
+
+
+def _rebase_path(value, old_prefix: str, new_prefix: str):
+    """Swap old_prefix for new_prefix on a path genuinely under it."""
+    if not _under_prefix(value, old_prefix):
+        return value
+    if value.startswith(old_prefix):
+        # Slice the original rather than the normalized form, so a POSIX path
+        # recorded on a cluster does not come back with Windows separators.
+        return new_prefix + value[len(old_prefix):]
+    tail = os.path.normpath(value)[len(os.path.normpath(old_prefix)):]
+    return new_prefix + tail
+
+
+
+# Retired per-tool spellings of the canonical map_table file column. A run folder
+# written before 1.4.0 still carries one; reading it as data would silently yield
+# a stream with no files, so it is named and refused instead.
+_RETIRED_FILE_COLUMNS = ("file_path", "msa_file")
+
+
+def _check_retired_file_column(rows, map_table_path: str, ds_dict) -> None:
+    """Refuse a pre-1.4.0 map_table rather than reading zero files from it.
+
+    Only for a stream that declares files. A value-based stream carries no
+    per-id file, so a path column there names a source rather than the stream's
+    own artifact and keeps whatever the tool called it.
+    """
+    if rows is None or "file" in rows.columns:
+        return
+    if not ds_dict.get("files"):
+        return
+    found = [c for c in _RETIRED_FILE_COLUMNS if c in rows.columns]
+    if not found:
+        return
+    stream_name = str(ds_dict.get("name", "?"))
+    raise ValueError(
+        f"Load: stream '{stream_name}' has a map_table whose file column is "
+        f"'{found[0]}', not 'file': {map_table_path}. "
+        f"That spelling was retired in 1.4.0 -- every map_table now records the "
+        f"per-id file under 'file'. This run folder was written by an earlier "
+        f"version. Rename the column in that CSV to 'file', or re-run the step."
+    )
 
 
 class Load(BaseConfig):
@@ -42,12 +100,19 @@ class Load(BaseConfig):
     - Provides filtered results through the standard pipeline interface
     - Enables subsequent tools to work with the filtered subset
 
-    This is the ONLY tool that checks file existence at configuration time (not execution time).
+    Partial outputs are a supported input, not an error. Every generated tool
+    script exits 0 by design, so a step can leave a half-written folder behind
+    and the run continues; Load is therefore the component that has to recover
+    whatever such a step did produce. It never raises on an incomplete folder —
+    absent files, a truncated or absent map_table, a ``_FAILED`` marker and a
+    populated ``missing.csv`` are all recovered from — and it reports what it
+    recovered and what it could not through ``recovery``, ``recovery_summary()``
+    and ``recovered_nothing``.
     """
 
     # Tool identification
     TOOL_NAME = "Load"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -77,18 +142,26 @@ echo "=== Load ready ==="
         self.validate_files = validate_files
         self.loaded_result = None
         self.missing_files = []
+        self.unresolved_streams = []
         self.original_tool_name = None
         self.filtered_ids = None
+        self.completion_status = None
+        self.recovery = {}
+        self.absent_tables = []
+        self.absent_files_by_stream = {}
+        self.excused_ids = []
 
         # Load and validate the result file
         self._load_and_validate_result()
+        self._detect_completion_status()
 
         # Process filter if provided
         if self.filter_input:
             self._process_filter()
 
-        # Set up job name based on loaded result
-        if not kwargs.get('job_name'):
+        # BaseConfig reads 'name', not 'job_name' — the old key was parked in .params
+        # and discarded, so every Load ran with an unnamed job.
+        if not kwargs.get('name'):
             original_job_name = self.loaded_result.get('job_name')
 
             if not original_job_name or original_job_name == 'unknown':
@@ -100,7 +173,7 @@ echo "=== Load ready ==="
             if not original_job_name:
                 original_job_name = 'unknown'
 
-            kwargs['job_name'] = f"load_{original_job_name}"
+            kwargs['name'] = f"load_{original_job_name}"
 
         # Initialize base class
         super().__init__(**kwargs)
@@ -140,10 +213,111 @@ echo "=== Load ready ==="
             new_prefix = os.path.dirname(self.tool_folder)    # parent of new tool folder
             print(f"Load: Rebasing paths from {old_prefix} -> {new_prefix}")
             self._rebase_paths(output_structure, old_prefix, new_prefix)
+            # A map_table is a CSV on disk: rebasing the JSON moves the pointer to it
+            # but not the paths recorded inside, and those routinely point at a sibling
+            # step of the same run. Downstream tools read that CSV directly at runtime,
+            # so rewrite it rather than only correcting what this class returns.
+            self._path_rebase = (old_prefix, new_prefix)
+            self._rebased_map_tables = set()
+            self._rebase_map_tables(output_structure, old_prefix, new_prefix)
 
         # Validate file existence if requested
         if self.validate_files:
             self._validate_file_existence()
+
+    def _detect_completion_status(self):
+        """Read the step's COMPLETED/FAILED marker, if the producer left one.
+
+        Tool scripts exit 0 whatever happens, so the marker is the only record
+        that a step ended badly. Load surfaces it rather than acting on it: a
+        FAILED step's partial output is still worth loading, but the user has to
+        be told which folder it came from.
+        """
+        parent_dir = os.path.dirname(self.tool_folder)
+        folder_name = os.path.basename(self.tool_folder.rstrip(os.sep))
+        tool = self.original_tool_name or 'Unknown'
+        prefix = f"{folder_name.split('_')[0]}_{tool}" if (
+            '_' in folder_name and folder_name.split('_')[0].isdigit()) else tool
+
+        for status in ("COMPLETED", "FAILED"):
+            if os.path.exists(os.path.join(parent_dir, f"{prefix}_{status}")):
+                self.completion_status = status
+                break
+
+        if self.completion_status == "FAILED":
+            print(f"Load: {prefix} carries a _FAILED marker — the step did not "
+                  f"finish. Loading whatever it produced.")
+
+    def _record_recovery(self, stream_name: str, *, declared: int, recovered: int,
+                         source: str, unrecovered_ids=()):
+        """Note what one stream yielded, for ``recovery_summary()``."""
+        self.recovery[stream_name] = {
+            'declared': declared,
+            'recovered': recovered,
+            'source': source,
+            'unrecovered_ids': list(unrecovered_ids),
+            'absent_files': list(self.absent_files_by_stream.get(stream_name, [])),
+        }
+
+    @property
+    def recovered_nothing(self) -> bool:
+        """True when every stream carrying declared ids yielded none of them.
+
+        A step that reported COMPLETED having produced nothing is where exit-0
+        costs the user, and an empty stream otherwise reads as success.
+        """
+        if not self.recovery:
+            return False
+        if not any(r['declared'] for r in self.recovery.values()):
+            return False
+        return all(r['recovered'] == 0 for r in self.recovery.values())
+
+    def recovery_summary(self) -> List[str]:
+        """Lines stating precisely what was recovered from the folder and what
+        was not. Populated by ``get_output_files()``."""
+        tool = self.original_tool_name or 'Unknown'
+        lines = [f"Load: recovery summary — {tool} from {self.tool_folder}"]
+
+        if self.completion_status:
+            lines.append(f"  completion marker: {self.completion_status}")
+        else:
+            lines.append("  completion marker: none found")
+
+        if not self.recovery:
+            lines.append("  streams: none declared")
+        for name, rec in self.recovery.items():
+            detail = f"  {name}: recovered {rec['recovered']} of {rec['declared']} " \
+                     f"declared id(s) via {rec['source']}"
+            shortfall = rec['declared'] - rec['recovered']
+            if shortfall > 0:
+                detail += f"; {shortfall} not produced"
+            lines.append(detail)
+            if rec['unrecovered_ids']:
+                shown = ', '.join(rec['unrecovered_ids'][:5])
+                more = (f" ... and {len(rec['unrecovered_ids']) - 5} more"
+                        if len(rec['unrecovered_ids']) > 5 else "")
+                lines.append(f"    unmatched id(s): {shown}{more}")
+            if rec['absent_files']:
+                lines.append(f"    {len(rec['absent_files'])} recovered path(s) "
+                             f"are absent from disk")
+
+        if self.excused_ids:
+            lines.append(f"  {len(self.excused_ids)} id(s) excused by "
+                         f"tables/missing.csv")
+        if self.absent_tables:
+            lines.append(f"  declared table(s) absent from disk: "
+                         f"{', '.join(sorted(self.absent_tables))}")
+        if self.unresolved_streams:
+            names = sorted({n for n, _p in self.unresolved_streams})
+            lines.append(f"  stream(s) with an unresolvable file template: "
+                         f"{', '.join(names)}")
+
+        if self.recovered_nothing:
+            declared = sum(r['declared'] for r in self.recovery.values())
+            lines.append(f"  RECOVERED NOTHING: 0 of {declared} declared output(s) "
+                         f"found. This folder carries no usable results.")
+
+        return lines
 
     def _rebase_paths(self, obj, old_prefix: str, new_prefix: str):
         """
@@ -168,18 +342,49 @@ echo "=== Load ready ==="
                     self._rebase_paths(item, old_prefix, new_prefix)
 
     def _validate_file_existence(self):
-        """Validate that all referenced files in the output structure exist."""
+        """Validate the output structure against what is actually on disk.
+
+        A `files` entry containing `<id>` is a template, not a path — statting it
+        always fails. Resolution goes through the stream's map_table, which lists
+        one row per id the producer actually wrote, so it is the authoritative
+        answer to "what exists".
+        """
         self.missing_files = []
+        self.unresolved_streams = []
+        self.absent_tables = []
+        self.absent_files_by_stream = {}
         output_structure = self.loaded_result['output_structure']
 
-        # Check DataStream files
         for key, value in output_structure.items():
             if key in ('tables', 'output_folder'):
                 continue
-            if isinstance(value, dict) and 'files' in value:
-                for file_path in value.get('files', []):
-                    if isinstance(file_path, str) and not os.path.exists(file_path):
-                        self.missing_files.append(file_path)
+            if not isinstance(value, dict) or 'files' not in value:
+                continue
+
+            # A readable map with zero rows means nothing was produced, which is an answer, not an unresolved template.
+            rows = self._read_map_table(value)
+            if rows is not None:
+                absent = []
+                if 'file' in rows.columns:
+                    absent = [str(p) for p in rows['file'].tolist()
+                              if isinstance(p, str) and p and not os.path.exists(p)]
+                self.absent_files_by_stream[key] = absent
+                self.missing_files.extend(absent)
+                continue
+
+            files = value.get('files', [])
+            candidates = [files] if isinstance(files, str) else files
+            absent = []
+            for file_path in candidates:
+                if not isinstance(file_path, str):
+                    continue
+                if '<id>' in file_path or any(c in file_path for c in '*?'):
+                    self.unresolved_streams.append((key, file_path))
+                    continue
+                if not os.path.exists(file_path):
+                    absent.append(file_path)
+            self.absent_files_by_stream[key] = absent
+            self.missing_files.extend(absent)
 
         # Check table files
         if 'tables' in output_structure:
@@ -189,6 +394,7 @@ echo "=== Load ready ==="
                     if isinstance(table_info, dict) and 'path' in table_info:
                         path = table_info['path']
                         if not os.path.exists(path):
+                            self.absent_tables.append(table_name)
                             self.missing_files.append(path)
 
         # Check output folder
@@ -197,13 +403,197 @@ echo "=== Load ready ==="
             if not os.path.exists(output_folder):
                 self.missing_files.append(output_folder)
 
-        # Report missing files but don't fail (files might be on a different machine)
+        # Report but don't fail — files might be on a different machine.
+        if self.unresolved_streams:
+            print(f"Warning: {len(self.unresolved_streams)} stream(s) in {self.result_file} "
+                  f"carry an unresolved file template and no map_table to resolve it against:")
+            for stream_name, pattern in self.unresolved_streams[:5]:
+                print(f"  - {stream_name}: {pattern}")
+            if len(self.unresolved_streams) > 5:
+                print(f"  ... and {len(self.unresolved_streams) - 5} more")
+
         if self.missing_files:
-            print(f"Warning: {len(self.missing_files)} files referenced in {self.result_file} are missing:")
+            print(f"Warning: {len(self.missing_files)} file(s) listed in {self.result_file} "
+                  f"are absent from disk:")
             for missing_file in self.missing_files[:5]:
                 print(f"  - {missing_file}")
             if len(self.missing_files) > 5:
                 print(f"  ... and {len(self.missing_files) - 5} more")
+
+    def _rebase_map_tables(self, output_structure: Dict[str, Any],
+                           old_prefix: str, new_prefix: str):
+        """Write rebased copies of every map_table and point the streams at them.
+
+        Tools downstream of a Load read `upstream_map_table` straight off disk, so
+        correcting the paths only inside this class would leave them resolving ids
+        against the machine the run came from.
+        """
+        import pandas as pd
+
+        def _fix(v):
+            return _rebase_path(v, old_prefix, new_prefix)
+
+        for key, value in output_structure.items():
+            if not isinstance(value, dict):
+                continue
+            mt = value.get('map_table')
+            if not mt or not os.path.exists(mt):
+                continue
+            try:
+                # dtype=str / keep_default_na=False: this frame is written back to
+                # disk, so type inference would persist its damage -- a zero-padded
+                # id reduced to an int, a "NA" cell blanked -- into the CSV every
+                # downstream tool then reads.
+                rows = pd.read_csv(mt, dtype=str, keep_default_na=False)
+            except Exception as e:
+                print(f"Warning: could not rebase map_table {mt}: {e}")
+                continue
+            # Any column holding paths under the old root, not just the two
+            # canonical names: tools name their own path column (msa_file,
+            # sdf_file, best_pose_file, pocket_file, session_file...), and one
+            # left un-rebased sends a downstream tool at paths on the machine the
+            # run came from.
+            cols = [c for c in rows.columns
+                    if rows[c].map(lambda v: _under_prefix(v, old_prefix)).any()]
+            if not cols:
+                continue
+            for c in cols:
+                rows[c] = rows[c].map(_fix)
+            rebased = os.path.join(os.path.dirname(mt),
+                                   f".rebased_{os.path.basename(mt)}")
+            try:
+                rows.to_csv(rebased, index=False)
+            except Exception as e:
+                # Leaving the old map_table in place would hand every tool that
+                # reads upstream_map_table directly a set of paths on the machine
+                # the run came from, and they resolve to nothing here.
+                raise RuntimeError(
+                    f"Load detected a moved run and could not write the rebased "
+                    f"map_table {rebased}: {e}. Copy the run somewhere writable, or "
+                    f"load it from its original path.") from e
+            value['map_table'] = rebased
+            # The on-disk copy is already correct, so _read_map_table must not
+            # substitute again -- a new prefix containing the old one (Job_001 ->
+            # Job_001_v2) would otherwise rebase twice.
+            self._rebased_map_tables.add(os.path.normpath(rebased))
+            print(f"Load: rebased map_table for '{key}' -> {rebased}")
+
+    def _map_table_file_paths(self, ds_dict: Dict[str, Any]) -> Optional[List[str]]:
+        """Per-id file paths from a stream's map_table, or None if unusable here.
+
+        Returns None (not an empty list) when there is no readable map_table or it
+        carries no per-id files, so the caller can fall back to the declared paths.
+        """
+        rows = self._read_map_table(ds_dict)
+        if rows is None or 'file' not in rows.columns:
+            return None
+        paths = [str(p) for p in rows['file'].tolist() if isinstance(p, str) and p]
+        return paths or None
+
+    def _stream_item_count(self, ds_dict: Dict[str, Any]) -> int:
+        """Number of items a stream carries — from its map_table when readable.
+
+        Falls back to expanding the declared ids, since a compact pattern like
+        ``design_<1..300>`` is one list entry standing for 300 items.
+        """
+        rows = self._read_map_table(ds_dict)
+        if rows is not None:
+            return len(rows)
+        try:
+            return len(DataStream.from_dict(ds_dict).ids_expanded)
+        except Exception:
+            return len(ds_dict.get('ids', []))
+
+    def _read_map_table(self, ds_dict: Dict[str, Any]):
+        """Read a stream's map_table CSV, or None if there isn't a readable one."""
+        import pandas as pd
+
+        map_table = ds_dict.get('map_table')
+        if not map_table or not os.path.exists(map_table):
+            return None
+        try:
+            # dtype=str / keep_default_na=False: the map is authoritative for ids, and
+            # inference rewrites them -- "0001" loads as 1 while its file stays
+            # 0001.pdb, breaking every downstream join on id. It also eats real
+            # strings, turning a "NA" or "nan" cell into a blank.
+            rows = pd.read_csv(map_table, dtype=str, keep_default_na=False)
+        except Exception as e:
+            self._warn_once(f"read:{map_table}",
+                            f"Warning: could not read map_table {map_table}: {e}")
+            return None
+
+        rebase = getattr(self, '_path_rebase', None)
+        already = os.path.normpath(map_table) in getattr(self, '_rebased_map_tables', set())
+        if rebase and not already:
+            old_prefix, new_prefix = rebase
+            # Every column, not just file/file_path — a tool's own path column
+            # (msa_file, sdf_file, pocket_file...) needs rebasing too.
+            for col in rows.columns:
+                rows[col] = rows[col].map(
+                    lambda v: _rebase_path(v, old_prefix, new_prefix))
+        if 'id' not in rows.columns:
+            self._warn_once(f"no_id:{map_table}",
+                            f"Warning: map_table {map_table} has no 'id' column; "
+                            f"ignoring it")
+            return None
+        _check_retired_file_column(rows, str(map_table), ds_dict)
+        return rows
+
+    def _warn_once(self, key: str, message: str):
+        """Print a warning the first time only — the same map_table is read by
+        validation, reconciliation and counting, and three copies of one warning
+        buries the rest of the recovery report."""
+        seen = self.__dict__.setdefault('_warned', set())
+        if key not in seen:
+            seen.add(key)
+            print(message)
+
+    def _reconcile_from_map_table(self, stream_name: str,
+                                  ds_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Narrow a stream's ids and files to the rows of its map_table.
+
+        The declared ids are the producer's prediction (and may be a compact
+        pattern); the map_table rows are what it actually wrote. Returns None when
+        there is no readable map_table, leaving the caller to resolve by globbing.
+        """
+        rows = self._read_map_table(ds_dict)
+        if rows is None:
+            return None
+
+        map_ids = [str(i) for i in rows['id'].tolist()]
+        reconciled = dict(ds_dict)
+        reconciled['ids'] = map_ids
+
+        try:
+            declared_count = len(DataStream.from_dict(ds_dict).ids_expanded)
+        except Exception:
+            declared_count = len(ds_dict.get('ids', []))
+
+        files = ds_dict.get('files', [])
+        if isinstance(files, str) and files:
+            # Shared-file stream: one artifact covers every id, nothing to narrow.
+            self._record_recovery(stream_name, declared=declared_count,
+                                  recovered=len(map_ids), source='map_table')
+            print(f"Load: {stream_name} — {len(map_ids)} ids from map_table (shared file)")
+            return reconciled
+
+        if 'file' in rows.columns:
+            map_files = [str(p) if isinstance(p, str) else '' for p in rows['file'].tolist()]
+            if any(map_files):
+                reconciled['files'] = map_files
+            else:
+                reconciled['files'] = []
+        elif files:
+            reconciled['files'] = []
+
+        self._record_recovery(stream_name, declared=declared_count,
+                              recovered=len(map_ids), source='map_table')
+
+        note = ""
+        if declared_count != len(map_ids):
+            note = f" (declared {declared_count} — {declared_count - len(map_ids)} not produced)"
+        print(f"Load: {stream_name} — {len(map_ids)} ids from map_table{note}")
+        return reconciled
 
     def _resolve_file_paths(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -232,10 +622,29 @@ echo "=== Load ready ==="
             if not files or not ids:
                 continue
 
-            # Already matched (same length, no globs)
+            # The map_table is the record of what the producer actually wrote —
+            # reconcile ids against it rather than trusting the declared ids.
+            reconciled = self._reconcile_from_map_table(file_type, ds_dict)
+            if reconciled is not None:
+                resolved[file_type] = reconciled
+                continue
+
+            declared_count = self._stream_item_count(ds_dict)
+
+            if isinstance(files, str):
+                self._record_recovery(file_type, declared=declared_count,
+                                      recovered=declared_count, source='declared')
+                continue
+
+            # Already matched (same length, no globs, no templates)
             if len(files) == len(ids):
-                has_glob = any('*' in f or '?' in f for f in files if isinstance(f, str))
-                if not has_glob:
+                # A one-id stream declaring '<id>.pdb' has as many entries as ids, but a template is still not a path: taking the shortcut reported it recovered whether or not the producer ever wrote the file.
+                unresolved = any(
+                    '*' in f or '?' in f or '<id>' in f
+                    for f in files if isinstance(f, str))
+                if not unresolved:
+                    self._record_recovery(file_type, declared=declared_count,
+                                          recovered=len(ids), source='declared')
                     continue
 
             # Need to resolve
@@ -243,11 +652,19 @@ echo "=== Load ready ==="
 
             # Collect all potential files
             all_files = []
+            templates = [f for f in files if isinstance(f, str) and '<id>' in f]
             for file_pattern in files:
                 if not isinstance(file_pattern, str):
                     continue
 
-                if '*' in file_pattern or '?' in file_pattern:
+                if '<id>' in file_pattern:
+                    # A template is not a path: statting it always fails, but substituting its <id> slot with * globs exactly this stream's files.
+                    expanded = glob_module.glob(
+                        id_patterns.glob_from_file_pattern(file_pattern))
+                    all_files.extend(expanded)
+                    print(f"  Expanded template {os.path.basename(file_pattern)}: "
+                          f"{len(expanded)} files")
+                elif '*' in file_pattern or '?' in file_pattern:
                     expanded = glob_module.glob(file_pattern)
                     all_files.extend(expanded)
                     print(f"  Expanded glob: {len(expanded)} files")
@@ -268,23 +685,46 @@ echo "=== Load ready ==="
                             if f not in all_files:
                                 all_files.append(f)
 
-            # Match IDs to files
-            resolved_files = []
-            resolved_ids = []
-
-            for item_id in ids:
-                matched_file = None
-
+            # The declared template states how a name is built from an id, so inverting it recovers the id rather than guessing at it — and a name that does not fit the template is not this stream's file.
+            by_template_id = {}
+            template_owned = set()
+            for template in templates:
                 for file_path in all_files:
+                    recovered = id_patterns.id_from_file_pattern(template, file_path)
+                    if recovered:
+                        template_owned.add(file_path)
+                        by_template_id.setdefault(recovered, file_path)
+
+            # Then exact basenames, and one file serves one id: substring matching in declared order paired design_10 with design_1.pdb and reported design_1 twice.
+            slots = [None] * len(ids)
+            used_files = set()
+            by_basename = {}
+            for file_path in all_files:
+                by_basename.setdefault(
+                    os.path.splitext(os.path.basename(file_path))[0], file_path)
+
+            pending = []
+            for pos, item_id in enumerate(ids):
+                for exact in (by_template_id.get(item_id), by_basename.get(item_id)):
+                    if exact is not None and exact not in used_files:
+                        used_files.add(exact)
+                        slots[pos] = (item_id, exact)
+                        break
+                else:
+                    pending.append(pos)
+
+            unrecovered_ids = []
+            claimed_ids = {s[0] for s in slots if s is not None}
+            for pos in pending:
+                item_id = ids[pos]
+                matched_file = None
+                for file_path in all_files:
+                    # A name the template already resolved belongs to the id it named, declared or not: design_20_best.pdb must stay out of design_2's reach.
+                    if file_path in used_files or file_path in template_owned:
+                        continue
                     basename = os.path.splitext(os.path.basename(file_path))[0]
 
-                    if basename == item_id:
-                        matched_file = file_path
-                        break
-                    if item_id in basename:
-                        matched_file = file_path
-                        break
-                    if basename in item_id:
+                    if item_id in basename or basename in item_id:
                         matched_file = file_path
                         break
                     if item_id.startswith("rank") and basename.startswith("rank"):
@@ -295,17 +735,32 @@ echo "=== Load ready ==="
                             matched_file = file_path
                             break
 
-                if matched_file:
-                    resolved_files.append(matched_file)
-                    actual_id = os.path.splitext(os.path.basename(matched_file))[0]
-                    resolved_ids.append(actual_id)
-                else:
+                if matched_file is None:
+                    unrecovered_ids.append(item_id)
                     print(f"  Warning: No file found for ID '{item_id}'")
+                    continue
+
+                actual_id = os.path.splitext(os.path.basename(matched_file))[0]
+                if actual_id in claimed_ids:
+                    unrecovered_ids.append(item_id)
+                    print(f"  Warning: No file found for ID '{item_id}' "
+                          f"(nearest match already belongs to '{actual_id}')")
+                    continue
+
+                used_files.add(matched_file)
+                claimed_ids.add(actual_id)
+                slots[pos] = (actual_id, matched_file)
+
+            resolved_ids = [s[0] for s in slots if s is not None]
+            resolved_files = [s[1] for s in slots if s is not None]
 
             resolved[file_type]['files'] = resolved_files
             resolved[file_type]['ids'] = resolved_ids
             # Wildcards resolved — files are now concrete paths
 
+            self._record_recovery(file_type, declared=len(ids),
+                                  recovered=len(resolved_ids), source='glob',
+                                  unrecovered_ids=unrecovered_ids)
             print(f"  Resolved: {len(resolved_files)}/{len(ids)} {file_type}")
 
         return resolved
@@ -469,16 +924,24 @@ echo "=== Load ready ==="
         else:
             return set()
 
+        # A declared-but-absent missing.csv is what a step killed mid-write leaves behind, and raising here would deny the user every id it did produce.
         if not os.path.exists(missing_path):
-            if not self.validate_files:
-                return set()
-            raise FileNotFoundError(f"Missing table referenced but file not found: {missing_path}")
+            print(f"Warning: Load: tables/missing.csv is declared but absent "
+                  f"({missing_path}); no ids excused")
+            return set()
 
-        missing_df = pd.read_csv(missing_path)
+        try:
+            missing_df = pd.read_csv(missing_path)
+        except Exception as e:
+            print(f"Warning: Load: could not read {missing_path}: {e}; no ids excused")
+            return set()
+
         if 'id' not in missing_df.columns:
-            raise ValueError(f"missing.csv does not have required 'id' column: {missing_path}")
+            print(f"Warning: Load: {missing_path} has no 'id' column; no ids excused")
+            return set()
 
-        missing_ids = set(missing_df['id'].tolist())
+        missing_ids = set(str(i) for i in missing_df['id'].tolist())
+        self.excused_ids = sorted(missing_ids)
         print(f"Load: Excluding {len(missing_ids)} IDs from missing.csv")
         return missing_ids
 
@@ -488,8 +951,12 @@ echo "=== Load ready ==="
             raise ValueError("No result loaded - initialization failed")
 
         if self.validate_files and len(self.missing_files) > 0:
-            print(f"Warning: {len(self.missing_files)} referenced files are missing")
+            print(f"Warning: {len(self.missing_files)} referenced files are absent from disk")
             print("Consider setting validate_files=False if files have been moved")
+
+        if self.validate_files and len(self.unresolved_streams) > 0:
+            print(f"Warning: {len(self.unresolved_streams)} stream(s) could not be resolved — "
+                  "their file template has no map_table behind it")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure Load - no inputs needed since we're loading existing results."""
@@ -511,6 +978,10 @@ echo "=== Load ready ==="
         # Resolve glob patterns and match IDs to files when validate_files=True
         if self.validate_files:
             output_structure = self._resolve_file_paths(output_structure)
+        else:
+            print("Load: validate_files=False — ids are propagated as declared, "
+                  "not reconciled against the map_table. Downstream tools must "
+                  "consume tables/missing.csv to excuse ids that were never produced.")
 
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
@@ -520,6 +991,12 @@ echo "=== Load ready ==="
             missing_ids = self._exclude_missing_ids(output_structure)
             if missing_ids:
                 self._filter_missing_ids(output_structure, missing_ids)
+
+        # The framework calls get_output_files() several times per configuration, and six copies of the report is noise the real warnings hide behind.
+        summary = "\n".join(self.recovery_summary())
+        if summary != getattr(self, '_reported_summary', None):
+            self._reported_summary = summary
+            print(summary)
 
         return self._convert_to_datastream_format(output_structure)
 
@@ -541,6 +1018,8 @@ echo "=== Load ready ==="
                         filtered_ids.append(i)
                 ds_dict['files'] = filtered_files
                 ds_dict['ids'] = filtered_ids
+                if stream_name in self.recovery:
+                    self.recovery[stream_name]['recovered'] = len(filtered_ids)
                 if len(filtered_files) < len(files):
                     print(f"  - Filtered {stream_name}: {len(filtered_files)}/{len(files)} kept")
 
@@ -640,12 +1119,20 @@ fi
         for stream_name, stream_data in output_structure.items():
             if stream_name in ('tables', 'output_folder'):
                 continue
-            if isinstance(stream_data, dict) and 'files' in stream_data:
-                files_list = stream_data.get('files', [])
-                files_to_check = files_list[:3]
-                for file_path in files_to_check:
-                    if isinstance(file_path, str):
-                        script_content += f"""
+            if not isinstance(stream_data, dict) or 'files' not in stream_data:
+                continue
+
+            # Templates are patterns, not paths — resolve through the map_table.
+            files_list = self._map_table_file_paths(stream_data)
+            if files_list is None:
+                files = stream_data.get('files', [])
+                candidates = [files] if isinstance(files, str) else files
+                files_list = [f for f in candidates
+                              if isinstance(f, str) and '<id>' not in f
+                              and not any(c in f for c in '*?')]
+
+            for file_path in files_list[:3]:
+                script_content += f"""
 if [ ! -f "{file_path}" ]; then
     echo "Warning: {stream_name} file missing: {file_path}"
 fi"""
@@ -715,7 +1202,8 @@ echo "Files loaded from {original_tool} are ready for use"
                 f"Original job: {original_job}",
                 f"Original order: {execution_order}",
                 f"Tool folder: {self.tool_folder}",
-                f"File validation: {'enabled' if self.validate_files else 'disabled'}"
+                f"File validation: {'enabled' if self.validate_files else 'disabled'}",
+                f"Completion marker: {self.completion_status or 'none found'}",
             ])
 
             output_structure = self.loaded_result['output_structure']
@@ -723,7 +1211,7 @@ echo "Files loaded from {original_tool} are ready for use"
                 if key in ('tables', 'output_folder'):
                     continue
                 if isinstance(value, dict) and 'ids' in value:
-                    count = len(value.get('ids', []))
+                    count = self._stream_item_count(value)
                     if count > 0:
                         config_lines.append(f"Loaded {key}: {count}")
 
@@ -732,7 +1220,10 @@ echo "Files loaded from {original_tool} are ready for use"
                 config_lines.append(f"Loaded tables: {table_count}")
 
             if self.missing_files:
-                config_lines.append(f"Missing files: {len(self.missing_files)}")
+                config_lines.append(f"Absent files: {len(self.missing_files)}")
+
+            if self.unresolved_streams:
+                config_lines.append(f"Unresolved templates: {len(self.unresolved_streams)}")
 
         return config_lines
 
@@ -750,7 +1241,11 @@ echo "Files loaded from {original_tool} are ready for use"
             'execution_order': self.loaded_result.get('execution_order'),
             'tool_folder': self.tool_folder,
             'missing_files_count': len(self.missing_files),
-            'validation_enabled': self.validate_files
+            'unresolved_streams_count': len(self.unresolved_streams),
+            'validation_enabled': self.validate_files,
+            'completion_status': self.completion_status,
+            'absent_tables': list(self.absent_tables),
+            'recovery': {k: dict(v) for k, v in self.recovery.items()},
         }
 
         if 'execution_metadata' in self.loaded_result:
@@ -769,7 +1264,8 @@ echo "Files loaded from {original_tool} are ready for use"
                 "tool_folder": self.tool_folder,
                 "validate_files": self.validate_files,
                 "original_tool_name": self.original_tool_name,
-                "missing_files_count": len(self.missing_files) if self.missing_files else 0
+                "missing_files_count": len(self.missing_files) if self.missing_files else 0,
+                "unresolved_streams_count": len(self.unresolved_streams) if self.unresolved_streams else 0
             }
         })
         return base_dict

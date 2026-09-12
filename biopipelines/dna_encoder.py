@@ -11,7 +11,7 @@ with color-coded codon frequencies.
 """
 
 import os
-from typing import Dict, List, Any, Union
+from typing import Dict, List, Any, Union, Optional
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
@@ -43,7 +43,7 @@ class DNAEncoder(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "DNAEncoder"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -65,6 +65,7 @@ echo "=== DNAEncoder ready ==="
     def __init__(self,
                  sequences: Union[DataStream, StandardizedOutput],
                  organism: str = "EC",
+                 exclude_sites: Optional[List[str]] = None,
                  **kwargs):
         """
         Initialize DNA encoder tool.
@@ -80,6 +81,11 @@ echo "=== DNAEncoder ready ==="
                      - "HS&SC" (optimized for both human and yeast)
                      - "EC&HS&SC" (optimized for all three organisms)
                      With more than one organism it is more likely if not inevitable to have rare codons.
+            exclude_sites: Sequences to keep out of the coding DNA, e.g. restriction
+                     sites ["GAATTC", "GGATCC"]. IUPAC codes are accepted. Each site is
+                     excluded on both strands, since a site on the reverse strand cuts
+                     too. Codons are re-drawn (with backtracking) until the site is gone,
+                     so the result stays within the normal codon-usage thresholds.
             **kwargs: Additional parameters
 
         Output:
@@ -96,6 +102,7 @@ echo "=== DNAEncoder ready ==="
             raise ValueError(f"sequences must be DataStream or StandardizedOutput, got {type(sequences)}")
 
         self.organism = organism
+        self.exclude_sites = list(exclude_sites) if exclude_sites else []
 
         super().__init__(**kwargs)
 
@@ -103,6 +110,22 @@ echo "=== DNAEncoder ready ==="
         """Validate DNAEncoder parameters."""
         if not self.sequences_stream or len(self.sequences_stream) == 0:
             raise ValueError("sequences parameter is required and must not be empty")
+
+        valid_iupac = set("ACGTRYSWKMBDHVN")
+        for site in self.exclude_sites:
+            clean = str(site).strip().upper()
+            if not clean:
+                raise ValueError("exclude_sites entries must not be empty")
+            bad = set(clean) - valid_iupac
+            if bad:
+                raise ValueError(
+                    f"exclude_sites entry '{site}' has non-IUPAC characters: {sorted(bad)}. "
+                    f"Give the recognition sequence, e.g. 'GAATTC' for EcoRI.")
+            if len(clean) < 4:
+                raise ValueError(
+                    f"exclude_sites entry '{site}' is only {len(clean)} bases. Sites shorter "
+                    f"than 4 occur by chance every few hundred bp and would over-constrain "
+                    f"the encoding.")
 
         # Validate organism parameter
         valid_organisms = ["EC", "SC", "HS"]
@@ -153,6 +176,7 @@ echo "=== DNAEncoder ready ==="
         config_data = {
             "sequences_csv": self.sequences_csv_path,
             "organism": self.organism,
+            "exclude_sites": self.exclude_sites,
             "dna_output": self.sequences_csv,
             "excel_output": self.dna_excel,
             "info_output": self.info_txt

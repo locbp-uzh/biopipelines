@@ -62,7 +62,8 @@ class P2Rank(BaseConfig):
     """
 
     TOOL_NAME = "P2Rank"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "p2rank"
 
     _CONFIGS = ("default", "alphafold", "conservation")
 
@@ -77,22 +78,23 @@ class P2Rank(BaseConfig):
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("P2Rank", "")
         prank_dir = f"{repo_dir}/p2rank_{cls.P2RANK_VERSION}"
-        env_check = cls._env_exists_check("p2rank", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         # Skip-check is file-based (no `prank --help`): booting the JVM just to
         # probe install state is slow and, on memory-constrained runtimes like
         # Colab, can crash the kernel. The jar + launcher existing is sufficient.
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_check} && [ -f "{prank_dir}/bin/p2rank.jar" ] && [ -x "$(dirname "$({cls._env_run("p2rank", env_manager)}which java)")/prank" ]; then
+if {env_check} && [ -f "{prank_dir}/bin/p2rank.jar" ] && [ -x "$(dirname "$({cls._env_run(env, env_manager)}which java)")/prank" ]; then
     echo "P2Rank already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("p2rank", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("p2rank", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing P2Rank ==="
 {skip}{remove_block}
 {env_block}
@@ -113,7 +115,7 @@ fi
 # through a symlink resolves to the env bin (no p2rank.jar there) and crashes
 # with ClassNotFoundException. Write a thin wrapper that execs the real
 # launcher by absolute path so its BASH_SOURCE points at the real install.
-ENV_BIN="$(dirname "$({cls._env_run("p2rank", env_manager)}which java)")"
+ENV_BIN="$(dirname "$({cls._env_run(env, env_manager)}which java)")"
 # Constrain the JVM via JAVA_OPTS (the prank launcher appends its own -Xmx2048m
 # AFTER $JAVA_OPTS, and the last -Xmx wins, so we keep 2g and add the rest).
 # On Colab the JVM logs "Cgroup memory controller path seems to have moved...

@@ -1,0 +1,87 @@
+# Minimal local-run config used by the test suite and as a reference for
+# running BioPipelines on a laptop without SLURM, GPU, or containers.
+#
+# Placeholders such as <biopipelines>, <biopipelines_output> are resolved by
+# FolderManager against folders.base entries below.
+
+
+# Machine / Site Configuration — no SLURM, no GPU mappings, no env manager
+# activation (pip mode means the generated bash emits empty shell-hook /
+# activate lines, so pipeline.sh runs on any host with python on PATH).
+machine:
+  email: ""
+  env_manager:
+    name: "pip"
+    init: []
+  scheduler:
+    name: "none"
+    init: []
+    modules: []
+  container_executor: "none"
+folders:
+  base:
+    home: "."
+    data: "."
+    scratch: "."
+    biopipelines: "<cwd>"
+    biopipelines_output: "./outputs"
+
+  infrastructure:
+    pipe_scripts: "<biopipelines>/pipe_scripts"
+    pdbs: "<biopipelines>/pdbs"
+    ligands: "<biopipelines>/ligands"
+    sequences: "<biopipelines>/sequences"
+    tables: "<biopipelines>/tables"
+    cache: "./cache"
+    containers: "./containers"
+
+  # Stub repository paths for tool_parameters tests. The paths don't have to
+  # exist on disk — config-time pipeline.save() only needs them to resolve
+  # without raising KeyError, since no upstream binary is executed.
+  repositories:
+    ProteinMPNN: "<biopipelines>/_stub_repos/ProteinMPNN"
+    LASErMPNN: "<biopipelines>/_stub_repos/LASErMPNN"
+    LigandMPNN: "<biopipelines>/_stub_repos/LigandMPNN"
+    Boltz2: "<biopipelines>/_stub_repos/boltz"
+    RFdiffusion: "<biopipelines>/_stub_repos/RFdiffusion"
+    RFdiffusionAllAtom: "<biopipelines>/_stub_repos/rf_diffusion_all_atom"
+    RFdiffusion2: "<biopipelines>/_stub_repos/RFdiffusion2"
+    RFdiffusion3: "<biopipelines>/_stub_repos/RFdiffusion3"
+    AlphaFold: "<biopipelines>/_stub_repos/AlphaFold"
+    BoltzGen: "<biopipelines>/_stub_repos/boltzgen"
+    Gnina: "<biopipelines>/_stub_repos/gnina"
+    CABSflex: "<biopipelines>/_stub_repos/CABSflex"
+    PoseBusters: "<biopipelines>/_stub_repos/posebusters"
+    PyMOL: "<biopipelines>/_stub_repos/pymol"
+    MMseqs2: "<biopipelines>/_stub_repos/mmseqs2"
+    MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
+    RBSDesigner: "<biopipelines>/_stub_repos/RBSDesigner"
+    DNAEncoder: "<biopipelines>/_stub_repos/DNAEncoder"
+    DiffDock: "<biopipelines>/_stub_repos/DiffDock"
+    DynamicBind: "<biopipelines>/_stub_repos/DynamicBind"
+    PocketGen: "<biopipelines>/_stub_repos/PocketGen"
+    PLACER: "<biopipelines>/_stub_repos/PLACER"
+    GEMS: "<biopipelines>/_stub_repos/GEMS"
+    RTMScore: "<biopipelines>/_stub_repos/RTMScore"
+    NeuralPLexer: "<biopipelines>/_stub_repos/NeuralPLexer"
+    AF2BIND: "<biopipelines>/_stub_repos/af2bind"
+  cache:
+    BoltzCache: "./cache/boltz"
+    AlphaFoldParams: "<biopipelines>/_stub_repos/alphafold_params"
+    ColabFoldDatabases: "<cache>/colabfold_databases"
+    MMseqs2Databases: "<ColabFoldDatabases>"
+  server: {}
+
+# The base local fixture declares no renderers on purpose, so most tests never
+# emit a viewer. bp-visualize is the renderers, so its tests need them declared.
+renderers:
+  streams:
+    _metadata: renderers/streams.py
+    pdb: renderers/structures.py
+    cif: renderers/structures.py
+    "pdb|cif": renderers/structures.py
+    png: renderers/images.py
+    fasta: renderers/fasta.py
+    _default: renderers/streams.py
+  tables:
+    _default: renderers/tables.py

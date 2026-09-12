@@ -43,7 +43,8 @@ def test_pipeline_save_emits_bash_script(local_config, isolated_cwd):
 # ── Multi-tool chain ──────────────────────────────────────────────────────────
 
 def test_pipeline_three_tool_chain_via_mock(
-    local_config, isolated_cwd, new_pipeline, assert_valid_script, record_case,
+    local_config, isolated_cwd, new_pipeline, assert_valid_script,
+    tool_order_in_script, record_case,
 ):
     """Mock → ReMap → Panda — verify a 3-tool chain emits a valid script with
     tools appearing in the right order."""
@@ -66,18 +67,17 @@ def test_pipeline_three_tool_chain_via_mock(
         )
         script_path = pipeline.save()
 
-    content = open(script_path, encoding="utf-8").read()
-    mock_pos = content.find("Mock")
-    remap_pos = content.find("ReMap")
-    panda_pos = content.find("Panda")
+    # content.find("Mock") matches the "# Tools:" comment header, which lists every tool in registration order -- so it passes on any emitted order, and on a script that invokes nothing.
+    order = tool_order_in_script(script_path)
     record_case(
         input="Mock → ReMap → Panda chain",
-        expected="all 3 markers present, Mock before downstream",
-        actual=f"Mock@{mock_pos}, ReMap@{remap_pos}, Panda@{panda_pos}",
+        expected=["Mock", "ReMap", "Panda"],
+        actual=order,
     )
     assert_valid_script(script_path, "Mock", "ReMap", "Panda")
-    assert mock_pos >= 0 and mock_pos < remap_pos
-    assert mock_pos < panda_pos
+    assert order == ["Mock", "ReMap", "Panda"], (
+        f"emitted step order {order} does not match the registration order"
+    )
 
 
 def test_pipeline_missing_propagates_through_downstream(

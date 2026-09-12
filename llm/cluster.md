@@ -53,18 +53,32 @@ llm/log.sh scp my_pipelines/foo.py cluster:~/biopipelines/my_pipelines/
 # Submit a pipeline.
 llm/log.sh ssh cluster "cd ~/biopipelines && ./submit my_pipelines/foo.py"
 
-# Resume after a cancel or failure.
-llm/log.sh ssh cluster "cd ~/biopipelines && ./resubmit <RunTime>/slurm.sh"
+# See which job scripts and scheduler outputs the run produced.
+llm/log.sh ssh cluster "ls <RunTime>"
 
-# Inspect the slurm log.
-llm/log.sh ssh cluster "tail -n 100 <RunTime>/slurm.out"
+# Resume after a cancel or failure (single-batch: slurm.sh; multi-batch: slurm_batch<N>.sh).
+# Dependency directives are stripped by default -- the script on disk names the
+# original run's job ids. Add --keep-dependencies only if the parent is still queued.
+llm/log.sh ssh cluster "cd ~/biopipelines && ./resubmit <RunTime>/slurm_batch1.sh"
 
-# Pull a result artifact back locally.
-llm/log.sh scp cluster:<RunTime>/slurm.out ./
+# Inspect a scheduler log (single-batch: slurm.out; multi-batch: job_batch<N>.out).
+llm/log.sh ssh cluster "tail -n 100 <RunTime>/job_batch1.out"
+
+# Render one step's outputs as a self-contained page, then pull it and open it.
+# Runs on the login node; needs no scheduler, works while the job is still going.
+llm/log.sh ssh cluster "cd ~/biopipelines && bp-visualize <Job>/<NNN>_<Tool> --descending <table>.<column> --max-items 5"
+llm/log.sh scp cluster:<Job>/<NNN>_<Tool>/_extras/<NNN>_<Tool>_view.html ./
+
+# Inspect a single tool's log.
+llm/log.sh ssh cluster "tail -n 100 <Job>/Logs/<NNN>_<ToolName>.log"
 
 # Cancel a job.
 llm/log.sh ssh cluster "scancel <jobid>"
 ```
+
+**The file names depend on how many batches the pipeline has.** Every `Resources()` call opens a new batch and each batch is submitted as its own job, so `submit` writes `<RunTime>/slurm_batch<N>.sh` → `<RunTime>/job_batch<N>.out` per batch. A pipeline that ended up with exactly one batch gets `<RunTime>/slurm.sh` → `<RunTime>/slurm.out` instead. `ls <RunTime>` first; do not assume `slurm.out` exists.
+
+`<RunTime>` is `<Job>_NNN/RunTime`, alongside `<Job>_NNN/Logs` (per-tool `<NNN>_<ToolName>.log` files) and the `<NNN>_<ToolName>_COMPLETED` / `_FAILED` / `_WARNING` completion markers, which sit directly in `<Job>_NNN/`.
 
 ## Logging
 

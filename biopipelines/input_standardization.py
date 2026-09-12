@@ -6,7 +6,7 @@
 
 Many tools accept the same shape of input: a StandardizedOutput, a raw
 DataStream, or an ergonomic shorthand (e.g. ``ligand="LIG"`` instead of
-``ligand=Ligand(code="LIG")``). ``resolve_basic_input`` collapses the three
+``ligand=Ligand(codes="LIG")``). ``resolve_basic_input`` collapses the three
 into the canonical stream so the rest of the framework only ever sees a
 DataStream, preserving the entity-only invariant.
 """

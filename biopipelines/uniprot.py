@@ -39,7 +39,7 @@ class UniProt(BaseConfig):
     """
 
     TOOL_NAME = "UniProt"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -138,7 +138,7 @@ fi
         return {
             "sequences": sequences,
             "structures": DataStream.empty("structures", "pdb"),
-            "compounds": DataStream.empty("compounds", "sdf"),
+            "compounds": DataStream.empty("compounds", "csv"),
             "tables": tables,
             "output_folder": self.output_folder,
         }

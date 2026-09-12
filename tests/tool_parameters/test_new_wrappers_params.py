@@ -120,7 +120,10 @@ def test_fpocket_params(local_config, isolated_cwd, new_pipeline):
             clustering_distance=2.6,
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["40", "3.5", "6.5", "2.6"])
+    assert_substrings_in(content, [
+        "--min-alpha-spheres 40", "--min-radius 3.5",
+        "--max-radius 6.5", "--clustering-distance 2.6",
+    ])
 
 
 def test_p2rank_params(local_config, isolated_cwd, new_pipeline):
@@ -130,7 +133,7 @@ def test_p2rank_params(local_config, isolated_cwd, new_pipeline):
         s = _structures_mock()
         P2Rank(structures=s.streams.structures, config="alphafold", threads=4, visualizations=True)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["alphafold", "4"])
+    assert_substrings_in(content, ['--config "alphafold"', "--threads 4"])
 
 
 def test_prodigy_params(local_config, isolated_cwd, new_pipeline):
@@ -140,7 +143,7 @@ def test_prodigy_params(local_config, isolated_cwd, new_pipeline):
         s = _structures_mock()
         Prodigy(structures=s.streams.structures, interface="A C", temperature=37.0)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["A C", "37"])
+    assert_substrings_in(content, ['--interface "A C"', "--temperature 37.0"])
 
 
 def test_apbs_params(local_config, isolated_cwd, new_pipeline):
@@ -154,7 +157,10 @@ def test_apbs_params(local_config, isolated_cwd, new_pipeline):
             grid_dim=97, pdie=4.0, sdie=80.0, solver="npbe",
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["6.5", "PARSE", "0.2", "97", "4.0", "80.0", "npbe"])
+    assert_substrings_in(content, [
+        "--ph 6.5", '--forcefield "PARSE"', "--ion-concentration 0.2",
+        "--grid-dim 97", "--pdie 4.0", "--sdie 80.0", '--solver "npbe"',
+    ])
 
 
 def test_openmm_params(local_config, isolated_cwd, new_pipeline):
@@ -169,7 +175,58 @@ def test_openmm_params(local_config, isolated_cwd, new_pipeline):
             platform="CPU", restraint_selection="CA", restraint_k=750.0,
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["500", "5.0", "amber14-all", "implicit-gbn2", "CPU", "CA", "750.0"])
+    assert_substrings_in(content, [
+        "--max-iterations 500", "--tolerance 5.0",
+        '--forcefield "amber14-all"', '--solvent "implicit-gbn2"',
+        '--platform "CPU"', '--restraint-selection "CA"', "--restraint-k 750.0",
+    ])
+
+
+def test_openmm_ligand_params(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.openmm import OpenMM
+    from biopipelines.ligand import Ligand
+    pipeline = new_pipeline("openmm_ligand_params")
+    with pipeline:
+        s = _structures_mock()
+        OpenMM(
+            structures=s.streams.structures,
+            ligand=Ligand(code="UNL"),
+            ligand_forcefield="gaff-2.11", ligand_charge_method="am1bcc",
+            mobile_selection="A51-59", solvent="implicit-obc2",
+        )
+        content = read_all_emitted_artifacts(pipeline.save())
+    assert_substrings_in(content, [
+        '--ligand-forcefield "gaff-2.11"', '--charge-method "am1bcc"',
+        '--mobile-selection "A51-59"', '--solvent "implicit-obc2"',
+        "--ligand-json", "ligand.json",
+    ])
+
+
+def test_openmm_rejects_mobile_and_frozen_together(local_config, isolated_cwd, new_pipeline):
+    """mobile_selection already freezes everything it does not name."""
+    import pytest as _pytest
+    from biopipelines.openmm import OpenMM
+    pipeline = new_pipeline("openmm_excl")
+    with pipeline:
+        s = _structures_mock()
+        with _pytest.raises(ValueError, match="mutually exclusive"):
+            OpenMM(structures=s.streams.structures,
+                   mobile_selection="A10-20", frozen_selection="A30").validate_params()
+
+
+def test_openmm_accepts_table_reference_selection(local_config, isolated_cwd, new_pipeline):
+    """A per-structure selection arrives as a TableReference, not a literal string."""
+    from biopipelines.openmm import OpenMM
+    from biopipelines.biopipelines_io import TableReference
+    pipeline = new_pipeline("openmm_tableref")
+    with pipeline:
+        s = _structures_mock()
+        OpenMM(structures=s.streams.structures,
+               mobile_selection=TableReference("/tmp/sel.csv", "within"))
+        content = read_all_emitted_artifacts(pipeline.save())
+    assert_substrings_in(
+        content, ['--mobile-selection "TABLE_REFERENCE:/tmp/sel.csv:within"']
+    )
 
 
 def test_aggrescan3d_params(local_config, isolated_cwd, new_pipeline):
@@ -179,7 +236,7 @@ def test_aggrescan3d_params(local_config, isolated_cwd, new_pipeline):
         s = _structures_mock()
         Aggrescan3D(structures=s.streams.structures, chains="AB", distance=12.0, max_parallel=3)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["AB", "12.0", "3"])
+    assert_substrings_in(content, ["-C AB", "-D 12.0", "MAX PARALLEL: 3"])
 
 
 def test_plip_params_ligand_mode(local_config, isolated_cwd, new_pipeline):
@@ -191,7 +248,7 @@ def test_plip_params_ligand_mode(local_config, isolated_cwd, new_pipeline):
         PLIP(structures=s.streams.structures, ligand=Ligand(code="ETH"),
              mode="ligand", generate_pse=False)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["ligand", "ETH"])
+    assert_substrings_in(content, ["--mode ligand", 'echo "Residue codes: ETH"'])
 
 
 def test_plip_params_peptide_mode(local_config, isolated_cwd, new_pipeline):
@@ -202,7 +259,7 @@ def test_plip_params_peptide_mode(local_config, isolated_cwd, new_pipeline):
         s = _structures_mock()
         PLIP(structures=s.streams.structures, mode="peptide", chains="AB", generate_pse=True)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["peptide", "AB"])
+    assert_substrings_in(content, ["--mode peptide", "--chains AB"])
 
 
 def test_af2bind_params(local_config, isolated_cwd, new_pipeline):
@@ -213,7 +270,7 @@ def test_af2bind_params(local_config, isolated_cwd, new_pipeline):
         AF2BIND(structures=s.streams.structures, chain="B",
                 mask_sidechains=False, mask_sequence=True, top_k=20)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["B", "20"])
+    assert_substrings_in(content, ['--chain "B"', "--top-k 20"])
 
 
 def test_frame2seq_params(local_config, isolated_cwd, new_pipeline):
@@ -224,7 +281,9 @@ def test_frame2seq_params(local_config, isolated_cwd, new_pipeline):
         Frame2Seq(structures=s.streams.structures, num_sequences=5,
                   temperature=0.7, chain="B", omit_aa="CW", fixed="10-20")
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["5", "0.7", "B", "CW"])
+    assert_substrings_in(content, [
+        "--num-sequences 5", "--temperature 0.7", '--chain "B"', '--omit-aa "CW"',
+    ])
 
 
 def test_thermompnn_params(local_config, isolated_cwd, new_pipeline):
@@ -234,7 +293,7 @@ def test_thermompnn_params(local_config, isolated_cwd, new_pipeline):
         s = _structures_mock()
         ThermoMPNN(structures=s.streams.structures, chain="B", mutations="A10G+L20P")
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["B", "A10G"])
+    assert_substrings_in(content, ['--chain "B"', '--mutations "A10G+L20P"'])
 
 
 # ── coordinate-ligand consumers (structures + a ligand) ───────────────────────
@@ -248,7 +307,9 @@ def test_xtb_params(local_config, isolated_cwd, new_pipeline):
         XTB(structures=s.streams.structures, ligand=lig, method="gfn1",
             solvent="water", charge=-1, opt=True)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["gfn1", "water", "-1"])
+    assert_substrings_in(
+        content, ['--method "gfn1"', '--solvent "water"', "--charge -1"]
+    )
 
 
 def test_prolif_smoke(local_config, isolated_cwd, new_pipeline):
@@ -285,7 +346,7 @@ def test_placer_params_ligand_mode(local_config, isolated_cwd, new_pipeline):
         PLACER(structures=s, ligand=Ligand(smiles="CCO", ids="c1", codes="ETH"),
                nsamples=15, rerank="prmsd")
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["15", "prmsd"])
+    assert_substrings_in(content, ["--nsamples 15", '--rerank "prmsd"'])
 
 
 def test_placer_params_apo_mode(local_config, isolated_cwd, new_pipeline):
@@ -296,7 +357,7 @@ def test_placer_params_apo_mode(local_config, isolated_cwd, new_pipeline):
         s = _structures_mock()
         PLACER(structures=s, target_res="A50", exclude_sm=True, nsamples=12)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["12", "A50"])
+    assert_substrings_in(content, ["--nsamples 12", '--target-res "A50"'])
 
 
 def test_gems_params(local_config, isolated_cwd, new_pipeline):
@@ -318,7 +379,7 @@ def test_rtmscore_params(local_config, isolated_cwd, new_pipeline):
         lig = _ligand_structures_mock()
         RTMScore(structures=s, ligands=lig, cutoff=8.0, model="model1")
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["8.0", "model1"])
+    assert_substrings_in(content, ["--cutoff 8.0", "rtmscore_model1.pth"])
 
 
 def test_neuralplexer_params(local_config, isolated_cwd, new_pipeline):
@@ -333,7 +394,9 @@ def test_neuralplexer_params(local_config, isolated_cwd, new_pipeline):
             sampler="DDIM", cuda=False,
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["8", "30", "DDIM"])
+    assert_substrings_in(
+        content, ["--n-samples 8", "--num-steps=30", "--sampler=DDIM"]
+    )
 
 
 # ── docking tools (structures + compounds) ────────────────────────────────────
@@ -353,7 +416,9 @@ def test_diffdock_params(local_config, isolated_cwd, new_pipeline):
             no_final_step_noise=False,
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["24", "18", "16"])
+    assert_substrings_in(content, [
+        "--samples_per_complex 24", "--inference_steps 18", "--batch_size 16",
+    ])
 
 
 def test_dynamicbind_params(local_config, isolated_cwd, new_pipeline):
@@ -368,7 +433,10 @@ def test_dynamicbind_params(local_config, isolated_cwd, new_pipeline):
             num_workers=2, rigid_protein=True, make_movie=True, seed=7,
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["30", "5", "15", "7"])
+    assert_substrings_in(content, [
+        "--samples_per_complex 30", "--savings_per_complex 5",
+        "--inference_steps 15", "--seed 7",
+    ])
 
 
 # ── sequence consumers ─────────────────────────────────────────────────────────
@@ -381,7 +449,7 @@ def test_bioemu_params(local_config, isolated_cwd, new_pipeline):
         BioEmu(sequences=q.streams.sequences, num_samples=25, batch_size=5,
                reconstruct_sidechains=True, filter_samples=False)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["25", "5"])
+    assert_substrings_in(content, ["--num-samples 25", "--batch-size 5"])
 
 
 def test_esmfold_params(local_config, isolated_cwd, new_pipeline):
@@ -392,7 +460,9 @@ def test_esmfold_params(local_config, isolated_cwd, new_pipeline):
         ESMFold(sequences=q.streams.sequences, chunk_size=128, num_recycles=8,
                 max_tokens_per_batch=2048, cpu_offload=True, cpu_only=True)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["128", "8", "2048"])
+    assert_substrings_in(content, [
+        "--chunk-size 128", "--num-recycles 8", "--max-tokens-per-batch 2048",
+    ])
 
 
 def test_vespag_params(local_config, isolated_cwd, new_pipeline):
@@ -423,7 +493,7 @@ def test_uniprot_params(local_config, isolated_cwd, new_pipeline):
     with pipeline:
         UniProt(accessions=["P12345", "Q9Y6K9"])
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["P12345", "Q9Y6K9"])
+    assert_substrings_in(content, ['"P12345",', '"Q9Y6K9"'])
 
 
 def test_openbabel_params(local_config, isolated_cwd, new_pipeline):
@@ -435,7 +505,10 @@ def test_openbabel_params(local_config, isolated_cwd, new_pipeline):
                   add_hydrogens=True, pH=7.4, gen3d=True, gen3d_quality="best",
                   minimize=True, ff="UFF", minimize_steps=300)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["sdf", "7.4", "best", "UFF", "300"])
+    assert_substrings_in(content, [
+        "--convert-3d sdf", "--ph 7.4", "--gen3d-quality best",
+        "--ff UFF", "--minimize-steps 300",
+    ])
 
 
 def test_rdkit_params(local_config, isolated_cwd, new_pipeline):
@@ -446,7 +519,7 @@ def test_rdkit_params(local_config, isolated_cwd, new_pipeline):
         RDKit(compounds=lig.streams.compounds,
               descriptors=["MolWt", "TPSA"], morgan_fp=True)
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["MolWt", "TPSA"])
+    assert_substrings_in(content, ['"MolWt",', '"TPSA"'])
 
 
 def test_ensemble_analysis_params(local_config, isolated_cwd, new_pipeline):
@@ -459,7 +532,7 @@ def test_ensemble_analysis_params(local_config, isolated_cwd, new_pipeline):
                          groups=groups.streams.sequences,
                          selection="CA", reference="first")
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["CA", "first"])
+    assert_substrings_in(content, ['--selection "CA"', '--reference "first"'])
 
 
 def test_consensus_params(local_config, isolated_cwd, new_pipeline):
@@ -475,4 +548,7 @@ def test_consensus_params(local_config, isolated_cwd, new_pipeline):
                         Consensus.mean("rmsf")],
         )
         content = read_all_emitted_artifacts(pipeline.save())
-    assert_substrings_in(content, ["stable_frac", "rmsf"])
+    assert_substrings_in(content, [
+        '"predicate": "rmsf<=2.0"', '"name": "stable_frac"',
+        '"column": "rmsf"', '"name": "rmsf_mean"',
+    ])

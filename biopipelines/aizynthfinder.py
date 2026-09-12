@@ -119,7 +119,8 @@ class AiZynthFinder(BaseConfig):
     """
 
     TOOL_NAME = "AiZynthFinder"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "aizynthfinder"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -129,25 +130,26 @@ class AiZynthFinder(BaseConfig):
         from figshare and writes the config.yml the CLI consumes, so the install
         is verified on that file's presence as well as on the import.
         """
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         data_dir = folders.get("AiZynthFinder", "")
         config_check = f'[ -f "{data_dir}/config.yml" ]'
-        env_check = cls._env_exists_check("aizynthfinder", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {config_check} \\
-   && {cls._env_run("aizynthfinder", env_manager)}python -c "import aizynthfinder" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import aizynthfinder" >/dev/null 2>&1; then
     echo "AiZynthFinder already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("aizynthfinder", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("aizynthfinder", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing AiZynthFinder ==="
 {skip}{remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create aizynthfinder environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
@@ -156,12 +158,12 @@ if {config_check}; then
     echo "Public data already present in {data_dir}"
 else
     echo "Downloading AiZynthFinder public models and templates"
-    (cd "{data_dir}" && {cls._env_run("aizynthfinder", env_manager)}download_public_data .)
+    (cd "{data_dir}" && {cls._env_run(env, env_manager)}download_public_data .)
 fi
 
 # Verify: package importable AND the downloaded config the CLI needs is present.
 if {config_check} \\
-   && {cls._env_run("aizynthfinder", env_manager)}python -c "import aizynthfinder" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import aizynthfinder" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== AiZynthFinder installation complete ==="
 else
@@ -326,10 +328,10 @@ python "{self.helper_py}" \\
         # Route and precursor counts are only known once the search runs, so both
         # suffixes stay in one lazy bracket.
         route_ids = generate_multiplied_ids_pattern(
-            self.compounds_stream.ids, "[<N>]", input_stream_name="compounds"
+            self.compounds_stream.ids, "[<#>]", input_stream_name="compounds"
         )
         precursor_ids = generate_multiplied_ids_pattern(
-            self.compounds_stream.ids, "[<N>_<N>]", input_stream_name="compounds"
+            self.compounds_stream.ids, "[<#>_<#>]", input_stream_name="compounds"
         )
 
         routes_stream = DataStream(

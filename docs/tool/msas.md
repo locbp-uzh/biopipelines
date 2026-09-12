@@ -18,15 +18,18 @@ Generates multiple sequence alignments for structure prediction by querying a lo
 
 **Parameters**:
 - `sequences`: str | List[str] | DataStream | StandardizedOutput (required) — Input sequences.
-- `output_format`: str = "csv" — Output format (`"csv"`, `"a3m"`).
+- `output_format`: str = "csv" — Format requested *from the search* (`"csv"`, `"a3m"`). The step always emits `<id>.csv` either way; an a3m result is converted on arrival, so this selects the wire format, not the output format. A `server_url` server returns a3m regardless.
 - `timeout`: int = 3600 — Server timeout in seconds.
 - `mask`: str | tuple = "" — Optional region of each sequence to mask out of the MSA query (PyMOL-style selection string or `(TableInfo, column)`).
-- `server_url`: str = "" — Query a remote ColabFold-protocol MSA server over HTTP instead of starting a local one. Requires `output_format="a3m"` (the protocol returns a3m alignments). Set `MMSEQS2_SERVER_USER` / `MMSEQS2_SERVER_PASSWORD` for basic auth; credentials are refused over plain HTTP.
+- `server_url`: str = "" — Query a remote ColabFold-protocol MSA server over HTTP instead of starting a local one. Any `output_format` is accepted (the step converts the a3m the protocol returns). Set `MMSEQS2_SERVER_USER` / `MMSEQS2_SERVER_PASSWORD` for basic auth; credentials are refused over plain HTTP. This queries a **shared public service** when pointed at `api.colabfold.com` — see the note below before running a large batch through it.
+
+**Using the public ColabFold server.** `server_url="https://api.colabfold.com"` queries a **free community service** run by the ColabFold authors, not lab infrastructure. The client identifies itself, checks the submit response for `RATELIMIT` / `MAINTENANCE` instead of polling a ticket that was never queued, and backs off with jitter as it waits. None of that makes a large batch appropriate: many pipeline steps running concurrently each poll independently, and there is no cross-step throttle. For anything beyond a handful of sequences, run a local `MMseqs2Server` — that is what it exists for. If a batch fails entirely the step now exits non-zero rather than writing an empty MSA table, which previously let every downstream fold run single-sequence with nothing saying so.
 
 **Streams**: `msas`
 
 **Tables**:
-- `msas`: | id | sequences.id | sequence | msa_file | file |
+- `msas`: | id | sequences.id | sequence | file |
+- `missing`: | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -69,7 +72,7 @@ Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFol
 **Streams**: `msas`
 
 **Tables**:
-- `msas`: | id | sequences.id | sequence | msa_file |
+- `msas`: | id | sequences.id | sequence | file |
 
 **MSA Recycling Compatibility**:
 

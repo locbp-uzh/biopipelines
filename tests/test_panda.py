@@ -877,3 +877,54 @@ def test_merge_grain_coarsest_keeps_one_row_per_coarse_id(capsys):
     assert sorted(out["id"]) == ["d_1", "d_2"]
     assert out["id"].notna().all()
     assert "WARNING" in capsys.readouterr().out
+
+
+def test_panda_multipool_value_stream_survives_file_stream_sibling(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Panda(pool=[file_based, value_based]) must keep the value stream's
+    content columns.
+
+    The runtime file-map builder excluded only shared-file streams, so a
+    value-based `sequences` stream (files=[], content in map_table) was
+    collected as if it were per-id files and rewritten as `id, file` —
+    dropping `sequence`. A single-pool test does not catch it; the
+    file-based sibling is what puts the extractor on that path."""
+    from biopipelines.sequence import Sequence
+    from biopipelines.mock import Mock
+    from biopipelines.panda import Panda
+
+    pipeline = new_pipeline("panda_multipool_value")
+    with pipeline:
+        seq = Sequence(seq=["MKTAYIAK", "GGGGALV"], ids=["d1", "d2"],
+                       type="protein")
+        struct = Mock(ids=["d1", "d2"],
+                      streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
+        pan = Panda(
+            tables=seq.tables.sequences,
+            operations=[Panda.filter("length >= 5")],
+            pool=[struct, seq],
+        )
+        pipeline.save()
+
+    _run_pipe("sequence", os.path.join(seq.output_folder, "_configuration", "sequence_config.json"))
+    _run_pipe("mock", os.path.join(struct.output_folder, "_configuration", "mock_config.json"),
+              config_flag=False)
+    _run_pipe("panda", os.path.join(pan.output_folder, "_configuration", "panda_config.json"))
+
+    out_seq = os.path.join(pan.output_folder, "sequences", "sequences.csv")
+    assert os.path.exists(out_seq), f"Panda did not emit {out_seq}"
+    cols = set(_read_csv_columns(out_seq))
+    rows = _read_csv_rows(out_seq)
+    seqs = {r["id"]: r.get("sequence", "") for r in rows}
+
+    record_case(
+        input="Panda(pool=[Mock(structures), Sequence]) sequences.csv",
+        expected=({"id", "sequence"}, {"d1": "MKTAYIAK", "d2": "GGGGALV"}),
+        actual=(cols & {"id", "sequence"}, seqs),
+    )
+    assert {"id", "sequence"}.issubset(cols), (
+        f"value-stream content lost beside a file-based pool: cols={cols}"
+    )
+    assert seqs["d1"] == "MKTAYIAK"
+    assert seqs["d2"] == "GGGGALV"

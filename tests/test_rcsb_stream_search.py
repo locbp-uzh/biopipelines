@@ -44,7 +44,7 @@ def test_rcsb_load_smiles_resolves_lazy_ids_from_runtime_map(tmp_path):
             {"id": "6_Panda_1", "smiles": "CCO"},
             {"id": "6_Panda_2", "smiles": "CCN"},
         ],
-        ["6_Panda_[<N>]"],
+        ["6_Panda_[<?>]"],
     )
 
     assert module.load_smiles(str(source)) == [
@@ -72,12 +72,12 @@ def test_rcsb_zero_hits_writes_concrete_empty_fetch_config(tmp_path, monkeypatch
     source = _stream_json(
         tmp_path,
         [{"id": "dye_1", "smiles": "CCO"}],
-        ["dye_[<N>]"],
+        ["dye_[<?>]"],
     )
     fetch_config = tmp_path / "fetch.json"
     fetch_config.write_text(json.dumps({
         "pdb_ids": [],
-        "custom_ids": ["[<hits>]"],
+        "custom_ids": ["[<?>]"],
     }))
     hits_table = tmp_path / "hits.csv"
     config = tmp_path / "search.json"

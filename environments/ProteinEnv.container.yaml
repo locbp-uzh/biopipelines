@@ -1,0 +1,33 @@
+# BioPipelines ProteinEnv - container variant (CSCS Daint, aarch64/GH200).
+#
+# Same role as ProteinEnv.cluster.yaml: the lightweight analysis/visualization
+# env behind ConformationalChange, Contacts, PoseChange, PyMOL, SASA and
+# Selection. Two differences from the cluster spec, both forced by aarch64:
+#
+#   1. The `schrodinger` channel is dropped. It publishes no linux-aarch64
+#      builds, and the cluster spec pairs it with channel_priority: strict,
+#      which would make the solve fail rather than fall through to conda-forge.
+#      conda-forge's pymol-open-source is what is wanted here anyway: it has a
+#      linux-aarch64 build (3.1.0), verified against the anaconda.org API.
+#   2. No version ceiling on python. Nothing in this env needs one on aarch64,
+#      and pinning <3.13 only narrows the solver's room on a platform with
+#      fewer builds to choose from.
+#
+# Everything here has a conda-forge linux-aarch64 build, so this resolves under
+# micromamba with no pip layer and no EDF.
+name: ProteinEnv
+channels:
+  - conda-forge
+
+dependencies:
+  - python>=3.10
+  - pymol-open-source
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - biopython
+  - rdkit
+  - openbabel
+  - requests
+  - pyyaml

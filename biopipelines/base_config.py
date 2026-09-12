@@ -10,12 +10,14 @@ validation, and integration with the pipeline system.
 """
 
 import pandas as pd
+import functools
+import inspect
 import os
 import sys
 import re
 import json
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union, TypeVar, overload, Type
+from typing import Dict, List, Any, Optional, TypeVar, overload, Type
 
 try:
     from ._layout import INTERNAL_FOLDER
@@ -70,17 +72,182 @@ def _escape_for_double_quotes(value: str) -> str:
              .replace("`", "\\`")
     )
 
+
+# CLI dialects `render_extra_args` can emit: "argparse" is `--key value`, "hydra" is `key=value`, which the whole RFdiffusion family needs because its entry points are hydra apps rather than argparse ones.
+EXTRA_ARGS_DIALECTS = ("argparse", "hydra")
+
+# The env the framework itself runs in, and the fallback when a config declares none.
+FRAMEWORK_ENV = "biopipelines"
+
+# A forwarded key becomes an upstream flag verbatim, so it is allowlisted rather than denylisted. Dotted paths and a leading "+" are here because a hydra override is spelled `denoiser.noise_scale_ca=1` or `+potentials.substrate=LIG`; those reach a constructor as `Tool(**{"denoiser.noise_scale_ca": 1})`, which Python accepts even though the key is not an identifier. An inner "-" is allowed too, because many upstream parsers spell flags `--msa-mode`.
+_SAFE_EXTRA_KEY_RE = re.compile(r"^\+?[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)*$")
+
+# Stricter than _SAFE_FREEFORM_RE because LigandMPNN emits its command through `eval`, which re-parses
+# the line and so strips one layer of quoting: a `;` in a forwarded value would start a new command.
+_SHELL_METACHARACTERS_RE = re.compile(r"[;|&<>()\n\r]")
+
+
+def _validate_extra_arg_scalar(field: str, value: Any) -> None:
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    if isinstance(value, str):
+        _validate_freeform_string(field, value)
+        found = _SHELL_METACHARACTERS_RE.search(value)
+        if found:
+            raise ValueError(
+                f"{field}={value!r} contains the shell metacharacter {found.group()!r}, which is never "
+                "part of an upstream command-line value and would be re-interpreted as shell syntax."
+            )
+        return
+    raise ValueError(
+        f"{field}={value!r} of type {type(value).__name__} cannot be forwarded as an "
+        "upstream command-line argument; only strings, numbers, booleans, None and "
+        "flat lists of those can."
+    )
+
+
+def _validate_extra_arg(key: str, value: Any) -> None:
+    """Shell-safety layer 4 for one forwarded kwarg, applied to the key and the value.
+
+    Runs at construction time so an unusable value raises at the user's desk instead of reaching bash on a compute node.
+    """
+    if not _SAFE_EXTRA_KEY_RE.match(key):
+        raise ValueError(
+            f"forwarded parameter name {key!r} is not an identifier or a dotted "
+            "path, so it cannot be rendered as an upstream flag."
+        )
+    if isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            if isinstance(item, (list, tuple)):
+                raise ValueError(
+                    f"{key}[{i}]: a nested list cannot be rendered as a flag value."
+                )
+            _validate_extra_arg_scalar(f"{key}[{i}]", item)
+        return
+    _validate_extra_arg_scalar(key, value)
+
+
+def render_extra_args(extras: Dict[str, Any], dialect: str = "argparse") -> List[str]:
+    """Render forwarded kwargs as raw upstream argv tokens.
+
+    The single renderer for every forwarding tool, so 73 pipe scripts and their wrappers cannot each invent their own spelling. Underscores are preserved: both dialects in use take them verbatim.
+
+    ``True`` becomes a bare flag under argparse and an explicit ``key=True`` under hydra, where a bare token is not a valid override. ``False`` and ``None`` are omitted entirely, since "off" is the upstream default the wrapper never touched. A list repeats an argparse flag once per element, but renders as a single hydra ``key=[a,b]``: a repeated hydra override keeps only the last value, which would drop elements silently.
+    """
+    if dialect not in EXTRA_ARGS_DIALECTS:
+        raise ValueError(
+            f"unknown extra-args dialect {dialect!r}; expected one of {EXTRA_ARGS_DIALECTS}"
+        )
+    tokens: List[str] = []
+    for key, value in extras.items():
+        if value is False or value is None:
+            continue
+        if dialect == "hydra":
+            if isinstance(value, (list, tuple)):
+                tokens.append(f"{key}=[{','.join(str(v) for v in value)}]")
+            else:
+                tokens.append(f"{key}={value}")
+            continue
+        if value is True:
+            tokens.append(f"--{key}")
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                tokens += [f"--{key}", str(item)]
+        else:
+            tokens += [f"--{key}", str(value)]
+    return tokens
+
+
+def _constructor_parameter_names(cls: type) -> List[str]:
+    """The named parameters of a tool's own constructor, for the misspelling check."""
+    try:
+        parameters = inspect.signature(cls.__init__).parameters
+    except (TypeError, ValueError):
+        return []
+    skip = (inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL)
+    return [n for n, p in parameters.items() if n != "self" and p.kind not in skip]
+
+
+def _resolve_parameter_aliases(cls: type, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite an alternative parameter spelling to the parameter's current name.
+
+    Applied before the tool's own ``__init__`` binds anything, so an alias binds the real parameter instead of falling through to the leftover-kwargs logic — which would otherwise report it as a probable misspelling and, on a forwarding tool, put it on the upstream command line.
+
+    A key the framework itself reads (`name`) is copied rather than moved: the tool gets the value under its new parameter name AND `BaseConfig` still sees `name`, so a tool that used to capture the job name keeps its old behaviour while the job name finally lands.
+    """
+    aliases = cls.PARAMETER_ALIASES
+    if not aliases:
+        return kwargs
+    resolved = dict(kwargs)
+    for old, new in aliases.items():
+        if old not in resolved:
+            continue
+        reserved = old in contract_enforcement.RESERVED_KWARGS
+        if new in resolved:
+            # `name` alongside the tool's own parameter is the uniform spelling, not a clash: it is the job name and nothing else.
+            if reserved:
+                continue
+            raise ValueError(
+                f"{cls.TOOL_NAME}: {old}= is another spelling of {new}=; "
+                f"pass one or the other, not both."
+            )
+        value = resolved[old] if reserved else resolved.pop(old)
+        resolved[new] = value
+        if old in cls.DEPRECATED_ALIASES:
+            contract_enforcement.report(contract_enforcement.Violation(
+                check="deprecated_alias",
+                message=f"{cls.TOOL_NAME}: {old}= is a synonym for {new}= and will soon be deprecated.",
+                hint=(f"The value was bound to {new}=, so this pipeline still runs as "
+                      f"written. Silence this line with "
+                      f"BIOPIPELINES_ENFORCE_DEPRECATED_ALIAS=off."),
+            ))
+    return resolved
+
+
+def _alias_resolving_init(init):
+    """Wrap a tool's ``__init__`` so `PARAMETER_ALIASES` is applied to its kwargs first."""
+    @functools.wraps(init)
+    def wrapper(self, *args, **kwargs):
+        return init(self, *args, **_resolve_parameter_aliases(type(self), kwargs))
+
+    wrapper._resolves_aliases = True
+    return wrapper
+
+
 try:
     from .config_manager import ConfigManager
     from .file_paths import Path
-    from .biopipelines_io import TableReference
+    from . import contract_enforcement
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from config_manager import ConfigManager
     from file_paths import Path
-    from biopipelines_io import TableReference
+    import contract_enforcement
 
+
+
+# Re-exported so the modules importing these from base_config keep working after the split.
+try:
+    from .data_containers import (  # noqa: F401
+        TableMetadata,
+        TableInfo,
+        IndexedTableContainer,
+        TableContainer,
+        StreamContainer,
+        resolve_table_reference,
+    )
+    from .outputs import StandardizedOutput, ToolOutput  # noqa: F401
+except ImportError:
+    from data_containers import (  # noqa: F401
+        TableMetadata,
+        TableInfo,
+        IndexedTableContainer,
+        TableContainer,
+        StreamContainer,
+        resolve_table_reference,
+    )
+    from outputs import StandardizedOutput, ToolOutput  # noqa: F401
 
 # TypeVar for preserving concrete tool types in type hints
 T = TypeVar('T', bound='BaseConfig')
@@ -101,6 +268,20 @@ class BaseConfig(ABC):
     # Independent of the upstream tool's version. The pre-commit hook enforces
     # that this is bumped whenever the wrapper or its pipe scripts change.
     TOOL_VERSION = "1.0"
+    # The environment this tool builds and runs in. Declared here so no install script hides an env name in its body; only env_manager "pip" ever falls back to it (see _install_env).
+    ENV_NAME = ""
+
+    # True when the tool's user names its streams (Mock(streams={...}), Scripting), so no registry can know them.
+    USER_STREAM_NAMES = False
+
+    # "" = off. Set to a dialect from EXTRA_ARGS_DIALECTS to declare that this tool renders constructor kwargs it does not type onto its upstream command line, so an advanced user can reach an upstream option the wrapper never curated.
+    FORWARD_UNKNOWN_KWARGS = ""
+
+    # {alternative spelling: current parameter name}. A renamed parameter keeps its old spelling here so a pipeline written against it still binds the new parameter; a synonym a user reasonably expects (RFdiffusion3's `contigs`, the plural its three sibling tools take) is declared the same way. Resolved before the constructor binds its parameters — see _resolve_parameter_aliases.
+    PARAMETER_ALIASES: Dict[str, str] = {}
+
+    # The PARAMETER_ALIASES keys that are a retired spelling rather than a first-class synonym: only these report a deprecation, so a synonym stays silent.
+    DEPRECATED_ALIASES: tuple = ()
 
     # Common path descriptors available to all tools
     pipeline_name = Path(lambda self: self._extract_pipeline_name())
@@ -120,6 +301,51 @@ class BaseConfig(ABC):
     tables_folder = Path(lambda self: os.path.join(self.output_folder, "tables"))
     extras_folder = Path(lambda self: os.path.join(self.output_folder, "_extras"))
     
+
+    def __init_subclass__(cls, **kwargs):
+        """Attribute every contract check raised inside get_output_files() to this tool.
+
+        Wrapping here rather than at each of the ~90 call sites is what lets a DataStream stay constructible standalone while still naming its tool.
+        """
+        super().__init_subclass__(**kwargs)
+        if cls.FORWARD_UNKNOWN_KWARGS:
+            if cls.FORWARD_UNKNOWN_KWARGS not in EXTRA_ARGS_DIALECTS:
+                raise ValueError(
+                    f"{cls.TOOL_NAME}: FORWARD_UNKNOWN_KWARGS must be one of "
+                    f"{EXTRA_ARGS_DIALECTS} or '' (off), got "
+                    f"{cls.FORWARD_UNKNOWN_KWARGS!r}."
+                )
+            contract_enforcement.assert_can_forward(cls)
+        if cls.PARAMETER_ALIASES or cls.DEPRECATED_ALIASES:
+            known = set(_constructor_parameter_names(cls)) | contract_enforcement.RESERVED_KWARGS
+            unbound = sorted(set(cls.PARAMETER_ALIASES.values()) - known)
+            if unbound:
+                raise ValueError(
+                    f"{cls.TOOL_NAME}: PARAMETER_ALIASES points at {unbound}, which "
+                    f"{cls.__name__}.__init__ does not name, so the alias would land "
+                    f"back in **kwargs."
+                )
+            undeclared = sorted(set(cls.DEPRECATED_ALIASES) - set(cls.PARAMETER_ALIASES))
+            if undeclared:
+                raise ValueError(
+                    f"{cls.TOOL_NAME}: DEPRECATED_ALIASES names {undeclared}, which "
+                    f"PARAMETER_ALIASES does not map to a current parameter."
+                )
+            if not getattr(cls.__init__, "_resolves_aliases", False):
+                cls.__init__ = _alias_resolving_init(cls.__init__)
+        produce_outputs = cls.__dict__.get("get_output_files")
+        if produce_outputs is None or getattr(produce_outputs, "_contract_context", False):
+            return
+
+        @functools.wraps(produce_outputs)
+        def wrapper(self, *args, **kwargs):
+            with contract_enforcement.tool_context(
+                self.TOOL_NAME, user_stream_names=type(self).USER_STREAM_NAMES
+            ):
+                return produce_outputs(self, *args, **kwargs)
+
+        wrapper._contract_context = True
+        cls.get_output_files = wrapper
 
     @overload
     def __new__(cls: Type[T], *args, **kwargs) -> T:
@@ -152,6 +378,49 @@ class BaseConfig(ABC):
             Bash script content for installing this tool, or None if not defined.
         """
         return None
+
+    @classmethod
+    def _install_env(cls, env_manager: str, env_name: Optional[str] = None) -> str:
+        """Return the env name this tool's install script must build.
+
+        Resolution order: an explicit ``env_name`` from the caller, then the tool's ``environments:`` entry in the active config, then raise. The config entry is what ``_load_environments`` activates at run time, so reading it here is what keeps install and runtime pointed at the same env: an install script that hard-codes its own name builds one env while the pipeline activates another, and the mismatch only surfaces later on a compute node.
+
+        No fallback to ``ENV_NAME`` outside pip mode is deliberate. A tool with no entry under the active variant is not set up there, and raising names the missing ``environments:`` entry instead of leaving a job to fail on an env that was never created.
+
+        ``env_manager: pip`` is exempt from the raise, because a laptop config declares no ``environments:`` at all: it falls back to the tool's own name as a label, and :meth:`_env_install_block` refuses to build a conda-style env there rather than emitting ``pip env create`` and ``pip run -n``, which are not pip commands and could only ever fail.
+        """
+        if env_name:
+            return env_name
+
+        config_manager = ConfigManager()
+        configured = config_manager.get_environment(cls.TOOL_NAME)
+        if isinstance(configured, list):
+            # A multi-env tool lists its primary env first; the rest are its own business.
+            configured = configured[0] if configured else None
+        if configured:
+            return configured
+
+        if env_manager == "pip":
+            # Exempt from the raise, not from the config: a laptop variant declares no environments:.
+            return cls.ENV_NAME
+
+        config_name = os.path.basename(config_manager._get_config_path())
+        variant = config_manager.get_variant()
+        if configured == "":
+            raise ValueError(
+                f"{cls.TOOL_NAME}: environments.{cls.TOOL_NAME} is empty in "
+                f"{config_name} (variant '{variant}'), which means an image supplies "
+                f"the interpreter and there is no environment to build. Installing "
+                f"{cls.TOOL_NAME} under this variant is not supported: use the "
+                f"configured image, or give environments.{cls.TOOL_NAME} a real "
+                f"environment name."
+            )
+        raise ValueError(
+            f"{cls.TOOL_NAME}: no environment is configured for it in {config_name} "
+            f"(variant '{variant}'), so there is no name to install into. Add an "
+            f"environments: entry -- environments.{cls.TOOL_NAME}: \"<env name>\" -- "
+            f"or install {cls.TOOL_NAME} under a variant that configures it."
+        )
 
     @staticmethod
     def _env_exists_check(env_name: str, env_manager: str) -> str:
@@ -193,6 +462,17 @@ class BaseConfig(ABC):
         actually work. The existence guard avoids non-zero exit codes from
         ``env remove`` on a non-existent env aborting the script under set -e.
         """
+        # A tool mapped to the framework's own env (config.cluster.yaml does this for PLIP and Gnina)
+        # would otherwise delete the env every other step activates.
+        if env_name == FRAMEWORK_ENV:
+            raise ValueError(
+                f"{cls.TOOL_NAME}.install(force_reinstall=True) resolves to the framework env "
+                f"{FRAMEWORK_ENV!r}, which every other step activates, so removing it would break the "
+                f"whole pipeline. Its `environments:` entry points there deliberately (the tool needs "
+                f"only the shared deps), so there is nothing tool-specific to rebuild. Reinstall "
+                f"without force, or rebuild {FRAMEWORK_ENV!r} yourself from "
+                f"environments/{FRAMEWORK_ENV}.yaml."
+            )
         check = cls._env_exists_check(env_name, env_manager)
         # venv has no registry and no `env remove`; the env IS its directory.
         if env_manager == "venv":
@@ -209,6 +489,44 @@ class BaseConfig(ABC):
             f'    {env_manager} env remove -n {env_name} -y\n'
             f'fi'
         )
+
+    @staticmethod
+    def _link_conda_binaries(env_name: str, env_manager: str, binaries) -> str:
+        """Symlink conda-provided executables into a venv shim's bin/.
+
+        A venv built by a conda env's python inherits that env's *Python
+        packages* through ``--system-site-packages``, but not its executables:
+        ``<venv>/bin`` holds only python and pip. A tool whose conda package
+        ships a binary (vina, obabel, mkdssp, …) must link it in, or the binary
+        is missing from PATH once the shim is activated.
+
+        No-op unless the env manager is venv — the conda family puts binaries on
+        PATH itself.
+        """
+        if env_manager != "venv":
+            return ""
+        cm = ConfigManager()
+        venv_bin = f"{cm.get_venv_path(env_name)}/bin"
+        conda_bin = f"{cm.get_conda_env_root()}/{env_name}/bin"
+        names = " ".join(binaries)
+        return (
+            f'# venv shims inherit packages, not executables.\n'
+            f'for _bin in {names}; do\n'
+            f'    if [ -x "{conda_bin}/$_bin" ]; then\n'
+            f'        ln -sf "{conda_bin}/$_bin" "{venv_bin}/$_bin"\n'
+            f'    fi\n'
+            f'done\n'
+        )
+
+    @staticmethod
+    def _env_create_name_flag(env_name: str, env_manager: str) -> str:
+        """Return the ``-n <env>`` flag for an ``env create``, or "" under pip.
+
+        A spec yaml carries its own ``name:`` key, which is what ``env create`` would name the env; passing ``-n`` overrides it so a redirected ``environments:`` entry creates the env the pipeline actually activates. Empty under pip, whose emitted commands are inert and are left exactly as they were.
+        """
+        if env_manager == "pip":
+            return ""
+        return f" -n {env_name}"
 
     @staticmethod
     def _env_install_block(env_name: str, env_manager: str, biopipelines: str) -> str:
@@ -235,11 +553,19 @@ class BaseConfig(ABC):
         only needs to call this helper with the env name.
         """
         import glob, re
+        if env_manager == "pip":
+            # `pip env create` and `pip run -n` are not pip commands; emitting them only failed later.
+            message = (
+                f"Cannot build the {env_name} environment: this variant sets machine.env_manager to"
+                " pip, which has no environment manager. Install the tool's dependencies into the"
+                " active interpreter, or use a variant whose env_manager is mamba, micromamba,"
+                " conda or venv."
+            )
+            return f'echo "{message}" >&2' + chr(10) + "exit 1" + chr(10)
         variant = ConfigManager().get_variant()
         env_dir = f"{biopipelines}/environments"
         env_yaml_variant = f"{env_dir}/{env_name}.{variant}.yaml"
         env_yaml_shared = f"{env_dir}/{env_name}.yaml"
-
         if env_manager == "venv":
             import yaml as _yaml
             src = env_yaml_variant if os.path.isfile(env_yaml_variant) else env_yaml_shared
@@ -297,11 +623,16 @@ class BaseConfig(ABC):
                     f'source "{venv_path}/bin/activate"\n'
                 )
         else:
+            named = BaseConfig._env_create_name_flag(env_name, env_manager)
+            # An env may be built by an upstream installer rather than from a spec (RF3's 'modelforge'), and `env create -f` on an absent file only fails.
             env_block = (
                 f'if [ -f "{env_yaml_variant}" ]; then\n'
-                f'    {env_manager} env create -f "{env_yaml_variant}" -y\n'
+                f'    {env_manager} env create -f "{env_yaml_variant}"{named} -y\n'
+                f'elif [ -f "{env_yaml_shared}" ]; then\n'
+                f'    {env_manager} env create -f "{env_yaml_shared}"{named} -y\n'
                 f'else\n'
-                f'    {env_manager} env create -f "{env_yaml_shared}" -y\n'
+                f'    echo "No environments/{env_name}.{variant}.yaml or {env_name}.yaml;'
+                f' assuming the {env_name} environment already exists." >&2\n'
                 f'fi\n'
             )
 
@@ -451,8 +782,8 @@ class BaseConfig(ABC):
         Raises:
             NotImplementedError: If the tool hasn't defined _install_script()
         """
-        # Verify _install_script is overridden (call with empty dict/default to check)
-        if cls._install_script({}, "mamba") is None:
+        # Probed with the configured manager, not a fixed "mamba", because _install_env resolves per manager.
+        if cls._install_script({}, ConfigManager().get_env_manager()) is None:
             raise NotImplementedError(
                 f"{cls.__name__} does not define installation steps. "
                 f"Override _install_script() to provide bash commands."
@@ -538,8 +869,49 @@ class BaseConfig(ABC):
         # Store all parameters for validation and serialization
         self.params = kwargs
 
+        # Whatever is left after the subclass bound its named parameters is a framework key, a typo, or — on a forwarding tool — an upstream option the wrapper does not type.
+        dialect = type(self).FORWARD_UNKNOWN_KWARGS
+        self.extra_args = {
+            k: v for k, v in kwargs.items()
+            if k not in contract_enforcement.RESERVED_KWARGS
+        } if dialect else {}
+
+        contract_enforcement.check_kwargs(
+            self.TOOL_NAME, kwargs,
+            known=_constructor_parameter_names(type(self)),
+            forwards=bool(dialect),
+        )
+        for key, value in self.extra_args.items():
+            _validate_extra_arg(key, value)
+
         # Validate configuration
         self.validate_params()
+
+    def extra_args_tokens(self) -> List[str]:
+        """Raw upstream argv tokens for this tool's forwarded kwargs; empty when it does not forward."""
+        extras = getattr(self, "extra_args", None)
+        if not extras:
+            return []
+        return render_extra_args(extras, type(self).FORWARD_UNKNOWN_KWARGS)
+
+    def extra_args_bash_tokens(self) -> List[str]:
+        """`extra_args_tokens`, each wrapped in double quotes for a bash array element or command line."""
+        return ['"' + t + '"' for t in self.extra_args_tokens()]
+
+    def extra_args_bash(self) -> str:
+        """The forwarded arguments as one bash-ready fragment, or '' when there are none."""
+        return " ".join(self.extra_args_bash_tokens())
+
+    def extra_args_echo(self) -> str:
+        """A bash `echo` naming the forwarded arguments, so they are visible in the log rather than silent.
+
+        The tokens carry no `" ` $ \\` — `_validate_extra_arg` rejected those at construction — so they are safe unquoted inside the echo's own double quotes.
+        """
+        tokens = self.extra_args_tokens()
+        if not tokens:
+            return ""
+        return (f'echo "Forwarding unrecognized argument(s) to {self.TOOL_NAME}: '
+                f'{" ".join(tokens)}"\n')
 
     def _load_environments(self):
         """
@@ -1452,1250 +1824,113 @@ class _Installer(BaseConfig):
         }
 
 
-class TableMetadata:
-    """Holds table metadata (name, path, columns, description)."""
+# ── dataflow edge recovery ───────────────────────────────────────────
 
-    def __init__(self, name: str, path: str, columns: List[str] = None,
-                 description: str = ""):
-        self.name = name
-        self.path = path
-        self.columns = columns or []
-        self.description = description
+# Never a dataflow input, and walking them would reach the pipeline or this tool's own outputs.
+_EDGE_SKIP_ATTRS = frozenset({
+    "pipeline", "pipeline_ref", "folders", "output_files", "input_sources",
+    "tables", "streams", "extra_args", "resources", "environments",
+    "dependencies", "filter_metadata",
+})
 
-    def __repr__(self) -> str:
-        return f"TableMetadata(name='{self.name}', path='{self.path}', columns={self.columns})"
+_EDGE_WALK_MAX_DEPTH = 5
+_EDGE_WALK_MAX_ITEMS = 5000
 
 
-class TableInfo:
-    """Information about a table including name, path, and expected columns.
+def producer_of(obj) -> Optional['BaseConfig']:
+    """The tool config that produced ``obj``, or None when it carries no back-reference."""
+    from .datastream import DataStream
 
-    Metadata is accessed via the .info property:
-        table.info.path, table.info.columns, etc.
+    if isinstance(obj, StandardizedOutput):
+        return obj._producer
+    if isinstance(obj, ToolOutput):
+        return obj.config
+    if isinstance(obj, DataStream):
+        return getattr(obj, "_producer", None)
+    return None
 
-    All other attribute access returns TableReference objects:
-        table.fixed -> TableReference(path, "fixed")
+
+def _walk_producer_refs(value, found: List[Any], depth: int = 0, seen=None) -> None:
+    """Collect producer-carrying objects reachable from ``value``.
+
+    Recurses through the shapes tools actually store an input in: Bundle/Each wrappers, lists of inputs, and dicts. Stops at anything that carries its own back-reference, and never descends into a tool config or a Pipeline.
     """
-
-    def __init__(self, name: str, path: str, columns: List[str] = None,
-                 description: str = ""):
-        self._info = TableMetadata(name, path, columns, description)
-
-        # Set column attributes for IDE autocompletion
-        for column in self._info.columns:
-            setattr(self, column, self._create_column_reference(column))
-
-    @property
-    def info(self) -> TableMetadata:
-        """Access table metadata (name, path, columns, description)."""
-        return self._info
-
-    def _create_column_reference(self, column_name: str):
-        """Create a TableReference for column access."""
-        return TableReference(self._info.path, column_name)
-
-    def __getattr__(self, column_name: str):
-        """Return TableReference for any attribute access."""
-        return self._create_column_reference(column_name)
-
-    def __str__(self) -> str:
-        if self._info.columns:
-            col_display = ', '.join(self._info.columns)
-            return f"${self._info.name} ({col_display})"
-        return f"${self._info.name}"
-
-    def __repr__(self) -> str:
-        return f"TableInfo(name='{self._info.name}', path='{self._info.path}', columns={self._info.columns})"
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert TableInfo to dictionary for JSON serialization."""
-        return {
-            "name": self._info.name,
-            "path": self._info.path,
-            "columns": self._info.columns.copy() if self._info.columns else [],
-            "description": self._info.description,
-        }
-
-
-class IndexedTableContainer:
-    """A collection of TableInfo objects indexed by ID, all sharing the same schema.
-
-    Used when a tool produces one table per input ID (e.g., per-structure RMSF).
-    Integrates into TableContainer as a single named entry.
-
-    Usage:
-        rmsf = IndexedTableContainer(
-            name="rmsf",
-            columns=["id", "chain", "resi", "rmsf"],
-            description="Per-residue RMSF"
-        )
-        rmsf.add("1a2j", path="/output/1a2j_RMSF.csv")
-        rmsf.add("1gfl", path="/output/1gfl_RMSF.csv")
-
-        rmsf["1a2j"]              # -> TableInfo
-        rmsf["1a2j"].info.path    # -> path string
-
-        for struct_id, table_info in rmsf:
-            print(struct_id, table_info.info.path)
-    """
-
-    def __init__(self, name: str, columns: List[str] = None,
-                 description: str = ""):
-        self.name = name
-        self.columns = columns or []
-        self.description = description
-        self._entries: Dict[str, TableInfo] = {}
-
-    def add(self, entry_id: str, path: str) -> 'IndexedTableContainer':
-        """Add a per-ID table entry. Returns self for chaining."""
-        self._entries[entry_id] = TableInfo(
-            name=f"{self.name}_{entry_id}",
-            path=path,
-            columns=self.columns.copy(),
-            description=f"{self.description} ({entry_id})",
-        )
-        return self
-
-    def __getitem__(self, entry_id: str) -> TableInfo:
-        """Get TableInfo by ID."""
-        if entry_id in self._entries:
-            return self._entries[entry_id]
-        raise KeyError(f"No entry for ID '{entry_id}' in indexed table '{self.name}'. "
-                       f"Available IDs: {list(self._entries.keys())}")
-
-    def get(self, entry_id: str, default=None) -> Optional[TableInfo]:
-        """Get TableInfo by ID with default."""
-        return self._entries.get(entry_id, default)
-
-    def __contains__(self, entry_id: str) -> bool:
-        return entry_id in self._entries
-
-    def __iter__(self):
-        """Iterate over (id, TableInfo) pairs."""
-        return iter(self._entries.items())
-
-    def __len__(self) -> int:
-        return len(self._entries)
-
-    @property
-    def ids(self) -> List[str]:
-        """All entry IDs."""
-        return list(self._entries.keys())
-
-    def keys(self):
-        """All entry IDs."""
-        return self._entries.keys()
-
-    def values(self):
-        """All TableInfo objects."""
-        return self._entries.values()
-
-    def items(self):
-        """All (id, TableInfo) pairs."""
-        return self._entries.items()
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serialize for JSON persistence."""
-        return {
-            "_type": "IndexedTableContainer",
-            "name": self.name,
-            "columns": self.columns.copy(),
-            "description": self.description,
-            "entries": {
-                entry_id: table_info.to_dict()
-                for entry_id, table_info in self._entries.items()
-            }
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'IndexedTableContainer':
-        """Deserialize from JSON dict."""
-        container = cls(
-            name=data["name"],
-            columns=data.get("columns", []),
-            description=data.get("description", "")
-        )
-        for entry_id, info_dict in data.get("entries", {}).items():
-            container._entries[entry_id] = TableInfo(
-                name=info_dict.get("name", f"{data['name']}_{entry_id}"),
-                path=info_dict.get("path", ""),
-                columns=info_dict.get("columns", []),
-                description=info_dict.get("description", ""),
-            )
-        return container
-
-    def __str__(self) -> str:
-        ids_display = ', '.join(self.ids[:5])
-        if len(self.ids) > 5:
-            ids_display += f', ... ({len(self.ids)} total)'
-        col_display = ', '.join(self.columns) if self.columns else 'unknown'
-        return f"${self.name}[{ids_display}] ({col_display})"
-
-    def __repr__(self) -> str:
-        return f"IndexedTableContainer(name='{self.name}', ids={self.ids}, columns={self.columns})"
-
-
-class TableContainer:
-    """Container for named tables with dot-notation access."""
-    
-    def __init__(self, tables: Dict[str, TableInfo]):
-        self._tables = tables
-
-        # Set attributes for dot notation access to TableInfo objects (not just paths)
-        # Note: For IDE autocompletion, attributes should also be explicitly set in calling code
-        for name, info in tables.items():
-            setattr(self, name, info)
-    
-    def __getitem__(self, key: str):
-        """Get table path by name, or IndexedTableContainer directly."""
-        if key in self._tables:
-            entry = self._tables[key]
-            if isinstance(entry, IndexedTableContainer):
-                return entry
-            return entry.info.path
-
-        raise KeyError(f"No table named '{key}' in tables")
-    
-    def __getattr__(self, name: str) -> TableInfo:
-        """Get TableInfo object by name via dot notation."""
-        if name in self._tables:
-            return self._tables[name]
-        raise AttributeError(f"No table named '{name}'")
-    
-    def keys(self):
-        """Get all table names."""
-        return self._tables.keys()
-
-    def items(self):
-        """Get all name, path/container pairs."""
-        result = []
-        for name, entry in self._tables.items():
-            if isinstance(entry, IndexedTableContainer):
-                result.append((name, entry))
-            else:
-                result.append((name, entry.info.path))
-        return result
-    
-    def __contains__(self, key: str) -> bool:
-        """Support 'in' operator: 'table_name' in tables"""
-        return key in self._tables
-    
-    def get(self, key: str, default: str = "") -> str:
-        """Get table path with default (like dict.get())."""
-        try:
-            return self.__getitem__(key)
-        except KeyError:
-            return default
-    
-    def __str__(self) -> str:
-        if not self._tables:
-            return "{}"
-
-        lines = []
-        for name, entry in self._tables.items():
-            if isinstance(entry, IndexedTableContainer):
-                lines.append(f"    {str(entry)}:")
-                for eid, tinfo in entry:
-                    filename = tinfo.info.path.split('/')[-1]
-                    lines.append(f"        [{eid}] '<output_folder>/{filename}'")
-            else:
-                # Format: table name with columns, then indented file path
-                # Extract just the filename from the full path
-                filename = entry.info.path.split('/')[-1]
-                path_display = f"<output_folder>/{filename}"
-                lines.append(f"    {str(entry)}:")
-                lines.append(f"        – '{path_display}'")
-        
-        return "\n".join(lines)
-    
-    def __repr__(self) -> str:
-        return f"TableContainer({list(self._tables.keys())})"
-
-
-class StreamContainer:
-    """Container for named DataStreams with dot-notation access."""
-
-    def __init__(self, streams: Dict[str, Any]):
-        self._streams = streams
-
-        # Set attributes for dot notation access to DataStream objects
-        for name, stream in streams.items():
-            setattr(self, name, stream)
-
-    def __getitem__(self, key: str):
-        """Get DataStream by name."""
-        if key in self._streams:
-            return self._streams[key]
-        raise KeyError(f"No stream named '{key}' in streams")
-
-    def __getattr__(self, name: str):
-        """Get DataStream by name via dot notation. Returns None if not present."""
-        if '_streams' in self.__dict__ and name in self._streams:
-            return self._streams[name]
-        return None
-
-    def keys(self):
-        """Get all stream names."""
-        return self._streams.keys()
-
-    def items(self):
-        """Get all name, stream pairs."""
-        return self._streams.items()
-
-    def __contains__(self, key: str) -> bool:
-        """Support 'in' operator: 'stream_name' in streams"""
-        return key in self._streams
-
-    def get(self, key: str, default=None):
-        """Get stream with default (like dict.get())."""
-        return self._streams.get(key, default)
-
-    def __len__(self) -> int:
-        """Return number of streams."""
-        return len(self._streams)
-
-    def __str__(self) -> str:
-        if not self._streams:
-            return "{}"
-        return f"StreamContainer({list(self._streams.keys())})"
-
-    def __repr__(self) -> str:
-        return f"StreamContainer({list(self._streams.keys())})"
-
-
-class StandardizedOutput:
-    """
-    Provides dot-notation access to standardized output keys.
-
-    DataStreams are accessed via the streams container:
-
-        for structure in output.streams.structures:
-            print(f"Processing {structure.ids[0]}: {structure.files[0]}")
-
-        print(f"Generated {len(output.streams.structures)} structures")
-
-    If all streams share the same IDs, the output itself is iterable,
-    yielding single-item StandardizedOutput objects:
-
-        for item in output:
-            tool = SomeTool(structures=item)  # item.streams has one id per stream
-    """
-
-    def __init__(self, output_files: Dict[str, Any]):
-        """Initialize with output files dictionary."""
-        self._data = output_files.copy()
-
-        # Handle tables - convert to TableInfo objects if needed
-        tables_raw = output_files.get('tables', [])
-        self.tables = self._process_tables(tables_raw)
-
-        # Build streams container from all DataStream objects in output_files
-        from .datastream import DataStream
-        streams_dict = {}
-        for key, value in output_files.items():
-            if isinstance(value, DataStream):
-                streams_dict[key] = value
-        self.streams = StreamContainer(streams_dict)
-
-        self.output_folder = output_files.get('output_folder', '')
-
-        # Handle filtering metadata
-        self.filter_metadata = output_files.get('filter_metadata', {})
-        self.is_filtered = self.filter_metadata.get('is_filtered', False)
-
-        # Store additional attributes (non-DataStream, non-reserved)
-        reserved_keys = {'tables', 'output_folder', 'filter_metadata', 'streams'}
-        for key, value in output_files.items():
-            if key not in reserved_keys and not isinstance(value, DataStream) and not hasattr(self, key):
-                setattr(self, key, value)
-    
-    def _process_tables(self, tables_raw: Any) -> 'TableContainer':
-        """Process tables into TableContainer with named access."""
-        if isinstance(tables_raw, dict):
-            # Already in named format
-            table_infos = {}
-            for name, info in tables_raw.items():
-                if isinstance(info, IndexedTableContainer):
-                    table_infos[name] = info
-                elif isinstance(info, dict):
-                    # Check for serialized IndexedTableContainer
-                    if info.get('_type') == 'IndexedTableContainer':
-                        table_infos[name] = IndexedTableContainer.from_dict(info)
-                    else:
-                        # Handle columns - ensure it's always a list
-                        columns = info.get('columns', [])
-                        if isinstance(columns, str):
-                            # No placeholders - if it's a string, it should be an actual column name
-                            columns = [columns]  # Single string becomes list
-
-                        table_infos[name] = TableInfo(
-                            name=name,
-                            path=info.get('path', ''),
-                            columns=columns,
-                            description=info.get('description', ''),
-                        )
-                elif isinstance(info, TableInfo):
-                    table_infos[name] = info
-                else:
-                    # Legacy format - just a path
-                    table_infos[name] = TableInfo(name=name, path=str(info))
-            return TableContainer(table_infos)
-        elif isinstance(tables_raw, list):
-            # Legacy format - convert first item to "main"
-            table_infos = {}
-            for i, path in enumerate(tables_raw):
-                name = "main" if i == 0 else f"sheet_{i}"
-                if isinstance(path, str):
-                    table_infos[name] = TableInfo(name=name, path=path)
-                else:
-                    # Assume it's already a TableInfo or dict
-                    table_infos[name] = path
-            return TableContainer(table_infos)
-        else:
-            return TableContainer({})
-
-    def __matmul__(self, column: str) -> 'TableReference':
-        """Column lookup sugar: ``output @ "col"`` finds the table declaring
-        ``col`` and returns its ``TableReference``, same object as
-        ``output.tables.<name>.col``.
-
-        Errors fast: raises if no declared table has the column, if more than
-        one does (caller must use ``output.tables.<name>.col``), or if the only
-        match is a per-ID ``IndexedTableContainer`` (caller must index by ID
-        first, then access the column).
-        """
-        if not isinstance(column, str):
-            raise TypeError(
-                f"Column lookup expects a string, got {type(column).__name__}"
-            )
-
-        matches = []
-        indexed_only = []
-        for name, entry in self.tables._tables.items():
-            if isinstance(entry, IndexedTableContainer):
-                if column in entry.columns:
-                    indexed_only.append(name)
-                continue
-            if column in entry.info.columns:
-                matches.append(name)
-
-        if len(matches) == 1:
-            return getattr(self.tables._tables[matches[0]], column)
-        if len(matches) > 1:
-            raise ValueError(
-                f"Column '{column}' is declared in tables {matches}; "
-                f"use output.tables.<name>.{column} to disambiguate."
-            )
-        if indexed_only:
-            raise ValueError(
-                f"Column '{column}' belongs to per-ID indexed table(s) {indexed_only}; "
-                f"index by ID first, e.g. output.tables.{indexed_only[0]}[id].{column}."
-            )
-        declared = {
-            name: (entry.columns if isinstance(entry, IndexedTableContainer)
-                   else entry.info.columns)
-            for name, entry in self.tables._tables.items()
-        }
-        raise ValueError(
-            f"No declared table has a column '{column}'. Declared columns: {declared}"
-        )
-
-    def __getitem__(self, key: str):
-        """
-        ID-based selection: ``output["CP1"]`` returns a new ``StandardizedOutput``
-        whose streams carry ``ids=[key]`` and the original streams' ``files``,
-        ``map_table``, and ``format`` unchanged.
-
-        ``key`` must appear in every non-empty stream's ``ids_expanded``.
-        ``ids_expanded`` is mode-aware: deterministic streams enumerate
-        fully at config time (typos fail fast); lazy streams at config
-        time enumerate only the deterministic prefix (so only prefix-shaped
-        keys pass); lazy streams at runtime (``_runtime_mode=True``) read
-        from the materialized map_table. See developer_manual.md "ID Patterns".
-        """
-        from .datastream import DataStream
-
-        if not isinstance(key, str):
-            raise TypeError(
-                f"StandardizedOutput key must be a string ID, got {type(key).__name__}"
-            )
-
-        streams = [
-            (name, ds) for name, ds in self.streams.items()
-            if isinstance(ds, DataStream) and len(ds) > 0
-        ]
-
-        if not streams:
-            raise KeyError(f"No non-empty streams to select ID '{key}' from")
-
-        for name, ds in streams:
-            if key not in ds.ids_expanded:
-                raise KeyError(
-                    f"ID '{key}' not found in stream '{name}' "
-                    f"(ids: {list(ds.ids_expanded)})"
-                )
-
-        single_data = {}
-        for name, ds in streams:
-            # Pick the right files shape for the sub-stream so the
-            # constructor's "len(files) must match len(ids)" rule holds.
-            # Templates and shared-file form already cover every id, so they
-            # pass through unchanged; explicit per-id lists need slicing.
-            if ds.is_shared_file or ds._has_file_template() or not ds.files:
-                sub_files = ds.files
-            else:
-                idx = ds.ids_expanded.index(key)
-                sub_files = [ds.files[idx]] if 0 <= idx < len(ds.files) else []
-            single_data[name] = DataStream(
-                name=ds.name,
-                ids=[key],
-                files=sub_files,
-                map_table=ds.map_table,
-                format=ds.format
-            )
-        single_data["output_folder"] = self.output_folder
-        single_data["tables"] = self._data.get("tables", [])
-        return StandardizedOutput(single_data)
-    
-    def __iter__(self):
-        """
-        Iterate over single-item StandardizedOutput objects.
-
-        Requires at least one stream and that all streams share the same IDs.
-        Each yielded item is a StandardizedOutput with single-item DataStreams
-        (one ID/file per stream), preserving the same stream names.
-
-        Raises:
-            ValueError: If there are no streams or streams have mismatched IDs.
-        """
-        from .datastream import DataStream
-
-        # Collect all streams
-        streams = [
-            (name, ds) for name, ds in self.streams.items()
-            if isinstance(ds, DataStream) and len(ds) > 0
-        ]
-
-        if not streams:
-            raise ValueError(
-                "Cannot iterate over StandardizedOutput: no non-empty streams. "
-                "Iterate over a specific stream instead (e.g., output.streams.structures)."
-            )
-
-        # Verify all streams share the same IDs
-        reference_name, reference_ds = streams[0]
-        reference_ids = list(reference_ds.ids)
-        for name, ds in streams[1:]:
-            if list(ds.ids) != reference_ids:
-                raise ValueError(
-                    f"Cannot iterate over StandardizedOutput: streams have mismatched IDs. "
-                    f"'{reference_name}' has {len(reference_ids)} IDs, "
-                    f"'{name}' has {len(ds)} IDs. "
-                    f"Iterate over a specific stream instead (e.g., output.streams.{reference_name})."
-                )
-
-        # Yield one StandardizedOutput per ID
-        for idx in range(len(reference_ids)):
-            single_streams = {}
-            for name, ds in streams:
-                if ds.is_shared_file:
-                    sub_files = ds.files  # str — shared across ids
-                elif isinstance(ds.files, list) and len(ds.files) > idx:
-                    sub_files = [ds.files[idx]]
-                else:
-                    sub_files = []
-                single_streams[name] = DataStream(
-                    name=ds.name,
-                    ids=[ds.ids[idx]],
-                    files=sub_files,
-                    map_table=ds.map_table,
-                    format=ds.format
-                )
-            single_streams["output_folder"] = self.output_folder
-            yield StandardizedOutput(single_streams)
-
-    def chunks(self, count: Optional[int] = None, *, size: Optional[int] = None
-               ) -> List['StandardizedOutput']:
-        """Split aligned streams into groups of ``StandardizedOutput`` objects.
-
-        Every stream must carry the same expanded IDs in the same order. Use a
-        specific ``DataStream.chunks()`` when an output contains independent ID
-        axes.
-        """
-        from .datastream import DataStream
-
-        streams = [
-            (name, ds) for name, ds in self.streams.items()
-            if isinstance(ds, DataStream)
-        ]
-        if not streams:
-            raise ValueError(
-                "Cannot chunk StandardizedOutput: it contains no streams."
-            )
-
-        reference_name, reference_ds = streams[0]
-        reference_ids = list(reference_ds.ids_expanded)
-        for name, ds in streams[1:]:
-            ids = list(ds.ids_expanded)
-            if ids != reference_ids:
-                raise ValueError(
-                    "Cannot chunk StandardizedOutput: streams have mismatched IDs. "
-                    f"'{reference_name}' has {len(reference_ids)} IDs, "
-                    f"'{name}' has {len(ids)} IDs. "
-                    f"Chunk a specific stream instead (e.g., "
-                    f"output.streams.{reference_name}.chunks(...))."
-                )
-
-        chunked = [
-            (name, ds.chunks(count, size=size)) for name, ds in streams
-        ]
-        n_chunks = len(chunked[0][1])
-        result = []
-        for index in range(n_chunks):
-            chunk_data = self._data.copy()
-            for name, chunks in chunked:
-                chunk_data[name] = chunks[index]
-            result.append(StandardizedOutput(chunk_data))
-        return result
-    
-    def keys(self):
-        """Get all available keys."""
-        return self._data.keys()
-    
-    def items(self):
-        """Get all key-value pairs."""
-        return self._data.items()
-    
-    def get(self, key: str, default=None):
-        """Get value with default."""
-        return self._data.get(key, default)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert back to dictionary."""
-        return self._data.copy()
-    
-    def __contains__(self, key: str) -> bool:
-        """Support 'in' operator: 'structures' in output"""
-        return key in self._data
-    
-    def get_legacy_table(self, name: str = "main") -> str:
-        """
-        Get table path using legacy naming conventions.
-        
-        Provides backward compatibility for code that expects:
-        - output.tables["main"]
-        - output.get_legacy_table("main")
-        
-        Args:
-            name: Legacy table name (default "main")
-            
-        Returns:
-            Path to table file, or empty string if not found
-        """
-        # Check if legacy "main" alias exists in _data
-        if name == "main" and "main" in self._data:
-            return self._data["main"]
-        
-        # Check in tables container
-        if hasattr(self.tables, name):
-            table_info = getattr(self.tables, name)
-            return table_info.info.path if hasattr(table_info, 'info') else str(table_info)
-
-        # For "main", try common table types in order of preference
-        if name == "main":
-            for fallback_name in ['sequences', 'structures', 'compounds']:
-                if hasattr(self.tables, fallback_name):
-                    table_info = getattr(self.tables, fallback_name)
-                    return table_info.info.path if hasattr(table_info, 'info') else str(table_info)
-        
-        return ""
-    
-    def pretty(self) -> str:
-        """Pretty formatted representation of the output."""
-        from .datastream import DataStream
-        import pandas as pd
-
-        lines = []
-
-        # Helper function to make paths relative to output_folder
-        def make_relative_path(file_path: str) -> str:
-            if self.output_folder and file_path.startswith(self.output_folder):
-                relative_path = os.path.relpath(file_path, self.output_folder)
-                return f"<output_folder>/{relative_path}"
-            return file_path
-
-        def format_datastream(stream_key: str, ds: DataStream) -> List[str]:
-            """Format a DataStream for display."""
-            import pandas as pd
-
-            if not ds or len(ds) == 0:
-                return []
-
-            result = [f"{stream_key}:"]
-
-            # Metadata fields
-            result.append(f"    name: {ds.name}")
-            result.append(f"    format: {ds.format}")
-            result.append(f"    items: {len(ds)}")
-            result.append(f"    map_table: '{make_relative_path(ds.map_table) if ds.map_table else ''}'")
-            if ds.has_patterns():
-                result.append(f"    has_patterns: True")
-            if ds.metadata:
-                meta_str = ", ".join(f"{k}={v}" for k, v in ds.metadata.items())
-                result.append(f"    metadata: {meta_str}")
-
-            # Data: try map_table first, then id/file fallback
-            map_data = ds._get_map_data()
-            if map_data is not None and len(map_data) > 0:
-                columns = list(map_data.columns)
-                n_rows = len(map_data)
-                if n_rows <= 4:
-                    row_indices = list(range(n_rows))
-                    ellipsis_after = None
-                else:
-                    row_indices = list(range(2)) + list(range(n_rows - 2, n_rows))
-                    ellipsis_after = 2
-
-                for row_i, idx in enumerate(row_indices):
-                    if ellipsis_after is not None and row_i == ellipsis_after:
-                        result.append(f"    – ... ({n_rows - 4} more) ...")
-                    row = map_data.iloc[idx]
-                    parts = []
-                    for col in columns:
-                        val = str(row[col]) if pd.notna(row[col]) else ''
-                        if len(val) > 40:
-                            val = val[:37] + '...'
-                        parts.append(f"{col}={val}")
-                    result.append(f"    – {', '.join(parts)}")
-            else:
-                if ds.is_shared_file:
-                    items = [(iid, ds.files) for iid in ds.ids]
-                elif ds.files:
-                    items = list(zip(ds.ids, ds.files))
-                else:
-                    items = [(iid, "") for iid in ds.ids]
-                n_items = len(items)
-                if n_items <= 4:
-                    display_items = items
-                    ellipsis_after = None
-                else:
-                    display_items = items[:2] + items[-2:]
-                    ellipsis_after = 2
-
-                for item_i, (item_id, item_file) in enumerate(display_items):
-                    if ellipsis_after is not None and item_i == ellipsis_after:
-                        result.append(f"    – ... ({n_items - 4} more) ...")
-                    if item_file:
-                        rel_path = make_relative_path(item_file)
-                        result.append(f"    – {item_id}: '{rel_path}'")
-                    else:
-                        result.append(f"    – {item_id}")
-
-            return result
-
-        # Streams summary
-        active_streams = [
-            (k, ds) for k, ds in self.streams.items()
-            if isinstance(ds, DataStream) and len(ds) > 0
-        ]
-        if active_streams:
-            lines.append("streams:")
-            for attr_name, ds in active_streams:
-                mt = make_relative_path(ds.map_table) if ds.map_table else ''
-                lines.append(f"    {attr_name}: format={ds.format}, items={len(ds)}, map_table='{mt}'")
-
-        # Per-stream detail
-        for attr_name, ds in active_streams:
-            lines.extend(format_datastream(attr_name, ds))
-
-        # Tables summary
-        if 'tables' in self._data and hasattr(self.tables, '_tables') and self.tables._tables:
-            lines.append("tables:")
-            for name, info in self.tables._tables.items():
-                col_display = ', '.join(info.info.columns[:]) if info.info.columns else ''
-                lines.append(f"    {name} ({col_display}):")
-                relative_path = make_relative_path(info.info.path)
-                lines.append(f"        – '{relative_path}'")
-
-            # Per-table detail
-            for name, info in self.tables._tables.items():
-                t_meta = info.info
-                lines.append(f"{name}:")
-                lines.append(f"    name: {t_meta.name}")
-                lines.append(f"    path: '{make_relative_path(t_meta.path) if t_meta.path else ''}'")
-                lines.append(f"    columns: {', '.join(t_meta.columns) if t_meta.columns else ''}")
-                lines.append(f"    description: {t_meta.description}")
-                if t_meta.path and os.path.exists(t_meta.path):
-                    try:
-                        table_df = pd.read_csv(t_meta.path)
-                        if len(table_df) > 0:
-                            columns = list(table_df.columns)
-                            n_rows = len(table_df)
-                            if n_rows <= 4:
-                                row_indices = list(range(n_rows))
-                                ellipsis_after = None
-                            else:
-                                row_indices = list(range(2)) + list(range(n_rows - 2, n_rows))
-                                ellipsis_after = 2
-                            for row_i, idx in enumerate(row_indices):
-                                if ellipsis_after is not None and row_i == ellipsis_after:
-                                    lines.append(f"    – ... ({n_rows - 4} more) ...")
-                                row = table_df.iloc[idx]
-                                parts = []
-                                for col in columns:
-                                    val = str(row[col]) if pd.notna(row[col]) else ''
-                                    if len(val) > 40:
-                                        val = val[:37] + '...'
-                                    parts.append(f"{col}={val}")
-                                lines.append(f"    – {', '.join(parts)}")
-                    except Exception:
-                        pass
-
-        # Output folder
-        if self.output_folder:
-            lines.append("output_folder:")
-            lines.append(f"    – '{self.output_folder}'")
-
-        # Additional attributes (not DataStreams, tables, or output_folder)
-        processed_keys = {'structures', 'sequences', 'compounds', 'msas',
-                         'tables', 'output_folder', 'filter_metadata'}
-        for key in sorted(self._data.keys()):
-            if key in processed_keys:
-                continue
-            value = self._data[key]
-            if isinstance(value, DataStream):
-                continue  # Already handled
-            if isinstance(value, str):
-                lines.append(f"{key}:")
-                lines.append(f"    – '{make_relative_path(value)}'")
-            elif isinstance(value, list) and value:
-                lines.append(f"{key}:")
-                for item in value[:6]:
-                    if isinstance(item, str):
-                        lines.append(f"    – '{make_relative_path(item)}'")
-                    else:
-                        lines.append(f"    – {item}")
-                if len(value) > 6:
-                    lines.append(f"    – ... ({len(value) - 6} more)")
-
-        return "\n".join(lines)
-    
-    def __str__(self) -> str:
-        """String representation with improved formatting."""
-        return self.pretty()
-    
-    def __repr__(self) -> str:
-        """Detailed representation."""
-        return f"StandardizedOutput({dict(self._data)})"
-
-    @staticmethod
-    def _is_colab() -> bool:
-        """Check if currently running on Google Colab."""
-        try:
-            import google.colab  # noqa: F401
-            return True
-        except ImportError:
-            return False
-
-    def download(self):
-        """
-        Download the tool's output folder as a zip.
-        On Colab, triggers a browser download. Elsewhere, prints the path.
-        """
-        if not self.output_folder or not os.path.isdir(self.output_folder):
-            print("No output folder found.")
+    from .datastream import DataStream
+    from .combinatorics import Bundle, Each
+
+    if value is None or depth > _EDGE_WALK_MAX_DEPTH:
+        return
+    if isinstance(value, (str, bytes, bool, int, float)):
+        return
+    if seen is None:
+        seen = set()
+    marker = id(value)
+    if marker in seen:
+        return
+    seen.add(marker)
+
+    if isinstance(value, (StandardizedOutput, ToolOutput, DataStream)):
+        found.append(value)
+        return
+    if isinstance(value, (Bundle, Each)):
+        for source in value.sources:
+            _walk_producer_refs(source, found, depth + 1, seen)
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        if len(value) > _EDGE_WALK_MAX_ITEMS:
             return
+        for item in value:
+            _walk_producer_refs(item, found, depth + 1, seen)
+        return
+    if isinstance(value, dict):
+        if len(value) > _EDGE_WALK_MAX_ITEMS:
+            return
+        for item in value.values():
+            _walk_producer_refs(item, found, depth + 1, seen)
 
-        import zipfile
-        folder_name = os.path.basename(self.output_folder)
-        zip_path = os.path.join(os.path.dirname(self.output_folder), f"{folder_name}.zip")
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _dirs, files in os.walk(self.output_folder):
-                for fname in files:
-                    fpath = os.path.join(root, fname)
-                    arcname = os.path.relpath(fpath, self.output_folder)
-                    zf.write(fpath, arcname)
 
-        if self._is_colab():
-            from google.colab import files as colab_files
-            size_mb = os.path.getsize(zip_path) / (1024 * 1024)
-            print(f"Downloading: {os.path.basename(zip_path)} ({size_mb:.1f} MB)")
-            print("If no download starts, check that your browser allows popups from colab.research.google.com")
-            colab_files.download(zip_path)
-        else:
-            print(f"Output zipped to: {zip_path}")
+def recover_input_edges(tool_config) -> List[Dict[str, Any]]:
+    """Recover ``tool_config``'s dataflow inputs as a list of edge records.
 
-    @staticmethod
-    def _is_notebook() -> bool:
-        """Check if currently running in a Jupyter/Colab notebook."""
+    Each record is ``{"producer", "stream", "shape", "arguments"}`` — the producing tool config, the stream name when the stored input was a bare DataStream (None when a whole StandardizedOutput was stored), the class name of what was stored, and the attribute/kwarg names it was found under.
+    """
+    from .datastream import DataStream
+
+    channels: List[tuple] = []
+    params = getattr(tool_config, "params", None)
+    if isinstance(params, dict):
+        for key, value in params.items():
+            if key not in _EDGE_SKIP_ATTRS:
+                channels.append((key, value))
+    for key, value in list(vars(tool_config).items()):
+        if key in _EDGE_SKIP_ATTRS or key == "params":
+            continue
+        channels.append((key.lstrip("_"), value))
+
+    edges: Dict[tuple, Dict[str, Any]] = {}
+    for label, value in channels:
+        found: List[Any] = []
         try:
-            from IPython import get_ipython
-            shell = get_ipython()
-            if shell is not None:
-                if (shell.__class__.__name__ == "ZMQInteractiveShell"
-                        or getattr(shell.__class__, "__module__", "") == "google.colab._shell"):
-                    return True
-        except (ImportError, NameError):
-            pass
-        return False
-
-    # Cache for loaded renderer modules
-    _renderer_cache = {}
-
-    @staticmethod
-    def _load_render_fn(script_path):
-        """Load and cache a renderer's render() function from a script path."""
-        if script_path not in StandardizedOutput._renderer_cache:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("renderer", script_path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            StandardizedOutput._renderer_cache[script_path] = mod.render
-        return StandardizedOutput._renderer_cache[script_path]
-
-    def _get_renderers_config(self):
-        """
-        Load renderers config from config.yaml, resolving script paths
-        relative to the repository root.
-        """
-        try:
-            config = ConfigManager().get_renderers_config()
+            _walk_producer_refs(value, found)
         except Exception:
-            return {}
-        if not config:
-            return {}
+            continue
+        for obj in found:
+            producer = producer_of(obj)
+            if producer is None or producer is tool_config:
+                continue
+            stream = obj.name if isinstance(obj, DataStream) else None
+            key = (id(producer), stream)
+            entry = edges.get(key)
+            if entry is None:
+                edges[key] = {
+                    "producer": producer,
+                    "stream": stream,
+                    "shape": type(obj).__name__,
+                    "arguments": [label],
+                }
+            elif label not in entry["arguments"]:
+                entry["arguments"].append(label)
 
-        # Resolve script paths relative to repo root
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        resolved = {}
-        for section in ("streams", "tables"):
-            if section in config:
-                resolved[section] = {}
-                for key, path in config[section].items():
-                    resolved[section][key] = os.path.join(repo_root, path)
-        return resolved
-
-    _CSS = """<style>
-.bp-table { border-collapse: collapse; font-family: monospace; font-size: 0.9em; margin: 4px 0 12px 0; }
-.bp-table th { background: #f0f0f0; padding: 4px 10px; border: 1px solid #ddd; text-align: left; }
-.bp-table td { padding: 4px 10px; border: 1px solid #ddd; }
-.bp-table tr:nth-child(even) { background: #fafafa; }
-.bp-table .bp-ellipsis td { color: #888; font-style: italic; text-align: center; }
-.bp-section { margin-top: 8px; font-family: monospace; }
-.bp-section-title { font-weight: bold; margin-bottom: 4px; }
-.bp-table-toggle summary { cursor: pointer; font-family: monospace; color: #555; margin-bottom: 4px; }
-.bp-table-toggle[open] + .bp-table-collapsed { display: none; }
-</style>"""
-
-    def _repr_html_(self) -> Optional[str]:
-        """
-        Rich HTML display for Jupyter notebooks.
-
-        Dispatches rendering to scripts configured in config.yaml renderers section.
-        Lookup order for streams: stream name -> format -> _default.
-        Lookup order for tables: table name -> _default.
-        """
-        if not self._is_notebook():
-            return None
-
-        from .datastream import DataStream
-        import html as html_module
-
-        renderers_config = self._get_renderers_config()
-        stream_renderers = renderers_config.get("streams", {})
-        table_renderers = renderers_config.get("tables", {})
-        metadata_script = stream_renderers.get("_metadata")
-
-        html_parts = [self._CSS]
-
-        def _rel(path):
-            if self.output_folder and path.startswith(self.output_folder):
-                return "<output_folder>/" + os.path.relpath(path, self.output_folder)
-            return path
-
-        # --- Tool-specific visualization (backwards compat) ---
-        # Run first: if the tool provides its own rendering, skip stream dispatch.
-        tool_html = ""
-        if hasattr(self, "tool") and hasattr(self.tool, "_repr_notebook_html"):
-            try:
-                tool_html = self.tool._repr_notebook_html(self) or ""
-            except Exception:
-                pass
-
-        # --- Streams summary ---
-        active_streams = [
-            (sn, s) for sn, s in self.streams.items()
-            if isinstance(s, DataStream) and len(s) > 0
-        ]
-
-        if active_streams:
-            html_parts.append(
-                '<div class="bp-section">'
-                '<div class="bp-section-title">STREAMS</div>'
-            )
-            html_parts.append(
-                '<table class="bp-table">'
-                '<tr><th>name</th><th>format</th><th>items</th><th>map_table</th></tr>'
-            )
-            for stream_name, stream in active_streams:
-                html_parts.append(
-                    f'<tr><td>{html_module.escape(stream_name)}</td>'
-                    f'<td>{html_module.escape(stream.format)}</td>'
-                    f'<td>{len(stream)}</td>'
-                    f'<td>{html_module.escape(_rel(stream.map_table) if stream.map_table else "")}</td></tr>'
-                )
-            html_parts.append('</table></div>')
-
-        # --- Render each stream via config ---
-        if not tool_html:
-            for stream_name, stream in self.streams.items():
-                if not isinstance(stream, DataStream) or len(stream) == 0:
-                    continue
-                # Lookup: stream name first, then format, then _default
-                script = (stream_renderers.get(stream_name)
-                          or stream_renderers.get(stream.format)
-                          or stream_renderers.get(stream.format.lower())
-                          or stream_renderers.get("_default"))
-                if not script:
-                    continue
-                try:
-                    # If the matched renderer is not the metadata script itself,
-                    # render metadata first, then the specialized renderer.
-                    if metadata_script and script != metadata_script:
-                        meta_fn = self._load_render_fn(metadata_script)
-                        meta_result = meta_fn(stream, self)
-                        if meta_result:
-                            html_parts.append(meta_result)
-                    render_fn = self._load_render_fn(script)
-                    result = render_fn(stream, self)
-                    if result:
-                        html_parts.append(result)
-                except Exception:
-                    pass
-        else:
-            html_parts.append(tool_html)
-
-        # --- Tables summary ---
-        if "tables" in self._data and hasattr(self.tables, "_tables") and self.tables._tables:
-            html_parts.append(
-                '<div class="bp-section">'
-                '<div class="bp-section-title">TABLES</div>'
-            )
-            html_parts.append(
-                '<table class="bp-table">'
-                '<tr><th>name</th><th>columns</th><th>path</th></tr>'
-            )
-            for name, info in self.tables._tables.items():
-                cols = ", ".join(info.info.columns) if info.info.columns else ""
-                path = _rel(info.info.path) if info.info.path else ""
-                html_parts.append(
-                    f"<tr><td>{html_module.escape(name)}</td>"
-                    f"<td>{html_module.escape(cols)}</td>"
-                    f"<td>{html_module.escape(path)}</td></tr>"
-                )
-            html_parts.append('</table></div>')
-
-            # Render each table via config
-            for name, info in self.tables._tables.items():
-                script = (table_renderers.get(name)
-                          or table_renderers.get("_default"))
-                if script:
-                    try:
-                        render_fn = self._load_render_fn(script)
-                        result = render_fn(info, self)
-                        if result:
-                            html_parts.append(result)
-                    except Exception:
-                        pass
-
-        if len(html_parts) <= 1:  # only CSS
-            return None
-        return "\n".join(html_parts)
-
-    def get_filter_info(self) -> Dict[str, Any]:
-        """
-        Get filtering information if this is filtered output.
-        
-        Returns:
-            Dictionary with filter information or empty dict if not filtered
-        """
-        return self.filter_metadata.copy() if self.filter_metadata else {}
-    
-    def get_kept_items_count(self) -> int:
-        """
-        Get count of items that passed filtering.
-
-        Returns:
-            Number of kept items (structures + sequences + compounds)
-        """
-        count = 0
-        for attr in (self.streams.structures, self.streams.sequences, self.streams.compounds):
-            if attr is not None:
-                count += len(attr)
-        return count
-    
-    def get_original_items_count(self) -> Optional[int]:
-        """
-        Get count of original items before filtering (if available).
-        
-        Returns:
-            Original item count or None if not available
-        """
-        if self.is_filtered and 'input_count' in self.filter_metadata:
-            return self.filter_metadata['input_count']
-        return None
-    
-    def get_filter_pass_rate(self) -> Optional[float]:
-        """
-        Calculate filter pass rate if filtering information is available.
-
-        Returns:
-            Pass rate (0.0 to 1.0) or None if not applicable
-        """
-        original_count = self.get_original_items_count()
-        if original_count is not None and original_count > 0:
-            kept_count = self.get_kept_items_count()
-            return kept_count / original_count
-        return None
-
-
-class ToolOutput:
-    """
-    Container for tool output information.
-
-    Returned by pipeline.add() to provide rich metadata about tool outputs
-    and enable flexible chaining between tools.
-    """
-    
-    def __init__(self, config: BaseConfig):
-        """Initialize with reference to tool configuration."""
-        self.config = config
-        self.tool_type = config.TOOL_NAME
-        self.environments = config.environments
-        self.output_folder = config.output_folder
-        self.execution_order = config.execution_order
-        
-        # Will be populated after tool configuration
-        self._output_files = {}
-        self._metadata = {}
-    
-    def update_outputs(self, output_files: Dict[str, List[str]], metadata: Dict[str, Any] = None):
-        """Update output files and metadata after tool configuration."""
-        self._output_files = output_files
-        self._metadata = metadata or {}
-    
-    def get_output_files(self, output_type: str = None) -> Union[Dict[str, List[str]], List[str]]:
-        """
-        Get output files, optionally filtered by type.
-        
-        Args:
-            output_type: Specific output type to retrieve (e.g., 'pdbs', 'sequences')
-            
-        Returns:
-            All outputs if output_type is None, otherwise specific output list
-        """
-        # If no cached outputs, delegate to config
-        if not self._output_files and hasattr(self.config, 'get_output_files'):
-            config_outputs = self.config.get_output_files()
-            if output_type is None:
-                return config_outputs
-            return config_outputs.get(output_type, [])
-
-        # Use cached outputs
-        if output_type is None:
-            return self._output_files
-        return self._output_files.get(output_type, [])
-    
-    @property
-    def output_pdbs(self) -> List[str]:
-        """Convenience property for PDB outputs."""
-        return self.get_output_files('pdbs')
-    
-    @property
-    def output_sequences(self) -> List[str]:
-        """Convenience property for sequence outputs."""
-        return self.get_output_files('sequences')
-    
-    @property
-    def output_structures(self) -> List[str]:
-        """Convenience property for structure outputs (PDbs)."""
-        return self.output_pdbs
-    
-    @property
-    def output_tables(self) -> List[str]:
-        """Convenience property for table outputs (JSON, CSV, etc.)."""
-        return self.get_output_files('tables')
-
-    @property
-    def tables(self):
-        """
-        Access tool's tables for IDE autocompletion and column access.
-
-        Enables usage like: tool_output.tables.structures.fixed
-        Returns the tool's tables container with full column access.
-        """
-        if hasattr(self.config, 'tables'):
-            return self.config.tables
-
-        # Create TableContainer from get_output_files if available
-        if hasattr(self.config, 'get_output_files'):
-            output_files = self.config.get_output_files()
-            tables_dict = output_files.get('tables', {})
-            if tables_dict:
-                return TableContainer(tables_dict)
-
-        # Return empty container if nothing available
-        return TableContainer({})
-    
-    @property
-    def job_name(self) -> str:
-        """Get job name from configuration."""
-        return self.config.job_name
-    
-    @property
-    def dependencies(self) -> List:
-        """Get dependencies from configuration.""" 
-        return self.config.dependencies
-    
-    @property
-    def output(self) -> StandardizedOutput:
-        """
-        Get standardized output with dot notation access.
-
-        Allows usage like:
-        - rfd.streams.structures
-        - rfd.tables
-        - rfd['streams'] (dict-style)
-        """
-        # Get current output files from the config
-        if hasattr(self.config, 'get_output_files'):
-            output_files = self.config.get_output_files()
-        else:
-            output_files = self._output_files
-
-        standardized_output = StandardizedOutput(output_files)
-        # Add tool reference for user access
-        standardized_output.tool = self.config
-
-        return standardized_output
-
-    @property
-    def o(self) -> StandardizedOutput:
-        """
-        Shorthand for .output - elegant access to tool outputs.
-
-        Allows usage like:
-        - tool.o.streams.structures
-        - tool.o.tables.sequences
-        - tool.o.tables.concatenated
-        """
-        return self
-
-    def _repr_html_(self):
-        """Delegate rich HTML display to StandardizedOutput."""
-        return self.output._repr_html_()
-
-    def __str__(self) -> str:
-        return f"ToolOutput({self.tool_type}, {len(self._output_files)} output types)"
-
-    def __repr__(self) -> str:
-        return self.__str__()
+    # Storing both the whole output and a stream out of it yields two edges to one producer.
+    named_producers = {k[0] for k, e in edges.items() if e["stream"]}
+    return [e for k, e in edges.items() if not (k[1] is None and k[0] in named_producers)]

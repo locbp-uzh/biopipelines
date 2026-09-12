@@ -44,22 +44,24 @@ class MutationProfiler(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationProfiler"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.0"
+    ENV_NAME = "MutationEnv"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("MutationEnv", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
-    echo "MutationEnv already installed, skipping. Use force_reinstall=True to reinstall."
+    echo "{env} already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("MutationEnv", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("MutationEnv", env_manager, biopipelines)
-        return f"""echo "=== Installing MutationEnv ==="
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
+        return f"""echo "=== Installing {env} ==="
 {skip}{remove_block}
 {env_block}
 
@@ -67,11 +69,11 @@ fi
 # MutationEnv.yaml and is actually imported by pipe_mutation_profiler.py;
 # the previous `import torch` check failed on fresh envs (e.g. Colab) since
 # torch is not part of MutationEnv and isn't used by the profiler.
-if MPLBACKEND=Agg {cls._env_run("MutationEnv", env_manager)}python -c "import logomaker" >/dev/null 2>&1; then
+if MPLBACKEND=Agg {cls._env_run(env, env_manager)}python -c "import logomaker" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
-    echo "=== MutationEnv installation complete ==="
+    echo "=== {env} installation complete ==="
 else
-    echo "ERROR: MutationEnv verification failed (cannot import logomaker)"
+    echo "ERROR: {env} verification failed (cannot import logomaker)"
     exit 1
 fi
 """

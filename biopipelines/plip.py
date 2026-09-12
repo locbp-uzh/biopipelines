@@ -48,7 +48,7 @@ class PLIP(BaseConfig):
 
     Inputs:
         structures: PDB complex structures.
-        ligand: Optional compounds stream (Ligand(code="MK1"), or a multi-row
+        ligand: Optional compounds stream (Ligand(codes="MK1"), or a multi-row
                     stream for several codes) restricting profiling to those
                     residue codes. The code(s) are read from the stream's
                     `code` column at runtime. Omit to profile all non-standard
@@ -74,7 +74,8 @@ class PLIP(BaseConfig):
     """
 
     TOOL_NAME = "PLIP"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.2"
+    ENV_NAME = "plip"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -92,7 +93,9 @@ touch "$INSTALL_SUCCESS"
 echo "=== PLIP container ready ==="
 """
 
-        env_check = cls._env_exists_check("plip", env_manager)
+        # Resolved after the container branch: a variant that only configures the image has no env to name.
+        env = cls._install_env(env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "PLIP already installed, skipping. Use force_reinstall=True to reinstall."
@@ -100,13 +103,13 @@ if {env_check}; then
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("plip", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("plip", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing PLIP ==="
 {skip}{remove_block}
 {env_block}
 
-if {cls._env_run("plip", env_manager)}python -c "import plip" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import plip" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== PLIP installation complete ==="
 else
@@ -139,9 +142,9 @@ fi
         else:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
         # Optional ligand filter — a compounds stream; codes resolved at runtime.
-        # A bare string is shorthand for an internal Ligand(code=...).
+        # A bare string is shorthand for an internal Ligand(codes=...).
         self.ligand_stream: Optional[DataStream] = resolve_basic_input(
-            ligand, Ligand, "compounds", "code")
+            ligand, Ligand, "compounds", "codes")
         self.mode = mode
         self.chains: List[str] = (
             [] if chains is None else [chains] if isinstance(chains, str) else list(chains)

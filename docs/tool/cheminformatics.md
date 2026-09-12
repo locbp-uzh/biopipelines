@@ -66,6 +66,7 @@ Strain answers a question PoseBusters cannot: a pose can be clash-free and geome
 - `smiles`: str | (TableInfo, column) = None — Bond-order template for the posed coordinates: a literal SMILES, or a table-column reference for a per-id template. Defaults to the `smiles` column of the `compounds` stream when one is supplied. **Mandatory for the strain path** — coordinate-only perception mis-assigns conjugated and charged systems, so there is no silent fallback; supplying neither raises.
 - `restrain_bonds`: List[Tuple[str, str]] = None — Explicit torsions to restrain, as `(atom_name, atom_name)` pairs naming the two central atoms of each bond, matching the PDB atom names (e.g. `[("C64", "C72"), ("N67", "C42")]`). Default `None` restrains every rotatable bond.
 - `ff`: str = "auto" — Force field: `"auto"` (MMFF94, falling back to UFF where MMFF has no parameters), `"mmff"`, or `"uff"`.
+- `max_iters`: int = 2000 — Minimizer iteration cap per pose, for both the restrained and free minimizations. A pose that hits the cap has not reached a minimum, so its strain would be unreliable — it raises rather than returning a misleading number (see "Both minimisations must converge" above). Larger or more strained ligands may need more than the default; raise this rather than trusting a capped result.
 
 **Tables**:
 - `descriptors` (when `compounds=` is given):
@@ -118,7 +119,7 @@ Strain-gating a pose set — extract the ligand *with* its coordinates, score it
 ```python
 from biopipelines.entities import Ligand
 
-posed = Ligand(code="LIG", structures=valid_poses)     # extract ligand WITH its coordinates
+posed = Ligand(codes="LIG", structures=valid_poses)     # extract ligand WITH its coordinates
 strain = RDKit(structures=posed, smiles=DYE_SMILES)
 
 kept = Panda(

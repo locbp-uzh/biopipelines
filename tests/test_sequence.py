@@ -240,6 +240,7 @@ def test_sequence_fasta_missing_file_raises(isolated_cwd, record_case):
 
 # ── RCSB PDB-code path (hits network) ────────────────────────────────────────
 
+@pytest.mark.network
 def test_sequence_fetches_from_rcsb_pdb_code(record_case):
     """Passing a 4-char alphanumeric code fetches chains from the RCSB FASTA API."""
     from biopipelines.sequence import Sequence

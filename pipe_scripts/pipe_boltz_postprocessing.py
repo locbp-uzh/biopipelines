@@ -40,19 +40,14 @@ import pandas as pd
 ALL_SAMPLES = args.all_samples
 
 
-def _prov_index(prov_lookup, row_id):
-    """Index of row_id in the provenance table, tolerating a multi-sample suffix.
+def _provenance_indices(row_ids, predicted_ids):
+    """Position in ``predicted_ids`` for each row id, resolved by the framework's id matcher.
 
-    With top_only=False, structure ids are '<base>_<k>' but the combinatorics
-    provenance is keyed by '<base>'. Try the id as-is, then strip a trailing
-    '_<digits>' sample suffix so per-sample rows still get proteins.id/ligands.id.
+    With top_only=False structure ids are '<base>_<k>' while combinatorics keys provenance by '<base>', which is the parent tier of the shared ladder -- so the suffix rule stays in id_map_utils instead of being restated here.
     """
-    idx = prov_lookup.get(row_id)
-    if idx is None and "_" in row_id:
-        base, sep, suffix = row_id.rpartition("_")
-        if suffix.isdigit():
-            idx = prov_lookup.get(base)
-    return idx
+    position = {sid: i for i, sid in enumerate(predicted_ids)}
+    matched = get_mapped_ids(list(row_ids), list(predicted_ids), unique=True)
+    return {rid: position.get(matched.get(rid)) for rid in row_ids}
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.id_map_utils import get_mapped_ids
@@ -329,12 +324,12 @@ if STRUCTURES_MAP and structural_files:
 
     # Preserve provenance columns from combinatorics config
     if stored_provenance and stored_predicted_ids:
-        prov_lookup = {sid: i for i, sid in enumerate(stored_predicted_ids)}
+        prov_index = _provenance_indices([r['id'] for r in map_rows], stored_predicted_ids)
         for stream_name, prov_ids in stored_provenance.items():
             col_name = f"{stream_name}.id"
             col_values = []
             for row in map_rows:
-                idx = _prov_index(prov_lookup, row['id'])
+                idx = prov_index.get(row['id'])
                 col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
             map_df[col_name] = col_values
 
@@ -359,13 +354,12 @@ if confidence_rows:
     confidence_df = pd.DataFrame(confidence_rows)
     # Add provenance columns if available
     if stored_provenance and stored_predicted_ids:
-        prov_lookup = {sid: i for i, sid in enumerate(stored_predicted_ids)}
+        prov_index = _provenance_indices([r['id'] for r in confidence_rows], stored_predicted_ids)
         for stream_name, prov_ids in stored_provenance.items():
             col_name = f"{stream_name}.id"
             col_values = []
-            for _, row_data in enumerate(confidence_rows):
-                seq_id = row_data['id']
-                idx = _prov_index(prov_lookup, seq_id)
+            for row_data in confidence_rows:
+                idx = prov_index.get(row_data['id'])
                 col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
             confidence_df[col_name] = col_values
     confidence_csv = CONFIDENCE_CSV
@@ -388,13 +382,12 @@ if affinity_rows:
     affinity_df = pd.DataFrame(affinity_rows)
     # Add provenance columns if available
     if stored_provenance and stored_predicted_ids:
-        prov_lookup = {sid: i for i, sid in enumerate(stored_predicted_ids)}
+        prov_index = _provenance_indices([r['id'] for r in affinity_rows], stored_predicted_ids)
         for stream_name, prov_ids in stored_provenance.items():
             col_name = f"{stream_name}.id"
             col_values = []
             for row_data in affinity_rows:
-                seq_id = row_data['id']
-                idx = _prov_index(prov_lookup, seq_id)
+                idx = prov_index.get(row_data['id'])
                 col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
             affinity_df[col_name] = col_values
     affinity_csv = AFFINITY_CSV
@@ -450,7 +443,7 @@ if os.path.exists(msas_folder):
                 'id': seq_id,  # Remove msa_ prefix - use same ID as other tables
                 'sequences.id': seq_id,
                 'sequence': sequences_data.get(seq_id, ''),  # Add actual protein sequence
-                'msa_file': os.path.join(msas_folder, msa_file)
+                'file': os.path.join(msas_folder, msa_file)
             }
             msa_files_in_dir.append(msa_entry)
             print(f"Added MSA file to list: {msa_file} (sequence_id: {seq_id})")
@@ -465,7 +458,7 @@ if msa_files_in_dir:
 else:
     print("[Warning] No MSA files found, creating empty MSAs CSV")
     # Create empty MSAs CSV so completion check doesn't fail
-    msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'msa_file'])
+    msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'file'])
     msa_df.to_csv(msa_csv, index=False)
     print(f"Created empty MSAs CSV: {msa_csv}")
 

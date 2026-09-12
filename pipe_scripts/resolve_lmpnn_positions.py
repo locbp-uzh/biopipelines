@@ -8,11 +8,10 @@
 Usage:
     python resolve_lmpnn_positions.py <positions_json> <struct_id>
 
-Prints two lines:
-    Line 1: fixed_option (e.g. --fixed_residues "A10 A11")
-    Line 2: redesigned_option (e.g. --redesigned_residues "A20 A21")
+Prints the argv tokens NUL-separated, so a value containing spaces stays one token and the caller reads them into a bash array with `mapfile -d ''` instead of `eval`.
 """
 
+import shlex
 import sys
 import json
 
@@ -20,5 +19,7 @@ with open(sys.argv[1]) as f:
     data = json.load(f)
 
 entry = data.get(sys.argv[2], {})
-print(entry.get("fixed_option", ""))
-print(entry.get("redesigned_option", ""))
+tokens = []
+for key in ("fixed_option", "redesigned_option"):
+    tokens.extend(shlex.split(entry.get(key, "") or ""))
+sys.stdout.write("".join(token + chr(0) for token in tokens))

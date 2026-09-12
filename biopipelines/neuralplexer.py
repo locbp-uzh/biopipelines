@@ -67,7 +67,10 @@ class NeuralPLexer(BaseConfig):
     """
 
     TOOL_NAME = "NeuralPLexer"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "2.1"
+    # neuralplexer-inference is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "neuralplexer"
 
     # ------------------------------------------------------------------
     # Install
@@ -79,6 +82,7 @@ class NeuralPLexer(BaseConfig):
         Zenodo weights bundle. Verification: env exists, neuralplexer
         importable, checkpoint file present.
         """
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         repo_dir = folders.get("NeuralPLexer", "")
         parent_dir = os.path.dirname(repo_dir)
@@ -89,13 +93,13 @@ class NeuralPLexer(BaseConfig):
         models_dir = os.path.join(repo_dir, "data", NEURALPLEXER_BUNDLE, "models")
         ckpt_file = os.path.join(models_dir, "complex_structure_prediction.ckpt")
 
-        env_check = cls._env_exists_check("neuralplexer", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         repo_check = f'[ -d "{repo_dir}/neuralplexer" ]'
         ckpt_check = f'[ -f "{ckpt_file}" ]'
 
         skip = "" if force_reinstall else f"""# Check if already installed
 if {repo_check} && {env_check} && {ckpt_check} \\
-   && {cls._env_run("neuralplexer", env_manager)}python -c "import neuralplexer" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import neuralplexer" >/dev/null 2>&1; then
     echo "NeuralPLexer already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -107,9 +111,9 @@ if [ ! -d "{repo_dir}" ]; then
     git clone https://github.com/zrqiao/NeuralPLexer.git "{repo_dir}"
 fi"""
 
-        remove_block = cls._env_remove_block("neuralplexer", env_manager) if force_reinstall else ""
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
 
-        env_block = cls._env_install_block("neuralplexer", env_manager, biopipelines)
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
 
         # openfold builds a CUDA extension at install time. The build needs a
         # specific environment, all set *inside* the `micromamba run` subshell
@@ -127,7 +131,7 @@ fi"""
         # Phase 3 has already downgraded setuptools<81 by the time this runs.
         openfold_dir = os.path.join(parent_dir, "openfold_build")
         openfold_block = f"""echo "--- build + install openfold (CUDA extension) ---"
-{cls._env_run("neuralplexer", env_manager)}bash -c '
+{cls._env_run(env, env_manager)}bash -c '
 set -e
 rm -rf "{openfold_dir}"
 git clone --filter=blob:none --quiet https://github.com/aqlaboratory/openfold.git "{openfold_dir}"
@@ -150,7 +154,7 @@ pip install . --no-build-isolation --no-deps
 
         # NeuralPLexer is the package itself; install editable from the clone.
         pkg_install = f"""echo "--- pip install -e NeuralPLexer ---"
-{cls._env_run("neuralplexer", env_manager)}pip install -e "{repo_dir}" --no-deps"""
+{cls._env_run(env, env_manager)}pip install -e "{repo_dir}" --no-deps"""
 
         # The Zenodo bundle is ~8.7 GB; over a cluster compute-node proxy the
         # download is prone to truncation, and a partial zip then fails extract
@@ -200,7 +204,7 @@ fi"""
 {remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to create neuralplexer environment."
+    echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
@@ -222,7 +226,7 @@ fi
 # which loads the compiled attn_core_inplace_cuda — so this import also proves
 # the CUDA extension built and loads.
 if {repo_check} && {ckpt_check} \\
-   && {cls._env_run("neuralplexer", env_manager)}python -c "import torch; import neuralplexer" >/dev/null 2>&1; then
+   && {cls._env_run(env, env_manager)}python -c "import torch; import neuralplexer" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== NeuralPLexer installation complete ==="
 else
@@ -383,7 +387,9 @@ fi
         # neuralplexer-inference is single-pair, so we loop ourselves.
         script += "# --- NeuralPLexer inference (neuralplexer env) ---\n"
         script += self.activate_environment()  # neuralplexer
+        script += self.extra_args_echo()
         cuda_flag = " \\\n        --cuda" if self.cuda else ""
+        extra_flags = "".join(f" \\\n        {t}" for t in self.extra_args_bash_tokens())
         # Colab exports MPLBACKEND=module://matplotlib_inline.backend_inline,
         # which leaks into this subprocess; matplotlib (pulled in transitively by
         # torchmetrics) rejects it as an invalid backend. Force a headless one.
@@ -414,7 +420,7 @@ for pair_dir in "{self.staging_folder}"/*/; do
         --num-steps={self.num_steps}{cuda_flag} \\
         --sampler={self.sampler} \\
         --separate-pdb \\
-        --rank-outputs-by-confidence
+        --rank-outputs-by-confidence{extra_flags}
     rc=$?
     set -e
     if [ $rc -ne 0 ]; then

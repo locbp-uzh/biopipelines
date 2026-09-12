@@ -72,26 +72,30 @@ class Aggrescan3D(BaseConfig):
     """
 
     TOOL_NAME = "Aggrescan3D"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
+    # The `aggrescan` binary is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
+    FORWARD_UNKNOWN_KWARGS = "argparse"
+    ENV_NAME = "Aggrescan3D"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         skip = "" if force_reinstall else f"""# Check if already installed
-if {cls._env_run("Aggrescan3D", env_manager)}python -c "import aggrescan" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import aggrescan" >/dev/null 2>&1; then
     echo "Aggrescan3D already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("Aggrescan3D", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("Aggrescan3D", env_manager, biopipelines)
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing Aggrescan3D ==="
 {skip}{remove_block}
 {env_block}
 
 # Verify installation
-if {cls._env_run("Aggrescan3D", env_manager)}python -c "import aggrescan" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import aggrescan" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Aggrescan3D installation complete ==="
 else
@@ -170,6 +174,7 @@ fi
         # stream IDs there would crash, because resolve_stream_ids.py imports
         # the Python-3 biopipelines package.
         script_content += self.activate_environment(name="biopipelines")
+        script_content += self.extra_args_echo()
         script_content += self._generate_run_aggrescan()
         script_content += self.generate_completion_check_footer()
         return script_content
@@ -182,6 +187,7 @@ fi
             flags.append(f"-C {self.chains}")
         if self.distance != 10.0:
             flags.append(f"-D {self.distance}")
+        flags += self.extra_args_bash_tokens()
         flags_str = " ".join(flags)
 
         n_structures = len(self.structures_stream)

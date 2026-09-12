@@ -62,7 +62,7 @@ def parse_arguments():
     )
     parser.add_argument(
         '--msa-table',
-        help='Path to MSA table CSV file (columns: id, sequences.id, sequence, msa_file)'
+        help='Path to MSA table CSV file (columns: id, sequences.id, sequence, file)'
     )
     parser.add_argument(
         '--affinity', action='store_true',
@@ -88,6 +88,12 @@ def parse_arguments():
     # Metal coordination bond constraints
     parser.add_argument('--metal-coord', help='JSON list of metal coordination bond constraints')
     # Sequences output
+    # Boltz's single-sequence mode. The wrapper has emitted --single-sequence
+    # since `single_sequence=` was added, but this parser never declared it, so
+    # argparse rejected the whole invocation and Boltz2 folded zero inputs while
+    # the step still reported post-processing 'successfully'.
+    parser.add_argument('--single-sequence', action='store_true',
+                        help="Fold without an MSA (sets msa: empty on every protein chain)")
     parser.add_argument('--sequences-csv', help='Path to write protein sequences CSV (id, sequence)')
     parser.add_argument('--sequence-ids', help='Path for sequence_ids.csv (defaults to parent of --output-dir)')
 
@@ -179,7 +185,7 @@ def load_msa_mappings(msa_table: Optional[str]) -> Dict:
 
         for _, row in df.iterrows():
             seq_id = row.get('sequences.id', row.get('id', ''))
-            msa_file = row.get('msa_file', '')
+            msa_file = row.get('file', '')
             sequence = row.get('sequence', '')
 
             if seq_id and msa_file:
@@ -646,6 +652,14 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
 
     def apply_decorations(config, first_ligand_chain):
         """Apply template, glycosylation, affinity, covalent, pocket, contacts."""
+        if getattr(args, "single_sequence", False):
+            # `msa: empty` is how Boltz expresses single-sequence. Applied to
+            # every protein chain, unconditionally -- backfill_empty_msa() only
+            # fills chains left un-recycled when some other chain HAS an MSA,
+            # which is a different question and a no-op when nothing is recycled.
+            for entry in config.get('sequences', []):
+                if 'protein' in entry:
+                    entry['protein']['msa'] = 'empty'
         config = backfill_empty_msa(config)
         config = add_template_to_config(config, args)
         config = add_glycosylation_to_config(config, glycosylation)

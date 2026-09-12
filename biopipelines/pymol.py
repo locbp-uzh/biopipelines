@@ -61,33 +61,35 @@ class PyMOL(BaseConfig):
     """
 
     TOOL_NAME = "PyMOL"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "2.1"
+    ENV_NAME = "ProteinEnv"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
+        env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        env_check = cls._env_exists_check("ProteinEnv", env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
-    echo "PyMOL (ProteinEnv) already installed, skipping. Use force_reinstall=True to reinstall."
+    echo "PyMOL ({env}) already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        remove_block = cls._env_remove_block("ProteinEnv", env_manager) if force_reinstall else ""
-        env_block = cls._env_install_block("ProteinEnv", env_manager, biopipelines)
-        return f"""echo "=== Installing PyMOL (ProteinEnv) ==="
+        remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        env_block = cls._env_install_block(env, env_manager, biopipelines)
+        return f"""echo "=== Installing PyMOL ({env}) ==="
 {skip}{remove_block}
 {env_block}
 if [ $? -ne 0 ]; then
-    echo "ERROR: ProteinEnv creation failed."
+    echo "ERROR: {env} creation failed."
     exit 1
 fi
 
 # Verify installation
-if {cls._env_run("ProteinEnv", env_manager)}python -c "import pymol" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "import pymol" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
-    echo "=== PyMOL (ProteinEnv) installation complete ==="
+    echo "=== PyMOL ({env}) installation complete ==="
 else
     echo "ERROR: PyMOL verification failed (cannot import pymol)"
     exit 1
@@ -137,7 +139,7 @@ fi
     # Lazy path descriptors — session file is the tool's primary binary
     # artefact; put it in _extras/ since it's not a typed stream or table.
     config_file = Path(lambda self: self.configuration_path("pymol_config.json"))
-    session_file = Path(lambda self: os.path.join(self.extras_folder, f"{self.session_name}.pse"))
+    session_file = Path(lambda self: self.extras_path(f"{self.session_name}.pse"))
     missing_csv = Path(lambda self: self.table_path("missing"))
     pymol_py = Path(lambda self: self.pipe_script_path("pipe_pymol.py"))
 
@@ -353,12 +355,14 @@ fi
         return PyMOLOperation("set", setting=setting, value=value, selection=selection)
 
     @staticmethod
-    def Save(filename: str = "session.pse") -> PyMOLOperation:
+    def Save(filename: Optional[str] = None) -> PyMOLOperation:
         """
         Save the PyMOL session.
 
         Args:
-            filename: Output filename (relative to output folder)
+            filename: Output filename, resolved against the tool's `_extras/`
+                      folder unless absolute. Defaults to the tool's `session`
+                      name, i.e. `_extras/<session>.pse`.
 
         Returns:
             PyMOLOperation for saving
@@ -551,6 +555,21 @@ fi
 
         super().__init__(**kwargs)
 
+    def _session_paths(self) -> List[str]:
+        """Every .pse this run writes: one per explicit Save, else the auto-save.
+
+        A Save filename is resolved against `_extras/`, not the renders stream
+        folder, so the declared path and the one the pipe script writes agree.
+        """
+        paths = []
+        for op in self.operations:
+            if op.op_type != "save":
+                continue
+            filename = op.params.get("filename") or f"{self.session_name}.pse"
+            paths.append(filename if os.path.isabs(filename)
+                         else self.extras_path(filename))
+        return paths or [self.session_file]
+
     def _extract_dependencies(self):
         """Extract structure sources and table references from operations."""
         for op in self.operations:
@@ -722,6 +741,7 @@ fi
             "output_folder": self.stream_folder("renders"),
             "renders_folder": self.stream_folder("renders"),
             "session_file": self.session_file,
+            "session_folder": self.extras_folder,
             "missing_csv": self.missing_csv,
             "upstream_missing_paths": getattr(self, "upstream_missing_paths", []),
         }
@@ -731,7 +751,7 @@ fi
             json.dump(config, f, indent=2)
 
         return f"""echo "Creating PyMOL session..."
-echo "Output: {self.session_file}"
+echo "Output: {' '.join(self._session_paths())}"
 
 python "{self.pymol_py}" --config "{self.config_file}"
 
@@ -810,7 +830,7 @@ python "{self.pymol_py}" --config "{self.config_file}"
             "renders": renders,
             "tables": tables,
             "output_folder": self.output_folder,
-            "session_file": self.session_file
+            "session_file": self._session_paths()
         }
 
     def get_config_display(self) -> List[str]:
