@@ -13,6 +13,14 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+**A step's own failure survives the blocks that run after it**
+
+- A generated tool script is a sequence -- the tool's command, optionally the missing-manifest propagation, then the completion check -- with no `set -e`. The script's status is therefore the LAST command's, and both trailing blocks succeed on their own, so a tool that failed exited 0 and `_step_failure_guard` read `${PIPESTATUS[0]}` as clean and wrote no marker. Found on Daint: a `Scripting` step whose `execution()` raised was stamped COMPLETED, with the traceback sitting in its own log. The real status is now captured immediately after the tool's command and re-asserted as the script's exit status, while the trailing blocks still run -- a partly-successful tool still owes downstream a `missing` manifest.
+
+**A value-based stream's map_table is a required output**
+
+- A value-based stream (`files == []`) keeps every row in its map_table, so it declared no per-id path and every existence check was vacuous for it: the tool could write nothing and still pass. In the case above the only output verified was the `missing` table that the trailing block had just created, reported as "1 of 1 declared outputs found". The completion check now requires the map_table of a stream that declares no files. A file-based stream is unchanged -- it is judged by its files, and its map is not required to pre-exist. Audited against four real runs across two clusters and ten tools: 18 of 18 value-based map_tables were already present, so no working step becomes red.
+
 ### Tools
 
 ## [1.4.0] — 2026-09-11

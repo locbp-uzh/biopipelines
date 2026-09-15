@@ -1616,7 +1616,11 @@ fi
 
         completion_environment = self.activate_environment(name="biopipelines")
 
-        return f"""{completion_environment}
+        return f"""# Capture the main command's status if nothing already did. A tool that emits
+# the missing-propagation block has it set there, right after its own command;
+# one that does not reaches this footer directly, so $? is still its own.
+BP_MAIN_RC=${{BP_MAIN_RC:-$?}}
+{completion_environment}
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
 
@@ -1626,6 +1630,14 @@ if [ $? -eq 0 ]; then
     echo "{self.TOOL_NAME} completed successfully"
 else
     echo "{self.TOOL_NAME} - some outputs missing"
+fi
+
+# The step's own status is what the failure guard reads. Trailing blocks run
+# whatever happened -- a partly-successful tool still owes downstream a missing
+# manifest -- but they must not overwrite the verdict.
+if [ "${{BP_MAIN_RC:-0}}" -ne 0 ]; then
+    echo "ERROR: {self.TOOL_NAME} exited ${{BP_MAIN_RC}}"
+    exit "${{BP_MAIN_RC}}"
 fi
 """
     
@@ -1747,6 +1759,11 @@ fi
         folders = " ".join(f'"{os.path.dirname(p)}"' for p in paths) or '""'
         local_arg = f' --local-missing "{local_missing}"' if local_missing else ""
         return f"""
+# Capture the main command's status BEFORE anything else runs: this block and
+# the completion check that follows both succeed on their own, and without this
+# the script would exit 0 and the failure guard would see a clean step.
+BP_MAIN_RC=$?
+
 # Propagate `missing` manifest(s) from upstream tools — writes tables/missing.csv.
 echo "Propagating upstream missing manifest(s)"
 python "{propagate_py}" \\

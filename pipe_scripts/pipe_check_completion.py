@@ -318,6 +318,21 @@ def _step_id(output_folder: str, tool_name: str) -> str:
     return tool_name
 
 
+def _value_stream_map_table(value) -> Optional[str]:
+    """The map_table of a value-based stream, or None if this is not one.
+
+    Value-based means ``files == []``: the stream's rows live only in the
+    map_table CSV. A stream that declares files is covered by the per-id check
+    instead, and its map is not required to pre-exist.
+    """
+    if not isinstance(value, dict):
+        return None
+    if value.get('files') != []:
+        return None
+    mt = value.get('map_table')
+    return str(mt) if mt else None
+
+
 def check_expected_outputs(expected_outputs: Dict[str, Any],
                            tool_name: str,
                            output_folder: str = "") -> Tuple[bool, Dict[str, List[str]]]:
@@ -362,6 +377,14 @@ def check_expected_outputs(expected_outputs: Dict[str, Any],
             continue
         pairs = extract_id_file_pairs(value)
         if not pairs:
+            # A value-based stream (files=[]) carries all its content in the
+            # map_table, so it contributes no per-id path and every check above
+            # is vacuous for it -- a tool could write nothing and still pass.
+            # The map is the artifact here, so require it.
+            mt = _value_stream_map_table(value)
+            if mt and not os.path.exists(mt):
+                missing_by_category[category] = [mt]
+                all_exist = False
             continue
         exists, missing = check_pairs_exist(pairs)
         if exists:
