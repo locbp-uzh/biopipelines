@@ -129,6 +129,9 @@ print_update_summary() {
 command -v git >/dev/null 2>&1 || exit 0
 git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1 || exit 0
 GIT_DIR="$(git -C "$SCRIPT_DIR" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+# An empty answer would make the sentinel "/.bp-check-updates-day", which a root
+# shell can actually create at the filesystem root.
+[ -n "$GIT_DIR" ] || exit 0
 
 # Throttle to once per day. The sentinel lives under .git/ so it stays out of
 # the worktree and survives a `git reset --hard` of the tracked tree.

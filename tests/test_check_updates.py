@@ -53,13 +53,28 @@ def _run(tmp_path, git_body: str, *, drop_network_tools: bool = True):
     )
 
 
+def _git_dir(tmp_path) -> str:
+    """A per-test stand-in for the repo's .git directory."""
+    d = tmp_path / "fakegit"
+    d.mkdir(exist_ok=True)
+    return str(d).replace("\\", "/")
+
+
 # A stub git that answers ls-remote with a sha and ancestry with the given code.
-def _git_stub(ancestor_exit: int, sha: str = "a" * 40) -> str:
+#
+# `rev-parse` has to answer too. check-updates derives its once-per-day sentinel
+# from `rev-parse --absolute-git-dir`; a stub that stays silent yields an empty
+# GIT_DIR, so the sentinel becomes "/.bp-check-updates-day" -- which a ROOT
+# shell (CI) can really create, after which every later case in the same job
+# hits the throttle and exits silently. Pointing it at the test's own tmp_path
+# keeps the cases isolated from each other.
+def _git_stub(ancestor_exit: int, git_dir: str, sha: str = "a" * 40) -> str:
     return (
         'for a in "$@"; do\n'
         '  case "$a" in\n'
         f'    ls-remote) echo "{sha}\trefs/heads/main"; exit 0 ;;\n'
         f'    merge-base) exit {ancestor_exit} ;;\n'
+        f'    rev-parse) echo "{git_dir}"; exit 0 ;;\n'
         '    fetch|pull) echo "FETCHED" >&2; exit 1 ;;\n'
         "  esac\n"
         "done\n"
@@ -69,7 +84,7 @@ def _git_stub(ancestor_exit: int, sha: str = "a" * 40) -> str:
 
 def test_it_never_fetches(tmp_path):
     """A fetch would write to the worktree of a job that is about to start."""
-    proc = _run(tmp_path, _git_stub(ancestor_exit=0))
+    proc = _run(tmp_path, _git_stub(ancestor_exit=0, git_dir=_git_dir(tmp_path)))
 
     assert "FETCHED" not in proc.stderr, "check-updates invoked git fetch"
     assert "FETCHED" not in proc.stdout
@@ -95,7 +110,7 @@ def test_it_exits_zero_when_git_is_absent(tmp_path):
 
 def test_up_to_date_checkout_is_silent(tmp_path):
     """merge-base --is-ancestor succeeding means the release line is behind us."""
-    proc = _run(tmp_path, _git_stub(ancestor_exit=0))
+    proc = _run(tmp_path, _git_stub(ancestor_exit=0, git_dir=_git_dir(tmp_path)))
 
     assert proc.returncode == 0
     assert "behind" not in proc.stdout.lower()
@@ -103,7 +118,7 @@ def test_up_to_date_checkout_is_silent(tmp_path):
 
 def test_a_behind_checkout_is_reported(tmp_path):
     """Ancestry failing means main's HEAD is not in our history."""
-    proc = _run(tmp_path, _git_stub(ancestor_exit=1))
+    proc = _run(tmp_path, _git_stub(ancestor_exit=1, git_dir=_git_dir(tmp_path)))
 
     assert proc.returncode == 0
     assert proc.stdout.strip(), "a checkout behind the release line printed nothing"
@@ -111,10 +126,23 @@ def test_a_behind_checkout_is_reported(tmp_path):
 
 def test_an_empty_ls_remote_is_silent(tmp_path):
     """Network failure gives an empty sha; that is 'cannot tell', not 'behind'."""
-    proc = _run(tmp_path, 'for a in "$@"; do case "$a" in ls-remote) exit 0 ;; esac; done\nexit 0\n')
+    # rev-parse must answer here too, or this passes because the run was
+    # throttled rather than because the empty sha was handled.
+    stub = (
+        'for a in "$@"; do\n'
+        '  case "$a" in\n'
+        '    ls-remote) exit 0 ;;\n'
+        f'    rev-parse) echo "{_git_dir(tmp_path)}"; exit 0 ;;\n'
+        "  esac\n"
+        "done\n"
+        "exit 0\n"
+    )
+    proc = _run(tmp_path, stub)
 
     assert proc.returncode == 0
     assert "behind" not in proc.stdout.lower()
+    # It reached the network step; it just could not tell.
+    assert "Checking for BioPipelines updates" in proc.stdout
 
 
 def test_it_does_not_require_python(tmp_path):
@@ -147,7 +175,7 @@ def test_it_works_when_timeout_is_missing(tmp_path):
     """With no `timeout` on PATH the ls-remote still runs, just unbounded."""
     bin_dir = _fake_bin(
         tmp_path,
-        git=_git_stub(ancestor_exit=1),
+        git=_git_stub(ancestor_exit=1, git_dir=_git_dir(tmp_path)),
         curl="exit 1\n",
         wget="exit 1\n",
         # `command -v timeout` must fail, so PATH below is only our stub dir
