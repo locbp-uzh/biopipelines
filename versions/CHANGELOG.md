@@ -13,6 +13,14 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+### Tools
+
+## [1.4.1] — 2026-09-16
+
+A patch release on top of `1.4.0`, correcting three faults found after the release commit: two that let a genuinely failed step be stamped `_COMPLETED`, and one that let a CI job silently suppress its own assertions. No API change, and no tool version bumps.
+
+### Framework
+
 **A step's own failure survives the blocks that run after it**
 
 - A generated tool script is a sequence -- the tool's command, optionally the missing-manifest propagation, then the completion check -- with no `set -e`. The script's status is therefore the LAST command's, and both trailing blocks succeed on their own, so a tool that failed exited 0 and `_step_failure_guard` read `${PIPESTATUS[0]}` as clean and wrote no marker. Found on Daint: a `Scripting` step whose `execution()` raised was stamped COMPLETED, with the traceback sitting in its own log. The real status is now captured immediately after the tool's command and re-asserted as the script's exit status, while the trailing blocks still run -- a partly-successful tool still owes downstream a `missing` manifest.
@@ -21,7 +29,9 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 - A value-based stream (`files == []`) keeps every row in its map_table, so it declared no per-id path and every existence check was vacuous for it: the tool could write nothing and still pass. In the case above the only output verified was the `missing` table that the trailing block had just created, reported as "1 of 1 declared outputs found". The completion check now requires the map_table of a stream that declares no files. A file-based stream is unchanged -- it is judged by its files, and its map is not required to pre-exist. Audited against four real runs across two clusters and ten tools: 18 of 18 value-based map_tables were already present, so no working step becomes red.
 
-### Tools
+**`check-updates` never derives its sentinel from an empty `GIT_DIR`**
+
+- The once-per-day throttle is keyed on a file under the repo's git dir, resolved with `git rev-parse --absolute-git-dir`. Nothing checked that the answer was non-empty, so a git that returns nothing there made the sentinel path `/.bp-check-updates-day` -- which a root shell really can create at the filesystem root. CI is exactly that shell: `tests/test_check_updates.py` stubs git on PATH and its stub did not answer `rev-parse`, so the first case to run created the sentinel at `/`, every later case in the same job saw today's date and exited silently, and `test_a_behind_checkout_is_reported` asserted on output the throttle had already suppressed. On Windows and on the cluster the write to `/` fails and is swallowed by `|| true`, so the fault surfaced only in CI and only by test order. `check-updates` now exits 0 when `GIT_DIR` is empty instead of writing to `/`, and the test stub answers `rev-parse` with a directory inside each case's own `tmp_path` so the cases cannot throttle one another whatever the user or platform.
 
 ## [1.4.0] — 2026-09-11
 
