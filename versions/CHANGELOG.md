@@ -11,6 +11,12 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ## [unreleased]
 
+### Framework
+
+### Tools
+
+## [1.5.1] — 2026-09-23
+
 ### Upgrading from 1.4.1
 
 The public repository goes from 1.4.1 to this release directly, so these are the 1.5.0 changes a 1.4.1 pipeline can notice:
