@@ -221,6 +221,24 @@ class TestTheScriptCapturesTheEnvironment:
             if "pip freeze" in line:
                 assert "bp_redact" in line, f"unredacted pip freeze: {line.strip()}"
 
+    def test_a_failed_debug_export_still_writes_its_fallback(self, isolated_cwd, tmp_path):
+        """`cmd | bp_redact > f || echo …` takes sed's status, so the fallback never ran."""
+        import shutil
+        import subprocess
+        if not shutil.which("bash"):
+            pytest.skip("needs bash")
+        _pipeline, script = self.build("redact_fallback", isolated_cwd, debug=True)
+        body = open(script, encoding="utf-8").read()
+        debug = body.split("BioPipelines debug capture")[1].split("end debug capture")[0]
+        line = next(l for l in debug.splitlines() if "| bp_redact >" in l and "||" in l)
+        assert "set -o pipefail" in line
+        out = tmp_path / "x.txt"
+        probe = ('bp_redact() { cat; }\n'
+                 f'( set -o pipefail; ( false ) 2>&1 | bp_redact > "{out.as_posix()}" ) '
+                 f'|| echo "failed" > "{out.as_posix()}"')
+        subprocess.run(["bash", "-c", probe], check=False)
+        assert out.read_text().strip() == "failed"
+
     def test_a_failed_export_is_not_digested(self, isolated_cwd):
         """Found on s3it: the block ran, the export failed, and it hashed the error message.
 
@@ -398,3 +416,31 @@ def test_a_conda_pin_named_like_a_secret_keeps_its_version():
     out = subprocess.run(["bash", "-c", REDACT_SED.strip()], input=text,
                          capture_output=True, text=True).stdout
     assert "tiktoken=0.5.1=pypi_0" in out and "AAAABBBB" not in out
+
+
+class TestTheProbeCannotReportAFalseMatch:
+
+    class Ssh:
+        env_prefix, python, repo = "", "python", "~/biopipelines"
+
+        def __init__(self, out):
+            self.out = out
+
+        def run(self, command, timeout=None):
+            return 0, self.out, ""
+
+    def test_a_target_that_imported_nothing_is_unprobed(self):
+        """`~/biopipelines` went onto sys.path unexpanded; the import failed, every field came
+        back empty, and the plan reported the target as matching."""
+        assert reproduce.probe(self.Ssh('{"biopipelines": null}')) == {}
+
+    def test_a_real_answer_is_kept(self):
+        assert reproduce.probe(self.Ssh('{"biopipelines": "1.5.1", "commit": "abc"}'))["commit"] == "abc"
+
+    def test_the_repo_path_is_expanded_on_the_target(self):
+        import subprocess
+        import sys
+        code = reproduce.PROBE.format(repo="~/nowhere").replace(
+            "print(json.dumps(out))", "print(sys.path[0])")
+        first = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True).stdout.strip()
+        assert not first.startswith("~")

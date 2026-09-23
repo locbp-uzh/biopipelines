@@ -91,8 +91,9 @@ def submit(ssh, script, upload=None, extra="", verbose=False):
                     "output": ""}
 
     prefix = getattr(ssh, "env_prefix", "")
-    command = (f"cd {quote(ssh.repo)} && {prefix}./submit {flags} "
-               f"{quote(script)}").replace("  ", " ")
+    # Joined rather than collapsed with replace(), which would also rewrite spaces inside a quoted path.
+    command = f"cd {quote(ssh.repo)} && {prefix}" + " ".join(
+        part for part in ("./submit", flags, quote(script)) if part)
     # Generation runs the pipeline script, which can take minutes before anything is submitted.
     try:
         code, out, err = ssh.run(command, timeout=max(ssh.timeout, 600))

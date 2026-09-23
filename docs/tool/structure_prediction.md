@@ -672,8 +672,8 @@ The whole batch folds in one process — `run_openfold predict` takes a single J
 - `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement
 - `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them, so both models receive the same chemistry for the same input
-- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Requires `use_msa_server=False`; the two are mutually exclusive
-- `use_msa_server`: bool = True - generate alignments through the ColabFold server
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA server off; passing `use_msa_server=True` as well is refused
+- `use_msa_server`: Optional[bool] = None - generate alignments through the ColabFold server; unset means on, unless `msas` is given
 - `num_diffusion_samples`: Optional[int] = None - structures sampled per query (upstream default 5)
 - `num_model_seeds`: Optional[int] = None - random seeds per query (upstream default 1)
 - `seeds`: Optional[List[int]] = None - the explicit seed values, when a run has to be reproducible by seed. Contradicting `num_model_seeds` is refused rather than silently resolved

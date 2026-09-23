@@ -47,7 +47,8 @@ class OpenFold3(BaseConfig):
         ligands: compounds, by SMILES or CCD code.
         msas: precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA
             server off, since a run cannot take both.
-        use_msa_server: generate alignments through the ColabFold server (default True).
+        use_msa_server: generate alignments through the ColabFold server (default: on, unless
+            `msas` is given). True together with `msas` is refused.
         num_diffusion_samples: structures sampled per query (upstream default 5).
         num_model_seeds: random seeds per query (upstream default 1).
         seeds: the explicit seed values, when the run has to be reproducible by seed.
@@ -74,7 +75,7 @@ class OpenFold3(BaseConfig):
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "openfold3"
 
     # Upstream spells its flags with underscores. The auto-generated option table in the docs
@@ -147,7 +148,7 @@ fi
                  dsRNA: Optional[Union[DataStream, StandardizedOutput]] = None,
                  ligands: Optional[Union[DataStream, StandardizedOutput]] = None,
                  msas: Optional[Union[DataStream, StandardizedOutput]] = None,
-                 use_msa_server: bool = True,
+                 use_msa_server: Optional[bool] = None,
                  num_diffusion_samples: Optional[int] = None,
                  num_model_seeds: Optional[int] = None,
                  seeds: Optional[List[int]] = None,
@@ -178,7 +179,8 @@ fi
         self.ligands_stream = self._axis_stream(ligands, "compounds")
         self.msas_stream = self._axis_stream(msas, "msas")
 
-        self.use_msa_server = use_msa_server
+        # Unset means: the server unless precomputed MSAs were given, as the docstring promises.
+        self.use_msa_server = (msas is None) if use_msa_server is None else use_msa_server
         self.num_diffusion_samples = num_diffusion_samples
         self.num_model_seeds = num_model_seeds
         self.seeds = seeds

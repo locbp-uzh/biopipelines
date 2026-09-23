@@ -51,9 +51,10 @@ def positions_chain(chains: ChainsSpec) -> str:
     """The chain a chainless position selection (``fixed="10-20"``) attaches to.
 
     One named chain answers it outright. Otherwise the runtime works it out from the
-    structure, which is also where the ambiguous case is caught — see ``accepts_multiple``.
+    structure, which is also where the ambiguous case is caught. Several named chains are
+    that ambiguous case, so they must not answer with the first of them.
     """
-    if isinstance(chains, list) and chains:
+    if isinstance(chains, list) and len(chains) == 1:
         return chains[0]
     return "auto"
 

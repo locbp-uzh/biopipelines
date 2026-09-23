@@ -415,7 +415,7 @@ class Ssh:
     def tally(self, root, names):
         """{relative path: data row count} for matching files under `root`, in one round trip."""
         patterns = " -o ".join(f"-name {quote(n)}" for n in names)
-        command = (f"cd {quote(root)} && find . -maxdepth 3 " + r"\( " + patterns + r" \) "
+        command = (f"cd {quote(root)} && find . -mindepth 2 -maxdepth 3 " + r"\( " + patterns + r" \) "
                    + "-exec wc -l {} + 2>/dev/null")
         code, out, _ = self.run(command, timeout=max(self.timeout, 120))
         if code != 0:

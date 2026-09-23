@@ -56,3 +56,8 @@ def test_a_bad_override_is_refused_at_configuration(local_config, overrides, mes
 def test_the_export_quotes_the_smiles():
     source = open(os.path.join(REPO, "biopipelines", "boltzgen.py"), encoding="utf-8").read()
     assert "export BOLTZGEN_SMILES_{_code}={shlex.quote(_smi)}" in source
+
+
+def test_a_missing_patch_binary_is_named_not_reported_as_a_version_mismatch(local_config):
+    script = _script()
+    assert "command -v patch" in script and "is not on PATH" in script

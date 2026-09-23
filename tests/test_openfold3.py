@@ -251,3 +251,18 @@ def test_an_iterating_axis_with_no_records_builds_no_query_instead_of_crashing()
     elements = {"proteins": {"mode": "each", "entity_type": "protein", "iterated": [],
                              "static": [], "static_first": False}}
     assert pipe_openfold3_config.build_queries(elements, {}, None, None) == {"queries": {}}
+
+
+
+def test_msas_alone_turn_the_server_off(local_config, isolated_cwd):
+    """The docstring promised it; the default use_msa_server=True made msas= raise instead."""
+    from biopipelines.mock import Mock
+    from biopipelines.pipeline import Pipeline
+    with Pipeline(project="TestSuite", job="of3", description="x", on_the_fly=False,
+                  local_output=True, config="local") as pipeline:
+        seqs = Mock(ids=["p"], streams={"sequences": {"format": "csv", "file": "<id>.csv"}})
+        msas = Mock(ids=["p"], streams={"msas": {"format": "a3m", "file": "<id>.a3m"}})
+        OpenFold3(proteins=seqs.streams.sequences, msas=msas.streams.msas)
+        assert pipeline.tools[-1].use_msa_server is False
+        with pytest.raises(ValueError, match="use_msa_server must be False"):
+            OpenFold3(proteins=seqs.streams.sequences, msas=msas.streams.msas, use_msa_server=True)

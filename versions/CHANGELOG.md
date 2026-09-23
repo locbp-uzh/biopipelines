@@ -13,7 +13,21 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- **`bp_reproduce` could report a match it never checked.** The probe put `~/biopipelines` on `sys.path` unexpanded, so the import failed, every field came back empty, and empty read as agreement. The path is expanded on the target, and a probe that could not import biopipelines counts as not probed.
+
+- `check-updates` strips a remote's credentials up to the last `@` before the path, so a password containing `@` no longer leaks its tail into job logs.
+
+- The debug capture's `|| echo "... failed"` fallbacks run again: piping through `bp_redact` gave each export `sed`'s exit status, so a failed export wrote its redacted error text instead of the fallback. Each pipeline now runs under `pipefail`.
+
+- `./submit`'s command is joined rather than collapsed with `replace("  ", " ")`, and the remote `tally` skips the job root as the local one does.
+
 ### Tools
+
+- **`ProteinMPNN` 2.7 -> 2.8** and **`LigandMPNN` 2.8 -> 2.9** - `chains=["A", "B"]` no longer attaches an unqualified `fixed=`/`redesigned=` selection to chain A. The default chain was the first named one, which skipped the ambiguity check; several named chains now resolve per structure, where a chainless selection on a multi-chain structure raises naming the chains.
+
+- **`OpenFold3` 1.3 -> 1.4** - `msas=` alone turns the MSA server off, as documented; the old default `use_msa_server=True` made it raise. `use_msa_server=True` with `msas` is still refused.
+
+- **`BoltzGen` 2.4 -> 2.5** - a missing `patch` binary is named instead of being reported as a version mismatch. **BoltzGenImport** 2.3 -> 2.4, **BoltzGenMerge** 2.3 -> 2.4 -- no behavioural change; they share `biopipelines/boltzgen.py`.
 
 ## [1.5.1] — 2026-09-23
 

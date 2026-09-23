@@ -10,7 +10,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 
 | # | Tool | Category | Version | Source file |
 |---|------|----------|---------|-------------|
-| 1 | BoltzGen | Structure Generation           | 2.4 | `biopipelines/boltzgen.py` |
+| 1 | BoltzGen | Structure Generation           | 2.5 | `biopipelines/boltzgen.py` |
 | 2 | PocketGen | Structure Generation           | 2.0 | `biopipelines/pocketgen.py` |
 | 3 | RFdiffusion | Structure Generation           | 2.2 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.6 | `biopipelines/rfdiffusion3.py` |
@@ -20,11 +20,11 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 8 | DNAEncoder                | Sequence Design                | 1.2 | `biopipelines/dna_encoder.py` |
 | 9 | Frame2Seq | Sequence Design                | 2.0 | `biopipelines/frame2seq.py` |
 | 10 | Fuse | Sequence Design                | 1.3 | `biopipelines/fuse.py` |
-| 11 | LigandMPNN | Sequence Design                | 2.8 | `biopipelines/ligand_mpnn.py` |
+| 11 | LigandMPNN | Sequence Design                | 2.9 | `biopipelines/ligand_mpnn.py` |
 | 12 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
 | 13 | Mutagenesis               | Sequence Design                | 1.2 | `biopipelines/mutagenesis.py` |
 | 14 | MutationComposer          | Sequence Design                | 1.0 | `biopipelines/mutation_composer.py` |
-| 15 | ProteinMPNN | Sequence Design                | 2.7 | `biopipelines/protein_mpnn.py` |
+| 15 | ProteinMPNN | Sequence Design                | 2.8 | `biopipelines/protein_mpnn.py` |
 | 16 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 17 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
 | 18 | AlphaFold                 | Structure Prediction & Docking | 1.7 | `biopipelines/alphafold.py` |
@@ -36,7 +36,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 24 | Gnina | Structure Prediction & Docking | 2.2 | `biopipelines/gnina.py` |
 | 25 | Vina | Structure Prediction & Docking | 2.2 | `biopipelines/gnina.py` |
 | 26 | NeuralPLexer | Structure Prediction & Docking | 2.1 | `biopipelines/neuralplexer.py` |
-| 27 | OpenFold3 | Structure Prediction & Docking | 1.3 | `biopipelines/openfold3.py` |
+| 27 | OpenFold3 | Structure Prediction & Docking | 1.4 | `biopipelines/openfold3.py` |
 | 28 | PLACER | Structure Prediction & Docking | 2.1 | `biopipelines/placer.py` |
 | 29 | ADMETAI | Analysis                       | 2.0 | `biopipelines/admet_ai.py` |
 | 30 | AF2BIND | Analysis                       | 2.0 | `biopipelines/af2bind.py` |

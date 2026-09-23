@@ -15,7 +15,7 @@ from . import manifest
 
 PROBE = (
     "import json,os,hashlib,sys\n"
-    "sys.path.insert(0, {repo!r})\n"
+    "sys.path.insert(0, os.path.expanduser(os.path.expandvars({repo!r})))\n"
     "out={{}}\n"
     "try:\n"
     "    from biopipelines import __version__ as v\n"
@@ -72,8 +72,10 @@ def probe(ssh, repo: str = "") -> Dict[str, Any]:
             parsed = json.loads(line)
         except Exception:
             continue
-        if isinstance(parsed, dict):
+        # A target that could not import biopipelines reported nothing, and nothing must not read as a match.
+        if isinstance(parsed, dict) and parsed.get("biopipelines"):
             return parsed
+        return {}
     return {}
 
 

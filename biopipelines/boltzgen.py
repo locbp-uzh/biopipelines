@@ -48,7 +48,7 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     ENV_NAME = "boltzgen"
 
     @classmethod
@@ -59,7 +59,11 @@ class BoltzGen(BaseConfig):
         # The local 0.3.1 patches lived only in site-packages, so a rebuild dropped them silently; apply (or confirm) them on every install.
         patch_block = f"""BG_SITE="$({cls._env_run(env, env_manager)}python -c 'import boltzgen,os;print(os.path.dirname(os.path.dirname(boltzgen.__file__)))')"
 BG_PATCH="{biopipelines}/environments/patches/boltzgen-0.3.1-locbp.patch"
-if patch -d "$BG_SITE" -p1 -R --dry-run -s -f < "$BG_PATCH" >/dev/null 2>&1; then
+if ! command -v patch >/dev/null 2>&1; then
+    echo "ERROR: 'patch' is not on PATH, so the BoltzGen local patches cannot be applied or confirmed."
+    echo "       Install it (e.g. 'mamba install -c conda-forge patch' or the OS package) and rerun the install."
+    exit 1
+elif patch -d "$BG_SITE" -p1 -R --dry-run -s -f < "$BG_PATCH" >/dev/null 2>&1; then
     echo "BoltzGen local patches already applied"
 elif patch -d "$BG_SITE" -p1 --forward -s < "$BG_PATCH"; then
     echo "Applied BoltzGen local patches to $BG_SITE"
@@ -1157,7 +1161,7 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -1355,7 +1359,7 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

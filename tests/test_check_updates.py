@@ -249,6 +249,13 @@ class TestWhichRemoteIsAsked:
         assert "oauth2" not in proc.stdout
         assert "gitlab.uzh.ch/locbp/public/bp" in proc.stdout
 
+    def test_a_password_containing_an_at_sign_is_stripped_whole(self, tmp_path):
+        """Stripping to the first @ printed the rest of the password in front of the host."""
+        origin = "https://user:pa@ssw0rd@gitlab.uzh.ch/locbp/public/bp.git"
+        proc = _run(tmp_path, _git_stub_with_origin(origin, _git_dir(tmp_path), _asked(tmp_path)))
+        assert "ssw0rd" not in proc.stdout
+        assert "gitlab.uzh.ch/locbp/public/bp" in proc.stdout
+
     def test_an_ssh_remote_is_shown_as_host_and_path(self, tmp_path):
         origin = "git@gitlab.uzh.ch:locbp/public/biopipelines-locbp.git"
         proc = _run(tmp_path, _git_stub_with_origin(origin, _git_dir(tmp_path), _asked(tmp_path)))

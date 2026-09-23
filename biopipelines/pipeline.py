@@ -1070,17 +1070,17 @@ class Pipeline:
         # Same redaction as the unconditional capture: `pip freeze` prints an editable install as
         # its remote URL, token included when the clone carries one.
         if env_manager == "pip":
-            lines.append(f'  ( pip freeze ) 2>&1 | bp_redact > "{envs_dir}/pip.txt" || echo "pip not available" > "{envs_dir}/pip.txt"')
+            lines.append(f'  ( set -o pipefail; ( pip freeze ) 2>&1 | bp_redact > "{envs_dir}/pip.txt" ) || echo "pip not available" > "{envs_dir}/pip.txt"')
         elif env_manager == "venv":
             for env in envs:
                 env_py = f'{cm.get_venv_path(env)}/bin/python'
-                lines.append(f'  ( "{env_py}" -m pip freeze ) 2>&1 | bp_redact > "{envs_dir}/{env}.pip.txt" || echo "pip freeze failed for {env}" > "{envs_dir}/{env}.pip.txt"')
+                lines.append(f'  ( set -o pipefail; ( "{env_py}" -m pip freeze ) 2>&1 | bp_redact > "{envs_dir}/{env}.pip.txt" ) || echo "pip freeze failed for {env}" > "{envs_dir}/{env}.pip.txt"')
         else:
             for env in envs:
                 env_yaml = f'{envs_dir}/{env}.yaml'
                 env_pip = f'{envs_dir}/{env}.pip.txt'
-                lines.append(f'  ( {env_manager} env export --no-builds -n {env} ) 2>&1 | bp_redact > "{env_yaml}" || echo "env export failed for {env}" > "{env_yaml}"')
-                lines.append(f'  ( {env_manager} run -n {env} pip freeze ) 2>&1 | bp_redact > "{env_pip}" || echo "pip freeze failed for {env}" > "{env_pip}"')
+                lines.append(f'  ( set -o pipefail; ( {env_manager} env export --no-builds -n {env} ) 2>&1 | bp_redact > "{env_yaml}" ) || echo "env export failed for {env}" > "{env_yaml}"')
+                lines.append(f'  ( set -o pipefail; ( {env_manager} run -n {env} pip freeze ) 2>&1 | bp_redact > "{env_pip}" ) || echo "pip freeze failed for {env}" > "{env_pip}"')
 
         lines.append('  echo "Debug capture complete."')
         lines.append('fi')

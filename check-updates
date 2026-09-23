@@ -165,7 +165,11 @@ RELEASE_URL="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null)"
 # open. A token in a remote URL must never reach a job's log.
 RELEASE_DISPLAY="${RELEASE_URL%.git}"
 RELEASE_DISPLAY="${RELEASE_DISPLAY#*://}"
-RELEASE_DISPLAY="${RELEASE_DISPLAY#*@}"
+# Up to the LAST @ before the path: a password may itself contain an unencoded @.
+RELEASE_AUTHORITY="${RELEASE_DISPLAY%%/*}"
+case "$RELEASE_AUTHORITY" in
+    *@*) RELEASE_DISPLAY="${RELEASE_AUTHORITY##*@}${RELEASE_DISPLAY#"$RELEASE_AUTHORITY"}" ;;
+esac
 RELEASE_DISPLAY="${RELEASE_DISPLAY/://}"
 
 # The subject list is parsed out of GitHub's Atom feed, so it exists only for a

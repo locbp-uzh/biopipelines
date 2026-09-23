@@ -15,7 +15,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
-    from .chain_rows import (accepts_multiple, chain_row_ids, chains_arg,
+    from .chain_rows import (chain_row_ids, chains_arg,
                              normalize_chains, positions_chain, validate_chains)
     from .biopipelines_io import Resolve, TableReference
 except ImportError:
@@ -25,7 +25,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
-    from chain_rows import (accepts_multiple, chain_row_ids, chains_arg,
+    from chain_rows import (chain_row_ids, chains_arg,
                             normalize_chains, positions_chain, validate_chains)
     from biopipelines_io import Resolve, TableReference
 
@@ -36,7 +36,7 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
     # protein_mpnn_run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     # `chain` and `chains` were one letter apart and meant different things, which is the
@@ -351,7 +351,6 @@ fi
                 "FIXED": fixed_param,
                 "DESIGNED": designed_param,
                 "FIXED_CHAIN": positions_chain(self.chains),
-                "MULTICHAIN": accepts_multiple(self.chains),
                 "fixed_jsonl_file": str(self.fixed_jsonl),
                 "sele_csv_file": str(self.sele_csv),
             }, f, indent=2)

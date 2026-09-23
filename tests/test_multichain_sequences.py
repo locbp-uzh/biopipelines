@@ -629,3 +629,12 @@ def test_equal_length_chains_are_assigned_by_sequence_not_by_alphabet(tmp_path):
         str(tmp_path), "A,B", [["GGGGA", "KKKKA"]], {"B": "GGGGM", "A": "KKKKM"})
     by_id = dict(zip(seqs["id"], seqs["sequence"]))
     assert by_id["bb_1_B"] == "GGGGA" and by_id["bb_1_A"] == "KKKKA"
+
+
+def test_naming_several_chains_does_not_attach_a_chainless_selection_to_the_first():
+    """chains=["A", "B"] used to set the default chain to "A", so an unqualified fixed= went to
+    chain A silently; several named chains are exactly the ambiguous case."""
+    from biopipelines.chain_rows import positions_chain
+    assert positions_chain(["A", "B"]) == "auto"
+    assert positions_chain(["B"]) == "B"
+    assert positions_chain("all") == "auto"

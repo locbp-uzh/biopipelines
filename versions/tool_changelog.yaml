@@ -280,8 +280,12 @@ BoltzGen:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen.py
   - pipe_scripts/pipe_boltzgen_config.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-09-23'
+    note: >-
+      A missing patch binary is reported as such instead of as a boltzgen version mismatch; the install still fails, since the local patches can then be neither applied nor confirmed.
   - version: '2.4'
     date: '2026-09-23'
     note: >-
@@ -311,8 +315,12 @@ BoltzGenImport:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen_import.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-09-23'
+    note: >-
+      No behavioural change; the version follows BoltzGen 2.5 because both classes live in biopipelines/boltzgen.py.
   - version: '2.3'
     date: '2026-09-23'
     note: >-
@@ -335,8 +343,12 @@ BoltzGenMerge:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen_merge.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-09-23'
+    note: >-
+      No behavioural change; the version follows BoltzGen 2.5 because both classes live in biopipelines/boltzgen.py.
   - version: '2.3'
     date: '2026-09-23'
     note: >-
@@ -856,8 +868,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "2.8"
+  current: "2.9"
   history:
+  - version: '2.9'
+    date: '2026-09-23'
+    note: >-
+      Naming several chains (chains=["A","B"]) no longer sets the default chain for an unqualified position selection to the first of them; the runtime reads it off each structure and refuses the ambiguous case, as for ProteinMPNN 2.8.
   - version: '2.8'
     date: '2026-09-23'
     note: >-
@@ -1201,8 +1217,12 @@ OpenFold3:
   - pipe_scripts/pipe_openfold3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-09-23'
+    note: >-
+      use_msa_server defaults to "on unless msas is given", as the docstring always said: with the old default of True, msas= alone raised. Passing use_msa_server=True together with msas is still refused.
   - version: '1.3'
     date: '2026-09-23'
     note: >-
@@ -1444,8 +1464,12 @@ ProteinMPNN:
   - pipe_scripts/pipe_pmpnn_fixed_positions.py
   - pipe_scripts/pipe_pmpnn_table.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "2.7"
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-09-23'
+    note: >-
+      Naming several chains (chains=["A","B"]) no longer attaches an unqualified fixed=/redesigned= selection to the first of them. positions_chain returned chains[0] for any non-empty list, so the runtime skipped its ambiguity check and fixed the residues on chain A silently; several named chains now resolve as "auto", where a chainless selection on a multi-chain structure raises naming the chains, as 2.6 documented. The unused MULTICHAIN key is gone from the positions config.
   - version: '2.7'
     date: '2026-09-23'
     note: >-
