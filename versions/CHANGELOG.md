@@ -13,6 +13,12 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+### Tools
+
+## [1.5.2] — 2026-09-23
+
+### Framework
+
 - `bp_visualize` walks a step's folders with one `find` over ssh instead of one `listdir` per folder, and `bp_table`'s listing and the provenance page count only the step's own CSVs (`tally(include_root=True)`), where every call counted every CSV in the run.
 
 - `bp_reproduce`'s probe runs the saved interpreter through `interpreter()` like every other remote call, and a non-object JSON line in its output no longer ends the search for the answer.
