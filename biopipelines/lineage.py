@@ -132,13 +132,10 @@ def tables(job_dir, step, fs=None):
     left out — they are not results.
     """
     fs = fs or LocalFS()
-    prefix = str(step).replace("\\", "/").strip("/") + "/"
     found = []
-    for path in fs.tally(job_dir, ["*.csv"]):
-        rel = path.replace("\\", "/")
-        if not rel.startswith(prefix):
-            continue
-        inner = rel[len(prefix):]
+    # Scoped to the step: counting every CSV of the run to list one step made the provenance page rescan it per step.
+    for path in fs.tally(fs.join(job_dir, str(step).strip("/\\")), ["*.csv"], include_root=True):
+        inner = path.replace("\\", "/")
         if inner.startswith("_") or "/_" in inner:
             continue
         found.append(inner)

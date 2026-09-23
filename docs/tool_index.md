@@ -20,11 +20,11 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 8 | DNAEncoder                | Sequence Design                | 1.2 | `biopipelines/dna_encoder.py` |
 | 9 | Frame2Seq | Sequence Design                | 2.0 | `biopipelines/frame2seq.py` |
 | 10 | Fuse | Sequence Design                | 1.3 | `biopipelines/fuse.py` |
-| 11 | LigandMPNN | Sequence Design                | 2.9 | `biopipelines/ligand_mpnn.py` |
+| 11 | LigandMPNN | Sequence Design                | 3.0 | `biopipelines/ligand_mpnn.py` |
 | 12 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
 | 13 | Mutagenesis               | Sequence Design                | 1.2 | `biopipelines/mutagenesis.py` |
 | 14 | MutationComposer          | Sequence Design                | 1.0 | `biopipelines/mutation_composer.py` |
-| 15 | ProteinMPNN | Sequence Design                | 2.8 | `biopipelines/protein_mpnn.py` |
+| 15 | ProteinMPNN | Sequence Design                | 2.9 | `biopipelines/protein_mpnn.py` |
 | 16 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 17 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
 | 18 | AlphaFold                 | Structure Prediction & Docking | 1.7 | `biopipelines/alphafold.py` |

@@ -13,6 +13,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `bp_visualize` walks a step's folders with one `find` over ssh instead of one `listdir` per folder, and `bp_table`'s listing and the provenance page count only the step's own CSVs (`tally(include_root=True)`), where every call counted every CSV in the run.
+
+- `bp_reproduce`'s probe runs the saved interpreter through `interpreter()` like every other remote call, and a non-object JSON line in its output no longer ends the search for the answer.
+
 - **`bp_reproduce` could report a match it never checked.** The probe put `~/biopipelines` on `sys.path` unexpanded, so the import failed, every field came back empty, and empty read as agreement. The path is expanded on the target, and a probe that could not import biopipelines counts as not probed.
 
 - `check-updates` strips a remote's credentials up to the last `@` before the path, so a password containing `@` no longer leaks its tail into job logs.
@@ -22,6 +26,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 - `./submit`'s command is joined rather than collapsed with `replace("  ", " ")`, and the remote `tally` skips the job root as the local one does.
 
 ### Tools
+
+- **`ProteinMPNN` 2.8 -> 2.9**, **`LigandMPNN` 2.9 -> 3.0** -- no behavioural change; the unused `accepts_multiple` is removed from their shared `chain_rows.py`.
 
 - **`ProteinMPNN` 2.7 -> 2.8** and **`LigandMPNN` 2.8 -> 2.9** - `chains=["A", "B"]` no longer attaches an unqualified `fixed=`/`redesigned=` selection to chain A. The default chain was the first named one, which skipped the ambiguity check; several named chains now resolve per structure, where a chainless selection on a multi-chain structure raises naming the chains.
 

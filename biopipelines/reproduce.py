@@ -59,10 +59,12 @@ def probe(ssh, repo: str = "") -> Dict[str, Any]:
     """
     from shlex import quote
 
+    from .remote import interpreter
+
     code = PROBE.format(repo=repo or getattr(ssh, "repo", ""))
     try:
         exit_code, out, _err = ssh.run(
-            f"{ssh.env_prefix}{ssh.python} -c {quote(code)}")
+            f"{ssh.env_prefix}{interpreter(ssh.python)} -c {quote(code)}")
     except Exception:
         return {}
     if exit_code != 0:
@@ -72,10 +74,10 @@ def probe(ssh, repo: str = "") -> Dict[str, Any]:
             parsed = json.loads(line)
         except Exception:
             continue
+        if not isinstance(parsed, dict):
+            continue
         # A target that could not import biopipelines reported nothing, and nothing must not read as a match.
-        if isinstance(parsed, dict) and parsed.get("biopipelines"):
-            return parsed
-        return {}
+        return parsed if parsed.get("biopipelines") else {}
     return {}
 
 

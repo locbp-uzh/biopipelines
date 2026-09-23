@@ -401,3 +401,12 @@ class TestDownload:
                             lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
         with pytest.raises(remote.RemoteError, match="scp is not on PATH"):
             remote.Ssh("cluster").download("/x", "y", recursive=False)
+
+
+def test_walk_files_is_one_round_trip(fake):
+    """views._walk listed every folder separately: one ssh connection per directory."""
+    recorder = fake({"find ": (0, "/r/step/top.png\n/r/step/_extras/i.png\n", "")})
+    found = remote.Ssh("cluster").walk_files("/r/step", depth=2)
+    assert found == [("/r/step/top.png", "top.png"), ("/r/step/_extras/i.png", "i.png")]
+    assert len(recorder.calls) == 1
+    assert "-maxdepth 3" in recorder.calls[0][-1] and "! -name _extras -prune" in recorder.calls[0][-1]

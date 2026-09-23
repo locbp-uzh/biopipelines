@@ -27,6 +27,13 @@ _WROTE = re.compile(r"(?:wrote|written to|Wrote)\s*:?\s*(\S+\.html)", re.I)
 
 def _walk(fs, root, depth=2):
     """(path, name) for files under `root`, `depth` levels down. Small by construction."""
+    walk_files = getattr(fs, "walk_files", None)
+    if walk_files is not None:
+        # Over ssh a listdir per folder is a round trip each; one find answers the whole walk.
+        try:
+            return walk_files(root, depth)
+        except Exception:
+            return []
     found = []
     stack = [(root, 0)]
     while stack:

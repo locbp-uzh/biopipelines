@@ -868,8 +868,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "2.9"
+  current: "3.0"
   history:
+  - version: '3.0'
+    date: '2026-09-23'
+    note: >-
+      No behavioural change: removes accepts_multiple from the shared biopipelines/chain_rows.py, which lost its last caller in the previous version.
   - version: '2.9'
     date: '2026-09-23'
     note: >-
@@ -1464,8 +1468,12 @@ ProteinMPNN:
   - pipe_scripts/pipe_pmpnn_fixed_positions.py
   - pipe_scripts/pipe_pmpnn_table.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "2.8"
+  current: "2.9"
   history:
+  - version: '2.9'
+    date: '2026-09-23'
+    note: >-
+      No behavioural change: removes accepts_multiple from the shared biopipelines/chain_rows.py, which lost its last caller in the previous version.
   - version: '2.8'
     date: '2026-09-23'
     note: >-

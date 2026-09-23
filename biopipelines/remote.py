@@ -202,8 +202,8 @@ class LocalFS:
         except OSError:
             return False
 
-    def tally(self, root, names):
-        """{relative path: data row count} for every file under `root` matching `names`.
+    def tally(self, root, names, include_root=False):
+        """{relative path: data row count} for every file under `root` matching `names`; `include_root` adds `root`'s own files.
 
         One call, because on a cluster the alternative is a round trip per step and a large
         campaign has dozens. Row counts exclude the CSV header.
@@ -213,7 +213,8 @@ class LocalFS:
         for name in names:
             # Map tables sit in the stream's own subfolder (`002_DSSP/dssp/dssp_map.csv`), not
             # beside it, so a one-level glob finds nothing and reports a run as traceless.
-            for path in list(base.glob(f"*/{name}")) + list(base.glob(f"*/*/{name}")):
+            top = list(base.glob(name)) if include_root else []
+            for path in top + list(base.glob(f"*/{name}")) + list(base.glob(f"*/*/{name}")):
                 try:
                     with io.open(path, encoding="utf-8", errors="replace") as handle:
                         found[str(path.relative_to(base)).replace("\\", "/")] = max(
@@ -412,10 +413,11 @@ class Ssh:
             stdin=text)
         return code == 0
 
-    def tally(self, root, names):
+    def tally(self, root, names, include_root=False):
         """{relative path: data row count} for matching files under `root`, in one round trip."""
         patterns = " -o ".join(f"-name {quote(n)}" for n in names)
-        command = (f"cd {quote(root)} && find . -mindepth 2 -maxdepth 3 " + r"\( " + patterns + r" \) "
+        command = (f"cd {quote(root)} && find . -mindepth {1 if include_root else 2} -maxdepth 3 -type f "
+                   + r"\( " + patterns + r" \) "
                    + "-exec wc -l {} + 2>/dev/null")
         code, out, _ = self.run(command, timeout=max(self.timeout, 120))
         if code != 0:
@@ -455,6 +457,16 @@ class Ssh:
         if code != 0 or not out.strip():
             raise RemoteError(f"could not resolve {text} on {self.host}: {err.strip() or 'empty'}")
         return validate_scp_path(out.strip())
+
+    def walk_files(self, root, depth=2):
+        """(path, name) for files up to `depth` folders below `root`, skipping `_` folders but `_extras`, in one call."""
+        code, out, _ = self.run(
+            f"find {quote(root)} -mindepth 1 -maxdepth {int(depth) + 1} "
+            r"\( -type d -name '_*' ! -name _extras -prune \) -o -type f -print 2>/dev/null")
+        if code != 0 and not out.strip():
+            return []
+        paths = [line.strip() for line in out.splitlines() if line.strip()]
+        return [(path, path.rsplit("/", 1)[-1]) for path in paths]
 
     def find_job(self, root, job):
         """Every `<root>/<project>/<job>` directory, in one round trip rather than one per project."""

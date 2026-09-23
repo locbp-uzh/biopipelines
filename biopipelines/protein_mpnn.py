@@ -36,7 +36,7 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
-    TOOL_VERSION = "2.8"
+    TOOL_VERSION = "2.9"
     # protein_mpnn_run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     # `chain` and `chains` were one letter apart and meant different things, which is the

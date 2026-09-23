@@ -59,18 +59,6 @@ def positions_chain(chains: ChainsSpec) -> str:
     return "auto"
 
 
-def accepts_multiple(chains: ChainsSpec) -> bool:
-    """Whether the caller has said this step may span several chains.
-
-    Answers two questions at once, which is why one parameter can serve both: it is what
-    makes a chain suffix necessary on the row ids, and what decides whether a structure
-    with several chains is an error or expected. When the caller has not said so, several
-    chains is an error rather than a silent pick of the first — that guess is the failure
-    mode this module exists to remove.
-    """
-    return chains == "all" or (isinstance(chains, list) and len(chains) > 1)
-
-
 def chains_arg(chains: ChainsSpec) -> str:
     """The `--chains` value `pipe_fa_to_csv_fasta.py` parses."""
     if chains == "all":

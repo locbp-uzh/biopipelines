@@ -444,3 +444,28 @@ class TestTheProbeCannotReportAFalseMatch:
             "print(json.dumps(out))", "print(sys.path[0])")
         first = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True).stdout.strip()
         assert not first.startswith("~")
+
+
+def test_the_probe_quotes_an_interpreter_path_like_every_other_remote_call():
+    sent = {}
+
+    class Ssh:
+        env_prefix, python, repo = "", "$SCRATCH/venvs/bp/bin/python", "~/bp"
+
+        def run(self, command, timeout=None):
+            sent["command"] = command
+            return 0, '{"biopipelines": "1.5.1"}', ""
+
+    reproduce.probe(Ssh())
+    # Raw, `$SCRATCH` would not survive quoting elsewhere and an unset one would not fail.
+    assert sent["command"].startswith('"${SCRATCH:?}"/venvs/bp/bin/python -c ')
+
+
+def test_a_non_dict_json_line_does_not_end_the_search():
+    class Ssh:
+        env_prefix, python, repo = "", "python", "~/bp"
+
+        def run(self, command, timeout=None):
+            return 0, '{"biopipelines": "1.5.1", "commit": "abc"}\n42\n', ""
+
+    assert reproduce.probe(Ssh())["commit"] == "abc"

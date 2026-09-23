@@ -232,3 +232,24 @@ def test_a_drop_propagated_downstream_is_counted_once_where_it_happened(tmp_path
     assert [steps[f]["missing"] for f in ("002_Panda", "003_Boltz2", "004_Panda")] == [2, 0, 1]
     text = lineage.summarize(list(steps.values()))
     assert "3 ID(s) dropped across 2 step(s)" in text and "largest single loss is 2 at 002_Panda" in text
+
+
+def test_tables_reads_only_the_step_it_lists(tmp_path):
+    """It used to count rows in every CSV of the run to list one step, once per step on the provenance page."""
+    job = tmp_path / "run_001"
+    (job / "003_ExtractMetrics").mkdir(parents=True)
+    (job / "003_ExtractMetrics" / "plddt.csv").write_text("id,v\na,1\n")
+    (job / "003_ExtractMetrics" / "tables").mkdir()
+    (job / "003_ExtractMetrics" / "tables" / "missing.csv").write_text("id\n")
+    (job / "004_Other" / "tables").mkdir(parents=True)
+    (job / "004_Other" / "tables" / "big.csv").write_text("id\n")
+
+    seen = []
+
+    class Counting(LocalFS):
+        def tally(self, root, names, include_root=False):
+            seen.append(str(root))
+            return super().tally(root, names, include_root=include_root)
+
+    assert lineage.tables(str(job), "003_ExtractMetrics", fs=Counting()) == ["plddt.csv", "tables/missing.csv"]
+    assert seen == [str(job / "003_ExtractMetrics")]
