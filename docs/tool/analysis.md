@@ -6,9 +6,11 @@
 
 ADMET endpoint predictions for compound libraries via the ADMET-AI Chemprop-RDKit model. Reads SMILES from a compounds stream and writes one row per input compound with all upstream-reported ADMET properties (~40+ regression and classification scores covering absorption, distribution, metabolism, excretion, and toxicity).
 
+**Tags**: predict-property, small-molecule
+
 **Environment**: `admet_ai`
 
-**Installation**: `ADMETAI.install()` creates a dedicated conda env (Python 3.10) and installs `admet-ai` via pip. Verification instantiates `ADMETModel`, which downloads the bundled weights and warms the cache. On Daint the env is a plain venv on the host Python 3.11 and `admet-ai` is pinned below 2.0 — see `llm/daint.md`.
+**Installation**: `ADMETAI.install()` creates a dedicated conda env (Python 3.10) and installs `admet-ai` via pip. Verification instantiates `ADMETModel`, which downloads the bundled weights and warms the cache. On Daint the env is a plain venv on the host Python 3.11 and `admet-ai` is pinned below 2.0 — see `skills/biopipelines/references/daint_backend.md`.
 
 **Parameters**:
 - `compounds`: Union[DataStream, StandardizedOutput] (required) — Input compounds. SMILES are read from the `smiles` column of the compounds map_table.
@@ -47,7 +49,9 @@ filtered = Panda(
 
 Small-molecule binding-residue prediction from a single protein structure, leveraging AlphaFold2's internal pair representation through a trained linear head (sokrypton/af2bind). It probes the target with 20 "bait" amino acids and reads out a per-residue binding probability `p_bind` — no ligand required. GPU-bound.
 
-**Environment**: AF2BIND **reuses LocalColabFold's conda env** on the cluster — it already ships a working `jaxlib+cuda` (the stack ColabFold runs on the cluster's GPUs), so `AF2BIND.install()` only pip-adds ColabDesign `@v1.1.1` rather than building a fragile `jax[cuda]` env. On Colab, ColabDesign is installed into the base Python (which has JAX+GPU). **AF2BIND therefore requires `AlphaFold.install()` (LocalColabFold) first.** It reads the AlphaFold2 network params from the **shared `AlphaFoldParams` cache** (the dir whose `params/` holds `params_model_*.npz`, configured in `folders.cache`) — on the cluster this is LocalColabFold's existing params, so nothing is re-downloaded. Only the AF2BIND linear-head weights are tool-specific and land under the `AF2BIND` folder.
+**Tags**: detect, predict-property, protein, pocket, residues, small-molecule
+
+**Environment**: `af2bind` — its own conda env (`environments/af2bind.yaml`), built by `AF2BIND.install()`. The conda layer is only python + numpy<2 + pandas; the JAX/ColabDesign stack (jax 0.4.23 + dm-haiku 0.0.10 + chex 0.1.7 + optax 0.1.7 + colabdesign 1.1.1) is pip-installed as an explicit step, because that set is the last one where ColabDesign v1.1.1's haiku still finds `jax.linear_util`. On Colab, ColabDesign is installed into the base Python (which has JAX+GPU). AF2BIND does not depend on the AlphaFold tool's environment. The two share only the **`AlphaFoldParams` cache** (the dir whose `params/` holds `params_model_*.npz`, configured in `folders.cache`): AF2BIND downloads the AF2 network params only if that folder is empty, so a co-located AlphaFold install's weights are reused and nothing is re-downloaded. Only the AF2BIND linear-head weights are tool-specific and land under the `AF2BIND` folder.
 
 **Parameters**:
 - `structures`: Union[DataStream, StandardizedOutput] (required) — Input PDB structures.
@@ -79,6 +83,8 @@ bind.tables.summary  # top binding residues as a selection string
 ### Angle
 
 Calculates angles between atoms in structures. Three modes are supported, selected by the shape of the `atoms` tuple. Useful for backbone phi/psi analysis, side chain rotamers, ligand geometry verification, and measuring relative orientations between structural elements.
+
+**Tags**: measure, protein, small-molecule, residues
 
 **Environment**: `biopipelines`
 
@@ -171,6 +177,8 @@ orientation_rad = Angle(
 
 Electrostatic surface potential. For each input PDB, runs `pdb2pqr` (PROPKA protonation at the given pH) then `apbs` to compute the Poisson-Boltzmann potential on a grid. Exposes the protonated/charged structure (PQR) and the potential grid (DX), plus per-structure charge metrics.
 
+**Tags**: measure, protein, energy
+
 **References**: https://github.com/Electrostatics/apbs
 
 **Environment**: `apbs`
@@ -202,6 +210,57 @@ elec.tables.electrostatics
 
 ---
 
+### BFactor
+
+Reads the B-factor column per residue and summarizes it over any number of named selections.
+
+The B-factor column is where a structure predictor puts its per-residue confidence: Boltz2, AlphaFold and ESMFold all write pLDDT there in [0,100], while an experimental structure carries a real temperature factor in A^2. Every tool in this catalog reports confidence as one number for the whole structure (`complex_plddt`, `plddt_mean`), which averages the part under scrutiny together with everything around it. On a 476-residue fusion whose designed linker is four residues, a connector the model cannot place at all moves the structure-level score by less than a percent. This reads the vector the predictor already wrote, so the region that differs between designs can be scored on its own.
+
+**Tags**: measure, protein, residues
+
+**Environment**: `biopipelines`
+
+**Values are never rescaled.** A 0-100 pLDDT and a 0-100 temperature factor are indistinguishable by range, so any auto-normalization would corrupt one of them; the caller knows which produced the file. One value per residue: the CA atom's B-factor when the residue has a CA, otherwise the mean over that residue's atoms.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) - PDB/mmCIF structures.
+- `selections`: Dict[str, str | TableReference] = None - `{name: selection}`. Each selection is a framework selection string (`"A75-77+A274"`; an unqualified `"75-77"` when only one chain has residues 75-77; if several do, that id is recorded as a failure naming them; a part that is not a span is refused) or a table column reference (`rfd.tables.structures.designed`) resolved per structure id. One group of summary columns is emitted per name; a single-row table broadcasts to every structure. Names must be alphanumeric with underscores, since they prefix the summary columns.
+
+**Streams**:
+- `bfactors`: per-residue `resi-csv`, one `<id>.csv` per input, columns `id | chain | resi | icode | bfactor`. Consumable by [Selection](data_management.md#selection) and [Consensus](#consensus), e.g. `Selection.add(bf.streams.bfactors, include="bfactor>=70")` to keep the confidently placed residues, or `Consensus.mean("bfactor")` to average a position across an ensemble.
+
+**Tables**:
+- `summary`:
+
+  | id | n_residues | all_mean | all_sd | <name>_mean | <name>_sd | <name>_min | <name>_n | <name>_delta |
+  |----|------------|----------|--------|-------------|-----------|------------|----------|--------------|
+
+  One group of five columns per named selection. `<name>_delta` is the selection's mean minus the whole structure's: negative means the region is less certain than the model around it, which is the comparison a structure-level average cannot express. `<name>_n` is how many residues the selection actually matched - read it before trusting the mean, since a selection that matches nothing reports an empty mean rather than a zero.
+
+- `missing`: | id | removed_by | kind | cause |
+
+**Units.** Whatever the input file carries. Boltz2, AlphaFold and ESMFold write pLDDT in 0-100, where higher is more confident (verified against Boltz2 output: CA values span 26.4-97.3). A crystallographic temperature factor occupies the same field and the same rough range, but *higher means more disordered*, so the sign of "good" flips with the source and the range cannot tell you which you have. There is no cross-source comparison to be made without knowing which produced the file.
+
+**Example**:
+```python
+from biopipelines.bfactor import BFactor
+
+# Confidence over a diffused linker, scored from the column that defined it.
+rfd = RFdiffusion(pdb=posed, contigs="A3-76/0-4/B2-197/0-4/A324-523", length="471-476")
+mpnn = ProteinMPNN(structures=rfd, redesigned=rfd.tables.structures.designed)
+folded = Boltz2(proteins=mpnn)
+
+bf = BFactor(structures=folded,
+             selections={"linker": rfd.tables.structures.designed,
+                         "motif": rfd.tables.structures.fixed})
+
+# Rank designs by how well the predictor places the designed span itself.
+best = Panda(tables=bf.tables.summary,
+             operations=[Panda.sort("linker_mean", ascending=False), Panda.head(10)])
+```
+
+---
+
 ### BindingData
 
 Experimentally measured protein–ligand binding affinities for a compounds stream, retrieved from the ChEMBL REST API and the BindingDB RESTful service. For each input compound the tool resolves the molecule in each configured source and collects its Ki/Kd/IC50/EC50 records against protein targets. No model, no GPU — two HTTP APIs.
@@ -209,6 +268,8 @@ Experimentally measured protein–ligand binding affinities for a compounds stre
 Sources are queried independently and their rows concatenated, so a measurement curated by both databases appears twice, distinguished by the `source` column; deduplicate downstream with `Panda` if needed. Affinity values are reported in nM. ChEMBL records carry `pchembl_value` (-log10 of the molar value, comparable across measurement types); BindingDB glues its relation onto the value (`">30000"`), which the tool splits into the separate `relation` and `affinity_nm` columns.
 
 Every input id yields at least one row: a compound queried successfully with no matching record keeps an all-NaN row so the `affinities` table stays a complete matrix over the input stream, and is additionally recorded in `missing` with `kind="filter"`.
+
+**Tags**: fetch, small-molecule, protein, complex, binding
 
 **Environment**: `biopipelines` (no installation needed).
 
@@ -268,6 +329,8 @@ with Pipeline("Project", "Affinities", description="Known binders of a library")
 
 Emulates a protein's equilibrium structural ensemble from sequence with a generative model. For each input sequence, samples `num_samples` statistically independent conformers approximating the equilibrium distribution — a fast alternative to running MD. Emits per-conformer PDBs plus a compact trajectory.
 
+**Tags**: sample-ensemble, protein, ensemble, flexibility, all-atom, sidechain
+
 **References**: https://github.com/microsoft/bioemu · https://www.science.org/doi/10.1126/science.adv9817
 
 **Resources**: GPU.
@@ -307,6 +370,8 @@ ens = BioEmu(sequences=seqs, num_samples=10)
 Fast coarse-grained Monte Carlo simulation of protein structure flexibility. Produces conformational ensembles and per-residue RMSF profiles. Optionally rebuilds models to all-atom representation using MODELLER.
 
 **WARNING**: MODELLER requires a license key (free for academics). Get one at https://salilab.org/modeller/registration.html and set `KEY_MODELLER` before running.
+
+**Tags**: sample-ensemble, measure, protein, ensemble, residues, flexibility, all-atom
 
 **Environment**: `CABSflex` (Python 2.7 with `modeller` and `cabs`)
 
@@ -385,6 +450,8 @@ Structure-based prediction of protein aggregation propensity. A3D scores each re
 
 This wrapper runs A3D in static mode only. The FoldX-backed repair / solubility-enhancing mutation modes and the CABS-flex-backed dynamic mode are not exposed.
 
+**Tags**: predict-property, protein, residues, solubility
+
 **Environment**: `Aggrescan3D` (Python 2.7 with `aggrescan3d`)
 
 **Installation**: `Aggrescan3D.install()` creates a dedicated env: `conda create -n Aggrescan3D python=2.7 && conda install -c lcbio -c conda-forge aggrescan3d`. The `aggrescan3d` package pulls its own SASA backend; pinning a standalone modern `freesasa` would conflict with the Python 2.7 requirement.
@@ -441,6 +508,8 @@ This is a proxy for TM-score, not TM-align. dRMSD on a resampled trace is cheape
 
 Clustering is sphere exclusion (leader / Taylor-Butina) in *ranking* order: structures are visited best-first, and each unassigned structure becomes a representative that absorbs everything within `threshold` of it. Two consequences worth knowing — each cluster's representative is its best-scoring member (the model you actually want to open), and a structure joins the *first* representative that captures it rather than its nearest one. Cost is O(N·n_clusters), not O(N²).
 
+**Tags**: data, protein, ensemble
+
 **Environment**: `biopipelines` (numpy + pandas + the shared PDB parser, which already reads mmCIF; no external tool, no dedicated env)
 
 **Installation**: none — the tool runs in the base `biopipelines` environment.
@@ -493,6 +562,8 @@ reps = Panda(tables=families.tables.assignments,
 ### EnsembleAnalysis
 
 Per-residue RMSF and ensemble-level metrics from a conformer ensemble. Where CABSflex couples RMSF to its own coarse-grained sampling, EnsembleAnalysis analyzes *any* ensemble: it superposes the conformers (least-squares on CA or backbone) and reports per-residue fluctuation, so it overlays RMSF profiles from NMR ensembles, PLACER dumps, BioEmu samples, or any pool of conformers on the same footing. The `rmsf` stream uses the same `resi-csv` schema as CABSflex, so `Selection` thresholds on it unchanged.
+
+**Tags**: data, measure, protein, ensemble, residues, flexibility
 
 **Environment**: `biopipelines` (numpy + the shared PDB parser; no external tool, no dedicated env)
 
@@ -560,6 +631,8 @@ rmsf.tables.ensemble
 
 Quantifies structural changes between reference and target structures using PyMOL's alignment RMSD.
 
+**Tags**: measure, protein
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -625,6 +698,8 @@ conf_change = ConformationalChange(
 ---
 
 ### Contacts
+
+**Tags**: measure, protein, small-molecule, complex, pocket, interactions
 
 **Environment**: `ProteinEnv`
 
@@ -698,6 +773,8 @@ core_contacts = Contacts(
 
 Measures distances between specific atoms and residues in structures. Useful for tracking ligand-protein interactions or structural features.
 
+**Tags**: measure, protein, small-molecule, residues
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -733,6 +810,8 @@ distances = Distance(
 ### DistanceSelector
 
 Selects protein residues based on proximity to a reference — a ligand, a residue range, or any atom/atom-set expressible in the framework's selection grammar (e.g. `LIG.O132`, `LIG.Cl+LIG.O3`, `87.CA`, `A141.CB`, `first.CA`, `D in IGDWG`). For a sequence-context selection like `D in IGDWG`, the context is matched against the chain sequence and the **first** occurrence of the target residue within the matched window is taken — pick a context unique in the sequence, and put the intended residue ahead of any other copy of the same letter in the window. Partitions residues into `within` / `beyond` by distance cutoff, a top-K cap, or both, and emits the per-residue distances as a `resi-csv` stream for downstream thresholding via [Selection](data_management.md#selection).
+
+**Tags**: measure, protein, small-molecule, pocket, residues
 
 **Installation**: It requires an environment containing pandas (e.g. biopipelines).
 
@@ -790,6 +869,8 @@ General per-group aggregator for `resi-csv` streams. Collapses an N-file (per-id
 
 The canonical use is to turn a per-pose proximity profile (e.g. [DistanceSelector](#distanceselector)'s `distances`) into a *consensus pocket* held fixed across an ensemble: aggregate the fraction of poses in which each residue is within a cutoff, then threshold that fraction with [Selection](data_management.md#selection).
 
+**Tags**: data, residues, pocket, ensemble, protein
+
 **Installation**: It requires an environment containing pandas (e.g. biopipelines).
 
 **Parameters**:
@@ -832,6 +913,8 @@ ProteinMPNN(structures=poses, redesigned=surface.tables.selections.selection)
 
 Per-residue secondary-structure assignment. For each input PDB, runs DSSP (`mkdssp`) and reports the 8-state code per residue plus a per-structure helix/sheet/coil summary.
 
+**Tags**: measure, protein, residues
+
 **References**: https://github.com/PDB-REDO/dssp
 
 **Environment**: `dssp`
@@ -852,16 +935,22 @@ Per-residue secondary-structure assignment. For each input PDB, runs DSSP (`mkds
 ```python
 from biopipelines.dssp import DSSP
 
-target = PDB("4UFC", convert="pdb")
+target = PDB("4UFC", convert="cif")
 ss = DSSP(structures=target)
 ss.tables.summary  # helix/sheet/coil fractions per structure
 ```
+
+**Malformed refinement records are handled for you.** `mkdssp` 4.6.1 converts PDB input to mmCIF internally, and for some entries that conversion emits two `refine` rows with the same key, which its validator rejects: `Duplicate Key violation, cat: refine`. When that happens the runner retries with `REMARK 3` stripped and notes it in the log. `REMARK 3` is refinement metadata and contributes nothing to a secondary-structure assignment — on 4UFC the stripped result is byte-for-byte identical to feeding the same entry as mmCIF. So `convert="pdb"` and `convert="cif"` both work; neither needs special handling.
+
+Note that `parse error at line 1: This file does not seem to be an mmCIF file` appears on **every** PDB input, including successful ones — it is `mkdssp` probing formats before falling back to its PDB reader. Verified on 1UBQ, 168L and 4HHB, which all print it and produce full output. It is never the cause of a failure.
 
 ---
 
 ### FPocket
 
 Geometry-based binding-pocket detection. For each input PDB, runs the `fpocket` binary and reports detected pockets with their alpha-sphere count, volume, druggability score, and constituent residues. No ligand or model inference required.
+
+**Tags**: detect, predict-property, protein, pocket
 
 **Environment**: `fpocket` (bioconda binary).
 
@@ -897,6 +986,8 @@ Protein–ligand **binding-affinity** prediction via a graph neural network with
 
 > **The ligand must be posed inside the pocket.** GEMS reads the ligand's 3-D coordinates, so the SDF/PDB must hold the bound pose — a SMILES embedded from scratch lands at the origin and produces an empty graph. Pass a ligand-producing tool's output (e.g. a Boltz2 complex, or `Ligand("STI", structures=complex)` → `OpenBabel(convert_3d="sdf")`) as `ligands=`.
 
+**Tags**: predict-property, complex, small-molecule, binding
+
 **References**: https://github.com/camlab-ethz/GEMS
 
 **Resources**: GPU.
@@ -912,6 +1003,8 @@ Protein–ligand **binding-affinity** prediction via a graph neural network with
 
 **Tables**:
 - `affinity`: | id | structures.id | ligands.id | pkd_pred |
+
+  **Units.** `pkd_pred` is a predicted pKd — that is −log10(Kd) with Kd in molar — so **higher is stronger**: 9 is nanomolar, 6 is micromolar. The opposite direction to Boltz2's `affinity_pred_value`.
 - `missing`: | id | removed_by | kind | cause |
 
 **Example**:
@@ -930,6 +1023,8 @@ aff.tables.affinity
 Distance-based residue selection referenced to a **subset of atoms inside one ligand residue**, rather than to the whole residue. [DistanceSelector](#distanceselector) measures from every atom of its reference; this measures only from the atom names you name.
 
 The case it exists for is a chimeric ligand that occupies a single residue — a dye conjugated to a peptide, say, all written as one `LIG` — where you want the residues lining the peptide half and not those near the dye. Its output schema is identical to `DistanceSelector`, so the result drops into `LigandMPNN(redesigned=...)` unchanged.
+
+**Tags**: measure, residues, small-molecule, pocket, protein
 
 **Environment**: `biopipelines`
 
@@ -968,6 +1063,8 @@ designs = LigandMPNN(structures=complexes, ligand="LIG",
 ### OpenMM
 
 Energy-minimises protein structures (Amber14 + implicit GBn2 solvent) to relieve clashes and bad geometry before downstream metric calculation. Scope is intentionally narrow — minimisation only, no trajectory production.
+
+**Tags**: refine-structure, protein, small-molecule, complex, energy, covalent, sidechain, all-atom
 
 **References**: https://github.com/openmm/openmm
 
@@ -1031,6 +1128,8 @@ relaxed = OpenMM(structures=boltz, ligand=lig,
 
 Template-free, machine-learning ligand binding-site prediction. For each input structure, runs `prank predict` and reports the predicted pockets (ranked by ligandability) and per-residue scores. P2Rank scores and clusters points on the solvent-accessible surface; no ligand, template, or MSA is needed, and it runs on CPU.
 
+**Tags**: detect, pocket, residues, protein
+
 **Environment**: `p2rank` (bioconda; bundles the `prank` launcher, needs Java 17+).
 
 **Parameters**:
@@ -1075,6 +1174,8 @@ pred = P2Rank(structures=af, config="alphafold")
 
 Sequence-based protein solubility prediction. PLM_Sol embeds each sequence with ProtT5-XL and classifies it with a biLSTM/TextCNN head trained on the updated E. coli solubility dataset (UESolDS); it is among the strongest sequence-only solubility predictors. It needs no structure — only sequence — so it complements the structure-based aggregation scorer Aggrescan3D. The output `solubility` is a probability in [0,1] (higher = more soluble); `soluble` is the ≥ 0.5 binary call.
 
+**Tags**: predict-property, protein, solubility, sequence-only
+
 **Environment**: `plm_sol` (Python 3.8 + torch 2.0.1 + `bio-embeddings`)
 
 **Installation**: `PLM_Sol.install()` clones the repo (for its inference code and committed model checkpoint) and creates a dedicated env. The ProtT5-XL (`prottrans_t5_xl_u50`) embedding weights download lazily on the first prediction.
@@ -1113,6 +1214,8 @@ sol.tables.solubility        # probability per sequence, most soluble first
 ### PLIP
 
 Protein interaction profiler. Reads complex PDBs and reports detected non-covalent interactions: hydrogen bonds, hydrophobic contacts, π-stacking, salt bridges, halogen bonds, water bridges, and metal complexes. Profiles protein–ligand, protein–peptide / protein–protein, and intra-chain interactions, selected by `mode`.
+
+**Tags**: detect, complex, small-molecule, nucleic-acid, pocket, residues, interactions
 
 **References**: https://github.com/pharmai/plip
 
@@ -1160,6 +1263,8 @@ intra = PLIP(structures=complex, mode="intra", chains="A")
 ### PoseBusters
 
 Validates computationally generated molecule poses by checking bond lengths, bond angles, internal steric clashes, volume overlap with protein, and more. Supports `dock` mode (ligand + protein) and `redock` mode (+ reference ligand for RMSD comparison).
+
+**Tags**: validate, small-molecule, complex, covalent
 
 **Environment**: `posebusters`
 
@@ -1235,6 +1340,8 @@ validation = PoseBusters(
 
 Measures ligand pose distance between reference holo structure and sample structures. Calculates RMSD and geometric metrics to quantify how well designed structures reproduce known binding poses.
 
+**Tags**: measure, small-molecule, complex
+
 **Environment**: `ProteinEnv`
 
 **Parameters**:
@@ -1306,6 +1413,8 @@ good_poses = Panda(
 
 Binding-affinity prediction for **protein–protein** complexes. For each complex PDB, reports the predicted dissociation constant Kd and binding free energy ΔG between two chain groups, from interfacial contacts.
 
+**Tags**: predict-property, complex, protein, binding
+
 **References**: https://github.com/haddocking/prodigy
 
 **Environment**: `prodigy`
@@ -1333,6 +1442,8 @@ aff = Prodigy(structures=complex, interface="A B")
 
 Protein–ligand interaction **fingerprints**. For each complex, computes the ProLIF interaction matrix and exports it in long form (one row per residue × interaction-type pair, with a binary `present` flag) so it joins cleanly with other tables.
 
+**Tags**: detect, complex, small-molecule, residues, interactions
+
 **References**: https://github.com/chemosim-lab/ProLIF
 
 **Environment**: `prolif`
@@ -1359,6 +1470,8 @@ fp = ProLIF(structures=boltz_holo, ligand=Ligand(codes="LIG"))
 
 Adds and optimises explicit hydrogens on protein and ligand atoms via the Richardson lab's `reduce` binary. Preserves protein residue topology and ligand HETATM records, so the output is suitable as input to interaction-fingerprint or MD-prep tools.
 
+**Tags**: refine-structure, protein, small-molecule, all-atom, sidechain
+
 **References**: https://github.com/rlabduke/reduce
 
 **Environment**: `reduce`
@@ -1384,6 +1497,8 @@ Scores and ranks docking poses by residue–atom distance likelihood (graph tran
 
 > **The ligand must be posed inside the pocket** (same caveat as [GEMS](#gems)) — pass a ligand-producing tool output as `ligands=`, not a from-scratch SMILES.
 
+**Tags**: predict-property, complex, small-molecule, pocket, binding
+
 **References**: https://github.com/sc8668/RTMScore
 
 **Resources**: GPU.
@@ -1400,6 +1515,8 @@ Scores and ranks docking poses by residue–atom distance likelihood (graph tran
 
 **Tables**:
 - `scores`: | id | structures.id | ligands.id | pose | rtmscore |
+
+  **Units.** `rtmscore` is dimensionless — an aggregated statistical potential summed from negative log-likelihoods. Upstream does not state which direction is better, so verify against the paper before ranking on it. It is a **pose-ranking score, not an affinity**: it is not calibrated to a binding constant and is not comparable to Prodigy's ΔG, GEMS's pKd or Boltz2's log-IC50.
 - `missing`: | id | removed_by | kind | cause |
 
 
@@ -1421,6 +1538,8 @@ scored.tables.scores
 ### SASA
 
 Solvent-accessible surface area analysis. Computes the change in SASA of a ligand when bound to vs separated from its protein partner — `delta_SASA = SASA(ligand alone) − SASA(ligand in complex)`. A larger delta indicates more ligand surface buried by the binder, typically interpreted as tighter packing.
+
+**Tags**: measure, complex, small-molecule, residues, sasa
 
 **Environment**: `ProteinEnv` (installed alongside `PyMOL`).
 
@@ -1456,6 +1575,8 @@ sasa.tables.sasa  # delta-SASA per structure
 Predicted change in fold stability (ddG) upon point mutation, from structure. ThermoMPNN is a lightweight GNN built on the ProteinMPNN backbone, trained on the Megascale stability dataset. For each input structure it scores every position × 19 substitutions in a single forward pass — materially faster than physics-based ddG estimation. Negative `ddG_pred` = predicted stabilising (lower folding free energy). Complements VespaG: ThermoMPNN scores fold *stability* from structure, VespaG scores functional *fitness* from sequence.
 
 **Single point mutations only.** ThermoMPNN predicts the ddG of *one* substitution at a time. Every value in the `ddg` table is an independent single-mutant ddG measured against the wildtype. It does **not** model the combined stability of several simultaneous mutations: summing per-mutation ddGs ignores epistasis and will mis-estimate a real multi-mutant. In the `mutations=` filter, each `+`-joined token is scored separately (it is a selection of single mutants, not a combined variant). For genuine double-mutant ddG (additive and epistatic) use the separate [ThermoMPNN-D](https://github.com/Kuhlman-Lab/ThermoMPNN-D) model; to judge the overall stability of a full multi-mutation design, fold it and compare a global metric to the wildtype.
+
+**Tags**: predict-property, protein, residues, stability
 
 **Environment**: `thermompnn`
 
@@ -1503,6 +1624,8 @@ ddg_subset = ThermoMPNN(structures=target, chain="A", mutations="A42G+L50V")
 ### VespaG
 
 Zero-shot single-substitution fitness prediction from sequence. VespaG is a small expert-guided model distilled from ESM-2, leaderboard-competitive on ProteinGym while being MSA-free and fast. Higher score = predicted more tolerated/beneficial substitution. Complements ThermoMPNN (stability from structure) by scoring evolutionary/functional fitness from sequence alone.
+
+**Tags**: predict-property, protein, residues, fitness, sequence-only
 
 **Environment**: `vespag`
 
@@ -1556,6 +1679,8 @@ fit_subset = VespaG(sequences=poi, mutations="A42G+L50V")
 Semi-empirical GFN2-xTB interaction-energy scoring. For each complex, splits the structure into a ligand fragment (by 3-letter code) and the surrounding protein, runs single-point GFN2-xTB on protein, ligand, and complex, and reports `E_complex − E_protein − E_ligand` — a physics-grounded ranking signal complementary to ML scorers.
 
 > A full GFN2-xTB single point on a whole protein (~1500 atoms) takes >1 h. For routine use, restrict to the binding pocket (a [DistanceSelector](#distanceselector) `within` selection) or use the cheaper `gfnff` method.
+
+**Tags**: measure, complex, small-molecule, energy
 
 **References**: https://github.com/grimme-lab/xtb
 

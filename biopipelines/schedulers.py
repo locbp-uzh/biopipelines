@@ -172,7 +172,12 @@ class SlurmBackend(SchedulerBackend):
                 return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\"", []
             else:
                 return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"~GPU{excluded_model}\"", []
-        elif gpu_spec in ["24GB", "32GB", "80GB", "96GB"] or "|" in gpu_spec:
+        # "140GB" belongs here: the pipe-list branch below already emits
+        # GPUMEM140GB, so a lone "140GB" was the only way to name an H200 that
+        # fell through to the typed-GRES branch and produced the invalid
+        # `--gpus=140GB:1` — sbatch rejects it and the pipeline generates but
+        # never submits, with no error surfaced against the run.
+        elif gpu_spec in ["24GB", "32GB", "80GB", "96GB", "140GB"] or "|" in gpu_spec:
             if "|" in gpu_spec:
                 memory_options = gpu_spec.split("|")
                 constraint_parts = [f"GPUMEM{mem}" for mem in memory_options]

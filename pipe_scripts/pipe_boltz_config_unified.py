@@ -26,12 +26,18 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import yaml
 
-# Import shared ID prediction from biopipelines
+# Two path entries because two import styles are in use here: the bare module names below resolve
+# against the package directory, while the package-qualified import needs the repo root.
 _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
 sys.path.insert(0, _biopipelines_dir)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from combinatorics import predict_single_output_id, CombinatoricsConfig
 from ligand_utils import auth_ligand_field
+from biopipelines.id_map_utils import get_mapped_ids
 import id_patterns
+from pipe_axis_data import load_axis_data, group_records
+from nucleic_acids import (AXIS_NAME_TO_ENTITY_TYPE, DOUBLE_STRANDED_ENTITY_TYPES,
+                           reverse_complement)
 
 
 # Custom YAML representer for inline list formatting in constraints
@@ -104,69 +110,6 @@ def load_combinatorics_config(config_path: str) -> Dict:
     """Load combinatorics configuration from JSON file."""
     with open(config_path, 'r') as f:
         return json.load(f)
-
-
-def load_axis_data(axis_config: Dict) -> tuple:
-    """
-    Load data from an axis's source CSV files.
-
-    Args:
-        axis_config: Dict with 'name', 'mode', 'sources' keys
-                    sources can be list of strings or list of dicts with 'path', 'iterate', and 'order'
-
-    Returns:
-        Tuple of (iterated_data, static_data, static_first):
-        - iterated_data: List of dicts from sources with iterate=True
-        - static_data: List of dicts from sources with iterate=False
-        - static_first: True if static sources should be added before iterated (based on order)
-    """
-    iterated_data = []
-    static_data = []
-    sources = axis_config.get('sources', [])
-
-    # Track order to determine if static should come first
-    min_iterated_order = float('inf')
-    min_static_order = float('inf')
-
-    for source in sources:
-        # Handle both old string format and new dict format
-        keep_ids = None
-        if isinstance(source, dict):
-            source_path = source.get('path')
-            is_iterate = source.get('iterate', True)
-            order = source.get('order', 0)
-            keep_ids = source.get('ids')
-        else:
-            source_path = source
-            is_iterate = True
-            order = 0
-
-        if not source_path or not os.path.exists(source_path):
-            print(f"Warning: Source file not found: {source_path}")
-            continue
-        try:
-            df = pd.read_csv(source_path, dtype={'id': str})
-            records = df.to_dict('records')
-            if keep_ids:
-                by_id = {str(r['id']): r for r in records if 'id' in r}
-                selected = id_patterns.select_ids(
-                    [str(p) for p in keep_ids], list(by_id.keys())
-                )
-                records = [by_id[i] for i in selected]
-            if is_iterate:
-                iterated_data.extend(records)
-                min_iterated_order = min(min_iterated_order, order)
-            else:
-                static_data.extend(records)
-                min_static_order = min(min_static_order, order)
-        except Exception as e:
-            print(f"Error loading {source_path}: {e}")
-            sys.exit(1)
-
-    # Static comes first if its minimum order is less than iterated's minimum order
-    static_first = min_static_order < min_iterated_order
-
-    return iterated_data, static_data, static_first
 
 
 def load_msa_mappings(msa_table: Optional[str]) -> Dict:
@@ -525,34 +468,23 @@ MSA_ENTITY_TYPES = {'protein'}
 # Entity types that are ligand-like (for affinity/pocket/covalent)
 LIGAND_ENTITY_TYPES = {'ligand'}
 
-# Backward-compatible mapping for old configs without entity_type
-AXIS_NAME_TO_ENTITY_TYPE = {
-    'proteins': 'protein',
-    'sequences': 'protein',
-    'ssDNA': 'ssdna',
-    'dsDNA': 'dsdna',
-    'ssRNA': 'ssrna',
-    'dsRNA': 'dsrna',
-    'ligands': 'ligand',
-    'compounds': 'ligand',
-}
-
-# Entity types that emit two chains (second chain is the reverse complement)
-DOUBLE_STRANDED_ENTITY_TYPES = {'dsdna', 'dsrna'}
-
-_DNA_COMPLEMENT = str.maketrans('ACGTacgt', 'TGCAtgca')
-_RNA_COMPLEMENT = str.maketrans('ACGUacgu', 'UGCAugca')
-
-
-def reverse_complement(sequence: str, entity_type: str) -> str:
-    """Return the reverse complement of a DNA or RNA sequence."""
-    table = _RNA_COMPLEMENT if entity_type in ('rna', 'ssrna', 'dsrna') else _DNA_COMPLEMENT
-    return sequence.translate(table)[::-1]
 
 
 def build_entry(entity_type: str, item: Dict, chain_id: str, msa_mappings: Dict,
                 rev_comp: bool = False) -> Dict:
     """Build a YAML sequence entry based on entity_type."""
+    # A polymer with no residues is never a legitimate request, and it does not
+    # announce itself: an empty FASTA read through pandas arrives here as the
+    # FLOAT nan, YAML writes it as `.nan`, and Boltz fails per-config with
+    # "'float' object is not iterable" while the surrounding step still reports
+    # post-processing "successfully". One production run lost all 210 of its
+    # jobs that way. Fail here, where the id says which input is at fault.
+    if entity_type not in ('ligand',):
+        seq = item.get('sequence', '')
+        if not isinstance(seq, str) or not seq.strip():
+            raise ValueError(
+                f"{entity_type} '{item.get('id', '?')}' (chain {chain_id}) has an "
+                f"empty sequence ({seq!r}) — check the FASTA or table it came from")
     if entity_type == 'protein':
         msa_file = get_msa_file(item['id'], item.get('sequence', ''), msa_mappings)
         return build_protein_entry(item, chain_id, msa_file)
@@ -636,18 +568,27 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
         counter[0] += 1
         return cid
 
-    def add_axis_items_to_config(config, entity_type, items, chain_counter):
-        """Add all items from an axis to the config, tracking first ligand chain."""
+    def add_one_item(config, entity_type, item, chain_counter):
+        """Add one iteration element: a single record, or a group's members as consecutive chains."""
         first_ligand_chain = None
-        for item in items:
+        for member in item.get('__members__', [item]):
             chain_id = next_chain_id(chain_counter)
-            config['sequences'].append(build_entry(entity_type, item, chain_id, msa_mappings))
+            config['sequences'].append(build_entry(entity_type, member, chain_id, msa_mappings))
             if entity_type in LIGAND_ENTITY_TYPES and first_ligand_chain is None:
                 first_ligand_chain = chain_id
             # Double-stranded: add a second chain with the reverse complement
             if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
                 chain_id2 = next_chain_id(chain_counter)
-                config['sequences'].append(build_entry(entity_type, item, chain_id2, msa_mappings, rev_comp=True))
+                config['sequences'].append(build_entry(entity_type, member, chain_id2, msa_mappings, rev_comp=True))
+        return first_ligand_chain
+
+    def add_axis_items_to_config(config, entity_type, items, chain_counter):
+        """Add all items from an axis to the config, tracking first ligand chain."""
+        first_ligand_chain = None
+        for item in items:
+            flc = add_one_item(config, entity_type, item, chain_counter)
+            if first_ligand_chain is None:
+                first_ligand_chain = flc
         return first_ligand_chain
 
     def apply_decorations(config, first_ligand_chain):
@@ -721,24 +662,14 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
                 if first_ligand_chain is None:
                     first_ligand_chain = flc
                 # Then iterated item
-                chain_id = next_chain_id(chain_counter)
-                config['sequences'].append(build_entry(entity_type, item, chain_id, msa_mappings))
-                if entity_type in LIGAND_ENTITY_TYPES and first_ligand_chain is None:
-                    first_ligand_chain = chain_id
-                # Double-stranded: add a second chain with the reverse complement
-                if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
-                    chain_id2 = next_chain_id(chain_counter)
-                    config['sequences'].append(build_entry(entity_type, item, chain_id2, msa_mappings, rev_comp=True))
+                flc = add_one_item(config, entity_type, item, chain_counter)
+                if first_ligand_chain is None:
+                    first_ligand_chain = flc
             else:
                 # Iterated item first
-                chain_id = next_chain_id(chain_counter)
-                config['sequences'].append(build_entry(entity_type, item, chain_id, msa_mappings))
-                if entity_type in LIGAND_ENTITY_TYPES and first_ligand_chain is None:
-                    first_ligand_chain = chain_id
-                # Double-stranded: add a second chain with the reverse complement
-                if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
-                    chain_id2 = next_chain_id(chain_counter)
-                    config['sequences'].append(build_entry(entity_type, item, chain_id2, msa_mappings, rev_comp=True))
+                flc = add_one_item(config, entity_type, item, chain_counter)
+                if first_ligand_chain is None:
+                    first_ligand_chain = flc
                 # Then static items
                 if static_items:
                     flc = add_axis_items_to_config(config, entity_type, static_items, chain_counter)

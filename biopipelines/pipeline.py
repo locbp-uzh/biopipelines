@@ -26,9 +26,27 @@ from .config_manager import ConfigManager
 from .contract_enforcement import ContractViolation
 from ._layout import INTERNAL_FOLDER
 from .schedulers import get_backend, BATCH_SCHEDULERS
+
+# `pip freeze` prints an editable install as the URL it was cloned from, so a clone made with a
+# token in that URL prints the token — into the group-readable output root. Every environment
+# export passes through this first, and the unredacted copy is never kept.
+_REDACT_PATTERNS = (
+    # Any userinfo in a URL, up to the last `@` before the path, so an unencoded `@` in a password cannot leak its tail.
+    "s#://[^/[:space:]]+@#://REDACTED@#g",
+    # GitLab's prefixes are followed by `-`, GitHub's classic ones by `_`. Accept either.
+    "s#(glpat|glrt|ghp|gho|ghu|ghs|ghr)[-_][A-Za-z0-9_.-]+#TOKEN-REDACTED#g",
+    "s#github_pat_[A-Za-z0-9_]+#github_pat_REDACTED#g",
+    "s#(hf_|sk-|pypi-)[A-Za-z0-9_-]{16,}#TOKEN-REDACTED#g",
+    # An anaconda.org channel token sits in the path, not the userinfo.
+    "s#/t/[A-Za-z0-9_.-]{8,}/#/t/REDACTED/#g",
+    # `KEY=value`, `key: value` and `?token=` in any case, the key ending in the secret's name, so `tokenizers==0.15` survives.
+    # Skipped on a conda pin line (`- tiktoken=0.5.1=pypi_0`), where `=` is a version, not a value.
+    "/^[[:space:]]*- [A-Za-z0-9_.-]+=[^=[:space:]]+(=[^[:space:]]*)?[[:space:]]*$/!s#([A-Za-z0-9_]*(password|passwd|token|secret|api[_-]?key|access[_-]?key))([[:space:]]*[:=][[:space:]]*)[^=[:space:]&,][^[:space:]&,]*#\\1\\3REDACTED#gI",
+)
+REDACT_SED = "  sed -E " + " ".join("-e '%s'" % p for p in _REDACT_PATTERNS)
 try:
     from .base_config import BaseConfig, ToolOutput
-    from .combinatorics import Bundle, Each
+    from .combinatorics import Bundle, Each, Grouped
     from .entities import *
 except ImportError:
     # Fallback for direct execution
@@ -36,7 +54,7 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, ToolOutput
-    from combinatorics import Bundle, Each
+    from combinatorics import Bundle, Each, Grouped
     from entities import *
 
 import re as _re
@@ -652,6 +670,14 @@ class Pipeline:
         self.pipeline_script = script_path
         self.scripts_generated = True
 
+        # Unconditional: the question "what produced this" is asked after the run, not before it.
+        from . import manifest as _manifest
+        if _manifest.write(self) is None:
+            # Silence here reads downstream as "this run predates the manifest", which sends the
+            # reader looking for a version problem instead of the real failure.
+            print("Warning: could not write manifest.json; this run has no provenance record "
+                  f"({_manifest.write.last_error})")
+
         # Snapshot active config + per-tool inventory for forensic reproducibility
         if self.debug:
             self._write_debug_capture_python_artifacts()
@@ -886,6 +912,11 @@ class Pipeline:
                 "",
             ]
 
+        environment_capture = self._generate_environment_capture_block()
+        if environment_capture:
+            script_lines.append(environment_capture)
+            script_lines.append("")
+
         if self.debug:
             script_lines.append('export BIOPIPELINES_DEBUG=1')
             script_lines.append(self._generate_debug_capture_block())
@@ -1008,6 +1039,11 @@ class Pipeline:
 
         lines = [
             '# === BioPipelines debug capture ===',
+            # Defined again here: the unconditional capture block is skipped entirely when the
+            # pipeline names no environment, and this block must not depend on having run.
+            'bp_redact() {',
+            REDACT_SED,
+            '}',
             'if [ "$BIOPIPELINES_DEBUG" = "1" ]; then',
             f'  mkdir -p "{envs_dir}" "{sys_dir}"',
             f'  echo "Capturing runtime environment to {capture_root}"',
@@ -1031,22 +1067,93 @@ class Pipeline:
         lines.append('')
         lines.append('  # Per-environment exports (one section per unique env across tools)')
 
+        # Same redaction as the unconditional capture: `pip freeze` prints an editable install as
+        # its remote URL, token included when the clone carries one.
         if env_manager == "pip":
-            lines.append(f'  ( pip freeze ) > "{envs_dir}/pip.txt" 2>&1 || echo "pip not available" > "{envs_dir}/pip.txt"')
+            lines.append(f'  ( pip freeze ) 2>&1 | bp_redact > "{envs_dir}/pip.txt" || echo "pip not available" > "{envs_dir}/pip.txt"')
         elif env_manager == "venv":
             for env in envs:
                 env_py = f'{cm.get_venv_path(env)}/bin/python'
-                lines.append(f'  ( "{env_py}" -m pip freeze ) > "{envs_dir}/{env}.pip.txt" 2>&1 || echo "pip freeze failed for {env}" > "{envs_dir}/{env}.pip.txt"')
+                lines.append(f'  ( "{env_py}" -m pip freeze ) 2>&1 | bp_redact > "{envs_dir}/{env}.pip.txt" || echo "pip freeze failed for {env}" > "{envs_dir}/{env}.pip.txt"')
         else:
             for env in envs:
                 env_yaml = f'{envs_dir}/{env}.yaml'
                 env_pip = f'{envs_dir}/{env}.pip.txt'
-                lines.append(f'  ( {env_manager} env export --no-builds -n {env} ) > "{env_yaml}" 2>&1 || echo "env export failed for {env}" > "{env_yaml}"')
-                lines.append(f'  ( {cls._env_run(env, env_manager)}pip freeze ) > "{env_pip}" 2>&1 || echo "pip freeze failed for {env}" > "{env_pip}"')
+                lines.append(f'  ( {env_manager} env export --no-builds -n {env} ) 2>&1 | bp_redact > "{env_yaml}" || echo "env export failed for {env}" > "{env_yaml}"')
+                lines.append(f'  ( {env_manager} run -n {env} pip freeze ) 2>&1 | bp_redact > "{env_pip}" || echo "pip freeze failed for {env}" > "{env_pip}"')
 
         lines.append('  echo "Debug capture complete."')
         lines.append('fi')
         lines.append('# === end debug capture ===')
+        return "\n".join(lines)
+
+    def _generate_environment_capture_block(self) -> str:
+        """Bash that records which environment actually ran, on the node that ran it.
+
+        The debug capture exports with ``--no-builds``, which is right for a portable environment file and wrong for identity: two different builds of the same versions export identically. This keeps the build strings and digests the result, so an environment rebuilt between two runs shows up as a different environment instead of an identical one. One export and one ``pip freeze`` per unique env, against a run measured in minutes.
+
+        The digest, not the export, is what the manifest compares. The export is kept beside it because a digest tells you two runs differ and never tells you how.
+        """
+        cm = ConfigManager()
+        env_manager = cm.get_env_manager()
+        envs = self._iter_pipeline_envs()
+        if not envs:
+            return ""
+
+        envs_dir = os.path.join(self.folders["output"], "environments")
+        lines = [
+            '# === BioPipelines environment capture ===',
+            f'mkdir -p "{envs_dir}"',
+            'bp_digest() {',
+            '  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d" " -f1',
+            '  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d" " -f1',
+            '  else echo "unavailable"; fi',
+            '}',
+            # `pip freeze` prints an editable install as its remote URL, and a clone made with a
+            # token in the URL therefore prints the token. The output root is group-readable.
+            'bp_redact() {',
+            REDACT_SED,
+            '}',
+        ]
+        for env in envs:
+            export = f'{envs_dir}/{env}.txt'
+            digest = f'{envs_dir}/{env}.sha256'
+            # Only a successful export is digested. Hashing the failure text would produce a
+            # stable value indistinguishable from an environment identity, so two runs that both
+            # failed to export would compare as identical.
+            # A private temp file: the unredacted capture must never sit in the group-readable output root.
+            raw = '$bp_raw'
+            lines.append('bp_raw=$( umask 077; mktemp "${TMPDIR:-/tmp}/bp_env.XXXXXX" )')
+            if env_manager == "venv":
+                # The venv's own interpreter. A bare `pip freeze` is the job shell's, so every
+                # environment on a venv site would digest identically and to the wrong thing.
+                capture = (f'( "{cm.get_venv_path(env)}/bin/python" -m pip freeze ) '
+                           f'> "{raw}" 2>/dev/null')
+            elif env_manager == "pip":
+                capture = f'( pip freeze ) > "{raw}" 2>/dev/null'
+            else:
+                capture = f'( {env_manager} env export -n {env} ) > "{raw}" 2>/dev/null'
+            lines += [
+                f'if {capture}; then',
+                *([f'  ( {env_manager} run -n {env} pip freeze ) >> "{raw}" 2>/dev/null || true']
+                  if env_manager not in ("pip", "venv") else []),
+                # Only the redacted file is ever kept. A redaction that fails leaves no export at
+                # all: an unredacted one can carry the token a `pip freeze` of an editable install
+                # prints, and the output root is group-readable.
+                f'  if bp_redact < "{raw}" > "{export}" 2>/dev/null; then',
+                f'    bp_digest "{export}" > "{digest}" 2>/dev/null || rm -f "{digest}"',
+                '  else',
+                f'    echo "export withheld for {env}: could not redact credentials" > "{export}"',
+                f'    rm -f "{digest}"',
+                '  fi',
+                f'  rm -f "{raw}"',
+                'else',
+                f'  rm -f "{raw}"',
+                f'  echo "export unavailable for {env}" > "{export}"',
+                f'  rm -f "{digest}"',
+                'fi',
+            ]
+        lines.append('# === end environment capture ===')
         return "\n".join(lines)
 
     def _write_debug_capture_python_artifacts(self):
@@ -1218,7 +1325,7 @@ class Pipeline:
         step from claiming all CPUs left in the allocation.  An explicit
         ``--cpus-per-task`` is what stops each step getting a single core.
         Nesting a container step inside an outer task step fails to bind CPUs,
-        so the container flag goes on this same step (see llm/daint.md).
+        so the container flag goes on this same step (see skills/biopipelines/references/daint_backend.md).
         """
         # --nodes=1: without it a single-task step inherits the allocation's
         # node count and warns "can't run 1 processes on N nodes".
@@ -1619,6 +1726,14 @@ umask 002
                 shell_hook,
                 "",
             ]
+
+        # A multi-batch run executes these, never RunTime/pipeline.sh, so the capture has to be
+        # here too or every mixed GPU/CPU campaign records no environment at all.
+        if batch_idx == 0:
+            environment_capture = self._generate_environment_capture_block()
+            if environment_capture:
+                script_lines.append(environment_capture)
+                script_lines.append("")
 
         if self.debug and batch_idx == 0:
             script_lines.append('export BIOPIPELINES_DEBUG=1')
@@ -2401,7 +2516,7 @@ class Parallel:
     ``Run()`` may mix containerized and plain tools.
 
     Inside a packed block ``Resources()`` describes the allocation and is
-    called ONCE; ``Run()`` delimits a task. See llm/daint.md for the probes
+    called ONCE; ``Run()`` delimits a task. See skills/biopipelines/references/daint_backend.md for the probes
     that fixed this shape.
 
     Packing requires ``machine.node_exclusive``, a positive

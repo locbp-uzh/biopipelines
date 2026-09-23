@@ -28,22 +28,9 @@ FIXED_CHAIN = cfg["FIXED_CHAIN"]
 fixed_jsonl_file = cfg["fixed_jsonl_file"]
 sele_csv_file = cfg["sele_csv_file"]
 
-from biopipelines.sele_utils import sele_to_list as _sele_to_list_chain_aware, list_to_sele
+from biopipelines.sele_utils import sele_to_list as _sele_to_list_chain_aware, list_to_sele, chain_aware_sele
 
-def sele_to_list(s):
-    """Convert selection string to flat list of residue numbers (strips chain info)."""
-    return [r for _, r in _sele_to_list_chain_aware(s)]
-
-def sele_to_dict(s):
-    """Convert selection string to dict of chain -> sorted residue list.
-
-    For chainless input, all residues go under key ''.
-    """
-    pairs = _sele_to_list_chain_aware(s)
-    d = {}
-    for chain, resnum in pairs:
-        d.setdefault(chain, []).append(resnum)
-    return d
+sele_to_list = _sele_to_list_chain_aware
 
 def get_protein_chains_from_pdb(pdb_path):
     """
@@ -159,7 +146,8 @@ def resolve_table_reference(reference, design_ids, map_table_paths=None):
             resolve against the table's original id space
 
     Returns:
-        Dictionary mapping design IDs to position lists
+        Dictionary mapping design IDs to lists of (chain, resnum) tuples. Chain is '' for
+        a selection written without one.
     """
     if not reference.startswith("TABLE_REFERENCE:"):
         # Direct PyMOL selection - same for all designs
@@ -192,65 +180,115 @@ design_entries = list(iterate_files(structures_ds))  # List of (design_id, pdb_f
 design_ids = [entry[0] for entry in design_entries]
 design_files = {entry[0]: entry[1] for entry in design_entries}  # Map id -> file path
 
-# Auto-detect chain if requested
-if FIXED_CHAIN == "auto":
-    # Use the first structure to detect chains
-    first_pdb = design_files[design_ids[0]]
-    all_chains = get_protein_chains_from_pdb(first_pdb)
-    if len(all_chains) == 1:
-        FIXED_CHAIN = all_chains[0]
-        print(f"Auto-detected single protein chain: {FIXED_CHAIN}")
-    elif len(all_chains) > 1:
-        FIXED_CHAIN = all_chains[0]
-        print(f"Multiple protein chains found: {', '.join(all_chains)}. Using first chain: {FIXED_CHAIN}")
-    else:
-        FIXED_CHAIN = "A"
-        print(f"Warning: No protein chains detected, defaulting to chain A")
-
 # Sanitize '-' placeholders (used when no positions are specified)
 FIXED = '' if FIXED == '-' else FIXED
 DESIGNED = '' if DESIGNED == '-' else DESIGNED
 
+
+def as_per_chain(selection):
+    """A selection as {key chain or '': selection}, whichever form the user wrote.
+
+    A dict already says which chain each part belongs to; anything else is one selection
+    under '', whose own chain prefixes (if any) decide where its residues land.
+    """
+    if isinstance(selection, dict):
+        return {c: v for c, v in selection.items() if v not in ('', '-', None)}
+    return {'': selection} if selection else {}
+
+
+structures_maps = [structures_ds.map_table] if structures_ds.map_table else None
+
+
+def bucket_by_chain(selection, design_ids, maps):
+    """{chain: {design_id: [resnum]}} plus whether any residue named no chain.
+
+    A residue's own prefix wins; failing that the dict key it was written under; failing
+    that the chain resolved from the structure. Because the parse is chain-aware, a
+    qualified string ("A10-20+B5") needs no dict.
+    """
+    buckets, chainless = {}, False
+    for key_chain, sel in as_per_chain(selection).items():
+        for design_id, pairs in resolve_table_reference(sel, design_ids, maps).items():
+            for chain, resnum in pairs:
+                target = chain or key_chain
+                if not target:
+                    chainless = True
+                buckets.setdefault(target, {}).setdefault(design_id, []).append(resnum)
+    return buckets, chainless
+
+
+fixed_raw, fixed_chainless = bucket_by_chain(FIXED, design_ids, structures_maps)
+designed_raw, designed_chainless = bucket_by_chain(DESIGNED, design_ids, structures_maps)
+
+# The chain an unqualified residue attaches to. "auto" means read it off the structure;
+# several protein chains then make it genuinely ambiguous, which is an error rather than a
+# reason to pick the first. A qualified selection never reaches this.
+if FIXED_CHAIN == "auto":
+    protein_chains = get_protein_chains_from_pdb(design_files[design_ids[0]])
+    named = sorted((set(fixed_raw) | set(designed_raw)) - {''})
+    if len(protein_chains) == 1:
+        FIXED_CHAIN = protein_chains[0]
+    elif len(protein_chains) > 1:
+        if fixed_chainless or designed_chainless:
+            raise ValueError(
+                f"{len(protein_chains)} protein chains ({'+'.join(protein_chains)}) and a "
+                f"position selection that names no chain: which chain do the residues "
+                f"belong to? Qualify them (\"{protein_chains[0]}10-20\"), name them per "
+                f"chain (redesigned={{'{protein_chains[0]}': ...}}), or restrict the step "
+                f"with chains=\"{protein_chains[0]}\".")
+        FIXED_CHAIN = named[0] if named else protein_chains[0]
+    else:
+        FIXED_CHAIN = "A"
+        print(f"Warning: No protein chains detected, defaulting to chain A")
+
+
+def resolve_chainless(buckets):
+    """Fold the unqualified bucket into the chain resolved for it."""
+    unqualified = buckets.pop('', None)
+    if unqualified:
+        target = buckets.setdefault(FIXED_CHAIN, {})
+        for design_id, resnums in unqualified.items():
+            target.setdefault(design_id, []).extend(resnums)
+    return {c: {d: sorted(set(per.get(d, []))) for d in design_ids}
+            for c, per in buckets.items()}
+
+
+fixed_by_chain = resolve_chainless(fixed_raw)
+designed_by_chain = resolve_chainless(designed_raw)
+selected_chains = sorted(set(fixed_by_chain) | set(designed_by_chain)) or [FIXED_CHAIN]
+empty = {design_id: [] for design_id in design_ids}
+
 fixed_dict = dict()
 mobile_dict = dict()
-
-# Resolve table references if present
-structures_maps = [structures_ds.map_table] if structures_ds.map_table else None
-fixed_per_design = resolve_table_reference(FIXED, design_ids, structures_maps) if FIXED else {design_id: [] for design_id in design_ids}
-designed_per_design = resolve_table_reference(DESIGNED, design_ids, structures_maps) if DESIGNED else {design_id: [] for design_id in design_ids}
 
 for design_id in design_ids:
     fixed_dict[design_id] = dict()
     mobile_dict[design_id] = dict()
-
-    # Store original mobile/designed positions for documentation
-    mobile_dict[design_id][FIXED_CHAIN] = designed_per_design[design_id]
-
-    # Compute what ProteinMPNN should keep fixed:
-    # Union of explicit fixed + complement of redesigned
     pdb_path = design_files[design_id]
 
-    # Start with explicit fixed positions
-    final_fixed = list(fixed_per_design[design_id])
+    for chain in selected_chains:
+        fixed_here = fixed_by_chain.get(chain, empty)[design_id]
+        designed_here = designed_by_chain.get(chain, empty)[design_id]
 
-    # Get all protein residues from PDB
-    all_residues = get_protein_residues_from_pdb(pdb_path, FIXED_CHAIN)
+        # Store original mobile/designed positions for documentation
+        mobile_dict[design_id][chain] = designed_here
 
-    if designed_per_design[design_id]:
-        # If redesigned positions are specified, add their complement to fixed
-        complement = compute_complement(all_residues, designed_per_design[design_id])
-        final_fixed = sorted(list(set(final_fixed + complement)))
+        # Compute what ProteinMPNN should keep fixed:
+        # Union of explicit fixed + complement of redesigned
+        final_fixed = list(fixed_here)
+        all_residues = get_protein_residues_from_pdb(pdb_path, chain)
 
-        print(f"Design: {design_id}, Explicit Fixed: {list_to_sele(fixed_per_design[design_id]) if fixed_per_design[design_id] else ''}, Redesigned: {list_to_sele(designed_per_design[design_id])}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
-    elif final_fixed:
-        # No redesigned specified but fixed specified, use fixed as-is
-        print(f"Design: {design_id}, Fixed: {list_to_sele(final_fixed)}, Redesigned: all")
-    else:
-        # Neither redesigned nor fixed specified - redesign everything (no fixed positions)
-        print(f"Design: {design_id}, No fixed/redesigned specified, redesigning all residues")
+        if designed_here:
+            complement = compute_complement(all_residues, designed_here)
+            final_fixed = sorted(list(set(final_fixed + complement)))
+            print(f"Design: {design_id} chain {chain}, Explicit Fixed: {list_to_sele(fixed_here) if fixed_here else ''}, Redesigned: {list_to_sele(designed_here)}, Final Fixed (to ProteinMPNN): {list_to_sele(final_fixed)}")
+        elif final_fixed:
+            print(f"Design: {design_id} chain {chain}, Fixed: {list_to_sele(final_fixed)}, Redesigned: all")
+        else:
+            print(f"Design: {design_id} chain {chain}, No fixed/redesigned specified, redesigning all residues")
 
-    # Store final fixed positions (what ProteinMPNN will use)
-    fixed_dict[design_id][FIXED_CHAIN] = final_fixed
+        # Store final fixed positions (what ProteinMPNN will use)
+        fixed_dict[design_id][chain] = final_fixed
 
 # Ensure every chain present in the structure (including DNA/RNA/hetero)
 # has an entry in fixed_dict — ProteinMPNN's tied_featurize requires it.
@@ -299,11 +337,23 @@ with open(fixed_jsonl_file,"w") as jsonl_file:
     #Python converts dictionaries to string having keys inside '', json only recognises ""
     jsonl_file.write(str(fixed_dict).replace("\'","\""))
 
+def summarize(per_chain):
+    """One selection string over the chains actually selected.
+
+    Chain-aware ("A10-20+B5") as soon as more than one chain is in play, which is what an
+    inter-tool selection column has to be; a single-chain step keeps the bare form it has
+    always written, so existing consumers are unaffected.
+    """
+    if len(selected_chains) == 1:
+        return list_to_sele(per_chain.get(selected_chains[0], []))
+    return chain_aware_sele([(c, r) for c in selected_chains for r in per_chain.get(c, [])])
+
+
 with open(sele_csv_file,"w") as csv_file:
     csv_file.write("id,fixed,mobile")
     for id in fixed_dict.keys():
-        fixed = list_to_sele(fixed_resnums[id][FIXED_CHAIN]) if FIXED_CHAIN in fixed_dict[id].keys() else ""
-        mobile = list_to_sele(mobile_dict[id][FIXED_CHAIN]) if FIXED_CHAIN in fixed_dict[id].keys() else ""
+        fixed = summarize(fixed_resnums[id])
+        mobile = summarize(mobile_dict[id])
         csv_file.write("\n")
         csv_file.write(f"{id},{fixed},{mobile}")
         

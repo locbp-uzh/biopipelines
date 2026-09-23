@@ -51,11 +51,11 @@ THREADS=4
 POLL_INTERVAL=10                     # seconds
 MAX_SEQS=10000    # limit homologs per query
 
-# colabfold_search lives in the LocalColabFold conda env; put it on PATH.
+# colabfold_search lives in AlphaFold's ColabFold env; put it on PATH.
 COLABFOLD_DIR=$(require_folder "${COLABFOLD_DIR:-}" "COLABFOLD_DIR" "AlphaFold")
 COLABFOLD_BIN="$COLABFOLD_DIR/colabfold-conda/bin"
 if [[ ! -x "$COLABFOLD_BIN/colabfold_search" ]]; then
-  echo "ERROR: colabfold_search not found at $COLABFOLD_BIN (is LocalColabFold installed?)" >&2
+  echo "ERROR: colabfold_search not found at $COLABFOLD_BIN (run AlphaFold.install())" >&2
   exit 1
 fi
 export PATH="$COLABFOLD_BIN:$PATH"

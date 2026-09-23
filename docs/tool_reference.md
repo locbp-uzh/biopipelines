@@ -4,7 +4,9 @@ Complete tool reference, organized into the same categories as the project
 [README](https://github.com/locbp-uzh/biopipelines#tools).
 
 For a single flat list of every public-API tool (with category and source-file
-mapping), see [tool_index.md](tool_index.md).
+mapping), see [tool_index.md](tool_index.md). Every tool section carries a
+`**Tags**:` line; the vocabulary and how to search it are in
+[tool_tags.md](tool_tags.md).
 
 ---
 
@@ -52,6 +54,7 @@ Predict protein and complex structures, and dock ligands.
 - [Gnina](tool/structure_prediction.md#gnina) — Docking or no-search pose scoring (score/minimize) with CNN
 - [Vina](tool/structure_prediction.md#vina) — AutoDock Vina docking on CPU; the aarch64 route (no CNN)
 - [NeuralPLexer](tool/structure_prediction.md#neuralplexer) — Protein–ligand complex prediction
+- [OpenFold3](tool/structure_prediction.md#openfold3) — Open-source co-folding of proteins, nucleic acids and ligands
 - [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket
 
 ---
@@ -65,6 +68,7 @@ Analyze structures, interactions, stability, and fitness.
 - [Aggrescan3D](tool/analysis.md#aggrescan3d) — Structure-based aggregation propensity
 - [Angle](tool/analysis.md#angle) — Bond, torsional, and vector angles
 - [APBS](tool/analysis.md#apbs) — Electrostatic surface potential
+- [BFactor](tool/analysis.md#bfactor) — Per-residue B-factor, summarized over named selections
 - [BindingData](tool/analysis.md#bindingdata) — Measured binding affinities (ChEMBL, BindingDB)
 - [BioEmu](tool/analysis.md#bioemu) — Equilibrium ensemble sampling
 - [CABSflex](tool/analysis.md#cabsflex) — Fast flexibility simulation

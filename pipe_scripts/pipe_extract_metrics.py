@@ -19,8 +19,12 @@ import sys
 import os
 
 
-def load_table(path):
-    """Load a table CSV file."""
+def read_metric_csv(path):
+    """Read one metrics CSV, or None if it cannot be read.
+
+    Deliberately not named for the framework helper: ``biopipelines_io``'s namesake
+    resolves a TABLE_REFERENCE and returns (frame, column), a different contract.
+    """
     try:
         return pd.read_csv(path)
     except Exception as e:
@@ -164,7 +168,7 @@ def main():
     tables = []
     for path in table_paths:
         print(f"Loading: {path}")
-        df = load_table(path)
+        df = read_metric_csv(path)
         tables.append(df)
         if df is not None:
             print(f"  Shape: {df.shape}")

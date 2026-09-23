@@ -22,9 +22,20 @@ import os
 import sys
 import traceback
 
+# Let the caching allocator grow a segment instead of demanding one contiguous
+# block. Folding many complexes of DIFFERENT sizes in one process fragments the
+# pool badly (a 718-residue complex at 20 diffusion samples leaves holes that a
+# 644-residue one cannot use), and PyTorch's own OOM message recommends exactly
+# this setting for that pattern. Must be set before torch initialises CUDA,
+# hence here rather than in the batch script. Complements the explicit
+# empty_cache() in the per-complex loop; neither alone was sufficient.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "biopipelines"))
 from biopipelines.combinatorics import predict_single_output_id
 
 # Double-stranded axes add a reverse-complement chain; ligand axes drive the
@@ -64,8 +75,15 @@ def load_axis_records(axis):
         # always holds a real string ("LIG" by default) so it never hit the
         # NaN branch, but the correct `ccd` column is genuinely blank for every
         # SMILES ligand.
-        records = pd.read_csv(path, keep_default_na=False).to_dict("records")
+        records = pd.read_csv(path, keep_default_na=False, dtype={"id": str}).to_dict("records")
+        if isinstance(source, dict) and source.get("ids"):
+            from id_patterns import select_ids
+            by_id = {str(r["id"]): r for r in records if "id" in r}
+            records = [by_id[i] for i in select_ids([str(p) for p in source["ids"]], list(by_id))]
         if is_iter:
+            if isinstance(source, dict) and source.get("group_by"):
+                from pipe_axis_data import group_records
+                records = group_records(records, source)
             iterated.extend(records)
             min_iter_order = min(min_iter_order, order)
         else:
@@ -149,6 +167,11 @@ def build_complexes(config, msa_by_seq, glycans=None):
         return chains
 
     def add_item(chains, entity_type, item, counter):
+        if "__members__" in item:
+            # A Grouped element: its member rows are the chains of one complex, in row order.
+            for member in item["__members__"]:
+                add_item(chains, entity_type, member, counter)
+            return
         if entity_type in LIGAND_TYPES:
             # `ccd` comes from the compounds table's `ccd` column, NOT its `code`
             # column. `ccd` is populated only for a genuine RCSB CCD lookup
@@ -454,6 +477,37 @@ def main():
                              iptm=float(getattr(res, "interface_ptm", getattr(res, "iptm", float("nan")))))
                     if args.include_pae and getattr(res, "pae", None) is not None:
                         m["max_pae"] = float(res.pae.max())
+                    # PER-CHAIN-PAIR ipTM, e.g. iptm_chain_0_2 for chain A vs C.
+                    #
+                    # The scalar `iptm` above is max-over-tokens of each token's
+                    # mean inter-chain TM, pooled across ALL chain pairs, so in a
+                    # protein+protein+ligand complex it is decided by the large
+                    # protein-protein interface and carries essentially no
+                    # information about the ligand (34 atoms cannot move a max
+                    # taken over ~700 tokens). The model computes the full
+                    # chain x chain matrix on every forward pass anyway; without
+                    # this it was discarded, and recovering it needs a refold
+                    # because the PAE logits it derives from are not saved.
+                    #
+                    # Boltz2 already reports the equivalent (ligand_iptm,
+                    # pair_chains_iptm-i-j) and there it correlates +0.52 with
+                    # dye pLDDT against +0.15 for the scalar -- i.e. the chain
+                    # pair is the part that knows about the ligand.
+                    #
+                    # NOT comparable in absolute value to protein-protein ipTM:
+                    # d0 is computed complex-wide, then averaged over only
+                    # (n_ligand_atoms x n_chain_tokens) pairs, so ligand pairs
+                    # sit systematically lower. Use it to rank designs, not as
+                    # an absolute score.
+                    pci = getattr(res, "pair_chains_iptm", None)
+                    if pci is not None:
+                        try:
+                            n = int(pci.shape[0])
+                            for a in range(n):
+                                for b in range(a + 1, n):
+                                    m[f"iptm_chain_{a}_{b}"] = float(pci[a][b])
+                        except Exception:
+                            pass
                     rank = m["plddt"] if is_monomer else m["iptm"]
                     samples.append((rank, m, res))
 
@@ -480,6 +534,36 @@ def main():
             print(f"WARNING: {cid} failed: {e}", file=sys.stderr)
             traceback.print_exc()
             failed.append(cid)
+        finally:
+            # RELEASE THE PER-DESIGN GPU TENSORS BEFORE THE NEXT COMPLEX.
+            #
+            # `samples` holds one result per diffusion sample, and each result
+            # carries CUDA tensors (coordinates, pLDDT, PAE) plus the pair
+            # representation they were decoded from. Rebinding it on the next
+            # iteration drops the references, but the caching allocator keeps
+            # the freed blocks — and they are large and badly shaped, so the
+            # next complex fails on an allocation far smaller than the memory
+            # nominally available.
+            #
+            # Invisible at 1-5 samples, which is why it survived this long.
+            # Measured at 20 samples on an H200 (139.80 GiB): after a few
+            # designs the process held 136.66 GiB, of which 17-26 GiB was
+            # reserved-but-unallocated fragmentation, and a 10.93 GiB request
+            # died. Ten of seventeen runs lost 34-85% of their designs this
+            # way; the survivors were the ones whose binders happened to be
+            # short enough to stay under the ceiling.
+            #
+            # Order-dependent by nature: a long binder early fragments the pool
+            # for everything after it, so the same job can succeed or fail on
+            # the same inputs in a different order.
+            samples = None
+            spi = None
+            try:
+                import torch as _torch
+                if _torch.cuda.is_available():
+                    _torch.cuda.empty_cache()
+            except Exception:
+                pass
 
     with open(os.path.join(args.output_dir, "ESMFold2_scores.json"), "w") as f:
         json.dump(scores, f)

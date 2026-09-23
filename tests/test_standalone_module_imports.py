@@ -24,7 +24,7 @@ PIPE_SCRIPTS = ROOT / "pipe_scripts"
 # Names a pipe script imports bare that are also modules here. Kept explicit rather than derived,
 # because several bare imports in pipe_scripts (pymol, openmm, prolif, ...) are the external tool
 # of that name and merely collide with a wrapper's filename.
-SHARED_WITH_PIPE_SCRIPTS = ["combinatorics", "id_patterns", "ligand_utils"]
+SHARED_WITH_PIPE_SCRIPTS = ["combinatorics", "id_patterns", "ligand_utils", "nucleic_acids"]
 
 
 def _intra_package_imports(path):

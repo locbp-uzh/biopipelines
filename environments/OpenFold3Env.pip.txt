@@ -1,0 +1,11 @@
+# Upstream publishes openfold3 on PyPI. The weights (~2 GB) are NOT fetched on first prediction;
+# OpenFold3.install() runs setup_openfold to download them into $HOME/.openfold3.
+openfold3
+# The cuEquivariance triangular kernels are optional and give 4-5x on long sequences. Pinned to
+# the same minor as Boltz2Env for the same reason recorded there: 0.11.x imports a torch.fx
+# symbol the container torch does not provide, and the kernel raises inside the forward pass
+# rather than at import, so a prediction dies at the first batch instead of failing to start.
+cuequivariance==0.10.0
+cuequivariance-torch==0.10.0
+cuequivariance-ops-cu12==0.10.0
+cuequivariance-ops-torch-cu12==0.10.0

@@ -104,9 +104,21 @@ def resolve_table_reference(value, parameter: str = "value"):
     ``(TableInfo, "col")`` tuple, or a ``(path, "col")`` pair. ``None`` passes
     through. A TableReference serializes to TABLE_REFERENCE:path:column, which
     is what pipe scripts resolve per id.
+
+    A ``{chain: selection}`` dict says which residues belong to which chain, which is the
+    only unambiguous way to express a selection over a multi-chain structure. Each value
+    is resolved by the same rules, so a chain may carry a literal or a column reference.
     """
     if value is None or isinstance(value, (str, TableReference)):
         return value
+    if isinstance(value, dict):
+        resolved = {}
+        for chain, selection in value.items():
+            if not isinstance(chain, str) or len(chain) != 1 or not chain.isalnum():
+                raise ValueError(
+                    f"{parameter} dict keys must be single-character chain ids, got {chain!r}")
+            resolved[chain] = resolve_table_reference(selection, f"{parameter}[{chain!r}]")
+        return resolved
     if isinstance(value, tuple) and len(value) == 2:
         table, column = value
         if not isinstance(column, str):

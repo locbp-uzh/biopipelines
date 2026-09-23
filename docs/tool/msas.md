@@ -10,6 +10,8 @@ Multiple-sequence-alignment (MSA) tools generate and convert the alignments that
 
 Generates multiple sequence alignments for structure prediction by querying a local MMseqs2 server. The client auto-starts the server (mode from `tool_overrides.mmseqs2server.mode`, default CPU) if one is not already running, so you don't need to launch `MMseqs2Server` yourself. Feed its `msas` output to `Boltz2(msas=...)`/`AlphaFold(msas=...)` to avoid the public MSA server's rate limits when folding many sequences.
 
+**Tags**: build-msa, fetch, msa, protein
+
 **References**: https://github.com/soedinglab/MMseqs2
 
 **Environment**: `biopipelines`
@@ -44,6 +46,8 @@ msas = MMseqs2(sequences=lmpnn, timeout=7200)
 
 Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated MSA queries hit a warm local server instead of the public endpoint. It only manages server infrastructure — it does not process sequences itself.
 
+**Tags**: data, build-msa, msa, protein
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -63,6 +67,8 @@ Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated 
 
 Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). Enables MSA recycling between prediction tools.
 
+**Tags**: data, msa
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -79,7 +85,11 @@ Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFol
 | Direction | Works? | Notes |
 |-----------|--------|-------|
 | AlphaFold → A3M → CSV → Boltz2 | Yes | A3M-to-CSV conversion works; Boltz2 accepts the converted CSV for recycling. |
-| Boltz2 → CSV → A3M → AlphaFold | No | ColabFold ignores the converted A3M (it lacks the original headers ColabFold expects) and re-queries the MMseqs2 server. |
+| AlphaFold → A3M → AlphaFold | Yes | No conversion involved — pass the producing tool straight to `msas=`. |
+| MMseqs2 → A3M → AlphaFold | Yes | Use `MMseqs2(..., output_format="a3m")`, which emits the search result verbatim. No `MSA()` step, and the UniRef headers survive. **Prefer this** over any route through CSV. |
+| Boltz2 → CSV → A3M → AlphaFold | Monomers only | The CSV form is `key, sequence` with no headers, so `MSA(convert="a3m")` has to invent `>100, >101, …`. ColabFold's `parse_fasta` ignores the `#` line and reads only the `>` text, so a monomer folds fine. A **complex** does not: chain pairing reads species off UniRef headers, and those are gone. |
+
+Headers are the whole difference between these rows. Once an MSA has been through the CSV form its identifiers are unrecoverable, so take A3M out of the producer when the consumer is AlphaFold.
 
 **Example**:
 ```python

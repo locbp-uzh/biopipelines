@@ -97,8 +97,31 @@ AlphaFold:
   - biopipelines/alphafold.py
   - pipe_scripts/pipe_alphafold_confidence.py
   - pipe_scripts/pipe_alphafold_msas.py
-  current: "1.2"
+  - pipe_scripts/pipe_alphafold_queries.py
+  - pipe_scripts/pipe_unsanitize_ids.py
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-09-23'
+    note: >-
+      Pre-computed msas= are refused for a Grouped complex, as they already were for a Bundle: ColabFold folds a complex with its own paired+unpaired pipeline and never reads a per-chain a3m, so the MSAs were dropped with only a warning. A bare `Grouped(...)` input is also accepted now; the input resolver did not know the wrapper, so the constructor raised before any validation ran.
+  - version: '1.6'
+    date: '2026-09-21'
+    note: >-
+      Consumes a `Grouped` axis: a source tagged with a group stream has its rows collapsed into one iteration element per group, and its members are colon-joined into one ColabFold query, with a static partner appending one more chain after them. Before this, the only way to place several chains in one prediction was `Bundle`, which cannot express a partition — so a multi-chain inverse-folding design had no correct spelling at all. Group membership is resolved on the compute node by the framework's id matching, so the group ids are all that has to be known at configuration time.
+      pipe_alphafold_queries.py is added to this tool's files, since no version gate covered it before.
+  - version: '1.5'
+    date: '2026-09-21'
+    note: >-
+      Fixes the confidence and msas tables recording paths that do not exist for any id ColabFold sanitizes. Its filenames cannot hold a `+`, so a bundled complex `barnase+barstar` comes back as `barnase_barstar`; the unsanitize pass renamed the files and rewrote the `id` column but left every other column alone, so confidence.structure pointed at the pre-rename basename and msas_map.csv kept both a sanitized `file` path and a sanitized `sequences.id`. Path and provenance columns are rewritten too now, comparing only string cells so a blank (which pandas reads as NaN, and NaN != NaN) is not counted as a change. Only multi-chain (Bundle) ids were affected -- a monomer id has nothing to sanitize. pipe_unsanitize_ids.py is added to this tool's files, since no version gate covered it before.
+  - version: '1.4'
+    date: '2026-09-20'
+    note: >-
+      Copies only the MSAs it is about to fold. The msas= stream is often wider than the query set -- a filtered stream, or a whole previous run recycled for one sequence -- and every a3m in it used to land in the directory ColabFold scans. The copy step now receives the queries CSV and restricts itself to those ids. Also drops the stale note that H100 is incompatible: that came from the cu11 jax pin, and folding on an H100 is verified with the CUDA 12 stack.
+  - version: '1.3'
+    date: '2026-09-20'
+    note: >-
+      Installs ColabFold 1.6.3 from pip instead of running LocalColabFold's install_colabbatch_linux.sh, which has been pinned to ColabFold 1.5.5 since January 2024. The env is a conda prefix at <AlphaFold>/colabfold-conda holding python, the pinned mmseqs2 build and pip-installed colabfold[alphafold,openmm] with jax[cuda12], so MMseqs2Server still finds colabfold_search and mmseqs where it always did. The skip check now runs `colabfold_batch --help` rather than `import colabfold`, and the run passes `--data <AlphaFoldParams>`.
   - version: '1.2'
     date: '2026-09-11'
     note: >-
@@ -175,8 +198,50 @@ Boltz2:
   - pipe_scripts/pipe_boltz_msa_copy.py
   - pipe_scripts/pipe_boltz_postprocessing.py
   - pipe_scripts/pipe_boltz_results.py
-  current: "2.4"
+  - biopipelines/nucleic_acids.py
+  - pipe_scripts/pipe_axis_data.py
+  current: "2.9"
   history:
+  - version: '2.9'
+    date: '2026-09-22'
+    note: >-
+      The axis reader and the nucleic-acid helpers move to pipe_scripts/pipe_axis_data.py and
+      biopipelines/nucleic_acids.py, so Boltz2 and OpenFold3 read an axis's rows and expand a
+      double-stranded sequence through one implementation. No behaviour change; the code that
+      ran is the code that moved.
+  - version: '2.8'
+    date: '2026-09-22'
+    note: >-
+      Memory controls, so a complex too large for the GPU can be folded at all: max_msa_seqs,
+      subsample_msa/num_subsampled_msa, max_parallel_samples and no_kernels, plus sampling_steps
+      and step_scale. boltz reads --num_subsampled_msa only when --subsample_msa is set, so the
+      count alone is refused rather than left to run at full MSA depth and die on the OOM it was
+      configured to avoid. Every setting is echoed into the step config and recorded in the tool
+      output, since a memory setting changes the result.
+  - version: '2.7'
+    date: '2026-09-22'
+    note: >-
+      pipe_boltz_config_unified.py puts the repo root on sys.path, not only the package directory.
+      It imports bare module names (combinatorics, id_patterns) which resolve against the package
+      dir, and also `from biopipelines.id_map_utils import get_mapped_ids`, which needs the repo
+      root; only the first path was added. In Boltz2Env, where biopipelines is not installed, the
+      config generator therefore died with ModuleNotFoundError, wrote zero YAML configs, and boltz
+      then ran to completion over zero inputs - so the step produced no structures while reporting
+      no error of its own.
+  - version: '2.6'
+    date: '2026-09-21'
+    note: >-
+      Consumes a `Grouped` axis: a source tagged with a group stream has its rows collapsed into one iteration element per group, and its members become consecutive chain entries off the shared chain-id counter. Before this, the only way to place several chains in one prediction was `Bundle`, which cannot express a partition - so a multi-chain inverse-folding design had no correct spelling at all. Group membership is resolved on the compute node by the framework's id matching, so the group ids are all that has to be known at configuration time.
+  - version: '2.5'
+    date: '2026-09-20'
+    note: >-
+      Two changes developed in parallel on separate branches, both numbered 2.5 and merged into
+      this single entry rather than renumbered, so no already-recorded version string changes
+      meaning. (1) Ligands-only prediction: a Boltz2 job may be built from a compounds stream with
+      no protein, for folding or scoring ligands on their own. (2) pipe_boltz_msa_copy.py takes an
+      optional --queries-csv and, when given, copies only the MSAs whose destination id appears in
+      it; Boltz2 does not pass the flag, so its own behavior is unchanged and the argument exists
+      for AlphaFold 1.4.
   - version: '2.4'
     date: '2026-09-11'
     note: >-
@@ -206,14 +271,33 @@ Boltz2:
       no YAML configs were written, and Boltz2 folded ZERO inputs while
       post-processing still reported success. Honouring it sets msa: empty on
       every protein chain, which is Boltz's single-sequence mode.
-
+  - version: '1.2'
+    date: '2026-08-05'
+    note: >-
+      A ligands-only prediction is now accepted. validate_params required config or a polymer axis, so Boltz2(ligands=...) with no protein was rejected even though everything downstream already handled it: pipe_boltz_config_unified.py emits a correct single-chain ligand config and the postprocessing maps the ids back without a sequences file. The alternative entry point does not work either -- config=<yaml> is still accepted by the constructor, but get_output_files calls predict_output_ids_with_provenance, which raises "requires at least one named input" when no axis exists -- so the ligands axis is the only route to a ligand-only run. affinity now raises when there is no receptor to bind rather than emitting a meaningless binder property. Verified on Daint (job 4327496): 8 dyes predicted, PDB atom names matching Boltz2.predict_atom_names exactly; protein-only, protein+ligand and empty Boltz2() behave as before.
 BoltzGen:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen.py
   - pipe_scripts/pipe_boltzgen_config.py
-  current: "2.1"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-09-23'
+    note: >-
+      The local 0.3.1 patches are applied by install() instead of only being recorded: every install path, the already-installed shortcut included, applies them or confirms they are in place, and fails if they apply to neither state. boltzgen is pinned to 0.3.1, the version the patch targets, so a rebuild no longer resolves a release that silently lacks them. smiles_overrides keys must be 1-5 uppercase letters or digits (they become an env-var name and are matched against the CIF res_name verbatim, so a lowercase code never matched), and each SMILES is shell-quoted in the export, where a quote or $ used to break or inject into the job script.
+  - version: '2.3'
+    date: '2026-09-19'
+    note: >-
+      `smiles_overrides={"LIG": "..."}` exports `BOLTZGEN_SMILES_<code>` into the job script, so a
+      ligand carried through the pipeline by CCD code can be folded from an explicit SMILES without
+      editing the compounds table. The local 0.3.1 patches are also recorded in the repo: they lived
+      only in site-packages on the cluster, so `bp-warm BoltzGen` or an environment rebuild silently
+      discarded them and BoltzGen then behaved differently with no indication why.
+  - version: '2.2'
+    date: '2026-09-18'
+    note: >-
+      smiles_overrides={CODE: SMILES} exports BOLTZGEN_SMILES_<code> into the generated job script, so a ligand carried through the pipeline by CCD code can be designed against an explicit SMILES without editing the compounds table. Default {} leaves the emitted script byte-identical.
   - version: '2.1'
     date: '2026-09-04'
     note: >-
@@ -227,8 +311,17 @@ BoltzGenImport:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen_import.py
-  current: "2.1"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-09-23'
+    note: >-
+      No behavioural change; the version follows BoltzGen 2.4 because both classes live in biopipelines/boltzgen.py.
+  - version: '2.2'
+    date: '2026-09-19'
+    note: >-
+      No behavioural change. Shares `biopipelines/boltzgen.py` with BoltzGen, and the version
+      moves because that file did when `smiles_overrides` was added.
   - version: '2.1'
     date: '2026-09-04'
     note: >-
@@ -242,8 +335,17 @@ BoltzGenMerge:
   files:
   - biopipelines/boltzgen.py
   - pipe_scripts/pipe_boltzgen_merge.py
-  current: "2.1"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-09-23'
+    note: >-
+      No behavioural change; the version follows BoltzGen 2.4 because both classes live in biopipelines/boltzgen.py.
+  - version: '2.2'
+    date: '2026-09-19'
+    note: >-
+      No behavioural change. Shares `biopipelines/boltzgen.py` with BoltzGen, and the version
+      moves because that file did when `smiles_overrides` was added.
   - version: '2.1'
     date: '2026-09-04'
     note: >-
@@ -308,8 +410,12 @@ Contacts:
   files:
   - biopipelines/contacts.py
   - pipe_scripts/pipe_contacts.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-21'
+    note: >-
+      Uses `pdb_parser.calculate_distance` instead of a byte-identical local copy. No behaviour change -- both computed the same Euclidean distance -- but the duplicate was one of the name collisions found while auditing how `pipe_pmpnn_fixed_positions.py` came to shadow a shared helper with a narrower one. This script's `parse_pdb_file` is deliberately kept: it wraps the shared parser to drop atoms at the origin, and says so.
 
 DiffDock:
   files:
@@ -370,8 +476,16 @@ DSSP:
   files:
   - biopipelines/dssp.py
   - pipe_scripts/pipe_dssp.py
-  current: "2.0"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-09-23'
+    note: >-
+      A retry without REMARK 3 that also fails now reports its own error beside the first one instead of dropping it, and the temporary copy it made is removed instead of leaking one temp directory per structure.
+  - version: '2.1'
+    date: '2026-09-17'
+    note: >-
+      Recovers from mkdssp's duplicate-`refine` defect instead of failing the step. mkdssp 4.6.1 converts PDB input to mmCIF internally, and for some entries that conversion emits two `refine` rows with the same key, which its validator rejects with `Duplicate Key violation, cat: refine`; 4UFC -- the entry the tool's own documented example used -- failed this way on every PDB run. A failed invocation is now retried once with `REMARK 3` stripped to a temp copy, and the retry is noted in the log. REMARK 3 is refinement metadata and contributes nothing to a secondary-structure assignment: on 4UFC the stripped result is byte-for-byte identical to feeding the same entry as mmCIF. A file carrying no REMARK 3 is passed through untouched, so the common path runs the binary exactly once. Note that `parse error at line 1: This file does not seem to be an mmCIF file` appears on every PDB input including successful ones (verified on 1UBQ, 168L, 4HHB) -- it is mkdssp probing formats, never the cause of a failure.
   - version: '2.0'
     date: '2026-09-02'
     note: >-
@@ -442,8 +556,24 @@ ESMFold2:
   - biopipelines/esmfold2.py
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
-  current: "2.1"
+  - pipe_scripts/pipe_axis_data.py
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-09-23'
+    note: >-
+      Axis source tables are read with string ids, so an id such as 001 is not turned into 1 and then silently dropped by the axis id filter added in 2.3.
+  - version: '2.3'
+    date: '2026-09-23'
+    note: >-
+      A Grouped axis is folded as one complex per group. ESMFold2 accepted Grouped at configuration time and declared one output per group, but the inference script had no `group_by` handling, so it folded every chain row on its own and the declared outputs never appeared. The rows now go through the shared `group_records`, and a group's member rows become consecutive chains. The axis `ids` filter a narrowed stream carries is also honoured, which the reader ignored.
+  - version: '2.2'
+    date: '2026-09-19'
+    note: >-
+      Frees CUDA tensors between diffusion samples, and keeps per-chain-pair ipTM as
+      `iptm_chain_<a>_<b>` columns. Both were found running a ternary complex at 20 diffusion
+      samples; neither is visible at the one to five samples every earlier run used, because the
+      retained results only exhaust the device once there are enough of them.
   - version: '2.1'
     date: '2026-09-11'
     note: >-
@@ -477,8 +607,12 @@ ExtractMetrics:
   files:
   - biopipelines/extract_metrics.py
   - pipe_scripts/pipe_extract_metrics.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-09-21'
+    note: >-
+      Its local `load_table` is renamed `read_metric_csv`. It is a `pd.read_csv` wrapper returning None on error, while the framework helper of that name resolves a TABLE_REFERENCE and returns (frame, column) -- the same name for a different contract, on a script that never imported the framework one. No behaviour change; the call site moved with it.
 
 FPocket:
   files:
@@ -653,8 +787,12 @@ LASErMPNN:
   - biopipelines/lasermpnn.py
   - pipe_scripts/pipe_lasermpnn.py
   - pipe_scripts/pipe_lasermpnn_bfactor.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-09-23'
+    note: >-
+      Records a change that shipped in 1.5.0 under an unchanged 2.1, so 2.1 names two behaviours; runs from 1.5.0 recording LASErMPNN 2.1 already have it. Copies of design files are size-checked and retried, an empty design file is recorded in missing.csv as "design file empty" instead of being copied, and an empty sequences.csv, structures_map.csv or missing.csv fails the step: a production run lost every byte of a ~3 s window of writes to the shared filesystem with no error raised, and the empty complexes cost 210 downstream Boltz2 jobs. `--collect-only` re-collects the streams from an existing designs tree without rerunning inference.
   - version: '2.1'
     date: '2026-09-04'
     note: >-
@@ -672,8 +810,12 @@ Ligand:
   files:
   - biopipelines/ligand.py
   - pipe_scripts/pipe_ligand.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-09-23'
+    note: >-
+      Records a change that shipped in 1.5.0 under an unchanged 1.4, so 1.4 names two behaviours; runs from 1.5.0 recording Ligand 1.4 already have it. SMILES conformers keep the ETKDG geometry when MMFF puckers a ring system the embedder made planar (measured on the SiR silicon-xanthene core: 0.005 A after ETKDG, 1.13 A after MMFF, with MMFFHasAllMoleculeParams true), because GNINA docks rings as rigid and would take the broken shape as given. Drug-like ligands whose rings MMFF keeps flat are unaffected.
   - version: '1.4'
     date: '2026-09-02'
     note: >-
@@ -696,8 +838,12 @@ LigandAtomSelector:
   files:
   - biopipelines/ligand_atom_selector.py
   - pipe_scripts/pipe_ligand_atom_selector.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-09-21'
+    note: >-
+      Uses `pdb_parser.calculate_distance` instead of a byte-identical local copy, and drops the now-unused `import math`. No behaviour change.
   - version: '1.1'
     date: '2026-09-03'
     note: >-
@@ -706,10 +852,25 @@ LigandAtomSelector:
 LigandMPNN:
   files:
   - biopipelines/ligand_mpnn.py
+  - biopipelines/chain_rows.py
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
-  current: "2.5"
+  - pipe_scripts/pipe_fa_to_csv_fasta.py
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-09-23'
+    note: >-
+      The chain= deprecation line no longer claims the pipeline runs as written: chain= used to name the chain an unqualified selection belongs to and left every other chain fused in one sequence row, while chains= also decides which chains become rows, so chain="B" now emits chain B alone. Separately, equal-length chains are assigned by sequence identity to the input chains: both candidate orders matched by length and alphabetical always won, so a design written in appearance order (B before A) had its two sequences swapped under each other's chain letters. A tie that sequence cannot break is reported rather than resolved silently.
+  - version: '2.7'
+    date: '2026-09-21'
+    note: >-
+      Also collapses `chain` into `chains`: the two were one letter apart and meant different things -- which chains are emitted, versus which chain an unqualified position selection belongs to -- which is the `Ligand` `code`/`codes` mistake again. Naming the chains in play answers both, so there is one parameter; `chain=` binds it through `PARAMETER_ALIASES` and reports a `deprecated_alias` line. A chainless selection on a multi-chain structure now raises naming the chains, where ProteinMPNN attached it to whichever chain came first and LigandMPNN used the literal "A" -- silently wrong whenever the single chain was called anything else, and now read off each structure. `fixed` and `redesigned` accept a `{chain: selection}` dict, each value taking any form the parameter accepts, and the `sele.csv` summary is chain-aware as soon as more than one chain is in play.
+  - version: '2.6'
+    date: '2026-09-21'
+    note: >-
+      A design over a multi-chain backbone becomes one `sequences` row per chain instead of one row whose `sequence` fuses every chain behind a separator. LigandMPNN joins them with `:`; it shares the affected writer with ProteinMPNN, so it carried the same fault. A `sequences` row is one polymer chain, so that value reached every consumer as if it were one: Boltz2 wrote it into a single YAML chain entry, where Boltz mapped the separator to an `UNK` residue and folded a complex containing a chain that should not exist, reporting high confidence for it. The new `chains` parameter says which chains become rows -- `None` (the default) expects a single-chain backbone and records a multi-chain one as a failure in `missing.csv` naming the chains found, `"A"` emits just that chain with the ids it always had, `["A","B"]` emits `<design>_<chain>` ids, and `"all"` emits every chain behind a lazy `[_<?>]` pattern. Chain letters are resolved by matching each segment's length against the backbone's per-chain residue counts, and a design that cannot be reconciled is dropped rather than mislabelled. A new `designs` stream carries one row per design -- the ids the `sequences` stream used to have -- and is what `Grouped` groups the chain rows by to fold a complex. Single-chain pipelines are unaffected: same ids, same rows.
+      Packed side-chain structures also fan out from the design ids rather than the chain rows, which are one per chain and would have over-counted them.
   - version: '2.5'
     date: '2026-09-04'
     note: >-
@@ -774,8 +935,16 @@ MMseqs2:
   - biopipelines/mmseqs2.py
   - pipe_scripts/pipe_mmseqs2_sequences.py
   - pipe_scripts/mmseqs2_client.sh
-  current: "1.6"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-09-20'
+    note: >-
+      output_format now decides the file the step emits, not only the format asked of the server. With output_format="a3m" the search result is written verbatim -- `#` meta line and `>` headers intact -- and the msas stream declares format="a3m", so it can be passed straight to AlphaFold with no MSA() conversion. The previous behaviour converted every result to `key,sequence` csv and discarded the headers, which are the only place the UniRef identifiers ColabFold pairs complex chains on are recorded. csv remains the default and is unchanged.
+  - version: '1.7'
+    date: '2026-09-20'
+    note: >-
+      Wording only: the messages naming the env that supplies colabfold_search and mmseqs now describe it as AlphaFold's ColabFold environment rather than LocalColabFold, which AlphaFold 1.3 no longer installs. No behavior change.
   - version: '1.6'
     date: '2026-09-11'
     note: >-
@@ -806,8 +975,16 @@ MMseqs2Server:
   files:
   - biopipelines/mmseqs2.py
   - pipe_scripts/mmseqs2_server_gpu.sh
-  current: "1.5"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-09-20'
+    note: >-
+      No change to the server. Version follows MMseqs2 1.8 because both classes live in biopipelines/mmseqs2.py and the edit-gate keys on the file, not the class.
+  - version: '1.6'
+    date: '2026-09-20'
+    note: >-
+      Wording only: the install check's error text now points at AlphaFold's ColabFold environment rather than LocalColabFold, which AlphaFold 1.3 no longer installs. The paths it probes are unchanged. No behavior change.
   - version: '1.5'
     date: '2026-09-11'
     note: >-
@@ -860,8 +1037,12 @@ MSA:
   files:
   - biopipelines/msa.py
   - pipe_scripts/pipe_msa.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-09-20'
+    note: >-
+      Fixes the A3M header line, whose two fields were written in the wrong order. ColabFold splits it on tab and reads field 1 as the per-chain query length and field 2 as the chain cardinality; convert_csv_to_a3m wrote sequence-count first, so a 5162-row MSA of a 36-residue query emitted `#5162	36` and ColabFold parsed it as a complex of 36 chains of 5162 residues. This, not the absence of UniRef headers, is why A3M produced by MSA(convert="a3m") did not work in AlphaFold.
   - version: '1.1'
     date: '2026-09-11'
     note: >-
@@ -990,8 +1171,12 @@ Panda:
   files:
   - biopipelines/panda.py
   - pipe_scripts/pipe_panda.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-09-22'
+    note: >-
+      A pool-mode rename declares its outputs honestly. `head(n)` fixes what the step DECLARES while a filter earlier in the chain decides how many rows there are, so the surplus slots named no upstream id and no id-matching tier could excuse them; the step was marked FAILED for files that correctly had nothing to contain (BinderDesign/tagged_binder_002, 23 of 30 slots unfilled in two streams; tagged_binder_short_002, all 30). The runtime now records each unfilled slot in missing.csv as kind=filter under the id it was declared by, and the wrapper passes its declared ids to the pipe script so the two cannot drift. The rename branch also emits the `<id>` file template instead of an explicit path list: an explicit path carries no owner id, which made every such stream structurally unexcusable, including by the upstream-filter path that already worked elsewhere.
   - version: '1.4'
     date: '2026-09-04'
     note: >-
@@ -1009,12 +1194,67 @@ Panda:
     note: >-
       Panda.merge gains a `grain` parameter (finest/coarsest) selecting which input's provenance level drives the output rows; `how` now defaults to None (derived from grain).
 
+OpenFold3:
+  files:
+  - biopipelines/openfold3.py
+  - pipe_scripts/pipe_openfold3_config.py
+  - pipe_scripts/pipe_openfold3_postprocess.py
+  - biopipelines/nucleic_acids.py
+  - pipe_scripts/pipe_axis_data.py
+  current: "1.3"
+  history:
+  - version: '1.3'
+    date: '2026-09-23'
+    note: >-
+      Declared ids and collected rows agree. With top_only=False the postprocess numbers every sample of every seed, so seeds=[100,101] with 3 samples writes _1.._6 while 3 were declared; the declaration now multiplies samples by seeds, and top_only=False with a runner_yaml and no num_diffusion_samples is refused because the count would be a guess. The postprocess walks the queries queries.json named instead of the folders on disk, so a query that failed before inference is recorded in missing.csv rather than vanishing. A csv msas stream is refused at configuration instead of on the node, an iterating axis with no records builds no query instead of raising IndexError, and install() skips rebuilding an existing env again (it still ensures the weights), where every install had recreated it.
+  - version: '1.2'
+    date: '2026-09-22'
+    note: >-
+      Two bugs a real cluster run exposed. The aggregated confidence JSON spells its keys
+      avg_plddt, disorder and sample_ranking_score, not plddt/fraction_disordered/ranking_score,
+      so three columns came back empty on the first run; the mapping is now read off a real
+      output and the table gains gpde. And top_only kept the LOWEST-numbered sample rather than
+      the best one -- upstream writes every sample and ranks them -- so the selection now
+      maximizes sample_ranking_score, with seed and sample recorded so the result says which
+      sample it chose.
+  - version: '1.1'
+    date: '2026-09-22'
+    note: >-
+      The install downloads the model parameters. Upstream documents them as fetched on first
+      prediction; they are not -- run_openfold validates the checkpoint up front and refuses
+      ("cowardly refusing to perform inference"), so a pipeline that installed cleanly died at
+      its first query. setup_openfold --non-interactive now runs as part of the install, and
+      before the already-installed short-circuit, or an env created by 1.0 would never acquire
+      its weights.
+  - version: '1.0'
+    date: '2026-09-22'
+    note: >-
+      First release. Open-source co-folding of proteins, nucleic acids and ligands via the
+      OpenFold Consortium reimplementation of AlphaFold3, Apache 2.0 with weights included. Takes
+      the same six input axes as Boltz2 so the two are interchangeable, and expresses ligands
+      through the same auth_ligand_field decision so both models receive identical chemistry for
+      the same input. No affinity head and no covalent linkage: those stay Boltz2's. The whole
+      batch folds in one process, since run_openfold takes a single JSON holding every query.
+
 PDB:
   files:
   - biopipelines/pdb.py
   - pipe_scripts/pipe_pdb.py
-  current: "1.4"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-09-23'
+    note: >-
+      An RCSB refusal (HTTP 400/403) is no longer retried three times with backoff; it is reported at once, naming the status. 429 and 5xx are still retried as transport failures, and a 404 still stops the build.
+  - version: '1.5'
+    date: '2026-09-22'
+    note: >-
+      An RCSB transport failure no longer aborts pipeline construction. Every exception from the
+      entry lookup -- timeout, connection reset, 5xx, 429 -- became a ValueError that stopped the
+      build, so an unrelated outage presented as a bad PDB id. The lookup now retries with
+      exponential backoff and keeps the two answers distinct: a 404 is a fact about the id and
+      still raises, anything else is a fact about the network and warns. The entry is also fetched
+      once per check rather than twice.
   - version: '1.4'
     date: '2026-09-11'
     note: >-
@@ -1200,10 +1440,28 @@ ProLIF:
 ProteinMPNN:
   files:
   - biopipelines/protein_mpnn.py
+  - biopipelines/chain_rows.py
   - pipe_scripts/pipe_pmpnn_fixed_positions.py
   - pipe_scripts/pipe_pmpnn_table.py
-  current: "2.3"
+  - pipe_scripts/pipe_fa_to_csv_fasta.py
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-09-23'
+    note: >-
+      The chain= deprecation line no longer claims the pipeline runs as written: chain= used to name the chain an unqualified selection belongs to and left every other chain fused in one sequence row, while chains= also decides which chains become rows, so chain="B" now emits chain B alone. Separately, equal-length chains are assigned by sequence identity to the input chains: both candidate orders matched by length and alphabetical always won, so a design written in appearance order (B before A) had its two sequences swapped under each other's chain letters. A tie that sequence cannot break is reported rather than resolved silently.
+  - version: '2.6'
+    date: '2026-09-21'
+    note: >-
+      Chain-qualified position selections finally route per chain. `sele_utils.sele_to_list` is chain-aware and both MPNN scripts import it, but this one aliased it away and defined a local `sele_to_list` of the same name that dropped the chain -- so a selection reading "A3-5+B2" had its residues merged into one flat set and applied to a single chain, while LigandMPNN handled the identical string correctly. Measured against the pre-change script, "A3-5+B2" on a two-chain backbone fixed A at 1+6-10 and fixed all of B, silently ignoring B2 and freeing A2; it now fixes A at 1-2+6-10 and B at 1+3-4. Selections are bucketed by the chain each residue names, falling back to the dict key it was written under and then to the chain resolved from the structure, so a qualified string needs no dict and the dict is left for attaching a different source per chain. Every single-chain case is byte-identical to before, verified by running both versions over the same inputs.
+  - version: '2.5'
+    date: '2026-09-21'
+    note: >-
+      Also collapses `chain` into `chains`: the two were one letter apart and meant different things -- which chains are emitted, versus which chain an unqualified position selection belongs to -- which is the `Ligand` `code`/`codes` mistake again. Naming the chains in play answers both, so there is one parameter; `chain=` binds it through `PARAMETER_ALIASES` and reports a `deprecated_alias` line. A chainless selection on a multi-chain structure now raises naming the chains, where ProteinMPNN attached it to whichever chain came first and LigandMPNN used the literal "A" -- silently wrong whenever the single chain was called anything else, and now read off each structure. `fixed` and `redesigned` accept a `{chain: selection}` dict, each value taking any form the parameter accepts, and the `sele.csv` summary is chain-aware as soon as more than one chain is in play.
+  - version: '2.4'
+    date: '2026-09-21'
+    note: >-
+      A design over a multi-chain backbone becomes one `sequences` row per chain instead of one row whose `sequence` fuses every chain behind a separator. ProteinMPNN joins them with `/`, its own native convention. A `sequences` row is one polymer chain, so that value reached every consumer as if it were one: Boltz2 wrote it into a single YAML chain entry, where Boltz mapped the separator to an `UNK` residue and folded a complex containing a chain that should not exist, reporting high confidence for it. The new `chains` parameter says which chains become rows -- `None` (the default) expects a single-chain backbone and records a multi-chain one as a failure in `missing.csv` naming the chains found, `"A"` emits just that chain with the ids it always had, `["A","B"]` emits `<design>_<chain>` ids, and `"all"` emits every chain behind a lazy `[_<?>]` pattern. Chain letters are resolved by matching each segment's length against the backbone's per-chain residue counts, and a design that cannot be reconciled is dropped rather than mislabelled. A new `designs` stream carries one row per design -- the ids the `sequences` stream used to have -- and is what `Grouped` groups the chain rows by to fold a complex. Single-chain pipelines are unaffected: same ids, same rows.
   - version: '2.3'
     date: '2026-09-03'
     note: >-
@@ -1397,8 +1655,27 @@ RFdiffusion3:
   - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
   - pipe_scripts/pipe_rfdiffusion3_postprocess.py
   - pipe_scripts/pipe_rfdiffusion3_table.py
-  current: "3.4"
+  current: "3.6"
   history:
+  - version: '3.6'
+    date: '2026-09-23'
+    note: >-
+      The element repair no longer corrupts a spec-compliant PDB. It assumed Biopython's PDBIO writes segID/element/charge one column early, which holds through 1.86; 1.87 writes the spec layout, so the repair read blanks, fell back to the atom name, and made every alpha carbon calcium and every SI a sulfur. The layout is now read off the installed PDBIO's format string (line length as fallback), and a blank element follows the PDB atom-name convention. Separately, a `/0` chain break or a `\0` inside `json_config` is now seen: only `contig` was inspected, so a multi-chain design given through `json_config` declared bare structure ids against per-chain rows and a consumer folded zero designs.
+  - version: '3.5'
+    date: '2026-09-19'
+    note: >-
+      Multi-chain contigs. The wrapper rejected any contig containing `/` and documented a backslash-zero
+      as the chain-break token; foundry's parser accepts neither spelling, so a binder design --
+      every design with more than one chain -- could not be expressed at all. `/0` is now the
+      documented and accepted token. Separately, Biopython's PDBIO writes five spaces after the
+      B-factor where the spec has six, shifting segID, element and charge one column left for every
+      downstream reader; those columns are repaired and CONECT records are emitted for HETATM
+      pairs, so a ligand keeps its bonds.
+      The `sequences` stream now declares one id per chain, matching the rows
+      pipe_rfdiffusion3_postprocess.py writes: a contig carrying `/0` declares the lazy
+      `<id>[_<?>]`, covering both the suffixed rows of a multi-chain design and the bare id
+      written for a single-chain one. Declaring bare structure ids made a downstream
+      selection match nothing, so a consumer folded zero designs and reported no error.
   - version: '3.4'
     date: '2026-09-11'
     note: >-
@@ -1666,3 +1943,26 @@ HBDesigner:
     date: '2026-06-30'
     note: >-
       Helper arguments moved from positional CLI into a JSON config file passed to the resolver script; generated bash changed, no user-facing parameter change.
+BFactor:
+  files:
+  - biopipelines/bfactor.py
+  - pipe_scripts/pipe_bfactor.py
+  current: "1.2"
+  history:
+  - version: '1.2'
+    date: '2026-09-23'
+    note: >-
+      The chain check counts only chains that have residues inside the span. 1.1 counted every chain, so a protein with a ligand or waters, the ordinary predictor output, had every unqualified selection recorded as a failure.
+  - version: '1.1'
+    date: '2026-09-23'
+    note: >-
+      Selection parsing stops guessing. An unqualified span on a multi-chain structure records that id as a failure naming its chains instead of averaging the same residue numbers across every chain; a part that is not a span is refused (a typo used to become an empty selection reported as n=0), at configuration time for a literal; and insertion-code residues (100, 100A) stay separate, with an icode column in the per-residue table.
+  - version: '1.0'
+    date: '2026-09-21'
+    note: >-
+      Initial release. Reads the per-residue B-factor column - where Boltz2 writes pLDDT,
+      AlphaFold and ESMFold write it on a 0-100 scale, and an experimental structure carries
+      a temperature factor - and summarizes it over any number of named selections, each a
+      literal selection string or a table column reference resolved per structure id. Emits a
+      resi-csv stream consumable by Selection and Consensus, plus a per-structure summary
+      carrying <name>_delta, the selection's mean minus the whole structure's.

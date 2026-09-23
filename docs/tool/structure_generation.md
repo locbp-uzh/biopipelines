@@ -8,6 +8,8 @@
 
 Generates protein binders (proteins, peptides, or nanobodies) targeting specified molecules using an end-to-end pipeline that combines diffusion-based backbone generation, inverse folding, structure prediction, and multi-metric filtering.
 
+**Tags**: generate-backbone, design-sequence, protein, small-molecule, nucleic-acid, complex, binding, interactions, sasa, binder-design, covalent, symmetry, motif-scaffolding, all-atom
+
 **References**:
 - https://github.com/HannesStark/boltzgen
 - https://www.biorxiv.org/content/10.1101/2025.11.20.689494v1.full.pdf
@@ -68,6 +70,8 @@ Which streams and tables exist depends on `steps`. With the default full pipelin
 
   | id | file_name | designed_sequence | designed_chain_sequence | num_prot_tokens | num_lig_atoms | num_resolved_tokens | num_tokens | num_design | UNK_fraction | GLY_fraction | ALA_fraction | CYS_fraction | SER_fraction | PRO_fraction | THR_fraction | VAL_fraction | ILE_fraction | ASN_fraction | ASP_fraction | LEU_fraction | MET_fraction | GLN_fraction | GLU_fraction | LYS_fraction | HIS_fraction | PHE_fraction | ARG_fraction | TYR_fraction | TRP_fraction | loop | helix | sheet | liability_score | liability_num_violations | liability_high_severity_violations | liability_medium_severity_violations | liability_low_severity_violations | native_rmsd | native_rmsd_bb | native_rmsd_refolded | native_rmsd_bb_refolded | bb_rmsd | bb_rmsd_design | bb_rmsd_target | design_ptm | design_iptm | design_to_target_iptm | min_design_to_target_pae | min_interaction_pae | affinity_pred_value | affinity_probability_binary1 |
   |----|-----------|-------------------|-------------------------|-----------------|---------------|---------------------|------------|------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|--------------|------|-------|-------|-----------------|--------------------------|------------------------------------|--------------------------------------|-----------------------------------|-------------|----------------|----------------------|-------------------------|---------|----------------|----------------|------------|-------------|-----------------------|--------------------------|---------------------|---------------------|------------------------------|
+
+  **Units.** `affinity_pred_value` comes from the same Boltz affinity head as Boltz2: `log10(IC50)` with IC50 in µM, so **lower is stronger**. `affinity_probability_binary1` is the probability the design binds at all, 0–1, **higher is more likely**. Neither is comparable to another tool's affinity number.
 
 - `per_target_metrics` (`analysis` step) — one row per target:
 
@@ -144,6 +148,8 @@ Designs a protein binding pocket tailored to a chosen target ligand. For each (s
 
 The scaffold must have the **ligand bound as HETATM** in the binding site — those coordinates define the pocket PocketGen edits. The ligand is supplied as a compounds stream carrying both the 3-letter `code` (present in the scaffold) and the canonical `smiles` (used as a bond-order template), typically `Ligand("CODE", smiles="...")`. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
 
+**Tags**: design-sequence, generate-backbone, protein, small-molecule, pocket, all-atom, sidechain
+
 **References**: https://github.com/zaixizhang/PocketGen · https://www.nature.com/articles/s42256-024-00920-9
 
 **Resources**: GPU.
@@ -179,6 +185,8 @@ pg = PocketGen(structures=scaffold, ligand=lig)
 ### RFdiffusion
 
 Generates novel protein backbone structures using diffusion models. Designs de novo proteins or scaffolds functional motifs into new contexts.
+
+**Tags**: generate-backbone, protein, complex, symmetry, motif-scaffolding, binder-design
 
 **References**: https://www.nature.com/articles/s41586-023-06415-8
 
@@ -270,6 +278,8 @@ rfd_fold = RFdiffusion(scaffold_dir="./examples/ppi_scaffolds_subset", num_desig
 
 Enzyme active-site scaffolding and small-molecule binder design. Its defining capability is **atomic** motif specification: an active site is given as individual side-chain atoms (`contig_atoms`) that the model scaffolds either at fixed sequence positions (indexed) or anywhere along the chain (`contig_as_guidepost=True`, unindexed). Also supports RASA-conditioned buried-binder design. Distinct from RFdiffusionAllAtom (earlier all-atom model) and RFdiffusion3 (the foundry/rfd3 successor).
 
+**Tags**: generate-backbone, protein, small-molecule, pocket, motif-scaffolding, all-atom, binder-design
+
 **References**:
 - Github: https://github.com/RosettaCommons/RFdiffusion2
 - Docs: https://rosettacommons.github.io/RFdiffusion2/
@@ -323,6 +333,8 @@ rfd2 = RFdiffusion2(
 ### RFdiffusion3
 
 Third-generation all-atom diffusion model for protein design. Operates at the atomic level (4 backbone + 10 sidechain atoms per residue) rather than residue-level, enabling precise design of sidechain interactions with ligands, catalytic residues, DNA/RNA, and symmetric assemblies. Approximately 10× faster than RFdiffusion2 with higher success rates on enzyme design benchmarks.
+
+**Tags**: generate-backbone, design-sequence, protein, small-molecule, nucleic-acid, symmetry, motif-scaffolding, binder-design, all-atom
 
 **References**:
 - Paper: https://www.biorxiv.org/content/10.1101/2024.11.13.623358v1
@@ -384,6 +396,10 @@ foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 The `cfg*`, `step_scale`, `noise_scale`, `num_steps`, `center_option`, and `seed` parameters are emitted as Hydra `inference_sampler.*` overrides on the `rfd3 design` command line (mapped to foundry keys: `noise_scale`→`gamma_0`, `num_steps`→`num_timesteps`). All other parameters above are written into the per-design inputs JSON.
 
 **Streams**: `structures`, `sequences` (value-based, extracted from the designed backbones)
+
+`sequences` carries **one row per chain**, as everything else in the framework does. A contig with no chain break declares one id per structure; a contig carrying `/0` declares the lazy `<structure>[_<?>]`, because the writer appends `_<chain>` only when a design actually has several chains. A downstream consumer selecting a bare `bb_1` against rows `bb_1_A, bb_1_B` matches nothing, so use the stream itself rather than hand-written ids.
+
+RFdiffusion3 emits no `designs` stream, so `Grouped(rfd3)` has no default axis to partition by. To refold a multi-chain design as one complex, name the partition explicitly: `Grouped(rfd3.streams.sequences, groups=rfd3.streams.structures)`.
 
 **Tables**:
 - `structures`:
@@ -478,6 +494,8 @@ rfd3 = RFdiffusion3(
 
 Designs highly-connected hydrogen-bonding networks that satisfy the requested constraints onto an input protein backbone. For each input structure it samples candidate networks, packs and scores them with PyRosetta, and keeps the top-ranked designs.
 
+**Tags**: design-sequence, protein, complex, residues, interactions, energy, sasa, sidechain, all-atom
+
 **References**: https://github.com/Kuhlman-Lab/HBDesigner — docs at https://rosettacommons.github.io/HBDesigner/
 
 **Installation**: `HBDesigner.install(device="gpu")` (default; pass `device="cpu"` for CPU) clones the repo into the `HBDesigner` data folder, creates the `hbdesigner` env from the device-matching vendored spec (`environments/hbdesigner.<device>.yaml` + `hbdesigner.<device>.pip.txt`, from the upstream `env_gpu.yaml` / `env_cpu.yaml`: torch 2.8 (+cu128 or +cpu), the matching PyG extension wheels, and PyRosetta), then `pip install -e .`-es the HBDesigner package from the clone — editable, because `run_hbdesigner` resolves its `model_weights/` relative to the package location, so it must import from the repo (which ships the weights), not a copy in site-packages. The env name is `hbdesigner` for both devices. HBDesigner depends on PyRosetta, which is free for academic use but requires a paid license for commercial use — installing accepts that license.
@@ -523,6 +541,8 @@ hb = HBDesigner(
 ### RFdiffusionAllAtom
 
 Generates protein structures with explicit modeling of ligands and small molecules. Diffusion model that handles all-atom representation including non-protein entities.
+
+**Tags**: generate-backbone, protein, small-molecule, complex, all-atom, motif-scaffolding, binder-design
 
 **References**: https://www.science.org/doi/10.1126/science.adl2528.
 

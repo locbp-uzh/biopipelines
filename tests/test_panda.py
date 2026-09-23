@@ -58,6 +58,23 @@ def _run_pipe(name, config_path, config_flag=True):
     subprocess.run(args, check=True)
 
 
+def _check_completion(tool):
+    """Ask the completion checker whether a finished step is complete.
+
+    Reads the step's own `.expected_outputs.json` — the manifest its bash
+    passes — and calls `check_expected_outputs` in process, as
+    `test_completion_all_filtered.py` does. Returns `(ok, missing_by_category)`.
+    """
+    sys.path.insert(0, os.path.join(_repo_root(), "pipe_scripts"))
+    import pipe_check_completion
+
+    with open(os.path.join(tool.output_folder, ".expected_outputs.json")) as f:
+        manifest = json.load(f)
+    return pipe_check_completion.check_expected_outputs(
+        manifest["output_structure"], manifest["tool_name"], tool.output_folder
+    )
+
+
 def _read_csv_rows(path):
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
@@ -928,3 +945,146 @@ def test_panda_multipool_value_stream_survives_file_stream_sibling(
     )
     assert seqs["d1"] == "MKTAYIAK"
     assert seqs["d2"] == "GGGGALV"
+
+
+def test_panda_head_accounts_for_slots_no_row_reached(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Mock(6 ids) → Panda(filter + sort + head(4), pool): only 2 rows survive.
+
+    `head(4)` fixes what the step DECLARES (`N_Panda_1..4`), the filter decides
+    how many rows there are. Slots 3 and 4 name no upstream id, so nothing in the
+    missing manifest the dropped inputs produced can excuse them — they have to be
+    accounted for under the ids they were declared by, or `pipe_check_completion`
+    demands two files that correctly have nothing to contain. Found on
+    BinderDesign/tagged_binder_002, where 23 of 30 declared slots went unfilled in
+    both the `structures` and `msas` streams and the step was marked FAILED."""
+    from biopipelines.mock import Mock
+    from biopipelines.panda import Panda
+
+    pipeline = new_pipeline("panda_head_slot_shortfall")
+    with pipeline:
+        m = Mock(
+            ids=["w1", "w2", "w3", "w4", "w5", "w6"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            tables={"scores": {"columns": ["id", "score"],
+                               "rows": [["w1", 9.0], ["w2", 8.0], ["w3", 1.0],
+                                        ["w4", 1.0], ["w5", 1.0], ["w6", 1.0]]}},
+        )
+        pan = Panda(
+            tables=m.tables.scores,
+            operations=[Panda.filter("score > 5"),
+                        Panda.sort("score", ascending=False),
+                        Panda.head(4)],
+            pool=m,
+        )
+        pipeline.save()
+
+    declared = _auto_rename_ids(pan.output_folder, 4)
+    assert list(pan.streams.structures.ids) == declared
+
+    _run_pipe("mock", os.path.join(m.output_folder, "_configuration", "mock_config.json"),
+              config_flag=False)
+    _run_pipe("panda", os.path.join(pan.output_folder, "_configuration", "panda_config.json"))
+
+    missing = _read_csv_rows(os.path.join(pan.output_folder, "tables", "missing.csv"))
+    slots = {r["id"]: r for r in missing if r["id"] in declared}
+
+    record_case(
+        input="Mock(6) → Panda(filter keeps 2 + head(4), pool) — missing.csv",
+        expected=set(declared[2:]),
+        actual=set(slots),
+    )
+    assert set(slots) == set(declared[2:]), (
+        f"unfilled slots not accounted for: {sorted(slots)}"
+    )
+    for slot_id, row in slots.items():
+        assert row["kind"] == "filter", f"{slot_id} must be excusable, got {row['kind']}"
+        assert "head(4)" in row["cause"] and "2 rows survived" in row["cause"], row["cause"]
+
+    ok, still_missing = _check_completion(pan)
+    assert ok, f"an accounted-for shortfall still failed the step: {still_missing}"
+
+
+def test_panda_head_with_every_row_filtered_is_not_a_failure(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """The same bug at its limit — BinderDesign/tagged_binder_short_002 kept 0 of 200.
+
+    `tests/test_completion_all_filtered.py` covers a fully-filtered step whose
+    declared ids ARE the ids in missing.csv (Panda's no-rename path). The rename
+    path declares a fresh id space, so every declared slot is unfilled and none of
+    them appears in the manifest the dropped inputs wrote."""
+    from biopipelines.mock import Mock
+    from biopipelines.panda import Panda
+
+    pipeline = new_pipeline("panda_head_slot_all_filtered")
+    with pipeline:
+        m = Mock(
+            ids=["z1", "z2", "z3"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            tables={"scores": {"columns": ["id", "score"],
+                               "rows": [["z1", 1.0], ["z2", 1.0], ["z3", 1.0]]}},
+        )
+        pan = Panda(
+            tables=m.tables.scores,
+            operations=[Panda.filter("score > 5"), Panda.head(3)],
+            pool=m,
+        )
+        pipeline.save()
+
+    declared = _auto_rename_ids(pan.output_folder, 3)
+
+    _run_pipe("mock", os.path.join(m.output_folder, "_configuration", "mock_config.json"),
+              config_flag=False)
+    _run_pipe("panda", os.path.join(pan.output_folder, "_configuration", "panda_config.json"))
+
+    missing = _read_csv_rows(os.path.join(pan.output_folder, "tables", "missing.csv"))
+    excused = {r["id"] for r in missing if r["kind"] == "filter"}
+    ok, still_missing = _check_completion(pan)
+
+    record_case(
+        input="Mock(3) → Panda(filter keeps 0 + head(3), pool) — completion",
+        expected=(set(declared), True),
+        actual=(excused & set(declared), ok),
+    )
+    assert set(declared).issubset(excused)
+    assert ok, f"a step whose filter kept nothing was reported as failed: {still_missing}"
+
+
+def test_panda_head_still_requires_the_rows_that_did_survive(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """The case that must NOT be excused, or a broken extraction reads as a filter."""
+    from biopipelines.mock import Mock
+    from biopipelines.panda import Panda
+
+    pipeline = new_pipeline("panda_head_slot_survivor_lost")
+    with pipeline:
+        m = Mock(
+            ids=["y1", "y2", "y3"],
+            streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+            tables={"scores": {"columns": ["id", "score"],
+                               "rows": [["y1", 9.0], ["y2", 8.0], ["y3", 1.0]]}},
+        )
+        pan = Panda(
+            tables=m.tables.scores,
+            operations=[Panda.filter("score > 5"), Panda.head(3)],
+            pool=m,
+        )
+        pipeline.save()
+
+    _run_pipe("mock", os.path.join(m.output_folder, "_configuration", "mock_config.json"),
+              config_flag=False)
+    _run_pipe("panda", os.path.join(pan.output_folder, "_configuration", "panda_config.json"))
+
+    declared = _auto_rename_ids(pan.output_folder, 3)
+    survivor = os.path.join(pan.output_folder, "structures", f"{declared[0]}.pdb")
+    assert os.path.exists(survivor), survivor
+    os.remove(survivor)
+
+    ok, still_missing = _check_completion(pan)
+    record_case(input="survivor's file deleted → completion check",
+                expected="incomplete", actual="incomplete" if not ok else "complete")
+    assert not ok, "a survivor's missing file was excused by the slot accounting"
+    assert "structures" in still_missing

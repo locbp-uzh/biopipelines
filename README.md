@@ -44,6 +44,21 @@ claude #or: codex
 > Read and follow `llm/pipelines.md`.
 ```
 
+**5. Register the MCP server so the assistant can query the framework directly.** Without it an agent can only *read about* BioPipelines; with it, the agent searches the tool catalog, inspects run status, reads logs and tables, and submits pipelines — on this machine or over ssh on a cluster. The SDK is an optional extra, so authoring and running pipelines never needs it.
+
+```bash
+pip install -e ".[mcp]"
+claude mcp add --scope user biopipelines -- bp-mcp   # `claude mcp list` should show it Connected
+```
+
+If your work runs on a cluster, point the server at it once from inside the assistant — it checks the whole chain (ssh alias, checkout, config variant, output root) and saves what works:
+
+```
+> bp_setup(host="mycluster", repo="~/biopipelines")
+```
+
+See [`skills/biopipelines/references/mcp_server.md`](skills/biopipelines/references/mcp_server.md) for the full tool list.
+
 For framework development please fork the repository. For manual editing we recommend a visual IDE with autocompletion like [VS Code](http://code.visualstudio.com/).
 
 ## Google Colab Notebooks for example pipelines
@@ -52,7 +67,7 @@ The **Open in Colab** badge launches the clean notebook to run yourself; the **p
 
 | Notebook | Link |  Description  | Tools |
 |----------|------|---------------|-------|
-| **Template** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/my_pipelines/template.ipynb) | Contains only setup cell ||
+| **Template** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/my_pipelines/_template.ipynb) | Contains only setup cell ||
 | **Inverse Folding** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/ubiquitin.ipynb) [![preview](https://img.shields.io/badge/%F0%9F%91%81%EF%B8%8F%20preview-white?style=flat-square&labelColor=white&color=white)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/ubiquitin_results.ipynb) | Inverse folding of ubiquitin, AlphaFold2 refolding, RMSD/pLDDT filter, codon optimisation for *E. coli* | ProteinMPNN · AlphaFold · ConformationalChange · DNAEncoder |
 | **Kinase LID Redesign** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/kinase_LID_redesign.ipynb) [![preview](https://img.shields.io/badge/%F0%9F%91%81%EF%B8%8F%20preview-white?style=flat-square&labelColor=white&color=white)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/kinase_LID_redesign_results.ipynb) | De novo backbone design of the adenylate kinase LID domain, filtered by RMSD on the fixed scaffold | RFdiffusion · ProteinMPNN · AlphaFold · ConformationalChange |
 | **FRET Biosensor Design** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/FRET.ipynb) [![preview](https://img.shields.io/badge/%F0%9F%91%81%EF%B8%8F%20preview-white?style=flat-square&labelColor=white&color=white)](https://colab.research.google.com/github/locbp-uzh/biopipelines/blob/main/example_pipelines/notebooks/FRET_results.ipynb) | Linker length optimisation for a Ca²⁺-responsive EBFP–CaM–EYFP FRET sensor | Fuse · Boltz2 · Distance · Panda |
@@ -87,7 +102,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
 
 <tr>
   <td><sub><b>BoltzGen</b><sup><i>a</i></sup><br>Design protein, peptide, or nanobody binders against a chosen target.</sub></td>
-  <td width="100" align="center"><sub><a href="https://github.com/jwohlwend/boltz"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2025.06.14.659707v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/HannesStark/boltzgen"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2025.11.20.689494v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
@@ -111,7 +126,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
 </tr>
 <tr>
   <td><sub><b>RFdiffusion2</b><br>Atom-level diffusion for enzyme active-site scaffolding around catalytic residues and ligands.</sub></td>
-  <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/RFdiffusion2"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2025.11.20.689494v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/RFdiffusion2"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.biorxiv.org/content/10.1101/2025.04.09.648075v1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
@@ -248,6 +263,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></sub></td>
 </tr>
 <tr>
+  <td><sub><b>OpenFold3</b><br>Open-source co-folding of proteins, nucleic acids and ligands; the Apache-2.0 AlphaFold3 reimplementation.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/aqlaboratory/openfold-3"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.nature.com/articles/s41586-024-07487-w"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+</tr>
+<tr>
   <td><sub><b>PLACER</b><br>Generate scored ligand-pose or sidechain ensembles in a protein pocket.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/baker-laboratory/PLACER"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.pnas.org/doi/10.1073/pnas.2427161122"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
@@ -256,6 +277,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
 
 <tr><td colspan="4"><h3>📐 Analysis</h3></td></tr>
 
+<tr>
+  <td><sub><b>BFactor</b><br>Read the per-residue B-factor - a predictor's pLDDT or a real temperature factor - and summarize it over named selections.</sub></td>
+  <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+</tr>
 <tr>
   <td><sub><b>ADMETAI</b><br>Predict ADMET and physicochemical properties for your compounds.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/swansonk14/admet_ai"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/bioinformatics/btae416"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
@@ -300,7 +327,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
 </tr>
 <tr>
   <td><sub><b>CABSflex</b><br>Estimate protein backbone flexibility and per-residue fluctuation profiles.</sub></td>
-  <td width="100" align="center"><sub><a href="https://github.com/lcbio/CABSflex"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/nar/gky356"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="100" align="center"><sub><a href="https://bitbucket.org/lcbio/cabsflex"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/nar/gky356"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>

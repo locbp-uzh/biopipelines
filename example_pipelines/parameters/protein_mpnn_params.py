@@ -47,7 +47,7 @@ with Pipeline(project="ToolParameters",
 
     # 4: chain selection
     Suffix("chain_A")
-    ProteinMPNN(structures=backbone, chain="A")
+    ProteinMPNN(structures=backbone, chains="A")
 
     # 5: global AA bias (3A reviewer's bias_AA_jsonl example).
     # omit_AA_jsonl needs a per-PDB-name structured payload that's awkward to

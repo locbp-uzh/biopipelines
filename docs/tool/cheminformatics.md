@@ -10,6 +10,8 @@ These tools work on the *chemistry* of small molecules: converting molecule file
 
 Converts a molecule stream between chemical file formats, optionally adding hydrogens (pH-aware) and generating 3-D coordinates. This is the standard way to turn a `Ligand` (which carries only SMILES) into a docking-ready 3-D file: `OpenBabel(compounds=lig, convert_3d="sdf")`.
 
+**Tags**: data, refine-structure, small-molecule
+
 **References**: https://github.com/openbabel/openbabel
 
 **Environment**: `biopipelines` (on Colab, install the `openbabel` pip extra).
@@ -53,6 +55,8 @@ protonated = OpenBabel(compounds=aspirin, convert_3d="sdf", pH=7.4)
 Two independent jobs, selected by which inputs are given. With `compounds=` it computes per-compound cheminformatics descriptors from SMILES — molecular weight, logP, TPSA, hydrogen-bond donors/acceptors, rotatable bonds, QED, fraction sp³, and more — for filtering or annotating a compound library before screening. With `structures=` it computes the **conformer strain** of each posed ligand: how much internal (torsional) energy the bound conformation carries relative to a relaxed one. Both may be given together.
 
 Strain answers a question PoseBusters cannot: a pose can be clash-free and geometrically valid yet still be twisted into an energetically implausible conformation. It is *internal* strain, not interaction energy — for the latter see XTB.
+
+**Tags**: measure, small-molecule, energy
 
 **References**: https://github.com/rdkit/rdkit
 
@@ -139,6 +143,8 @@ Retrosynthetic route planning. Runs a Monte-Carlo tree search that recursively a
 The output is nested, and the tool exposes all three levels: a **target** is searched, producing several ranked **routes**, each of which ends in several **precursors**. Routes are ranked best-first by the state score (a combination of stock availability and route length); precursors carry only an `in_stock` boolean, so they are molecules rather than scored objects.
 
 The `precursors` stream is a **compounds** stream with the canonical `id | format | smiles | ccd` schema, so the building blocks feed directly into any compounds consumer (`ADMETAI`, `RDKit`, `OpenBabel`, a docking run). Its map_table *is* the `precursors` table, so filtering it with `Panda` and passing `pool=` carries the stream along.
+
+**Tags**: predict-property, small-molecule
 
 **References**: https://github.com/MolecularAI/aizynthfinder — Genheden et al. (2020) *J. Cheminform.* 12, 70.
 

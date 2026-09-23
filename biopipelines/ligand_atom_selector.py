@@ -43,7 +43,7 @@ class LigandAtomSelector(BaseConfig):
     """
 
     TOOL_NAME = "LigandAtomSelector"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

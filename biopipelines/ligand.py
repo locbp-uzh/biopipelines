@@ -62,7 +62,7 @@ class Ligand(BaseConfig):
     """
 
     TOOL_NAME = "Ligand"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     # `code=` was one letter from `codes=` and a different object: a mistyped `codes` silently built a chemistry-free stub instead of naming a residue on a real ligand. The retired spelling still binds, with a deprecation line.
     PARAMETER_ALIASES = {"code": "codes"}
     DEPRECATED_ALIASES = ("code",)

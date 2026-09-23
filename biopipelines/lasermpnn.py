@@ -78,7 +78,7 @@ class LASErMPNN(BaseConfig):
     """LASErMPNN: ligand-conditioned inverse folding + all-atom packing."""
 
     TOOL_NAME = "LASErMPNN"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     # run_batch_inference is argparse and takes far more flags than the wrapper types; an untyped kwarg joins the free-form --run-options string.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "lasermpnn"

@@ -35,9 +35,13 @@ def convert_csv_to_a3m(csv_file: str, output_a3m: str) -> str:
     """
     Convert a Boltz2-style CSV MSA file to A3M format.
 
-    Writes the A3M header line (``#<num_seqs>\\t<query_length>``) followed by
+    Writes the A3M header line (``#<query_length>\\t<cardinality>``) followed by
     FASTA-like ``>index\\nsequence\\n`` pairs.  The first sequence is treated as
     the query.
+
+    Field order matters: ColabFold splits that line on tab and reads field 1 as
+    the per-chain query length(s) and field 2 as the chain cardinality, then
+    treats anything with cardinality != 1 as a multi-chain complex.
 
     Args:
         csv_file: Input CSV with columns `key, sequence`
@@ -58,7 +62,7 @@ def convert_csv_to_a3m(csv_file: str, output_a3m: str) -> str:
     query_len = len(sequences[0])
 
     with open(output_a3m, 'w') as f:
-        f.write(f"#{len(sequences)}\t{query_len}\n")
+        f.write(f"#{query_len}\t1\n")
         for i, seq in enumerate(sequences):
             f.write(f">{100 + i}\n{seq}\n")
 

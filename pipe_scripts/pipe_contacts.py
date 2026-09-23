@@ -26,7 +26,8 @@ from biopipelines.biopipelines_io import load_datastream, iterate_files, lookup_
 from biopipelines.id_map_utils import get_mapped_ids
 
 # Import PDB parser and selection utilities
-from biopipelines.pdb_parser import Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file, STANDARD_RESIDUES
+from biopipelines.pdb_parser import (Atom as _PdbAtom, parse_pdb_file as _pdb_parse_pdb_file,
+                                     calculate_distance, STANDARD_RESIDUES)
 from biopipelines.sele_utils import sele_to_list as _sele_to_list
 
 
@@ -152,21 +153,6 @@ def filter_atoms_by_selection(atoms: List[Atom], residue_tuples: List[Tuple[str,
             if (atom.chain, atom.res_num) in chained or atom.res_num in chainless_nums]
 
 
-def calculate_distance(atom1: Atom, atom2: Atom) -> float:
-    """
-    Calculate Euclidean distance between two atoms.
-
-    Args:
-        atom1: First atom
-        atom2: Second atom
-
-    Returns:
-        Distance in Angstroms
-    """
-    dx = atom1.x - atom2.x
-    dy = atom1.y - atom2.y
-    dz = atom1.z - atom2.z
-    return math.sqrt(dx*dx + dy*dy + dz*dz)
 
 
 def calculate_contacts(atoms: List[Atom], protein_selections: str, ligand_name: str, contact_threshold: float, reference: str = "ligand") -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float], Optional[float]]:

@@ -63,6 +63,117 @@ class Bundle:
         return f"Bundle({', '.join(repr(s) for s in self.sources)})"
 
 
+class Grouped:
+    """
+    Iterates the *groups* of a stream: one output per group, carrying all of that
+    group's rows together.
+
+    ``Each`` makes one output per row and ``Bundle`` makes one output from every row;
+    ``Grouped`` sits between them, which is what a multi-chain design needs — a design
+    is several ``sequences`` rows that belong in one prediction. The partition comes
+    from ``groups``, a stream whose ids are the group keys, exactly as ``Consensus``
+    takes it. Membership is resolved at runtime by the framework's id matching, so the
+    group ids are all that has to be known at configuration time.
+
+    ``groups`` is any stream whose ids are the keys, and it needs no relationship to the
+    grouped stream beyond ancestry — matching walks the parent chain, so a key may be the
+    rows' parent, grandparent or any ancestor. Grouping four chain rows ``A_1_1, A_1_2,
+    A_2_1, A_2_2`` under the two designs ``A_1, A_2`` and under the one backbone ``A`` are
+    the same call with a different ``groups``::
+
+        Boltz2(proteins=Grouped(pmpnn.streams.sequences, groups=pmpnn.streams.designs))
+        Boltz2(proteins=Grouped(pmpnn.streams.sequences, groups=rfd))   # one per backbone
+
+    Omitting ``groups`` defaults to the source output's ``designs``, which is the common
+    case, and requires a tool output rather than a bare stream::
+
+        Boltz2(proteins=Bundle(Grouped(pmpnn), tag))
+    """
+
+    #: The stream name a tool output falls back to when ``groups`` is not given.
+    DEFAULT_GROUP_STREAM = "designs"
+
+    def __init__(self, source, groups=None):
+        self.source = source
+        self.groups = groups
+
+    def resolve_groups(self, stream_name: str):
+        """The group stream as a DataStream, from ``groups`` or the source's ``designs``.
+
+        A given ``groups`` is resolved on its own terms, never under the consuming axis's
+        stream name: the keys commonly live on a differently-named stream (an RFdiffusion
+        output groups sequences by its ``structures``), so looking for ``sequences`` there
+        would refuse a perfectly good partition.
+        """
+        if self.groups is not None:
+            return self._as_group_stream(self.groups)
+
+        # A tool output carries its sibling streams directly; a bare stream carries the
+        # tool that produced it, which is how `Grouped(tool.streams.sequences)` -- the
+        # spelling that reads most naturally -- finds the same siblings.
+        streams = getattr(self.source, "streams", None)
+        group_stream = getattr(streams, self.DEFAULT_GROUP_STREAM, None) if streams else None
+        if group_stream is None:
+            group_stream = self._sibling_from_producer(self.source)
+
+        if group_stream is None:
+            raise ValueError(
+                f"Grouped(...) could not find a '{self.DEFAULT_GROUP_STREAM}' stream to group "
+                f"'{stream_name}' by. Pass groups= naming the stream whose ids are the group "
+                f"keys, e.g. groups=tool.streams.{self.DEFAULT_GROUP_STREAM}."
+            )
+        if not len(group_stream):
+            raise ValueError(
+                f"Grouped(...): the '{self.DEFAULT_GROUP_STREAM}' stream it would group "
+                f"'{stream_name}' by is empty; pass groups= explicitly."
+            )
+        return group_stream
+
+    @classmethod
+    def _sibling_from_producer(cls, source):
+        """The producer's ``designs`` stream, reached from a bare stream's back-reference.
+
+        ``get_output_files()`` is declarative -- it predicts paths and touches no disk -- so
+        asking the producing tool for its own streams again at configuration time is free.
+        """
+        producer = getattr(source, "_producer", None)
+        if producer is None or not hasattr(producer, "get_output_files"):
+            return None
+        try:
+            outputs = producer.get_output_files()
+        except Exception:
+            return None
+        candidate = outputs.get(cls.DEFAULT_GROUP_STREAM) if isinstance(outputs, dict) else None
+        return candidate if hasattr(candidate, "ids") else None
+
+    @staticmethod
+    def _as_group_stream(groups):
+        """A DataStream from whatever the caller passed as ``groups``.
+
+        Mirrors ``Consensus._resolve_group_stream``: streams sharing one id set yield the
+        same partition, so picking between them is harmless, while streams that disagree
+        would change the answer and are refused rather than guessed.
+        """
+        if hasattr(groups, "ids") and hasattr(groups, "map_table"):
+            return groups
+        streams = getattr(groups, "streams", None)
+        if streams is None:
+            raise ValueError(
+                f"Grouped(groups=...) must be a DataStream or a tool output, got {type(groups)}")
+        candidates = [ds for _, ds in streams.items() if ds is not None and len(ds) > 0]
+        if not candidates:
+            raise ValueError("Grouped(groups=...): no non-empty stream found in that output")
+        if len({tuple(ds.ids) for ds in candidates}) > 1:
+            raise ValueError(
+                f"Grouped(groups=...): output streams disagree on ids "
+                f"({[(c.name, len(c)) for c in candidates]}); pass an explicit stream, "
+                f"e.g. groups=tool.streams.structures")
+        return candidates[0]
+
+    def __repr__(self) -> str:
+        return f"Grouped({self.source!r}, groups={self.groups!r})"
+
+
 @dataclass
 class AxisConfig:
     """
@@ -204,10 +315,35 @@ def _extract_source_entries(source: Any, stream_name: str) -> List[Dict[str, Any
         raise ValueError(f"DataStream for stream '{stream_name}' has no map_table")
     if hasattr(source, 'streams'):
         stream = getattr(source.streams, stream_name, None)
-        if stream and hasattr(stream, 'map_table') and stream.map_table:
+        # `stream is not None`, NOT `stream`: DataStream.__bool__ is len(ids) > 0,
+        # so a stream whose cardinality is only known at runtime (e.g. RFdiffusion3's
+        # sequences for a multi-chain design, or anything downstream of it) reads as
+        # falsy and gets reported as having no map_table when it has a perfectly good
+        # one. Emptiness at config time is not absence.
+        if stream is not None and hasattr(stream, 'map_table') and stream.map_table:
             return [_source_entry(stream)]
         raise ValueError(f"Source for '{stream_name}' stream must have {stream_name} with map_table")
     raise ValueError(f"Cannot extract source paths from {type(source)} for stream '{stream_name}'")
+
+
+def _grouped_source_entries(value: 'Grouped', stream_name: str) -> List[Dict[str, Any]]:
+    """Source entries for a Grouped axis, each tagged with where its group keys live.
+
+    ``group_by`` is the group stream's map_table and ``group_ids`` its id patterns; the
+    runtime loader reads the keys from there and matches the member rows against them.
+    """
+    group_stream = value.resolve_groups(stream_name)
+    if not group_stream.map_table:
+        raise ValueError(
+            f"Grouped(...): the group stream '{group_stream.name}' has no map_table, so its "
+            f"keys cannot be read at runtime")
+    group_entry = _source_entry(group_stream)
+    entries = []
+    for entry in _extract_source_entries(value.source, stream_name):
+        entries.append({**entry,
+                        "group_by": group_entry["path"],
+                        "group_ids": list(group_entry.get("ids") or [])})
+    return entries
 
 
 def _extract_source_paths(source: Any, stream_name: str) -> List[str]:
@@ -245,7 +381,12 @@ def _extract_source_paths(source: Any, stream_name: str) -> List[str]:
     # StandardizedOutput - use stream_name to determine which DataStream to use
     if hasattr(source, 'streams'):
         stream = getattr(source.streams, stream_name, None)
-        if stream and hasattr(stream, 'map_table') and stream.map_table:
+        # `stream is not None`, NOT `stream`: DataStream.__bool__ is len(ids) > 0,
+        # so a stream whose cardinality is only known at runtime (e.g. RFdiffusion3's
+        # sequences for a multi-chain design, or anything downstream of it) reads as
+        # falsy and gets reported as having no map_table when it has a perfectly good
+        # one. Emptiness at config time is not absence.
+        if stream is not None and hasattr(stream, 'map_table') and stream.map_table:
             return [stream.map_table]
         raise ValueError(f"Source for '{stream_name}' stream must have {stream_name} with map_table")
 
@@ -273,11 +414,20 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
     - Each sources marked iterate=True
     - Bare sources marked iterate=False
     """
+    if isinstance(value, Grouped):
+        return ("each", [{**entry, "iterate": True}
+                         for entry in _grouped_source_entries(value, stream_name)])
+
     if isinstance(value, Bundle):
         sources_with_iterate = []
         order = 0
         for src in value.sources:
-            if isinstance(src, Each):
+            if isinstance(src, Grouped):
+                # Grouped inside Bundle - iterated, one output per group
+                for entry in _grouped_source_entries(src, stream_name):
+                    sources_with_iterate.append({**entry, "iterate": True, "order": order})
+                    order += 1
+            elif isinstance(src, Each):
                 # Each inside Bundle - these are iterated
                 for sub_src in src.sources:
                     for entry in _extract_source_entries(sub_src, stream_name):
@@ -295,6 +445,11 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
         # Each iterates - all sources are iterated
         sources_with_iterate = []
         for src in value.sources:
+            if isinstance(src, Grouped):
+                sources_with_iterate.extend(
+                    {**entry, "iterate": True}
+                    for entry in _grouped_source_entries(src, stream_name))
+                continue
             for entry in _extract_source_entries(src, stream_name):
                 sources_with_iterate.append({**entry, "iterate": True})
         return ("each", sources_with_iterate)
@@ -306,6 +461,10 @@ def _unwrap_sources(value: Any, stream_name: str) -> tuple:
             if isinstance(item, (Bundle, Each)):
                 _, sub_sources = _unwrap_sources(item, stream_name)
                 sources_with_iterate.extend(sub_sources)
+            elif isinstance(item, Grouped):
+                sources_with_iterate.extend(
+                    {**entry, "iterate": True}
+                    for entry in _grouped_source_entries(item, stream_name))
             else:
                 for entry in _extract_source_entries(item, stream_name):
                     sources_with_iterate.append({**entry, "iterate": True})
@@ -373,13 +532,13 @@ def generate_combinatorics_config(
 
 
 def is_combinatorics_wrapper(value: Any) -> bool:
-    """Check if a value is wrapped in Bundle or Each."""
-    return isinstance(value, (Bundle, Each))
+    """Check if a value is wrapped in Bundle, Each or Grouped."""
+    return isinstance(value, (Bundle, Each, Grouped))
 
 
 def contains_combinatorics_wrapper(value: Any) -> bool:
-    """Check if a value contains any Bundle or Each wrappers."""
-    if isinstance(value, (Bundle, Each)):
+    """Check if a value contains any Bundle, Each or Grouped wrappers."""
+    if isinstance(value, (Bundle, Each, Grouped)):
         return True
     if isinstance(value, list):
         return any(contains_combinatorics_wrapper(item) for item in value)
@@ -475,15 +634,21 @@ def _collect_iterated_ids_from_value(value: Any, stream_name: str, iterate_only:
             return [stream_name]
         return []
 
+    if isinstance(value, Grouped):
+        # The axis iterates groups, so its ids are the group keys.
+        return list(value.resolve_groups(stream_name).ids)
+
     if isinstance(value, Bundle):
-        # Check if there's an Each inside - if so, only collect IDs from the Each sources
-        has_each_inside = any(isinstance(src, Each) for src in value.sources)
+        # Check if there's an Each/Grouped inside - if so, only collect IDs from those
+        has_each_inside = any(isinstance(src, (Each, Grouped)) for src in value.sources)
 
         if has_each_inside:
-            # Collect IDs only from the Each sources (these are what we iterate over)
+            # Collect IDs only from the iterated sources
             all_ids = []
             for src in value.sources:
-                if isinstance(src, Each):
+                if isinstance(src, Grouped):
+                    all_ids.extend(_collect_iterated_ids_from_value(src, stream_name))
+                elif isinstance(src, Each):
                     for each_src in src.sources:
                         all_ids.extend(_collect_iterated_ids_from_value(each_src, stream_name))
             return all_ids
@@ -519,12 +684,12 @@ def _collect_static_ids_from_value(value: Any, stream_name: str) -> Tuple[List[s
     """
     if not isinstance(value, Bundle):
         return [], False
-    has_each = any(isinstance(src, Each) for src in value.sources)
+    has_each = any(isinstance(src, (Each, Grouped)) for src in value.sources)
     if not has_each:
         return [], False  # Pure bundle — no static/iterated split
     static_ids = []
     for src in value.sources:
-        if not isinstance(src, Each):
+        if not isinstance(src, (Each, Grouped)):
             ids = _collect_iterated_ids_from_value(src, stream_name)
             for id_ in ids:
                 if id_ not in static_ids:
@@ -532,7 +697,7 @@ def _collect_static_ids_from_value(value: Any, stream_name: str) -> Tuple[List[s
     # static_first: True if first non-Each source comes before first Each
     static_first = False
     for src in value.sources:
-        if isinstance(src, Each):
+        if isinstance(src, (Each, Grouped)):
             break
         else:
             static_first = True

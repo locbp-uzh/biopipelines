@@ -9,11 +9,11 @@ Unified pipeline system for protein modeling workflows.
 Provides tool configurations, pipeline orchestration, and seamless integration.
 """
 
-__version__ = "1.4.1"
+__version__ = "1.5.0"
 
-from .pipeline import Pipeline, Bundle, Each, Folder, Resources, Suffix, Save, Dependencies, Parallel, Run, Service
+from .pipeline import Pipeline, Bundle, Each, Grouped, Folder, Resources, Suffix, Save, Dependencies, Parallel, Run, Service
 from .base_config import BaseConfig, ToolOutput, IndexedTableContainer
-from .combinatorics import Bundle, Each, CombinatoricsConfig, generate_combinatorics_config, get_mode
+from .combinatorics import Bundle, Each, Grouped, CombinatoricsConfig, generate_combinatorics_config, get_mode
 from .datastream import DataStream, create_map_table
 from .datastream_resolver import DataStreamResolver, resolve_to_datastream, resolve_input_to_datastream
 from .idset import IdSet, compose_axes
@@ -59,6 +59,7 @@ from .pocketgen import PocketGen
 from .placer import PLACER
 from .dynamicbind import DynamicBind
 from .neuralplexer import NeuralPLexer
+from .openfold3 import OpenFold3
 from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
 from .aizynthfinder import AiZynthFinder
@@ -90,6 +91,7 @@ from .mutagenesis import Mutagenesis
 from .selection import Selection
 from .distance_selector import DistanceSelector
 from .ligand_atom_selector import LigandAtomSelector
+from .bfactor import BFactor
 from .consensus import Consensus
 from .mutation_profiler import MutationProfiler
 from .mutation_composer import MutationComposer
@@ -144,6 +146,7 @@ __all__ = [
     # Combinatorics for input handling
     'Bundle',
     'Each',
+    'Grouped',
     'CombinatoricsConfig',
     'generate_combinatorics_config',
     'get_mode',
@@ -195,6 +198,7 @@ __all__ = [
     'PLACER',
     'DynamicBind',
     'NeuralPLexer',
+    'OpenFold3',
     'PoseBusters',
     'ADMETAI',
     'AiZynthFinder',
@@ -226,6 +230,7 @@ __all__ = [
     'Selection',
     'DistanceSelector',
     'LigandAtomSelector',
+    'BFactor',
     'Consensus',
     'MutationProfiler',
     'MutationComposer',

@@ -9,8 +9,14 @@ stages:
   stage: test
   image: python:${PYTHON_VERSION}-slim
   before_script:
+    # tests/test_templates.py shells out to `git ls-files` to check that the
+    # whitelisted templates are actually committed. python:*-slim has no git,
+    # so without this those tests die with FileNotFoundError rather than
+    # testing anything.
+    - apt-get update && apt-get install -y --no-install-recommends git
     - python -m pip install --upgrade pip
-    - python -m pip install -e ".[test]"
+    # `[mcp]` too: without it tests/test_mcp_server.py skips and bp-mcp ships untested.
+    - python -m pip install -e ".[test,mcp]"
   script:
     # -m overrides the local addopts deselect: CI has network, so it runs those;
     # tool_parameters stays out because it needs a GPU.

@@ -371,10 +371,25 @@ def check_expected_outputs(expected_outputs: Dict[str, Any],
         print(f"Found {len(expected_missing_ids)} IDs expected to be missing "
               f"(upstream propagated or local filter)")
 
+    excused = set(expected_missing_ids)
+
     # Every non-reserved key whose value reduces to a file list is a stream.
     for category, value in expected_outputs.items():
         if category in _RESERVED_TOP_LEVEL_KEYS:
             continue
+
+        # A stream every one of whose ids was filtered out has nothing left to
+        # write, including its shared artifacts. `_filter_expected_missing`
+        # excuses a path by its owner id and a shared file (one FASTA for the
+        # whole step) has none, so it could never be excused that way: a Panda
+        # filter that kept 0 of 4 designs was reported FAILED for the absence of
+        # a file that correctly had nothing to contain.
+        declared = list(value.get('ids') or []) if isinstance(value, dict) else []
+        if declared and excused and all(i in excused for i in declared):
+            print(f"Info: every id of {category} was filtered out upstream, so its "
+                  f"outputs are expected to be absent")
+            continue
+
         pairs = extract_id_file_pairs(value)
         if not pairs:
             # A value-based stream (files=[]) carries all its content in the
@@ -572,6 +587,9 @@ def main():
                        help="Force check even if status file exists")
     parser.add_argument("--job-name", 
                        help="Job name for filter manifest lookup (auto-detected if not provided)")
+    parser.add_argument("--main-rc", type=int, default=0,
+                       help="Exit status of the step's own command. Non-zero is FAILED whatever "
+                            "is on disk: a tool that died still leaves its declared paths behind.")
     
     args = parser.parse_args()
     
@@ -618,6 +636,18 @@ def main():
 
     success, missing_by_category = check_expected_outputs(expected_outputs, args.tool_name, args.output_folder)
     found, declared = tally_declared_outputs(expected_outputs)
+
+    # A step that exited non-zero is FAILED however complete its outputs look. Declared
+    # paths survive the command that died, so existence alone would report it COMPLETED,
+    # and the pipeline's own guard then defers to that marker instead of writing FAILED.
+    if args.main_rc != 0:
+        print(f"{args.tool_name} exited {args.main_rc}: marking FAILED "
+              f"({found} of {declared} declared outputs present)")
+        if not args.check_only:
+            details = {"exit_status": args.main_rc, "missing_files": missing_by_category}
+            status_file = create_status_file(args.output_folder, args.tool_name, "FAILED", details)
+            print(f"Created failure status file: {os.path.basename(status_file)}")
+        sys.exit(1)
 
     if success:
         print(f"Required outputs found for {args.tool_name}: "

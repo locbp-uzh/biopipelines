@@ -13,7 +13,7 @@ Daint allocates whole nodes, so a job that folds on one GPU is billed for four
 and the other three idle. This packs the node instead: five concurrent tasks in
 one allocation, one of them the MMseqs2 server.
 
-The server needs time to make its index resident (see llm/daint.md), which is
+The server needs time to make its index resident (see skills/biopipelines/references/daint_backend.md), which is
 dead time if nothing else runs. Here it overlaps with backbone generation and
 inverse folding, so by the time there are sequences to align the server is warm.
 Its clients block until it advertises readiness, so no explicit coordination is

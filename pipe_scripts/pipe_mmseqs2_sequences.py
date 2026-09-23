@@ -481,6 +481,82 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_posit
         log(f"ERROR: Failed to process A3M file {a3m_file}: {str(e)}")
         return []
 
+def read_existing_query(msa_file, ext):
+    """Query sequence from an already-written per-id MSA, or "" if unusable.
+
+    Used by the resume path to decide whether a previous run's output can stand.
+    """
+    if ext == 'a3m':
+        with open(msa_file, 'r') as f:
+            seq, seen_header = "", False
+            for line in f:
+                line = line.strip()
+                if line.startswith('#'):
+                    continue
+                if line.startswith('>'):
+                    if seen_header:
+                        break
+                    seen_header = True
+                    continue
+                if seen_header:
+                    seq += line
+        return seq
+    existing_df = pd.read_csv(msa_file)
+    if 'sequence' in existing_df.columns and len(existing_df) > 0:
+        return existing_df['sequence'].iloc[0]
+    return ""
+
+
+def write_a3m_output(a3m_file, sequence_id, output_a3m_file, mask_positions=None):
+    """Emit the server's A3M as-is, keeping its `#` meta line and every `>` header.
+
+    The headers are the reason to take this path: converting to CSV keeps only the
+    aligned characters, and the UniRef identifiers that carry species are what
+    ColabFold pairs chains on. Once dropped they cannot be reconstructed.
+    """
+    try:
+        with open(a3m_file, 'r') as f:
+            lines = f.read().splitlines()
+
+        meta = lines[0] if lines and lines[0].startswith('#') else None
+        body = lines[1:] if meta is not None else lines
+
+        headers, sequences, current = [], [], None
+        for line in body:
+            if line.startswith('>'):
+                if current is not None:
+                    sequences.append(current)
+                headers.append(line)
+                current = ""
+            elif current is not None:
+                current += line.strip()
+        if current is not None:
+            sequences.append(current)
+
+        if mask_positions:
+            log(f"Applying mask to {len(sequences)} MSA sequences (positions: {mask_positions[:10]}...)")
+            sequences = apply_mask_to_msa(sequences, mask_positions)
+
+        with open(output_a3m_file, 'w') as f:
+            if meta is not None:
+                f.write(meta + "\n")
+            for header, seq in zip(headers, sequences):
+                f.write(f"{header}\n{seq}\n")
+
+        log(f"Wrote A3M with headers preserved: {output_a3m_file}")
+
+        return [{
+            'id': f"{sequence_id}_msa",
+            'sequences.id': sequence_id,
+            'sequence': sequences[0] if sequences else "",
+            'file': output_a3m_file,
+        }]
+
+    except Exception as e:
+        log(f"ERROR: Failed to write A3M output for {sequence_id}: {str(e)}")
+        return []
+
+
 def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=None):
     """Create summary row for CSV MSA file with optional masking."""
     try:
@@ -870,21 +946,26 @@ def main():
 
     # --- Phase 1: collect work. Reuse any per-sequence MSA that already exists
     # (resume after a partial/failed run), and gather the rest into ONE batch. ---
+    # What this step writes to disk. Unlike `ext` (the wire format asked of the
+    # server) this decides the file the tool emits, and a3m is emitted verbatim
+    # so its headers survive.
+    emit_ext = args.output_format
+
     all_msa_rows = []
     pending = []   # (sequence_id, sequence) still needing an MSA
     for _, row in sequences_df.iterrows():
         sequence_id = row['id']
         sequence = row['sequence']
-        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
+        individual_msa_file = os.path.join(output_dir, f"{sequence_id}.{emit_ext}")
 
         if os.path.exists(individual_msa_file):
             try:
-                existing_df = pd.read_csv(individual_msa_file)
-                if 'sequence' in existing_df.columns and len(existing_df) > 0:
+                query_seq = read_existing_query(individual_msa_file, emit_ext)
+                if query_seq:
                     all_msa_rows.append({
                         'id': f"{sequence_id}_msa",
                         'sequences.id': sequence_id,
-                        'sequence': existing_df['sequence'].iloc[0],
+                        'sequence': query_seq,
                         'file': individual_msa_file,
                     })
                     log(f"Reused existing MSA for {sequence_id}")
@@ -934,14 +1015,17 @@ def main():
             # alias index -> real sequence id by enumerating `pending` in order.
             for alias, (sequence_id, _seq) in enumerate(pending):
                 produced = os.path.join(staging, f"{alias}.{ext}")
-                individual_msa_file = os.path.join(output_dir, f"{sequence_id}.csv")
+                individual_msa_file = os.path.join(output_dir, f"{sequence_id}.{emit_ext}")
                 if not os.path.exists(produced):
                     log(f"WARNING: no MSA produced for {sequence_id} (alias {alias})")
                     missing_rows.append({'id': sequence_id, 'removed_by': 'MMseqs2',
                                          'kind': 'failure', 'cause': 'no MSA produced'})
                     continue
                 mask_positions = mask_data.get(sequence_id, None)
-                if ext == 'a3m':
+                if emit_ext == 'a3m':
+                    # Source is a3m whenever a3m is requested, so no conversion.
+                    msa_rows = write_a3m_output(produced, sequence_id, individual_msa_file, mask_positions)
+                elif ext == 'a3m':
                     msa_rows = convert_a3m_to_csv_format(produced, sequence_id, individual_msa_file, mask_positions)
                 else:
                     msa_rows = process_csv_output(produced, sequence_id, individual_msa_file, mask_positions)

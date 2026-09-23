@@ -39,7 +39,7 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.9"
     # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Boltz2Env"
@@ -507,8 +507,16 @@ fi
                  # Advanced prediction parameters
                  recycling_steps: Optional[int] = None,
                  diffusion_samples: Optional[int] = None,
+                 sampling_steps: Optional[int] = None,
+                 step_scale: Optional[float] = None,
                  top_only: bool = True,
                  use_potentials: bool = False,
+                 # Memory: what a target too large for the GPU needs
+                 max_msa_seqs: Optional[int] = None,
+                 subsample_msa: bool = False,
+                 num_subsampled_msa: Optional[int] = None,
+                 max_parallel_samples: Optional[int] = None,
+                 no_kernels: bool = False,
                  # Template parameters
                  template: Optional[str] = None,
                  template_chain_ids: Optional[List[str]] = None,
@@ -539,7 +547,9 @@ fi
             dsDNA: Double-stranded DNA sequences (two chains per sequence, reverse complement auto-generated)
             ssRNA: Single-stranded RNA sequences (one chain per sequence)
             dsRNA: Double-stranded RNA sequences (two chains per sequence, reverse complement auto-generated)
-            ligands: DataStream or StandardizedOutput with a compounds stream (e.g. Ligand, CompoundLibrary)
+            ligands: DataStream or StandardizedOutput with a compounds stream (e.g. Ligand,
+                CompoundLibrary). May be the only input, which predicts a conformer of
+                the ligand on its own (requires affinity=False — there is no receptor).
             msas: Precomputed MSAs as an msas DataStream or a StandardizedOutput
                 carrying one (e.g. from MMseqs2 or a previous Boltz2 run). When
                 provided, the public MSA server is not queried. When omitted, MSAs
@@ -548,7 +558,18 @@ fi
             output_format: Output format ("pdb" or "mmcif")
             recycling_steps: Number of recycling steps
             diffusion_samples: Number of diffusion samples
+            sampling_steps: Diffusion sampling steps (boltz default 200)
+            step_scale: Diffusion temperature; lower samples more diverse poses (boltz-2 default 1.5)
             use_potentials: Enable potentials for improved structure prediction
+            max_msa_seqs: Cap on MSA depth (boltz default 8192). The first thing to lower when a
+                large complex runs out of VRAM, since memory scales with MSA depth
+            subsample_msa: Sample the MSA down instead of truncating it, keeping its diversity
+            num_subsampled_msa: How many sequences to subsample (boltz default 1024). Requires
+                subsample_msa, which boltz ignores this without
+            max_parallel_samples: Diffusion samples held on the GPU at once (boltz default 5).
+                Lower it to trade wall time for peak memory when diffusion_samples is high
+            no_kernels: Disable the trifast/cuequivariance triangular kernels. Needed on GPUs
+                those kernels do not support; slower where they do
             template: Path to PDB template file
             template_chain_ids: List of chain IDs to apply template to
             template_force: Whether to force template usage
@@ -637,6 +658,13 @@ fi
         self.output_format = output_format
         self.recycling_steps = recycling_steps
         self.diffusion_samples = diffusion_samples
+        self.sampling_steps = sampling_steps
+        self.step_scale = step_scale
+        self.max_msa_seqs = max_msa_seqs
+        self.subsample_msa = subsample_msa
+        self.num_subsampled_msa = num_subsampled_msa
+        self.max_parallel_samples = max_parallel_samples
+        self.no_kernels = no_kernels
         # When False, every diffusion sample is surfaced as a separate structure
         # (<id>_1..N) instead of just the top model (<id>) — e.g. to feed a pose
         # ensemble into downstream design. Default True keeps the single-best output.
@@ -663,6 +691,32 @@ fi
 
         super().__init__(**kwargs)
 
+    def _validate_memory_parameters(self):
+        """The knobs that decide whether a large complex folds at all.
+
+        Booleans are rejected explicitly: `True` is an `int` in Python and would otherwise reach
+        the command line as `--max_msa_seqs True`.
+        """
+        for name in ("sampling_steps", "max_msa_seqs", "num_subsampled_msa",
+                     "max_parallel_samples"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+
+        if self.step_scale is not None and (not isinstance(self.step_scale, (int, float))
+                                            or isinstance(self.step_scale, bool)
+                                            or self.step_scale <= 0):
+            raise ValueError("step_scale must be a positive number")
+
+        # boltz reads --num_subsampled_msa only when --subsample_msa is set, so the two are one
+        # unit: the count alone leaves the MSA at full depth on a run configured to fit.
+        if self.num_subsampled_msa is not None and not self.subsample_msa:
+            raise ValueError(
+                "num_subsampled_msa requires subsample_msa=True; boltz ignores the count "
+                "without the flag, so the MSA would stay at full depth")
+
     def validate_params(self):
         """Validate Boltz2-specific parameters."""
         # Must have some form of input
@@ -673,13 +727,22 @@ fi
             self.ssRNA_stream is not None,
             self.dsRNA_stream is not None,
         ])
-        has_input = self.config is not None or has_sequence_input
+        # A ligands-only run (no polymer at all) is legitimate — it predicts a
+        # conformer of the small molecule by itself. The config generator and the
+        # postprocessing handle it unchanged; only affinity is meaningless without
+        # a receptor to bind.
+        has_input = self.config is not None or has_sequence_input or self.ligands_stream is not None
         if not has_input:
-            raise ValueError("Either config or at least one sequence parameter (proteins/ssDNA/dsDNA/ssRNA/dsRNA) is required")
+            raise ValueError("Either config, at least one sequence parameter (proteins/ssDNA/dsDNA/ssRNA/dsRNA), or ligands is required")
 
         # Cannot specify both config and sequence parameters
-        if self.config is not None and has_sequence_input:
-            raise ValueError("Cannot specify both config and sequence parameters (proteins/ssDNA/dsDNA/ssRNA/dsRNA)")
+        if self.config is not None and (has_sequence_input or self.ligands_stream is not None):
+            raise ValueError("Cannot specify both config and input axes (proteins/ssDNA/dsDNA/ssRNA/dsRNA/ligands)")
+
+        if self.affinity and not has_sequence_input and self.config is None:
+            raise ValueError(
+                "affinity requires a receptor: a ligands-only prediction has nothing "
+                "to bind to. Pass affinity=False, or add a proteins/nucleic-acid input.")
 
         # Validate enum values
         if self.output_format not in ["pdb", "mmcif"]:
@@ -693,6 +756,8 @@ fi
 
         if self.diffusion_samples is not None and (not isinstance(self.diffusion_samples, int) or self.diffusion_samples < 1):
             raise ValueError("diffusion_samples must be a positive integer")
+
+        self._validate_memory_parameters()
         if not isinstance(self.top_only, bool):
             raise ValueError("top_only must be a bool")
 
@@ -872,6 +937,27 @@ echo "Using direct YAML configuration: {config_file_path}"
 
         if self.diffusion_samples is not None:
             boltz_options += f" --diffusion_samples {self.diffusion_samples}"
+
+        if self.sampling_steps is not None:
+            boltz_options += f" --sampling_steps {self.sampling_steps}"
+
+        if self.step_scale is not None:
+            boltz_options += f" --step_scale {self.step_scale}"
+
+        if self.max_msa_seqs is not None:
+            boltz_options += f" --max_msa_seqs {self.max_msa_seqs}"
+
+        if self.subsample_msa:
+            boltz_options += " --subsample_msa"
+
+        if self.num_subsampled_msa is not None:
+            boltz_options += f" --num_subsampled_msa {self.num_subsampled_msa}"
+
+        if self.max_parallel_samples is not None:
+            boltz_options += f" --max_parallel_samples {self.max_parallel_samples}"
+
+        if self.no_kernels:
+            boltz_options += " --no_kernels"
 
         if self.use_potentials:
             boltz_options += " --use_potentials"
@@ -1196,6 +1282,25 @@ python {self.boltz_compounds_py} \\
         if self.diffusion_samples is not None:
             config_lines.append(f"Diffusion samples: {self.diffusion_samples}")
 
+        if self.sampling_steps is not None:
+            config_lines.append(f"Sampling steps: {self.sampling_steps}")
+
+        if self.step_scale is not None:
+            config_lines.append(f"Step scale: {self.step_scale}")
+
+        if self.max_msa_seqs is not None:
+            config_lines.append(f"Max MSA sequences: {self.max_msa_seqs}")
+
+        if self.subsample_msa:
+            config_lines.append(
+                f"Subsample MSA: {self.num_subsampled_msa if self.num_subsampled_msa else 1024}")
+
+        if self.max_parallel_samples is not None:
+            config_lines.append(f"Max parallel samples: {self.max_parallel_samples}")
+
+        if self.no_kernels:
+            config_lines.append("Triangular kernels: disabled")
+
         if self.use_potentials:
             config_lines.append(f"Use potentials: {self.use_potentials}")
 
@@ -1241,6 +1346,13 @@ python {self.boltz_compounds_py} \\
                 "output_format": self.output_format,
                 "recycling_steps": self.recycling_steps,
                 "diffusion_samples": self.diffusion_samples,
+                "sampling_steps": self.sampling_steps,
+                "step_scale": self.step_scale,
+                "max_msa_seqs": self.max_msa_seqs,
+                "subsample_msa": self.subsample_msa,
+                "num_subsampled_msa": self.num_subsampled_msa,
+                "max_parallel_samples": self.max_parallel_samples,
+                "no_kernels": self.no_kernels,
                 "use_potentials": self.use_potentials,
                 "template": self.template,
                 "template_chain_ids": self.template_chain_ids,

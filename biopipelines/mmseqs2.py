@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.8"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -95,10 +95,14 @@ echo "=== MMseqs2 ready ==="
 
         Args:
             sequences: Input sequences - can be sequence string, list, DataStream or StandardizedOutput
-            output_format: format requested FROM the search ("csv" or "a3m",
-                default csv). The step always emits <id>.csv either way — an a3m
-                result is converted on arrival. A ColabFold-protocol server
-                (server_url) returns a3m regardless of this setting.
+            output_format: the format this step emits, "csv" (default) or "a3m".
+                csv is the Boltz2 convention: `key, sequence` rows, no headers.
+                a3m is written exactly as the search returned it, `#` meta line
+                and `>` headers intact, which is what AlphaFold needs and the
+                only form that carries the UniRef identifiers ColabFold pairs
+                complex chains on. A ColabFold-protocol server (server_url)
+                always returns a3m on the wire; with output_format="csv" it is
+                converted on arrival.
             timeout: Timeout in seconds for server response
             server_url: ColabFold-protocol MSA server to query over HTTP (e.g.
                   "https://api.colabfold.com"). When set, no local MMseqs2 server
@@ -321,11 +325,11 @@ echo "MMseqs2 processing completed"
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after MMseqs2 execution."""
         sequence_ids = self._predict_sequence_ids()
-        # The harvester writes <id>.csv whatever was requested: an a3m result is
-        # converted on the way out, so output_format selects the WIRE format, not
-        # the file this step emits. Declaring .a3m here would name files that are
-        # never written and fail the completion check.
-        ext = "csv"
+        # output_format now decides the file this step emits, not just the wire
+        # format. a3m is written verbatim, headers intact, because the UniRef
+        # identifiers are what ColabFold pairs chains on and converting to csv
+        # discards them irrecoverably. csv stays the default for Boltz2.
+        ext = self.output_format
 
         # One <id> template (not a concrete path per id) so the completion check
         # expands it against the resolved ids at runtime — lazy ids stay lazy.
@@ -387,7 +391,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.7"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
@@ -423,24 +427,24 @@ class MMseqs2Server(BaseConfig):
         """
         if step is None:
             # The server itself needs no install, but the CPU server runs
-            # colabfold_search + the mmseqs bundled with LocalColabFold (under the
-            # AlphaFold folder). Verify both are present; if not, point the user at
-            # AlphaFold.install(). `folders` is {} during the override-probe in
-            # base_config, so resolve defensively.
+            # colabfold_search + the mmseqs that sits in AlphaFold's ColabFold env
+            # (under the AlphaFold folder). Verify both are present; if not, point
+            # the user at AlphaFold.install(). `folders` is {} during the
+            # override-probe in base_config, so resolve defensively.
             cf_bin = os.path.join(folders.get("AlphaFold", ""), "colabfold-conda", "bin")
             return f"""echo "=== MMseqs2Server ==="
 echo "The server needs no install of its own, but it runs colabfold_search and"
-echo "the mmseqs bundled with LocalColabFold."
+echo "the mmseqs from AlphaFold's ColabFold environment."
 CF_BIN="{cf_bin}"
 if [ -x "$CF_BIN/colabfold_search" ] && [ -x "$CF_BIN/mmseqs" ]; then
-    echo "Found LocalColabFold (colabfold_search + mmseqs) at $CF_BIN."
+    echo "Found colabfold_search + mmseqs at $CF_BIN."
     echo "Pass step=\\"databases\\" to download the ColabFold DBs, or step=\\"build\\" (mode=\\"cpu\\"|\\"gpu\\") to build the indexes."
     touch "$INSTALL_SUCCESS"
     echo "=== MMseqs2Server ready ==="
 else
-    echo "ERROR: LocalColabFold not found at $CF_BIN (need colabfold_search + mmseqs)."
-    echo "Run AlphaFold.install() first - it installs LocalColabFold, which the"
-    echo "MMseqs2 server uses for both colabfold_search and its CPU mmseqs binary."
+    echo "ERROR: colabfold_search and/or mmseqs not found at $CF_BIN."
+    echo "Run AlphaFold.install() first - it builds the ColabFold environment, which"
+    echo "the MMseqs2 server uses for both colabfold_search and its CPU mmseqs binary."
     exit 1
 fi
 """
@@ -588,7 +592,7 @@ fi
 nvidia-smi --query-gpu=gpu_name --format=csv,noheader || true
 
 # Ensure a GPU-capable MMseqs2 (release >=16, with gpuserver) is present.
-# The colabfold-conda mmseqs is v15 (no GPU), so we install the GPU build here.
+# The colabfold-conda mmseqs is a CPU build (no gpuserver), so install the GPU one here.
 MMSEQS_BIN="$MMSEQS_DIR/bin/mmseqs"
 if [ ! -x "$MMSEQS_BIN" ] || ! "$MMSEQS_BIN" --help 2>/dev/null | grep -q gpuserver; then
     echo "GPU-capable MMseqs2 not found at $MMSEQS_BIN, downloading..."
@@ -787,7 +791,7 @@ touch "$INSTALL_SUCCESS"
             # there instead of vmtouch-mlocking off Lustre. See config.daint.yaml.
             f"export MMSEQS2_USE_SHM={1 if _machine_use_shm() else 0}",
             f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
-            # LocalColabFold install: provides colabfold_search AND the CPU mmseqs
+            # AlphaFold's ColabFold env: provides colabfold_search AND the CPU mmseqs
             # binary the server uses (colabfold-conda/bin). No separate MMseqs2
             # install needed for CPU mode — keeps it portable to CPU-only clusters.
             f"export COLABFOLD_DIR={self.folders.get('AlphaFold', '')}",
@@ -832,7 +836,7 @@ bash {self.cpu_server_script}
             f"export MMSEQS2_DB_DIR={os.path.join(self.folders.get('MMseqs2Databases', ''), 'gpu')}",
             f"export BIOPIPELINES_DATA_DIR={self.folders.get('data', '')}",
             f"export MMSEQS2_DIR={self.folders.get('MMseqs2', '')}",
-            # LocalColabFold install (ships colabfold_search); the server adds
+            # AlphaFold's ColabFold env (ships colabfold_search); the server adds
             # its colabfold-conda/bin to PATH.
             f"export COLABFOLD_DIR={self.folders.get('AlphaFold', '')}",
             # Number of GPUs (1 or 2). With 2, the script pins the UniRef30 and

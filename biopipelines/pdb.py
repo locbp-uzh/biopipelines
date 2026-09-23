@@ -64,6 +64,46 @@ def _normalize_selection(selection):
     )
 
 
+class _RcsbNotFound(Exception):
+    """RCSB answered, and the entry is not there."""
+
+
+class _RcsbUnreachable(Exception):
+    """RCSB did not answer. Says nothing about whether the entry exists."""
+
+
+def _rcsb_entry(url: str, attempts: int = 3, timeout: int = 10) -> dict:
+    """One RCSB entry, retried on transport failure.
+
+    The two outcomes have to stay distinguishable. A 404 is a fact about the id and should stop a
+    pipeline; a timeout or a 5xx is a fact about the network and should not, or an unrelated outage
+    reads as a bad PDB id. `conftest`'s reachability probe already retries three times with backoff,
+    so without this the check is more fragile than the guard written to protect it.
+    """
+    import time
+
+    import requests
+
+    last = None
+    for attempt in range(attempts):
+        try:
+            response = requests.get(url, timeout=timeout)
+            if response.status_code == 404:
+                raise _RcsbNotFound(url)
+            if 400 <= response.status_code < 500 and response.status_code != 429:
+                # A refusal (400, 403) will not change on retry, and it is not an outage.
+                raise _RcsbUnreachable(f"RCSB refused {url} with HTTP {response.status_code}")
+            response.raise_for_status()
+            return response.json()
+        except (_RcsbNotFound, _RcsbUnreachable):
+            raise
+        except (requests.RequestException, ValueError) as exc:
+            last = exc
+            if attempt < attempts - 1:
+                time.sleep(2 ** attempt)
+    raise _RcsbUnreachable(last)
+
+
 # Crystallization additives and ions that are never the ligand of interest.
 # Shared with RCSB so both tools classify a bound component the same way.
 COMMON_SOLVENTS = {
@@ -133,7 +173,7 @@ class PDB(BaseConfig):
     """
 
     TOOL_NAME = "PDB"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.6"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -447,7 +487,15 @@ echo "=== PDB ready ==="
         if self.from_upstream:
             self.pdb_ids = list(self.structures_stream.ids)
             upstream_fmt = self.structures_stream.format
-            self.convert = upstream_fmt if upstream_fmt in ("pdb", "cif") else convert.lower() if convert else None
+            # An explicit convert= wins. The upstream format is only a fallback
+            # for inferring the output format when the caller did not ask for
+            # one -- letting it override convert= made PDB(tool, convert="pdb")
+            # a silent no-op for any tool that already emits a known format,
+            # which is exactly when a conversion is being asked for.
+            if convert:
+                self.convert = convert.lower()
+            else:
+                self.convert = upstream_fmt if upstream_fmt in ("pdb", "cif") else None
         else:
             # Check if pdbs is a folder path and load all files from it
             if isinstance(pdbs, str) and self._is_folder_path(pdbs):
@@ -761,16 +809,15 @@ echo "=== PDB ready ==="
             return False, []
 
         try:
-            url = f"https://data.rcsb.org/rest/v1/core/entry/{rcsb_id}"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-
-            data = response.json()
-        except (requests.RequestException, ValueError):
-            # Network failure, HTTP error, or non-JSON response — treat as "no
-            # ligand info available" rather than crashing pipeline construction.
+            data = _rcsb_entry(f"https://data.rcsb.org/rest/v1/core/entry/{rcsb_id}")
+        except (_RcsbNotFound, _RcsbUnreachable):
+            # Treat as "no ligand info available" rather than crashing pipeline construction.
             return False, []
 
+        return self._ligands_from_entry(data, rcsb_id, custom_id)
+
+    def _ligands_from_entry(self, data: dict, rcsb_id: str, custom_id: str = None) -> tuple:
+        """The ligand verdict for an entry already fetched, so one lookup serves both callers."""
         # Check for ligands
         if 'rcsb_entry_info' in data:
             entry_info = data['rcsb_entry_info']
@@ -822,22 +869,19 @@ echo "=== PDB ready ==="
             # Can't check, assume it exists
             return False
 
+        url = f"https://data.rcsb.org/rest/v1/core/entry/{rcsb_id}"
         try:
-            url = f"https://data.rcsb.org/rest/v1/core/entry/{rcsb_id}"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
+            data = _rcsb_entry(url)
+        except _RcsbNotFound:
+            raise ValueError(f"PDB '{rcsb_id}' not found on RCSB (URL: {url})")
+        except _RcsbUnreachable as exc:
+            # A transport failure is not evidence the entry is absent, and refusing to build the
+            # pipeline over one makes an unrelated outage look like a bad PDB id.
+            print(f"Warning: could not reach RCSB to check '{rcsb_id}' ({exc}); "
+                  f"continuing without the ligand check")
+            return False
 
-            # Use shared logic for ligand checking
-            has_ligands, _ = self._check_ligands_in_rcsb(rcsb_id, custom_id)
-            return has_ligands
-
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                raise ValueError(f"PDB '{rcsb_id}' not found on RCSB (URL: {url})")
-            else:
-                raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
-        except Exception as e:
-            raise ValueError(f"Error checking RCSB for '{rcsb_id}': {e}")
+        return self._ligands_from_entry(data, rcsb_id, custom_id)[0]
 
     def get_config_display(self) -> List[str]:
         """Get configuration display lines."""

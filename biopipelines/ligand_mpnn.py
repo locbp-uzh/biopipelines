@@ -15,6 +15,8 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
+    from .chain_rows import (chain_row_ids, chains_arg, normalize_chains,
+                             positions_chain, validate_chains)
     from .biopipelines_io import Resolve, TableReference
     from .input_standardization import resolve_basic_input
     from .ligand import Ligand
@@ -25,6 +27,8 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
+    from chain_rows import (chain_row_ids, chains_arg, normalize_chains,
+                            positions_chain, validate_chains)
     from biopipelines_io import Resolve, TableReference
     from input_standardization import resolve_basic_input
     from ligand import Ligand
@@ -36,7 +40,17 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.8"
+    # `chain` and `chains` were one letter apart and meant different things, which is the
+    # Ligand code/codes mistake again. `chains` now answers both.
+    PARAMETER_ALIASES = {"chain": "chains"}
+    DEPRECATED_ALIASES = ("chain",)
+    ALIAS_CHANGES = {"chain": (
+        "chain= named the chain an unqualified selection belongs to and left every other chain "
+        "fused into the same sequence row; chains= also decides which chains become sequences "
+        "rows, so chain=\"B\" now emits chain B alone. On a multi-chain backbone pass every chain "
+        "to fold, e.g. chains=[\"A\", \"B\"], and qualify selections (\"B10-20\")."
+    )}
     # LigandMPNN's run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "ligandmpnn_env"
@@ -101,6 +115,7 @@ fi
     packed_folder = Path(lambda self: self.stream_folder("structures"))
     queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
+    designs_csv = Path(lambda self: self.stream_path("designs", "designs.csv"))
     structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
     positions_json = Path(lambda self: self.configuration_path("lmpnn_positions.json"))
     positions_args_json = Path(lambda self: self.configuration_path("lmpnn_positions_args.json"))
@@ -121,7 +136,7 @@ fi
                  fixed: Union[str, Tuple['TableInfo', str]] = "",
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
                  design_within: float = 5.0,
-                 chain: str = "A",
+                 chains: Union[str, List[str], None] = None,
                  model: str = "v_32_010",
                  num_batches: int = 1,
                  remove_duplicates: bool = True,
@@ -155,6 +170,13 @@ fi
             chain: Default chain ID for chainless position input (default "A")
             model: LigandMPNN model version to use
             num_batches: Number of batches to run
+            chains: Which backbone chains reach the `sequences` stream. LigandMPNN writes
+                       every chain of the backbone into one record, joined by ":"; this says
+                       which of them become rows. None (default) expects a single-chain
+                       backbone and keeps ids as `<structure>_<n>`; "A"/["A"] emits only that
+                       chain with the same ids; ["A","B"] emits `<structure>_<n>_<chain>`;
+                       "all" emits every chain with lazy `[_<?>]` ids. A multi-chain backbone
+                       under the default is a failure in missing.csv, not a fused sequence.
             remove_duplicates: Remove duplicate sequences from output (default True)
             fill_gaps: Amino acid to replace X (unknown/gap residues) with (default "G" for glycine).
                        Empty string means no filling (X is kept as-is).
@@ -204,7 +226,7 @@ fi
         self.fixed = resolve_table_reference(fixed, "fixed")
         self.redesigned = resolve_table_reference(redesigned, "redesigned")
         self.design_within = design_within
-        self.chain = chain
+        self.chains = normalize_chains(chains)
         self.model = model
         self.num_batches = num_batches
         self.remove_duplicates = remove_duplicates
@@ -242,6 +264,8 @@ fi
         if self.num_sequences <= 0:
             raise ValueError("num_sequences must be positive")
 
+        validate_chains(self.chains)
+
         if self.num_batches <= 0:
             raise ValueError("num_batches must be positive")
 
@@ -270,7 +294,7 @@ fi
             "LIGAND: (code resolved from compounds stream at runtime)",
             f"FIXED: {self.fixed or 'Auto (from table or ligand-based)'}",
             f"REDESIGNED: {self.redesigned or 'Auto (from table or ligand-based)'}",
-            f"CHAIN: {self.chain}",
+            f"CHAINS: {self.chains if self.chains else 'single (expected)'}",
             f"DESIGN WITHIN: {self.design_within}A",
             f"NUM SEQUENCES: {self.num_sequences}",
             f"NUM BATCHES: {self.num_batches}",
@@ -327,8 +351,9 @@ fi
                 "designed_positions": designed_param,
                 "ligand": str(self.ligand_json),
                 "design_within": self.design_within,
+                "chains": self.chains,
                 "output_file": str(self.positions_json),
-                "default_chain": self.chain,
+                "default_chain": positions_chain(self.chains),
             }, f, indent=2)
 
         return f"""echo "Setting up LigandMPNN position constraints"
@@ -392,6 +417,7 @@ done
             self.structures_input
         )
         upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
+        chains_flag = f' --chains "{chains_arg(self.chains)}"' if self.chains else ""
 
         # Upstream names packed files <struct>_packed_<seq>_<pack>.pdb under its own
         # out_folder; the declared stream ids are <struct>_<seq>_<pack>, so drop the
@@ -407,7 +433,7 @@ done
 """
 
         return f"""echo "Converting FASTA outputs to CSV format"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag} --ds-json "{self.structures_json}" --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag}{chains_flag} --ds-json "{self.structures_json}" --designs-csv "{self.designs_csv}" --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 {pack_block}
 """
 
@@ -421,17 +447,27 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
         # Total sequences per structure = num_sequences (batch_size) * num_batches
         total_seqs = self.num_sequences * self.num_batches
         suffix_pattern = f"<1..{total_seqs}>"
-        sequence_ids = generate_multiplied_ids_pattern(
+        design_ids = generate_multiplied_ids_pattern(
             self.structures_stream.ids, suffix_pattern,
             input_stream_name="structures"
         )
+        sequence_ids = chain_row_ids(design_ids, self.chains)
 
-        # Sequences stream - CSV-based with individual sequence IDs
+        # Sequences stream - CSV-based, one row per designed chain
         sequences = DataStream(
             name="sequences",
             ids=sequence_ids,
             files=[],
             map_table=self.queries_csv,
+            format="csv"
+        )
+
+        # The grouping key for the chain rows above: one row per design.
+        designs = DataStream(
+            name="designs",
+            ids=design_ids,
+            files=[],
+            map_table=self.designs_csv,
             format="csv"
         )
 
@@ -451,8 +487,16 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "sequence", "sample", "T", "seed", "overall_confidence", "ligand_confidence", "seq_rec", "gaps"],
-                description="LigandMPNN ligand-aware sequence generation results with binding scores"
+                columns=["id", "design", "structures.id", "chain", "sequence", "sample", "T",
+                         "seed", "overall_confidence", "ligand_confidence", "seq_rec", "gaps"],
+                description="LigandMPNN ligand-aware sequence results, one row per designed chain"
+            ),
+            "designs": TableInfo(
+                name="designs",
+                path=self.designs_csv,
+                columns=["id", "structures.id", "source_pdb", "n_chains", "overall_confidence",
+                         "ligand_confidence", "seq_rec"],
+                description="One row per design, before the chain split"
             ),
             "missing": TableInfo(
                 name="missing",
@@ -464,6 +508,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
 
         result = {
             "sequences": sequences,
+            "designs": designs,
             "fasta": fasta,
             "tables": tables,
             "output_folder": self.output_folder
@@ -473,8 +518,8 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             # Upstream writes packed/<name>_packed_<seq>_<pack>.pdb, so the ids fan out
             # over sequence then pack.
             packed_ids = generate_multiplied_ids_pattern(
-                sequence_ids, f"<1..{self.packs_per_design}>",
-                input_stream_name="sequences"
+                design_ids, f"<1..{self.packs_per_design}>",
+                input_stream_name="designs"
             )
             result["structures"] = DataStream(
                 name="structures",
@@ -498,7 +543,6 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                                if isinstance(self.redesigned, TableReference)
                                else self.redesigned),
                 "design_within": self.design_within,
-                "chain": self.chain,
                 "model": self.model,
                 "remove_duplicates": self.remove_duplicates,
                 "temperature": self.temperature,

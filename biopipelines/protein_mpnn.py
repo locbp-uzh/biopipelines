@@ -15,6 +15,8 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
+    from .chain_rows import (accepts_multiple, chain_row_ids, chains_arg,
+                             normalize_chains, positions_chain, validate_chains)
     from .biopipelines_io import Resolve, TableReference
 except ImportError:
     import sys
@@ -23,6 +25,8 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import generate_multiplied_ids, generate_multiplied_ids_pattern
+    from chain_rows import (accepts_multiple, chain_row_ids, chains_arg,
+                            normalize_chains, positions_chain, validate_chains)
     from biopipelines_io import Resolve, TableReference
 
 
@@ -32,9 +36,19 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.7"
     # protein_mpnn_run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
+    # `chain` and `chains` were one letter apart and meant different things, which is the
+    # Ligand code/codes mistake again. `chains` now answers both.
+    PARAMETER_ALIASES = {"chain": "chains"}
+    DEPRECATED_ALIASES = ("chain",)
+    ALIAS_CHANGES = {"chain": (
+        "chain= named the chain an unqualified selection belongs to and left every other chain "
+        "fused into the same sequence row; chains= also decides which chains become sequences "
+        "rows, so chain=\"B\" now emits chain B alone. On a multi-chain backbone pass every chain "
+        "to fold, e.g. chains=[\"A\", \"B\"], and qualify selections (\"B10-20\")."
+    )}
     # Upstream calls this env "mlfold"; we share RFdiffusion's SE3nv to spare one.
     ENV_NAME = "SE3nv"
 
@@ -145,6 +159,7 @@ fi
     main_table = Path(lambda self: self.table_path("proteinmpnn_results"))
     queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
+    designs_csv = Path(lambda self: self.stream_path("designs", "designs.csv"))
     structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
 
     missing_csv = Path(lambda self: self.table_path("missing"))
@@ -161,9 +176,9 @@ fi
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
                  num_sequences: int = 1,
-                 fixed: Union[str, Tuple['TableInfo', str]] = "",
-                 redesigned: Union[str, Tuple['TableInfo', str]] = "",
-                 chain: str = "auto",
+                 fixed: Union[str, Tuple['TableInfo', str], Dict[str, Any]] = "",
+                 redesigned: Union[str, Tuple['TableInfo', str], Dict[str, Any]] = "",
+                 chains: Union[str, List[str], None] = None,
                  sampling_temp: float = 0.1,
                  model_name: str = "v_48_020",
                  soluble_model: bool = False,
@@ -183,10 +198,29 @@ fi
             fixed: Fixed positions. Accepts:
                    - PyMOL-style selection string: "10-20+30-40"
                    - TableReference: table.column_name
-            redesigned: Designed positions. Accepts:
-                   - PyMOL-style selection string: "10-20+30-40"
-                   - TableReference: table.column_name
-            chain: Chain to apply fixed positions to ("auto" detects from input structure)
+                   - {chain: selection}: which residues belong to which chain, e.g.
+                     {"A": "10-20", "B": rfd.tables.structures.designed}. Required on a
+                     multi-chain structure, where an unqualified selection is ambiguous
+                     and raises rather than being attached to a guessed chain.
+            redesigned: Designed positions. Same three forms as `fixed`.
+            chains: The chains this step is about. ProteinMPNN always writes every chain of
+                   the backbone, joined by "/" in one record, so this says which of them
+                   become `sequences` rows — and, because it names the chains in play, it is
+                   also the chain a chainless position selection (`fixed="10-20"`) attaches
+                   to. The retired `chain` parameter is a deprecated alias for it.
+                   - None (default): the backbone is expected to have one chain, and ids stay
+                     `<structure>_<n>`. A multi-chain backbone is a failure recorded in
+                     missing.csv naming the chains found, not a silently fused sequence.
+                   - "A" or ["A"]: only that chain, ids unchanged.
+                   - ["A", "B"]: one row per named chain, ids `<structure>_<n>_<chain>`.
+                   - "all": every chain, ids `<structure>_<n>[_<?>]` (lazy — the chain letters
+                     are only known once the backbone is read).
+                   A chainless position selection attaches to the single named chain, or to
+                   the structure's only chain when none is named. With several chains in
+                   play it attaches to the first named one, so qualify the selection
+                   ("A10-20") when that is not what you mean.
+                   Group the chain rows back into one complex with
+                   `Grouped(<this tool>)`; see the Grouped entry in the user manual.
             sampling_temp: Sampling temperature for sequence generation
             model_name: ProteinMPNN model variant
             soluble_model: Use soluble protein model (default False; see SolubleMPNN)
@@ -203,9 +237,10 @@ fi
                        ProteinMPNN choose its own seed.
 
         Output:
-            Streams: sequences (.csv), fasta (.fasta)
+            Streams: sequences (.csv), designs (.csv), fasta (.fasta)
             Tables:
-                sequences: id | structures.id | source_pdb | sequence | score | seq_recovery | gaps
+                sequences: id | design | structures.id | source_pdb | chain | sequence | score | seq_recovery | gaps
+                designs: id | structures.id | source_pdb | n_chains | score | seq_recovery
                 missing: id | removed_by | kind | cause
         """
         # Resolve input to DataStream. Keep the original object too: a DataStream carries
@@ -223,7 +258,7 @@ fi
         self.num_sequences = num_sequences
         self.fixed = resolve_table_reference(fixed, "fixed")
         self.redesigned = resolve_table_reference(redesigned, "redesigned")
-        self.chain = chain
+        self.chains = normalize_chains(chains)
         self.sampling_temp = sampling_temp
         self.model_name = model_name
         self.soluble_model = soluble_model
@@ -257,12 +292,16 @@ fi
         if self.model_name not in valid_models:
             raise ValueError(f"model_name must be one of: {valid_models}")
 
-        _validate_freeform_string("chain", self.chain)
+        validate_chains(self.chains)
+
         _validate_freeform_string("fill_gaps", self.fill_gaps)
-        if isinstance(self.fixed, str):
-            _validate_freeform_string("fixed", self.fixed)
-        if isinstance(self.redesigned, str):
-            _validate_freeform_string("redesigned", self.redesigned)
+        for name, selection in (("fixed", self.fixed), ("redesigned", self.redesigned)):
+            if isinstance(selection, str):
+                _validate_freeform_string(name, selection)
+            elif isinstance(selection, dict):
+                for chain, value in selection.items():
+                    if isinstance(value, str):
+                        _validate_freeform_string(f"{name}[{chain!r}]", value)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         """Configure input structures."""
@@ -275,7 +314,7 @@ fi
             f"NUM SEQUENCES PER TARGET: {self.num_sequences}",
             f"FIXED: {self.fixed or 'None'}",
             f"REDESIGNED: {self.redesigned or 'None'}",
-            f"CHAIN: {self.chain}",
+            f"CHAINS: {self.chains if self.chains else 'single (expected)'}",
             f"SAMPLING T: {self.sampling_temp}",
             f"MODEL: {self.model_name}",
             f"SOLUBLE: {self.soluble_model}"
@@ -303,16 +342,16 @@ fi
         # Serialize DataStream to JSON file (proper way to pass ids + files to pipe_script)
         self.structures_stream.save_json(self.structures_json)
 
-        fixed_param = str(self.fixed) if isinstance(self.fixed, TableReference) else (self.fixed or "-")
-        designed_param = (str(self.redesigned) if isinstance(self.redesigned, TableReference)
-                          else (self.redesigned or "-"))
+        fixed_param = self._selection_param(self.fixed)
+        designed_param = self._selection_param(self.redesigned)
 
         with open(self.fixed_args_json, "w") as f:
             json.dump({
                 "structures_json": str(self.structures_json),
                 "FIXED": fixed_param,
                 "DESIGNED": designed_param,
-                "FIXED_CHAIN": self.chain,
+                "FIXED_CHAIN": positions_chain(self.chains),
+                "MULTICHAIN": accepts_multiple(self.chains),
                 "fixed_jsonl_file": str(self.fixed_jsonl),
                 "sele_csv_file": str(self.sele_csv),
             }, f, indent=2)
@@ -432,23 +471,39 @@ done
             self.structures_input
         )
         upstream_missing_flag = f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
+        chains_flag = f' --chains "{chains_arg(self.chains)}"' if self.chains else ""
 
         return f"""echo "Creating results table and queries files"
 python {self.table_py} {self.seqs_folder} {self.pipeline_name} "-" {self.main_table}
 
 echo "Creating queries CSV and FASTA from results table"
-python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --ds-json "{self.structures_json}"{duplicates_flag}{fill_gaps_flag} --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta} --ds-json "{self.structures_json}"{duplicates_flag}{fill_gaps_flag}{chains_flag} --designs-csv "{self.designs_csv}" --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
 
 """
 
+
+    @staticmethod
+    def _selection_param(selection):
+        """A selection as the pipe script's config expects it.
+
+        A dict stays a dict, one entry per chain; anything else collapses to the string
+        form, with "-" standing for "nothing selected".
+        """
+        if isinstance(selection, dict):
+            return {c: (str(v) if isinstance(v, TableReference) else v)
+                    for c, v in selection.items()}
+        if isinstance(selection, TableReference):
+            return str(selection)
+        return selection or "-"
+
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after ProteinMPNN execution."""
-        # Predict sequence IDs (stream_id + sequence number)
-        suffix_pattern = f"<1..{self.num_sequences}>"
-        sequence_ids = generate_multiplied_ids_pattern(
-            self.structures_stream.ids, suffix_pattern,
+        # One design per (structure, sample); the chain rows below hang off these.
+        design_ids = generate_multiplied_ids_pattern(
+            self.structures_stream.ids, f"<1..{self.num_sequences}>",
             input_stream_name="structures"
         )
+        sequence_ids = chain_row_ids(design_ids, self.chains)
 
         # Content-bearing sequences stream: queries_csv lives under
         # sequences/ and doubles as the map_table.
@@ -457,6 +512,16 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             ids=sequence_ids,
             files=[],
             map_table=self.queries_csv,
+            format="csv"
+        )
+
+        # The grouping key for the chain rows above: one row per design, whatever
+        # `chains` does to the sequences stream's cardinality.
+        designs = DataStream(
+            name="designs",
+            ids=design_ids,
+            files=[],
+            map_table=self.designs_csv,
             format="csv"
         )
 
@@ -483,8 +548,15 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             "sequences": TableInfo(
                 name="sequences",
                 path=self.queries_csv,
-                columns=["id", "structures.id", "source_pdb", "sequence", "score", "seq_recovery", "gaps"],
-                description="ProteinMPNN sequence results"
+                columns=["id", "design", "structures.id", "source_pdb", "chain", "sequence",
+                         "score", "seq_recovery", "gaps"],
+                description="ProteinMPNN sequence results, one row per designed chain"
+            ),
+            "designs": TableInfo(
+                name="designs",
+                path=self.designs_csv,
+                columns=["id", "structures.id", "source_pdb", "n_chains", "score", "seq_recovery"],
+                description="One row per design, before the chain split"
             ),
             "missing": TableInfo(
                 name="missing",
@@ -496,10 +568,12 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
 
         return {
             "sequences": sequences,
+            "designs": designs,
             "fasta": fasta,
             "tables": tables,
             "output_folder": self.output_folder
         }
+
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration."""
@@ -511,7 +585,7 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "redesigned": (str(self.redesigned)
                                if isinstance(self.redesigned, TableReference)
                                else self.redesigned),
-                "chain": self.chain,
+                "chains": self.chains,
                 "sampling_temp": self.sampling_temp,
                 "model_name": self.model_name,
                 "soluble_model": self.soluble_model,
@@ -533,7 +607,7 @@ class SolubleMPNN(ProteinMPNN):
                  num_sequences: int = 1,
                  fixed: Union[str, Tuple['TableInfo', str]] = "",
                  redesigned: Union[str, Tuple['TableInfo', str]] = "",
-                 chain: str = "auto",
+                 chains: Union[str, List[str], None] = None,
                  sampling_temp: float = 0.1,
                  model_name: str = "v_48_020",
                  remove_duplicates: bool = True,
@@ -549,7 +623,7 @@ class SolubleMPNN(ProteinMPNN):
             num_sequences=num_sequences,
             fixed=fixed,
             redesigned=redesigned,
-            chain=chain,
+            chains=chains,
             sampling_temp=sampling_temp,
             model_name=model_name,
             soluble_model=True,

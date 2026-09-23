@@ -56,16 +56,16 @@ ENVDB_PATH="$DB_DIR/$ENVDB"
 POLL_INTERVAL="${MMSEQS2_POLL_INTERVAL:-10}"   # seconds
 MAX_SEQS="${MMSEQS2_MAX_SEQS:-10000}"          # limit homologs per query
 
-# colabfold_search lives in the LocalColabFold conda env; put it on PATH.
+# colabfold_search lives in AlphaFold's ColabFold env; put it on PATH.
 COLABFOLD_DIR=$(require_folder "${COLABFOLD_DIR:-}" "COLABFOLD_DIR" "AlphaFold")
 COLABFOLD_BIN="$COLABFOLD_DIR/colabfold-conda/bin"
 if [[ ! -x "$COLABFOLD_BIN/colabfold_search" ]]; then
-  echo "ERROR: colabfold_search not found at $COLABFOLD_BIN (is LocalColabFold installed?)" >&2
+  echo "ERROR: colabfold_search not found at $COLABFOLD_BIN (run AlphaFold.install())" >&2
   exit 1
 fi
 export PATH="$COLABFOLD_BIN:$PATH"
 
-# Use the mmseqs that ships with LocalColabFold (colabfold-conda/bin/mmseqs): a
+# Use the mmseqs from AlphaFold's ColabFold env (colabfold-conda/bin/mmseqs): a
 # plain CPU build (no gpuserver, no NVIDIA-driver/glibc-2.29 requirement), so the
 # CPU server is portable to CPU-only clusters and never depends on the GPU mmseqs
 # build (which the GPU DB-build step installs under the MMseqs2 folder). It is
@@ -73,7 +73,7 @@ export PATH="$COLABFOLD_BIN:$PATH"
 # index format — verified).
 MMSEQS_BIN="$COLABFOLD_BIN/mmseqs"
 if [[ ! -x "$MMSEQS_BIN" ]]; then
-  echo "ERROR: mmseqs not found at $MMSEQS_BIN (LocalColabFold should bundle it)" >&2
+  echo "ERROR: mmseqs not found at $MMSEQS_BIN (AlphaFold's ColabFold env should provide it)" >&2
   exit 1
 fi
 

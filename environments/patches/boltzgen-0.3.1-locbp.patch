@@ -1,0 +1,248 @@
+# Local BoltzGen patches — apply against an unmodified boltzgen 0.3.1 install.
+#
+#   cd "$(python -c 'import boltzgen,os;print(os.path.dirname(os.path.dirname(boltzgen.__file__)))')"
+#   patch -p1 < environments/patches/boltzgen-0.3.1-locbp.patch
+#
+# These live only in site-packages on the cluster; a `bp-warm BoltzGen` or env
+# rebuild silently discards them and BoltzGen then behaves differently. Upstream
+# 0.3.2 contains NONE of them, so upgrading also drops them.
+#
+# What they do:
+#
+# 1. data/parse/mmcif.py, data/feature/featurizer.py  (2026-03-19 / 03-24)
+#    BOLTZGEN_SMILES_<RESNAME> override. A non-CCD ligand supplied inside an
+#    input structure otherwise resolves to a CCD placeholder; the override
+#    rebuilds the correct molecular graph from SMILES and maps RDKit atom order
+#    onto the CIF atom names. Required for the SiR work.
+#
+# 2. cli/boltzgen.py  (2026-03-30)
+#    Points the affinity step at intermediate_designs_inverse_folded/refold_cif
+#    instead of intermediate_designs_inverse_folded, so affinity scores the
+#    refolded structures (predicted fresh from sequence) rather than the
+#    inverse-folded backbones. Deliberate methodological choice.
+#
+# 3. task/predict/data_from_generated.py  (2026-03-30 + 2026-08-24)
+#    The .exists() guard is local. It interacts badly with (2): affinity's
+#    extra_mol_dir becomes refold_cif/molecules_out_dir, which nothing creates,
+#    so the guard was false and `mols` was left UNBOUND -> every dataloader
+#    worker died with UnboundLocalError and the whole run failed at step 5/7.
+#    The `mols = {}` default restores upstream's behaviour (upstream binds mols
+#    unconditionally) while keeping the guard. Verified 2026-08-24: job 5252381
+#    completed all 7 steps, 0 failed affinity predictions.
+#
+diff -ur p2/boltzgen/cli/boltzgen.py l2/boltzgen/cli/boltzgen.py
+--- p2/boltzgen/cli/boltzgen.py	2026-03-06 20:52:34
++++ l2/boltzgen/cli/boltzgen.py	2026-08-24 14:30:23
+@@ -1150,6 +1150,13 @@
+             )
+ 
+         # Affinity
++        # Run affinity prediction on the refolded structures (refold_cif/) rather than
++        # the inverse-folded structures, as the refolded structures are more realistic
++        # (structure predicted fresh from sequence, independent of the BoltzGen backbone).
++        # The .npz metadata files remain in input_dir (one level above refold_cif/), so
++        # reference_metadata_dir is set to redirect metadata loading to the correct path.
++        # writer.design_dir is explicitly set to input_dir so affinity outputs land in
++        # input_dir/affinity_out_npz/ where the analysis step expects them.
+         use_affinity = protocol in ["protein-small_molecule"]
+         if use_affinity:
+             self.steps.append(
+@@ -1158,7 +1165,9 @@
+                     config_path=args.config_dir / "affinity.yaml",
+                     args=[
+                         f"output={output_dir}",
+-                        f"data.design_dir={input_dir}",
++                        f"data.design_dir={input_dir}/refold_cif",
++                        f"data.reference_metadata_dir={input_dir}",
++                        f"writer.design_dir={input_dir}",
+                         f"trainer.devices={devices}",
+                         f"data.cfg.num_workers={args.num_workers}",
+                         f"data.skip_existing={args.reuse}",
+diff -ur p2/boltzgen/data/feature/featurizer.py l2/boltzgen/data/feature/featurizer.py
+--- p2/boltzgen/data/feature/featurizer.py	2026-03-06 20:52:34
++++ l2/boltzgen/data/feature/featurizer.py	2026-08-24 14:30:22
+@@ -1031,6 +1031,63 @@
+         mol = molecules[token["res_name"]]
+         atom_name_to_ref = {}
+         atom_name_to_ref = {a.GetProp("name"): a for a in mol.GetAtoms()}
++        # PATCH v1 (featurizer): SMILES override — use env-var SMILES mol instead of CCD mol.
++        # Fixes: CCD "LIG" has wrong atom names (N1/N3/C4... 18-atom placeholder) vs
++        # our CIF atom names (O1/C1/.../SI1 31 atoms) → assertion failure.
++        import os as _fos
++        _fsmiles_env = _fos.environ.get("BOLTZGEN_SMILES_" + str(token["res_name"]))
++        if _fsmiles_env and chain["mol_type"] == const.chain_type_ids["NONPOLYMER"]:
++            from rdkit.Chem import AllChem as _fAllChem, RWMol as _fRWMol
++            from collections import defaultdict as _fdd
++            _ffb = _fAllChem.MolFromSmiles(_fsmiles_env)
++            if _ffb is not None:
++                # Get CIF atom names from structure atoms for this token
++                _fn = token["atom_num"]
++                _fsatoms = data.structure.atoms[token["atom_idx"]:token["atom_idx"] + _fn]
++                _ftwo_ch = {'SI': 'Si', 'FE': 'Fe', 'ZN': 'Zn', 'MG': 'Mg',
++                            'CL': 'Cl', 'BR': 'Br', 'CU': 'Cu', 'MN': 'Mn',
++                            'CO': 'Co', 'NI': 'Ni', 'NA': 'Na', 'CD': 'Cd'}
++                _fnbe = _fdd(list)
++                for _fsa in _fsatoms:
++                    _fsn = _fsa["name"]
++                    if hasattr(_fsn, 'decode'):
++                        _fsn = _fsn.decode()
++                    _fsn = str(_fsn).strip()
++                    _fnm = _fsn.upper()
++                    _fel = _ftwo_ch.get(_fnm[:2], _fnm[0]) if _fnm else ''
++                    _fnbe[_fel].append(_fsn)
++                # Assign CIF names to SMILES mol atoms by element order
++                _fec = _fdd(int)
++                _frw = _fRWMol(_ffb)
++                for _ffi in range(_ffb.GetNumAtoms()):
++                    _ffse = _ffb.GetAtomWithIdx(_ffi).GetSymbol()
++                    _ffns = _fnbe[_ffse]
++                    _ffj = _fec[_ffse]
++                    if _ffj < len(_ffns):
++                        _frw.GetAtomWithIdx(_ffi).SetProp('name', _ffns[_ffj])
++                        _fec[_ffse] += 1
++                _fmol_named = _frw.GetMol()
++                # Generate 3D conformer (ETKDGv3 → 2D fallback)
++                try:
++                    _fmol_h = _fAllChem.AddHs(_fmol_named)
++                    _fparams = _fAllChem.ETKDGv3()
++                    _fparams.randomSeed = 42
++                    _fparams.useRandomCoords = True
++                    _femb = _fAllChem.EmbedMolecule(_fmol_h, _fparams)
++                    if _femb != -1 and _fmol_h.GetNumConformers() > 0:
++                        mol = _fAllChem.RemoveHs(_fmol_h)
++                    else:
++                        raise RuntimeError("EmbedMolecule failed")
++                except Exception:
++                    # Fallback: 2D coords (always succeeds)
++                    _fAllChem.Compute2DCoords(_fmol_named)
++                    mol = _fmol_named
++                atom_name_to_ref = {
++                    a.GetProp("name"): a
++                    for a in mol.GetAtoms()
++                    if a.HasProp("name")
++                }
++                print(f"[FEATURIZER_SMILES v1] atom_name_to_ref keys: {list(atom_name_to_ref.keys())}", flush=True)
+         # Sample a random conformer
+ 
+         if (chain_idx, res_id) not in res_index_to_conf_id:
+diff -ur p2/boltzgen/data/parse/mmcif.py l2/boltzgen/data/parse/mmcif.py
+--- p2/boltzgen/data/parse/mmcif.py	2026-03-06 20:52:34
++++ l2/boltzgen/data/parse/mmcif.py	2026-08-24 14:30:22
+@@ -1095,6 +1095,50 @@
+                 ligand: gemmi.Residue
+                 ligand_mol = get_mol(ligand.name, mols, moldir)
+ 
++                # PATCH v5: SMILES override — takes priority over CCD lookup.
++                # Fixes v4: condition was `ligand_mol is None AND smiles_env`, so if
++                # get_mol("LIG") returned a CCD placeholder mol, the override was skipped.
++                # Now: if the env var is set, always use the SMILES regardless of CCD.
++                # e.g. export BOLTZGEN_SMILES_LIG="<smiles_string>"
++                import os as _os
++                _smiles_env = _os.environ.get("BOLTZGEN_SMILES_" + ligand.name)
++                if _smiles_env:
++                    print(f"[BOLTZGEN_SMILES v5] SMILES override for {ligand.name}", flush=True)
++                    from rdkit.Chem import AllChem as _AllChem, RWMol as _RWMol
++                    from collections import defaultdict as _dd
++                    _fb_mol = _AllChem.MolFromSmiles(_smiles_env)
++                    if _fb_mol is not None:
++                        _two_ch = {'SI': 'Si', 'FE': 'Fe', 'ZN': 'Zn', 'MG': 'Mg',
++                                   'CL': 'Cl', 'BR': 'Br', 'CU': 'Cu', 'MN': 'Mn',
++                                   'CO': 'Co', 'NI': 'Ni', 'NA': 'Na', 'CD': 'Cd'}
++                        _cif_names_by_elem = _dd(list)
++                        for _ca in ligand:
++                            _nm = _ca.name.upper()
++                            _el = _two_ch.get(_nm[:2], _nm[0]) if _nm else ''
++                            _cif_names_by_elem[_el].append(_ca.name)
++                        _elem_cursor = _dd(int)
++                        _rwmol = _RWMol(_fb_mol)
++                        for _i in range(_fb_mol.GetNumAtoms()):
++                            _se = _fb_mol.GetAtomWithIdx(_i).GetSymbol()
++                            _names = _cif_names_by_elem[_se]
++                            _j = _elem_cursor[_se]
++                            if _j < len(_names):
++                                _rwmol.GetAtomWithIdx(_i).SetProp('name', _names[_j])
++                                _elem_cursor[_se] += 1
++                        _mapped_mol = _rwmol.GetMol()
++                        print(f"[BOLTZGEN_SMILES v5] mol has {_fb_mol.GetNumAtoms()} atoms, mapped names: {[_rwmol.GetAtomWithIdx(_i).GetPropsAsDict().get('name','?') for _i in range(_fb_mol.GetNumAtoms())]}", flush=True)
++                        residue = parse_ccd_residue(
++                            name=ligand.name,
++                            ref_mol=_mapped_mol,
++                            res_idx=lig_idx,
++                            gemmi_mol=ligand,
++                            is_covalent=is_covalent,
++                        )
++                        residues.append(residue)
++                        continue
++                    else:
++                        print(f"[BOLTZGEN_SMILES v5] WARNING: MolFromSmiles returned None for {ligand.name}", flush=True)
++
+                 residue = parse_ccd_residue(
+                     name=ligand.name,
+                     ref_mol=ligand_mol,
+@@ -1175,6 +1219,49 @@
+ 
+                     ligand: gemmi.Residue
+                     ligand_mol = get_mol(ligand.name, mols, moldir)
++
++                    # PATCH v5: SMILES override — takes priority over CCD lookup.
++                    # Fixes v4: condition was `ligand_mol is None AND smiles_env`, so if
++                    # get_mol("LIG") returned a CCD placeholder mol, the override was skipped.
++                    # Now: if the env var is set, always use the SMILES regardless of CCD.
++                    # e.g. export BOLTZGEN_SMILES_LIG="<smiles_string>"
++                    import os as _os
++                    _smiles_env = _os.environ.get("BOLTZGEN_SMILES_" + ligand.name)
++                    if _smiles_env:
++                        print(f"[BOLTZGEN_SMILES v5] SMILES override for {ligand.name}", flush=True)
++                        from rdkit.Chem import AllChem as _AllChem, RWMol as _RWMol
++                        from collections import defaultdict as _dd
++                        _fb_mol = _AllChem.MolFromSmiles(_smiles_env)
++                        if _fb_mol is not None:
++                            _two_ch = {'SI': 'Si', 'FE': 'Fe', 'ZN': 'Zn', 'MG': 'Mg',
++                                       'CL': 'Cl', 'BR': 'Br', 'CU': 'Cu', 'MN': 'Mn',
++                                       'CO': 'Co', 'NI': 'Ni', 'NA': 'Na', 'CD': 'Cd'}
++                            _cif_names_by_elem = _dd(list)
++                            for _ca in ligand:
++                                _nm = _ca.name.upper()
++                                _el = _two_ch.get(_nm[:2], _nm[0]) if _nm else ''
++                                _cif_names_by_elem[_el].append(_ca.name)
++                            _elem_cursor = _dd(int)
++                            _rwmol = _RWMol(_fb_mol)
++                            for _i in range(_fb_mol.GetNumAtoms()):
++                                _se = _fb_mol.GetAtomWithIdx(_i).GetSymbol()
++                                _names = _cif_names_by_elem[_se]
++                                _j = _elem_cursor[_se]
++                                if _j < len(_names):
++                                    _rwmol.GetAtomWithIdx(_i).SetProp('name', _names[_j])
++                                    _elem_cursor[_se] += 1
++                            _mapped_mol = _rwmol.GetMol()
++                            residue = parse_ccd_residue(
++                                name=ligand.name,
++                                ref_mol=_mapped_mol,
++                                res_idx=lig_idx,
++                                gemmi_mol=ligand,
++                                is_covalent=is_covalent,
++                            )
++                            residues.append(residue)
++                            continue
++                        else:
++                            print(f"[BOLTZGEN_SMILES v5] WARNING: MolFromSmiles returned None for {ligand.name}", flush=True)
+ 
+                     residue = parse_ccd_residue(
+                         name=ligand.name,
+diff -ur p2/boltzgen/task/predict/data_from_generated.py l2/boltzgen/task/predict/data_from_generated.py
+--- p2/boltzgen/task/predict/data_from_generated.py	2026-03-06 20:52:34
++++ l2/boltzgen/task/predict/data_from_generated.py	2026-08-24 14:30:23
+@@ -357,7 +357,12 @@
+ 
+     def get_feat(self, path, design_mask, ss_type=None, binding_type=None, aa_constraint_mask=None):
+         # Load design
+-        if self.extra_mol_dir is not None:
++        # mols must exist even when extra_mol_dir is absent: the .exists() guard
++        # below is a local addition, and without a default it leaves mols unbound
++        # (upstream binds it unconditionally). See refold_cif staging in
++        # biopipelines/boltzgen.py::_generate_molecule_stage_section.
++        mols = {}
++        if self.extra_mol_dir is not None and self.extra_mol_dir.exists():
+             mols = {
+                 path.stem: pickle.load(path.open("rb"))
+                 for path in self.extra_mol_dir.glob("*.pkl")

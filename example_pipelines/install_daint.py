@@ -19,7 +19,7 @@ re-running afterwards; on project storage it persists but costs inodes.
 Daint runs a subset of the catalogue. Tools are absent here when they cannot be
 built for aarch64 at all: RFdiffusion needs DGL, whose aarch64 wheel ships no
 C++ library matching the installed torch, and the RosettaCommons images are
-x86-64 only. See llm/daint.md for the evidence behind each.
+x86-64 only. See skills/biopipelines/references/daint_backend.md for the evidence behind each.
 """
 
 from biopipelines.pipeline import *

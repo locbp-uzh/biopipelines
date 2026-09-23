@@ -10,6 +10,7 @@ import argparse
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 
 import pandas as pd
@@ -43,18 +44,67 @@ def find_dssp_binary(container_prefix: str = "") -> str:
     raise RuntimeError("Neither mkdssp nor dssp found on PATH")
 
 
+def strip_refinement_remarks(pdb_path: str) -> str:
+    """Write a copy without REMARK 3, or return the path unchanged if there is none.
+
+    mkdssp 4.6.1 converts PDB to mmCIF internally, and for some entries that conversion emits
+    two `refine` rows with the same key, which its validator rejects: `Duplicate Key violation,
+    cat: refine`. REMARK 3 is refinement metadata and contributes nothing to a secondary
+    structure assignment — dropping it makes those entries work, producing output byte-for-byte
+    identical to feeding the same entry as mmCIF (verified on 4UFC).
+    """
+    try:
+        with open(pdb_path, "r", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return pdb_path
+    kept = [ln for ln in lines if not ln.startswith("REMARK   3")]
+    if len(kept) == len(lines):
+        return pdb_path
+
+    # A temp dir, not the output folder: a sanitization artifact must not land in a declared
+    # output stream beside the real results.
+    cleaned = os.path.join(tempfile.mkdtemp(prefix="dssp_norefine_"),
+                           os.path.basename(pdb_path))
+    with open(cleaned, "w") as handle:
+        handle.writelines(kept)
+    return cleaned
+
+
 def run_dssp(binary: str, pdb_path: str, out_path: str, container_prefix: str = ""):
-    """Try modern mkdssp invocation first; fall back to legacy positional form."""
+    """Try modern mkdssp invocation first; fall back to legacy positional form.
+
+    A first failure is retried without REMARK 3 rather than reported, so a user never has to
+    discover the mmCIF workaround the hard way.
+    """
     pre = container_argv_prefix(container_prefix)
-    cmd1 = pre + [binary, "--output-format", "dssp", pdb_path, out_path]
-    res = subprocess.run(cmd1, capture_output=True, text=True)
-    if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+
+    def attempt(path):
+        for cmd in ([binary, "--output-format", "dssp", path, out_path],
+                    [binary, path, out_path]):
+            res = subprocess.run(pre + cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                return None
+        return res
+
+    failure = attempt(pdb_path)
+    if failure is None:
         return
-    cmd2 = pre + [binary, pdb_path, out_path]
-    res = subprocess.run(cmd2, capture_output=True, text=True)
-    if res.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-        return
-    raise RuntimeError(f"{binary} failed: {res.stderr.strip() or res.stdout.strip()}")
+
+    detail = failure.stderr.strip() or failure.stdout.strip()
+    cleaned = strip_refinement_remarks(pdb_path)
+    if cleaned != pdb_path:
+        try:
+            retry = attempt(cleaned)
+        finally:
+            shutil.rmtree(os.path.dirname(cleaned), ignore_errors=True)
+        if retry is None:
+            print(f"  note: {os.path.basename(pdb_path)} needed REMARK 3 stripped "
+                  f"(mkdssp duplicate-key defect); result is unaffected")
+            return
+        detail += ("\n  retry without REMARK 3 also failed: "
+                   + (retry.stderr.strip() or retry.stdout.strip() or f"exit {retry.returncode}"))
+    raise RuntimeError(f"{binary} failed: {detail}")
 
 
 def parse_dssp_classic(out_path: str):

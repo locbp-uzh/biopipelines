@@ -158,6 +158,23 @@ def render_extra_args(extras: Dict[str, Any], dialect: str = "argparse") -> List
     return tokens
 
 
+def _called_with(cls: type, args: tuple, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """The constructor call as names, so a positional argument is not lost and `**kwargs` is flat.
+
+    Never raises: this only feeds the provenance record, and a tool that cannot be introspected must still be constructible.
+    """
+    try:
+        bound = inspect.signature(cls.__init__).bind_partial(None, *args, **kwargs)
+    except (TypeError, ValueError):
+        return dict(kwargs)
+    named = dict(bound.arguments)
+    named.pop("self", None)
+    for name, parameter in inspect.signature(cls.__init__).parameters.items():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD and isinstance(named.get(name), dict):
+            named.update(named.pop(name))
+    return named
+
+
 def _constructor_parameter_names(cls: type) -> List[str]:
     """The named parameters of a tool's own constructor, for the misspelling check."""
     try:
@@ -197,9 +214,10 @@ def _resolve_parameter_aliases(cls: type, kwargs: Dict[str, Any]) -> Dict[str, A
             contract_enforcement.report(contract_enforcement.Violation(
                 check="deprecated_alias",
                 message=f"{cls.TOOL_NAME}: {old}= is a synonym for {new}= and will soon be deprecated.",
-                hint=(f"The value was bound to {new}=, so this pipeline still runs as "
-                      f"written. Silence this line with "
-                      f"BIOPIPELINES_ENFORCE_DEPRECATED_ALIAS=off."),
+                hint=((f"The value was bound to {new}=, but the meaning changed: "
+                       f"{cls.ALIAS_CHANGES[old]} " if old in cls.ALIAS_CHANGES else
+                       f"The value was bound to {new}=, so this pipeline still runs as written. ")
+                      + "Silence this line with BIOPIPELINES_ENFORCE_DEPRECATED_ALIAS=off."),
             ))
     return resolved
 
@@ -282,6 +300,9 @@ class BaseConfig(ABC):
 
     # The PARAMETER_ALIASES keys that are a retired spelling rather than a first-class synonym: only these report a deprecation, so a synonym stays silent.
     DEPRECATED_ALIASES: tuple = ()
+
+    # {retired spelling: what changed}, for an alias whose new parameter does not mean exactly what the old one did.
+    ALIAS_CHANGES: Dict[str, str] = {}
 
     # Common path descriptors available to all tools
     pipeline_name = Path(lambda self: self._extract_pipeline_name())
@@ -815,6 +836,9 @@ class BaseConfig(ABC):
         """
         # Create the tool instance normally
         instance = super(BaseConfig, cls).__new__(cls)
+        # What the caller actually wrote, before the subclass binds its named parameters and
+        # BaseConfig sees only the leftovers. The manifest reports it as `passed`.
+        instance._constructor_kwargs = _called_with(cls, args, kwargs)
 
         # Check for active pipeline context
         # Import here to avoid circular dependency
@@ -1624,7 +1648,7 @@ BP_MAIN_RC=${{BP_MAIN_RC:-$?}}
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
 
-python "{pipe_check_completion}" "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_file}"
+python "{pipe_check_completion}" "{self.output_folder}" "{self.TOOL_NAME}" "{expected_outputs_file}" --main-rc "${{BP_MAIN_RC:-0}}"
 
 if [ $? -eq 0 ]; then
     echo "{self.TOOL_NAME} completed successfully"
@@ -1666,21 +1690,61 @@ fi
             return str(missing_info)
         return None
 
+    @staticmethod
+    def _unwrap_combinatorics(input_source) -> List[Any]:
+        """The id-bearing objects inside a `Bundle`/`Each`, or the source itself.
+
+        `Bundle` and `Each` hold their members in ``.sources`` and expose no
+        ``.tables`` of their own, so a manifest behind one was invisible:
+        ``Boltz2(proteins=Bundle(filtered_designs, tag))`` declared no `missing`
+        table, and every id its upstream had legitimately filtered was then
+        counted as a failed output. Found on a real campaign where a Panda
+        filter kept 0 of 4 designs and the fold step was marked FAILED for the
+        4 files that were correctly never produced.
+        """
+        try:
+            from .combinatorics import Grouped
+        except ImportError:
+            from combinatorics import Grouped
+        found: List[Any] = []
+
+        def walk(item):
+            # Depth first, so a nested member keeps its source's position: the
+            # collector documents order-preserving output and a breadth-first
+            # walk would put `Bundle(Each(a), b)` in the order b, a.
+            if item is None:
+                return
+            if isinstance(item, Grouped):
+                walk(item.source)
+                return
+            inner = getattr(item, 'sources', None)
+            if inner is not None and not hasattr(item, 'tables'):
+                for member in inner:
+                    walk(member)
+                return
+            found.append(item)
+
+        for item in (input_source if isinstance(input_source, (list, tuple))
+                     else [input_source]):
+            walk(item)
+        return found
+
     def _collect_upstream_missing_paths(self, *input_sources) -> List[str]:
         """All distinct upstream `missing` table paths across input sources.
 
         Unlike ``_get_upstream_missing_table_path`` (first match only), this
         returns every input axis's manifest so a filter on more than one axis
-        (e.g. both proteins and ligands) propagates fully. Order-preserving,
-        de-duplicated.
+        (e.g. both proteins and ligands) propagates fully, and it looks inside
+        `Bundle`/`Each` wrappers. Order-preserving, de-duplicated.
         """
         paths: List[str] = []
         seen = set()
         for src in input_sources:
-            p = self._missing_path_of(src)
-            if p and p not in seen:
-                seen.add(p)
-                paths.append(p)
+            for member in self._unwrap_combinatorics(src):
+                p = self._missing_path_of(member)
+                if p and p not in seen:
+                    seen.add(p)
+                    paths.append(p)
         return paths
 
     def _get_upstream_missing_table_path(self, *input_sources) -> Optional[str]:
@@ -1848,6 +1912,9 @@ _EDGE_SKIP_ATTRS = frozenset({
     "pipeline", "pipeline_ref", "folders", "output_files", "input_sources",
     "tables", "streams", "extra_args", "resources", "environments",
     "dependencies", "filter_metadata",
+    # A verbatim copy of the constructor call, so every input it names would be found twice and
+    # labelled with this attribute's name instead of the parameter the caller used.
+    "_constructor_kwargs",
 })
 
 _EDGE_WALK_MAX_DEPTH = 5
@@ -1873,7 +1940,7 @@ def _walk_producer_refs(value, found: List[Any], depth: int = 0, seen=None) -> N
     Recurses through the shapes tools actually store an input in: Bundle/Each wrappers, lists of inputs, and dicts. Stops at anything that carries its own back-reference, and never descends into a tool config or a Pipeline.
     """
     from .datastream import DataStream
-    from .combinatorics import Bundle, Each
+    from .combinatorics import Bundle, Each, Grouped
 
     if value is None or depth > _EDGE_WALK_MAX_DEPTH:
         return
@@ -1892,6 +1959,10 @@ def _walk_producer_refs(value, found: List[Any], depth: int = 0, seen=None) -> N
     if isinstance(value, (Bundle, Each)):
         for source in value.sources:
             _walk_producer_refs(source, found, depth + 1, seen)
+        return
+    if isinstance(value, Grouped):
+        _walk_producer_refs(value.source, found, depth + 1, seen)
+        _walk_producer_refs(value.groups, found, depth + 1, seen)
         return
     if isinstance(value, (list, tuple, set, frozenset)):
         if len(value) > _EDGE_WALK_MAX_ITEMS:

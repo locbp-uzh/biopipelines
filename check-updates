@@ -7,12 +7,19 @@
 # Daily update check for BioPipelines.
 #
 # Called by ./submit and ./run on the first invocation of the day. It asks the
-# public GitHub repository for the current HEAD of the release branch (main) and
-# checks whether that commit is an ancestor of this checkout's current HEAD. If
-# it is not, the release line has advanced past this copy and a friendly notice
-# is printed. It never fetches, never writes to the worktree, and always exits 0
-# — a notice must never block a job, so any failure (no git, no network) is
-# silent.
+# repository this checkout actually came from for the current HEAD of the release
+# branch (main) and checks whether that commit is an ancestor of this checkout's
+# current HEAD. If it is not, the release line has advanced past this copy and a
+# friendly notice is printed. It never fetches, never writes to the worktree, and
+# always exits 0 — a notice must never block a job, so any failure (no git, no
+# network, no credentials) is silent.
+#
+# Why the checkout's own `origin` rather than a fixed GitHub URL: the lab works on
+# an internal GitLab whose `main` is ahead of what has been published, and GitHub's
+# `main` is a mirror of the `public` branch. Asking GitHub therefore answered the
+# wrong question for every internal clone — GitHub's HEAD is an ancestor of theirs,
+# so the check stayed silent while the line they actually track had moved on.
+# A clone with no `origin` (an export, a tarball) still falls back to GitHub.
 #
 # Why test "is main's HEAD an ancestor of mine?" rather than compare branch shas:
 # the real question is "has the released code moved past me?". That is answered
@@ -28,8 +35,7 @@
 #
 
 GITHUB_URL="https://github.com/locbp-uzh/biopipelines.git"
-GITHUB_FEED="https://github.com/locbp-uzh/biopipelines/commits/main.atom"
-RELEASE_BRANCH="main"   # the public release line this checkout should stay current with
+RELEASE_BRANCH="main"   # the release line this checkout should stay current with
 LS_REMOTE_TIMEOUT=5     # seconds; a slow/blocked network must not delay a job
 FEED_TIMEOUT=5          # same budget for the optional summary call
 SUMMARY_MAX=8           # subjects listed before the rest are counted rather than named
@@ -53,11 +59,15 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Best effort throughout. No downloader, no network, a rate-limited or malformed
 # feed all end in silence rather than a delayed or broken job.
 print_update_summary() {
+    # The parser below keys on GitHub's `Grit::Commit/` ids, so it speaks only to
+    # github.com. Any other host (the lab's GitLab) gets the notice without the
+    # subject list rather than a second, half-tested parser.
+    [ -n "$RELEASE_FEED" ] || return 0
     local feed=""
     if command -v curl >/dev/null 2>&1; then
-        feed="$(curl -sfL --max-time "$FEED_TIMEOUT" "$GITHUB_FEED" 2>/dev/null)"
+        feed="$(curl -sfL --max-time "$FEED_TIMEOUT" "$RELEASE_FEED" 2>/dev/null)"
     elif command -v wget >/dev/null 2>&1; then
-        feed="$(wget -qO- --timeout="$FEED_TIMEOUT" "$GITHUB_FEED" 2>/dev/null)"
+        feed="$(wget -qO- --timeout="$FEED_TIMEOUT" "$RELEASE_FEED" 2>/dev/null)"
     else
         return 0
     fi
@@ -144,13 +154,40 @@ fi
 # only try once today rather than on every submit.
 echo "$TODAY" > "$SENTINEL" 2>/dev/null || true
 
+# The remote to ask is this checkout's own `origin`: a lab clone tracks the
+# internal GitLab, whose release line is the one that has actually moved. Only a
+# checkout with no origin at all falls back to the published GitHub repository.
+RELEASE_URL="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null)"
+[ -n "$RELEASE_URL" ] || RELEASE_URL="$GITHUB_URL"
+
+# Display form: strip any embedded credentials and the trailing .git, and render
+# an scp-style ssh remote as host/path, so the notice names a place a person can
+# open. A token in a remote URL must never reach a job's log.
+RELEASE_DISPLAY="${RELEASE_URL%.git}"
+RELEASE_DISPLAY="${RELEASE_DISPLAY#*://}"
+RELEASE_DISPLAY="${RELEASE_DISPLAY#*@}"
+RELEASE_DISPLAY="${RELEASE_DISPLAY/://}"
+
+# The subject list is parsed out of GitHub's Atom feed, so it exists only for a
+# github.com remote; elsewhere the notice stands on its own.
+RELEASE_FEED=""
+case "$RELEASE_DISPLAY" in
+    github.com/*) RELEASE_FEED="https://${RELEASE_DISPLAY}/commits/${RELEASE_BRANCH}.atom" ;;
+esac
+
+# An internal remote can ask for credentials, and a prompt in a submit script
+# hangs the job until someone notices. `timeout` bounds it only where coreutils
+# exists (not stock macOS), so refusing to prompt at all is the real guard.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=5}"
+
 # Printed only on the once-per-day run that actually reaches the network call,
 # so the up-to-5s ls-remote does not look like an unexplained stall.
 echo "Checking for BioPipelines updates..."
 
-# Ask GitHub for the release branch's HEAD sha without configuring a remote or
-# fetching. A non-zero exit, timeout, or empty result is treated as "can't
-# tell" and stays silent.
+# Ask that remote for the release branch's HEAD sha without fetching. A non-zero
+# exit, timeout, missing credentials or empty result is treated as "can't tell"
+# and stays silent.
 # `timeout` is GNU coreutils and absent from a stock macOS; without it the
 # ls-remote still runs, it just cannot be bounded.
 if command -v timeout >/dev/null 2>&1; then
@@ -159,7 +196,7 @@ else
     TIMEOUT_CMD=""
 fi
 RELEASE_SHA="$($TIMEOUT_CMD git -C "$SCRIPT_DIR" \
-    ls-remote "$GITHUB_URL" "refs/heads/$RELEASE_BRANCH" 2>/dev/null | awk '{print $1}')"
+    ls-remote "$RELEASE_URL" "refs/heads/$RELEASE_BRANCH" 2>/dev/null | awk '{print $1}')"
 [ -n "$RELEASE_SHA" ] || exit 0  # branch absent upstream or network failure
 
 # Up to date only if that commit is an ANCESTOR of our current HEAD — i.e. it is
@@ -178,8 +215,8 @@ CURRENT_BRANCH="$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/
 
 echo ""
 echo "────────────────────────────────────────────────────────────────────"
-echo " A newer version of BioPipelines is available on GitHub."
-echo " (github.com/locbp-uzh/biopipelines, branch $RELEASE_BRANCH)"
+echo " A newer version of BioPipelines is available."
+echo " ($RELEASE_DISPLAY, branch $RELEASE_BRANCH)"
 echo ""
 print_update_summary
 if [ "$CURRENT_BRANCH" = "$RELEASE_BRANCH" ]; then

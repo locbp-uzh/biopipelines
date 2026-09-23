@@ -12,20 +12,30 @@ described a task. Wait for the actual request, then act.
 
 ## Read at session start
 
-Before responding to the user's first task, read these files end-to-end so
-you have the framework's contract loaded — the `Pipeline`/`Resources` API,
-typed streams, the cluster-vs-Colab differences, and which tools exist:
+**First, look at your own tool list.** If it contains tools named `bp_tools`, `bp_setup`, `bp_status` and the rest, the `bp-mcp` server is registered and those tools — not shell commands, not scripts in this repo — are how you interact with BioPipelines: finding a tool, submitting a run, reading its status, its logs, its tables. The sections below describe the same operations for a session without them. Where the two differ, the tool wins.
+
+Before responding to the user's first task, load the framework's contract — the
+`Pipeline`/`Resources` API, typed streams, and the cluster-vs-Colab differences:
 
 - `docs/user_manual.md`
-- `docs/tool_reference.md`
-- `docs/tool/*.md`
-- `README.md` — the tool table records, per tool, the hardware (CPU/GPU), the platforms it has been verified on (HPC x86-64 / HPC aarch64 / Colab), and the upstream references (repo + paper). Read all of this off the badge markup on each row, never the base64 `<img src=...>` blobs (those carry no information): the `alt="..."` attributes give the status — `alt="CPU"`, `alt="GPU"`, `alt="HPC x86-64 ok"`, `alt="HPC aarch64 ok"`, `alt="Colab ok"` — and the `<a href="...">` wrapping a badge whose `alt` is `repo` or `paper` gives the reference URL. A BP-native tool carries `alt="BioPipelines native tool"` and has no repo/paper link. (The prose legend above the table uses the shorter forms `alt="HPC x86-64"`, `alt="HPC aarch64"`, `alt="Colab"`, `alt="BP"` — those are the legend swatches, not tool rows. Tool rows are the ones inside `<td><sub><b>Name</b>` blocks.)
-  A platform badge means **verified**; a missing badge means **not verified**, which is not the same as unsupported. Three rows currently carry no Colab badge (MMseqs2/MMseqs2Server, Vina, RFdiffusion2) and seven carry no HPC badge (PocketGen, Frame2Seq, DiffDock, DynamicBind, NeuralPLexer, GEMS, RTMScore) — yet all seven of the latter have an `environments:` entry in `config.cluster.yaml` and cluster bring-up pipelines, so they do run there. So: prefer a tool whose badge covers the user's mode, and when only the badge is missing say the combination is unverified and ask, rather than refusing the tool.
+- `skills/biopipelines/references/tool_index.md` — the tool catalog, one line per tool
+  (~4k tokens). **This replaces reading `docs/tool_reference.md` and `docs/tool/*.md` up
+  front**, which together run to ~78k tokens. Read the index, pick the tools the task needs,
+  then read only those sections: every entry ends with a `docs/tool/<file>.md#<anchor>`
+  pointer to its authoritative entry, and that is where the real signature lives. Read a
+  section before you write the stage that uses it — an unknown keyword is swallowed by
+  `**kwargs` rather than rejected, so a guessed parameter is silently ignored instead of
+  erroring. Never read a whole `docs/tool/*.md` file to find a tool: `analysis.md` alone is
+  ~24k tokens for 33 tools, and a campaign typically uses three of them.
+
+The index also carries, per tool, the hardware it needs (CPU/GPU) and the platforms it has been verified on, lifted from the README's badge table — so you never need to open `README.md`, which is ~32k tokens and written for people, not for you. Each line ends with the tool's tags, so a capability the one-line summary omits — `covalent`, `binder-design`, `symmetry` — is still greppable in the index alone.
 
 Do not announce that you've read them, do not summarise
 them, do not list what you found. Just have the context loaded so your
 suggestions and questions are grounded in actual API shapes and tool names
 instead of inferred guesses.
+
+**With `bp_tools` in your tool list, none of the reading above is how you find a tool.** Call `bp_tools()` for the catalog and `bp_tools(name="Boltz2")` for one tool's section — same content, same files, no path to get wrong. It also answers the two questions the index file cannot: `bp_tools(outputs="rmsd")` lists every tool whose streams, tables or columns match that fragment, read from the tools' own source, and `bp_tools(tags=[...], exclude=[...])` filters by intent over the vocabulary in `docs/tool_tags.md`. Opening `docs/tool/*.md` by hand when the tool is available costs tokens and finds nothing extra.
 
 ## Execution mode (cluster vs Colab)
 
@@ -34,12 +44,12 @@ infrastructure:
 
 - **Cluster** — `.py` scripts submitted via `./submit` to SLURM, conda envs
   via `mamba`/`conda`/`micromamba`, outputs persist on shared storage.
-  Read `cluster.md` for more information.
+  Read `skills/biopipelines/references/cluster_backend.md` for more information.
 - **Colab** — `.ipynb` cells executed inline, `micromamba` envs installed
   per session, runtime ephemeral (~12 h cap, anything not saved to Drive or
-  downloaded is lost). Read `colab.md` for more information, including whether this session can drive the runtime itself.
+  downloaded is lost). Read `skills/biopipelines/references/colab_backend.md` for more information, including whether this session can drive the runtime itself.
 
-A third variant, `daint` (CSCS Alps, aarch64), is also a SLURM cluster but differs enough to have its own file — read `daint.md` if the user is on Daint.
+A third variant, `daint` (CSCS Alps, aarch64), is also a SLURM cluster but differs enough to have its own file — read `skills/biopipelines/references/daint_backend.md` if the user is on Daint.
 
 The auto-loaded config differs (`config.cluster.yaml` vs `config.colab.yaml`).
 If the user hasn't made it clear which mode applies, infer from context
@@ -196,10 +206,10 @@ If `llm/resources.md` is missing or older than ~3 months, regenerate it
 before suggesting concrete resource values. On the cluster, run:
 
 ```bash
-llm/log.sh ssh cluster 'sinfo -o "%P %l %G %D %t" | sort -u'   # partitions, time limits, GPUs
-llm/log.sh ssh cluster 'sinfo -o "%G" | sort -u'                # available GPU types
-llm/log.sh ssh cluster 'scontrol show config | grep -E "SchedulerType|DefaultTime|MaxArraySize"'
-llm/log.sh ssh cluster 'sacctmgr show qos format=Name,MaxWall,Priority 2>/dev/null | head'
+ssh s3it 'sinfo -o "%P %l %G %D %t" | sort -u'   # partitions, time limits, GPUs
+ssh s3it 'sinfo -o "%G" | sort -u'                # available GPU types
+ssh s3it 'scontrol show config | grep -E "SchedulerType|DefaultTime|MaxArraySize"'
+ssh s3it 'sacctmgr show qos format=Name,MaxWall,Priority 2>/dev/null | head'
 ```
 
 Record the answers in `llm/resources.md` (use `llm/resources.md.template` as
@@ -219,30 +229,48 @@ time requested.
 
 ### Running the pipeline
 
-All cluster interaction is over plain `ssh` and `scp`, and **every call must
-be wrapped in `llm/log.sh`** — no raw `ssh`/`scp` invocations. The wrapper
-appends each command and its full output to `llm/logs/YYYY-MM-DD.log`, which
-is the audit trail for the session. If the user runs a raw cluster command,
-re-issue it through `log.sh` rather than relying on the unlogged result.
+**If `bp_submit`, `bp_status` or `bp_logs` appear in your tool list, they are how you reach the cluster. Use them.** Do not open a shell to do what one of them does: an `ssh` command that submits a run bypasses the operations record the tool would have written, guesses which `.out` file exists, and reads markers the tool already interprets. Shell out only for something no tool covers, and say which tool you checked first.
 
-Typical idioms (assume an ssh alias `cluster` and a remote repo at
-`~/biopipelines`):
+| What you want | Call | Not |
+| --- | --- | --- |
+| Run a pipeline on the cluster | `bp_submit(script=...)` | `ssh s3it "./submit ..."` |
+| Did it work / where is it | `bp_status(job=...)` | `ssh s3it "ls ... && squeue"` |
+| Why did a step fail | `bp_logs(job=..., step="007_Boltz2")` | `ssh s3it "tail Logs/..."` |
+| Read a result table | `bp_table(job=..., step=..., table=...)` | `scp` then open the CSV |
+| Which ids were dropped, and where | `bp_lineage(job=...)` | reading `missing.csv` by hand |
+| A page a supervisor or referee can read | `bp_lineage(job=..., page=True)` | pasting numbers into a document |
+| What produced this run | `bp_provenance(job=...)` | guessing from the commit date |
+| How do two runs differ | `bp_provenance(job=..., against=...)` | diffing two output folders |
+| Run this campaign again, elsewhere | `bp_reproduce(job=..., target=...)` | re-authoring the pipeline |
+| Show me a finished step | `bp_visualize(job=..., step=...)` | describing the numbers in prose |
+| Resume a run that failed partway | `bp_resubmit(job=...)` | resubmitting the whole thing |
+| Stop queued jobs | `bp_cancel(job=...)`, then `confirm=True` | `ssh s3it "scancel ..."` |
+| What runs exist | `bp_runs()` | `ssh s3it "ls <output root>"` |
+| Bring a file back | `bp_fetch(remote_path=...)` | `scp s3it:...` |
+| Which tool does X | `bp_tools(tags=[...])`, `bp_tools(outputs="rmsd")`, `bp_tools(name=...)` | grepping `docs/tool/` |
+| Connect the first time | `bp_setup(host=..., repo=...)` | probing by hand |
+
+The tools take `host=` and default to the saved one, so a call needs no ssh alias in it. Each run still records what was done to it in `<Job>_NNN/_operations.jsonl`, next to its outputs, so the record survives being copied off the cluster; the MCP tools write that record as they go, and a hand-run `ssh` does not.
+
+#### Without the MCP server
+
+Only when those tools are **not** in your tool list. Then all cluster interaction is plain `ssh` and `scp`, with the idioms below (assume an ssh alias named after the site — `s3it` here — and a remote repo at `~/biopipelines`):
 
 | Step                              | Command                                                                                |
 | --------------------------------- | -------------------------------------------------------------------------------------- |
-| Sync remote repo to a branch      | `llm/log.sh ssh cluster "cd ~/biopipelines && git fetch && git reset --hard origin/<branch>"` |
-| Copy a personal pipeline / inputs | `llm/log.sh scp my_pipelines/foo.py cluster:~/biopipelines/my_pipelines/`              |
-| Submit                            | `llm/log.sh ssh cluster "cd ~/biopipelines && ./submit my_pipelines/foo.py"`           |
-| Resume after cancel/fail          | `llm/log.sh ssh cluster "cd ~/biopipelines && ./resubmit <RunTime>/<job script>"`      |
-| Watch the queue                   | `llm/log.sh ssh cluster 'squeue -u $(whoami)'`                                         |
-| List the scheduler output files   | `llm/log.sh ssh cluster "ls <RunTime>/*.out"`                                          |
-| Inspect a scheduler log           | `llm/log.sh ssh cluster "tail -n 100 <RunTime>/job_batch1.out"`                        |
-| Inspect a tool log                | `llm/log.sh ssh cluster "tail -n 100 <Job>/Logs/<NNN>_<ToolName>.log"`                 |
-| Cancel a job                      | `llm/log.sh ssh cluster "scancel <jobid>"`                                             |
-| Refresh the run page after a run  | `llm/log.sh ssh cluster "cd ~/biopipelines && python -c 'from biopipelines.pipeline import regenerate_pipeline_page as r; r(\"<RunTime>\")'"` |
-| Fetch the run page                | `llm/log.sh scp cluster:<RunTime>/pipeline.html ./`                                    |
-| Render one step (top 5 by a score) | `llm/log.sh ssh cluster "cd ~/biopipelines && bp-visualize <Job>/<NNN>_<Tool> --descending <table>.<column> --max-items 5"` |
-| Fetch a step's page               | `llm/log.sh scp cluster:<Job>/<NNN>_<Tool>/_extras/<NNN>_<Tool>_view.html ./`           |
+| Sync remote repo to a branch      | `ssh s3it "cd ~/biopipelines && git fetch && git reset --hard origin/<branch>"` |
+| Copy a personal pipeline / inputs | `scp my_pipelines/foo.py s3it:~/biopipelines/my_pipelines/`              |
+| Submit                            | `ssh s3it "cd ~/biopipelines && ./submit my_pipelines/foo.py"`           |
+| Resume after cancel/fail          | `ssh s3it "cd ~/biopipelines && ./resubmit <RunTime>/<job script>"`      |
+| Watch the queue                   | `ssh s3it 'squeue -u $(whoami)'`                                         |
+| List the scheduler output files   | `ssh s3it "ls <RunTime>/*.out"`                                          |
+| Inspect a scheduler log           | `ssh s3it "tail -n 100 <RunTime>/job_batch1.out"`                        |
+| Inspect a tool log                | `ssh s3it "tail -n 100 <Job>/Logs/<NNN>_<ToolName>.log"`                 |
+| Cancel a job                      | `ssh s3it "scancel <jobid>"`                                             |
+| Refresh the run page after a run  | `ssh s3it "cd ~/biopipelines && python -c 'from biopipelines.pipeline import regenerate_pipeline_page as r; r(\"<RunTime>\")'"` |
+| Fetch the run page                | `scp s3it:<RunTime>/pipeline.html ./`                                    |
+| Render one step (top 5 by a score) | `ssh s3it "cd ~/biopipelines && bp-visualize <Job>/<NNN>_<Tool> --descending <table>.<column> --max-items 5"` |
+| Fetch a step's page               | `scp s3it:<Job>/<NNN>_<Tool>/_extras/<NNN>_<Tool>_view.html ./`           |
 
 **Which `.out` file to tail.** Every `Resources()` call in the pipeline opens a new batch, and each batch is submitted as its own job. `submit` writes one scheduler output per batch: `<RunTime>/job_batch<N>.out` (from `<RunTime>/slurm_batch<N>.sh`). Only a pipeline that ended up with a *single* batch gets `<RunTime>/slurm.out` (from `<RunTime>/slurm.sh`). Since most pipelines call `Resources()` more than once, `ls <RunTime>/*.out` first rather than assuming `slurm.out` exists — and pass the matching `slurm_batch<N>.sh` to `resubmit` when resuming.
 
@@ -288,11 +316,11 @@ Outputs land at the path configured on the cluster (typically `/shares/<group>/<
 ### Running the pipeline
 
 There is nothing to ssh into. The "running" step is just executing the
-notebook cells in order. `llm/log.sh` does not apply in Colab mode — the
-notebook itself is the audit trail (cell outputs are saved with the
-`.ipynb`).
+notebook cells in order. The notebook carries its own record too — cell
+outputs are saved with the `.ipynb` — on top of the run's own
+`<Job>_NNN/_operations.jsonl`.
 
-**Who executes the cells depends on whether the Colab MCP server is registered.** If `mcp__colab-mcp__*` tools are in this session's tool list, you create the notebook, add cells and run them yourself, and read the outputs back directly — see `colab.md` for the full workflow. If they are not, you cannot touch the runtime: hand the user the notebook, ask them to run it, and work from what they paste back. Check the tool list; do not assume either.
+**Who executes the cells depends on whether the Colab MCP server is registered.** If `mcp__colab-mcp__*` tools are in this session's tool list, you create the notebook, add cells and run them yourself, and read the outputs back directly — see `skills/biopipelines/references/colab_backend.md` for the full workflow. If they are not, you cannot touch the runtime: hand the user the notebook, ask them to run it, and work from what they paste back. Check the tool list; do not assume either.
 
 Things to remind the user about during execution:
 

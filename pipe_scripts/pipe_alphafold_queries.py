@@ -37,6 +37,9 @@ sys.path.insert(0, _biopipelines_dir)
 from combinatorics import CombinatoricsConfig, predict_single_output_id  # noqa: E402
 import id_patterns  # noqa: E402
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from biopipelines.id_map_utils import get_mapped_ids  # noqa: E402
+
 
 def _load_id_to_seq(path, patterns=None):
     """Load an {id: sequence} map from a sequences CSV (columns: id, sequence).
@@ -52,6 +55,31 @@ def _load_id_to_seq(path, patterns=None):
         return present
     selected = id_patterns.select_ids([str(p) for p in patterns], list(present.keys()))
     return {i: present[i] for i in selected}
+
+
+def _group_id_to_seq(id_to_seq, src):
+    """Collapse a grouped source's chain rows into {group id: colon-joined sequence}.
+
+    A group is one ColabFold query, so its members are joined here exactly as a Bundle's
+    chains are joined below; a static partner added later simply appends one more chain.
+    """
+    group_path = src["group_by"]
+    if not os.path.exists(group_path):
+        raise ValueError(f"group source not found: {group_path}")
+    group_ids = [str(i) for i in pd.read_csv(group_path, dtype={'id': str})['id'].tolist()]
+    patterns = src.get("group_ids")
+    if patterns:
+        group_ids = id_patterns.select_ids([str(p) for p in patterns], group_ids)
+
+    members = get_mapped_ids(group_ids, list(id_to_seq.keys()), unique=False)
+    grouped = {}
+    for gid in group_ids:
+        member_ids = members.get(gid) or []
+        if not member_ids:
+            print(f"Warning: group '{gid}' has no member rows; skipping")
+            continue
+        grouped[gid] = ":".join(id_to_seq[m] for m in member_ids)
+    return grouped
 
 
 def _ordered_sources(axis):
@@ -82,6 +110,8 @@ def build_queries(config_path, output_csv):
             raise ValueError(f"sequences source not found: {path}")
         patterns = src.get("ids")
         id_to_seq = _load_id_to_seq(path, patterns=patterns)
+        if src.get("group_by"):
+            id_to_seq = _group_id_to_seq(id_to_seq, src)
         # Selected ids in row order (id_to_seq is already restricted + ordered).
         ids = list(id_to_seq.keys())
         loaded.append({
@@ -132,8 +162,10 @@ def build_queries(config_path, output_csv):
     out.to_csv(output_csv, index=False)
 
     for rid, seqs, chain_ids in rows:
-        kind = "complex" if len(seqs) > 1 else "monomer"
-        print(f"  query {rid}: {kind} ({len(seqs)} chain(s): {'+'.join(chain_ids)})")
+        # A grouped element is already colon-joined, so count chains not elements.
+        n_chains = sum(s.count(":") + 1 for s in seqs)
+        kind = "complex" if n_chains > 1 else "monomer"
+        print(f"  query {rid}: {kind} ({n_chains} chain(s): {'+'.join(chain_ids)})")
     print(f"Wrote {len(rows)} ColabFold query row(s) to {output_csv}")
 
 

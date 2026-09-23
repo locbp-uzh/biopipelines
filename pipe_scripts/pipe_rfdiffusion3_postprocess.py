@@ -27,6 +27,7 @@ Usage:
 import argparse
 import gzip
 import json
+import math
 import os
 import glob
 import tempfile
@@ -127,6 +128,137 @@ def decompress_cif(cif_gz_path: str, temp_dir: str) -> str:
     return cif_path
 
 
+def _pdbio_writes_shifted_columns() -> Optional[bool]:
+    """Does this Biopython's PDBIO put segID/element/charge one column early? None if it cannot tell."""
+    try:
+        import importlib
+        import sys
+        importlib.import_module("Bio.PDB.PDBIO")
+        template = sys.modules["Bio.PDB.PDBIO"]._ATOM_FORMAT_STRING
+    except Exception:
+        return None
+    if "%s%s      %4s" in template:
+        return False
+    if "%s%s     %4s" in template:
+        return True
+    return None
+
+
+def _element_from_atom_name(name_field: str) -> str:
+    """The PDB convention: a blank or digit in column 13 means a one-letter element in column 14."""
+    name_field = name_field.ljust(4)
+    if name_field[0] == " " or name_field[0].isdigit():
+        return name_field[1].strip().upper()
+    return "".join(c for c in name_field[:2] if c.isalpha()).upper()
+
+
+def _fix_element_columns(pdb_path: str) -> None:
+    """Put segID, element and charge in the columns the PDB spec gives them (73-76, 77-78, 79-80).
+
+    Biopython through 1.86 formats ATOM/HETATM with five spaces after the B-factor where the spec has six, so a two-letter symbol like "SI" lands in 76-77 and a spec-compliant reader takes "I " -> iodine; 1.87 writes the spec layout. The layout is read off the installed PDBIO's format string, falling back to the line length (79 shifted, 80 compliant), so a compliant file is never shifted a second time. A blank element is filled from the atom name by the PDB convention, so " CA " is carbon, not calcium.
+    """
+    shifted_writer = _pdbio_writes_shifted_columns()
+
+    with open(pdb_path) as fh:
+        lines = fh.readlines()
+
+    fixed = []
+    for line in lines:
+        if not line.startswith(("ATOM  ", "HETATM")):
+            fixed.append(line)
+            continue
+        raw = line.rstrip("\r\n")
+        shifted = shifted_writer if shifted_writer is not None else len(raw) == 79
+        body = raw.ljust(80)
+        if shifted:
+            segid, element, charge = body[71:75], body[75:77].strip(), body[77:79].strip()
+        else:
+            segid, element, charge = body[72:76], body[76:78].strip(), body[78:80].strip()
+        if not element:
+            element = _element_from_atom_name(body[12:16])
+        fixed.append(
+            f"{body[:66]}{'':>6}{segid}{element.upper():>2}{charge:>2}".rstrip() + "\n"
+        )
+
+    with open(pdb_path, "w") as fh:
+        fh.writelines(fixed)
+
+
+# Covalent radii (Angstrom) for the elements a design PDB can contain.
+# Cordero et al. 2008; the 0.45 A slack is the usual perception tolerance.
+_COVALENT_RADII = {
+    "H": 0.31, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57, "P": 1.07,
+    "S": 1.05, "CL": 1.02, "BR": 1.20, "I": 1.39, "SI": 1.11, "SE": 1.20,
+    "B": 0.84, "FE": 1.32, "ZN": 1.22, "MG": 1.41, "CA": 1.76, "NA": 1.66,
+    "K": 2.03, "MN": 1.39, "CU": 1.32, "NI": 1.24, "CO": 1.26,
+}
+_BOND_TOLERANCE = 0.45
+
+
+def _add_ligand_conect(pdb_path: str) -> int:
+    """Append CONECT records for intra-ligand (HETATM) bonds.
+
+    Without explicit connectivity a viewer must perceive ligand bonds by
+    distance, and the cutoff it uses is element-dependent and version-
+    dependent. For si-rhodamine the Si-C bonds span 1.785-1.892 A — all
+    chemically normal — but the two Si-methyls are the longest of the four,
+    so a viewer whose cutoff lands near 1.85 A drops exactly those two and
+    keeps the ring bonds. CONECT records remove that ambiguity: the bonds
+    are stated rather than guessed.
+
+    Only HETATM-HETATM bonds are emitted. Protein connectivity is implied by
+    residue templates and needs no CONECT; cross-linking a ligand to the
+    protein would assert a covalent bond that may not exist.
+
+    Returns the number of CONECT records written.
+    """
+    lines = open(pdb_path).read().splitlines()
+    het = []
+    for i, l in enumerate(lines):
+        if l.startswith("HETATM"):
+            b = l.ljust(80)
+            el = b[76:78].strip().upper() or "".join(
+                c for c in b[12:16].strip() if c.isalpha()
+            )[:2].upper()
+            het.append({
+                "serial": int(b[6:11]), "el": el,
+                "xyz": (float(b[30:38]), float(b[38:46]), float(b[46:54])),
+            })
+    if len(het) < 2:
+        return 0
+
+    bonds = {a["serial"]: [] for a in het}
+    for i in range(len(het)):
+        for j in range(i + 1, len(het)):
+            a, b = het[i], het[j]
+            ra = _COVALENT_RADII.get(a["el"])
+            rb = _COVALENT_RADII.get(b["el"])
+            if ra is None or rb is None:
+                continue
+            d = math.dist(a["xyz"], b["xyz"])
+            if 0.4 < d <= ra + rb + _BOND_TOLERANCE:
+                bonds[a["serial"]].append(b["serial"])
+                bonds[b["serial"]].append(a["serial"])
+
+    records = []
+    for serial in sorted(bonds):
+        partners = sorted(bonds[serial])
+        # PDB allows at most four partners per CONECT line; wrap the rest.
+        for k in range(0, len(partners), 4):
+            chunk = partners[k:k + 4]
+            records.append(
+                "CONECT" + f"{serial:5d}" + "".join(f"{p:5d}" for p in chunk)
+            )
+    if not records:
+        return 0
+
+    out = [l for l in lines if not l.startswith(("CONECT", "END", "MASTER"))]
+    out += records + ["END"]
+    with open(pdb_path, "w") as fh:
+        fh.write("\n".join(out) + "\n")
+    return len(records)
+
+
 def convert_cif_to_pdb(cif_path: str, pdb_path: str) -> bool:
     """
     Convert CIF file to PDB format using BioPython.
@@ -147,6 +279,9 @@ def convert_cif_to_pdb(cif_path: str, pdb_path: str) -> bool:
         io = PDBIO()
         io.set_structure(structure)
         io.save(pdb_path, select=AllAtoms())
+
+        _fix_element_columns(pdb_path)
+        _add_ligand_conect(pdb_path)
 
         return True
     except Exception as e:

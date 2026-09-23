@@ -56,6 +56,7 @@ plugins:
 nav:
   - Home: index.md
   - User Guide: user_manual.md
+  - Provenance: provenance.md
   - Tool Reference:
       - Overview: tool_reference.md
       - Structure Generation: tool/structure_generation.md
@@ -68,4 +69,8 @@ nav:
       - Data Management: tool/data_management.md
       - Inputs & I/O: tool/inputs_io.md
       - Tool Index: tool_index.md
+      - Tool Tags: tool_tags.md
   - Developer Guide: developer_manual.md
+  - Design Notes:
+      - Multi-chain sequences: design/multichain-sequences.md
+      - Per-ID ancestry: design/id-ancestry.md

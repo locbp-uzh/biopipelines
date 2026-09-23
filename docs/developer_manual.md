@@ -182,6 +182,19 @@ Read values from a value-based stream at runtime with `get_value(ds, id, column=
 
 A `resi-csv` stream is the per-residue counterpart: it carries **one CSV file per id** (file-based), and each CSV has multiple rows, one per residue, with a `resi` column plus one or more value columns. CABSflex's RMSF output is the canonical producer (`biopipelines/cabsflex.py`, `format="resi-csv"`, columns `id, chain, resi, rmsf`), and `Selection` consumes it stream-based (reading the `resi` column against a `"column op value"` threshold). Use `resi-csv` whenever a tool emits a per-residue numeric profile that another tool will threshold or select on.
 
+#### The Chain Contract: one `sequences` row is one polymer chain
+
+A `sequences` row's `sequence` column holds **one chain**. It never holds several chains behind a separator, whatever the upstream tool's own convention is.
+
+The framework already expresses a complex as several rows combined by an axis — `Bundle` for rows that are always together, `Grouped` for rows partitioned by a key. AlphaFold colon-joins a bundle's chains for ColabFold and Boltz2 allocates one chain id per bundled row; both read the axis, not the cell. A separator inside one cell bypasses that machinery entirely, and nothing in the tree splits on one, so such a value reaches every consumer as if it were a single chain. Boltz did exactly that: it mapped ProteinMPNN's `/` to a `UNK` residue and folded a complex containing a chain that should not exist, at high reported confidence.
+
+Two obligations follow.
+
+1. **A producer whose upstream emits multi-chain records splits them.** One row per chain, a `chain` column naming the chain, and a `designs` stream carrying one row per design so the rows stay groupable. `pipe_fa_to_csv_fasta.py` is the reference, shared by ProteinMPNN and LigandMPNN. Where the chain set is known at configuration time the row ids are deterministic (`<design>_<chain>`); where it is not, the producer emits a lazy `[_<?>]` suffix rather than guessing.
+2. **A consumer that cannot represent several chains refuses rather than concatenates.** Sequence-level tools (MSA generation, solubility, stability) are correct on a per-chain row and wrong on a fused one, so the split is what makes them correct for free.
+
+A single-chain design carries no suffix and no chain label. That is deliberate: adding one would change the ids of every existing pipeline to describe a distinction that is not there.
+
 #### The Ligand Contract: compounds = chemistry, structures = coordinates
 
 Ligands split cleanly across two streams, and every tool must honour the split:
@@ -354,11 +367,14 @@ It is a pure value type — ids and nothing else, no map_table and no file handl
 | Operation | Call | Example |
 |---|---|---|
 | bundling | `ids.bundled()` | `['l1','l2']` → `['l1+l2']` |
+| grouping | `Grouped(stream, groups=keys)` | `['d1_A','d1_B','d2_A']` over `['d1','d2']` → `['d1','d2']` |
 | cartesian product | `a.product(b)` | `['p1','p2'] × ['l1','l2']` → `['p1+l1','p1+l2','p2+l1','p2+l2']` |
 | suffix multiplication | `ids.multiplied_by_suffix('<1..3>')` | `['5HG6_<0..4>']` → `['5HG6_<0..4>_<1..3>']` |
 | renaming | `ids.renamed(mapping)` | cardinality-preserving; a rename that would collapse two ids raises |
 
 `+` composes axes and `_` separates a parent from its child, which is what lets `prot1+lig1` be told apart from a suffix pattern. A suffix carrying a `+` is refused for that reason.
+
+**Grouping is resolved at runtime, its cardinality at configuration time.** A `Grouped` axis contributes one output per *group id*, and those come from the group stream — so they are known at configuration time even when the member stream carries lazy ids. Which members fall in which group is `get_mapped_ids(group_ids, member_ids, unique=False)` on the compute node, using the child-match tier, so a renamed or `+`-composed id still finds its group. Do **not** pass `closest_siblings_only=True` here: it restricts to the *sibling* tier and returns nothing for a parent-to-child grouping.
 
 **Composing axes.** `compose_axes([(ids, mode), ...])` is the axis-aware entry point, and it is what tools should use: a `"bundle"` axis contributes one `+`-joined prefix however many ids it holds, a `"each"` axis contributes one id per row. **Bundle prefixes come first, ahead of the iterated axes and regardless of declared order.** That convention has a consequence worth internalizing: an id cannot be decomposed back by splitting on `+` and pairing positions with declared axes, because a bundle occupies as many positions as it has members and not the position it was declared in. Record what each axis contributed while composing instead. Getting this wrong silently mis-assigns provenance columns rather than failing.
 

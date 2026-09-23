@@ -30,13 +30,13 @@ Output:
 
 import sys
 import os
-import math
 import pandas as pd
 from typing import List, Dict, Tuple
 
 # Reuse helpers from pipe_distance_selector and biopipelines
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.pdb_parser import parse_pdb_file, select_atoms_by_ligand, Atom, STANDARD_RESIDUES
+from biopipelines.pdb_parser import (parse_pdb_file, select_atoms_by_ligand, Atom,
+                                     calculate_distance, STANDARD_RESIDUES)
 from biopipelines.sele_utils import sele_to_list, list_to_sele
 from biopipelines.biopipelines_io import load_datastream, iterate_files, load_table, lookup_table_value
 
@@ -95,11 +95,6 @@ def is_placeholder_atom(atom: Atom) -> bool:
     return atom.x == 0.0 and atom.y == 0.0 and atom.z == 0.0
 
 
-def calculate_distance(atom1: Atom, atom2: Atom) -> float:
-    dx = atom1.x - atom2.x
-    dy = atom1.y - atom2.y
-    dz = atom1.z - atom2.z
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 def resolve_restriction_spec(restrict_spec: str, structure_id: str) -> List[Tuple[str, int]]:

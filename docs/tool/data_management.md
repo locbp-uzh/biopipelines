@@ -10,6 +10,8 @@ These tools reshape and route the **tables and streams** flowing through a pipel
 
 Creates separate CSV files per metric for statistical software (GraphPad Prism).
 
+**Tags**: data
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -38,6 +40,8 @@ metrics = ExtractMetrics(
 ## Panda
 
 Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, MergeTables, ConcatenateTables, SliceTable.
+
+**Tags**: data
 
 **Environment**: `biopipelines`
 
@@ -248,6 +252,8 @@ mean_per_source = Panda(
 
 Gathers N `StandardizedOutput`s from parallel runs of the **same upstream tool** into one combined `StandardizedOutput`. Designed to pair with `with Parallel():` (see *Parallel batches* under [Resources](../user_manual.md#resources) in the user manual) for the canonical fan-out / fan-in pattern.
 
+**Tags**: data
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -290,6 +296,8 @@ combined = Pool(runs=runs)
 ## ReMap
 
 Renames IDs across all streams and tables from a source tool output. At execution time, files are symlinked and CSV tables are rewritten with new IDs.
+
+**Tags**: data
 
 **Environment**: `biopipelines`
 
@@ -344,6 +352,8 @@ remapped = ReMap(source=tool_a, onto=tool_c, map=tool_b)
 ## Selection
 
 Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right.
+
+**Tags**: data, residues
 
 **Environment**: `biopipelines`
 

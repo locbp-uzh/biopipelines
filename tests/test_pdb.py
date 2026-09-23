@@ -185,6 +185,51 @@ def test_pdb_convert_none_is_mixed_format(
     assert p.streams.structures.format == "pdb|cif"
 
 
+def test_pdb_convert_overrides_upstream_format(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """An explicit convert= must beat the upstream stream's own format.
+
+    Regression: the upstream format used to win, so PDB(tool, convert="pdb")
+    on a cif-emitting tool (ESMFold2) silently stayed cif and fed .cif to
+    downstream tools that only parse .pdb.
+    """
+    from biopipelines.pdb import PDB
+    from biopipelines.datastream import DataStream
+
+    upstream = DataStream(name="structures", ids=["d1", "d2"],
+                          files=["<id>.cif"], format="cif")
+
+    pipeline = new_pipeline("pdb_convert_overrides_upstream")
+    with pipeline:
+        p = PDB(pdbs=upstream, convert="pdb")
+        pipeline.save()
+
+    record_case(input="PDB(cif_stream, convert='pdb')",
+                expected="pdb", actual=p.streams.structures.format)
+    assert p.streams.structures.format == "pdb"
+
+
+def test_pdb_upstream_format_used_when_no_convert(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Without convert=, the upstream format is still inherited."""
+    from biopipelines.pdb import PDB
+    from biopipelines.datastream import DataStream
+
+    upstream = DataStream(name="structures", ids=["d1"],
+                          files=["<id>.cif"], format="cif")
+
+    pipeline = new_pipeline("pdb_upstream_format_default")
+    with pipeline:
+        p = PDB(pdbs=upstream)
+        pipeline.save()
+
+    record_case(input="PDB(cif_stream)",
+                expected="cif", actual=p.streams.structures.format)
+    assert p.streams.structures.format == "cif"
+
+
 def test_pdb_invalid_convert_raises(record_case):
     from biopipelines.pdb import PDB
 

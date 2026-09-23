@@ -1059,12 +1059,40 @@ def load_upstream_provenance_row(
     }
 
 
+def unfilled_slot_rows(declared_output_ids: List[str], produced_count: int,
+                       step_tool_name: str,
+                       operations: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """The declared output ids no surviving row reached, as missing-table rows.
+
+    ``head(n)`` fixes how many outputs the tool DECLARES; a filter earlier in the
+    chain decides how many rows there actually are. The surplus slots name no
+    upstream id, so no id-matching tier can excuse them from the missing manifest
+    the dropped inputs produced — they have to be accounted for under the ids the
+    tool declared them by, or the completion check demands files that correctly
+    have nothing to contain.
+    """
+    if not declared_output_ids or produced_count >= len(declared_output_ids):
+        return []
+
+    limits = [(op.get('type'), op.get('params', {}).get('n'))
+              for op in operations
+              if op.get('type') in ('head', 'tail', 'sample')
+              and op.get('params', {}).get('n') is not None]
+    op_type, n = min(limits, key=lambda pair: pair[1]) if limits else ('head', len(declared_output_ids))
+    cause = (f"Unfilled output slot: {op_type}({n}) declared "
+             f"{len(declared_output_ids)} outputs; {produced_count} rows survived")
+    return [{'id': slot_id, 'removed_by': step_tool_name, 'kind': 'filter', 'cause': cause}
+            for slot_id in declared_output_ids[produced_count:]]
+
+
 def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                        output_folder: str, step_tool_name: str,
                        operations: List[Dict[str, Any]],
                        rename_map: Optional[Dict[str, str]] = None,
                        removed_by_op: Optional[Dict[str, str]] = None,
-                       missing_csv_path: Optional[str] = None) -> None:
+                       missing_csv_path: Optional[str] = None,
+                       declared_output_ids: Optional[List[str]] = None,
+                       produced_count: int = 0) -> None:
     """
     Create missing.csv with IDs that were filtered out or renamed.
 
@@ -1076,6 +1104,8 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
         operations: List of operation dicts from config
         rename_map: Optional mapping from original ID to new renamed ID
         removed_by_op: Optional per-ID cause mapping from execution tracking
+        declared_output_ids: The ids this step declared at configuration time
+        produced_count: How many of them a surviving row actually filled
     """
     all_ids = set(str(i) for i in original_ids)
     passed_ids = set(str(i) for i in filtered_ids)
@@ -1097,6 +1127,9 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                     'kind': 'filter',
                     'cause': f"Renamed to {rename_map[orig_str]}"
                 })
+
+    missing_data.extend(unfilled_slot_rows(declared_output_ids or [], produced_count,
+                                           step_tool_name, operations))
 
     if missing_data:
         missing_df = pd.DataFrame(missing_data)
@@ -1422,7 +1455,10 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         result_df = result_df.copy()
         result_df['original_id'] = result_df['id']
         result_df['id'] = new_ids
-        print(f"\nApplied rename: {rename}_1 to {rename}_{len(result_df)}")
+        if len(result_df):
+            print(f"\nApplied rename: {rename}_1 to {rename}_{len(result_df)}")
+        else:
+            print(f"\nNo rows to rename to {rename}_N: the operation chain kept none")
 
     # Create output directory
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
@@ -1647,14 +1683,18 @@ def run_panda(config_data: Dict[str, Any]) -> None:
 
     # Create missing.csv
     missing_csv_path = config_data.get('missing_csv')
-    if original_ids:
+    declared_output_ids = config_data.get('declared_output_ids') or []
+    # Declared slots need accounting even when no input id was dropped.
+    if original_ids or declared_output_ids:
         output_dir = os.path.dirname(output_csv)
         step_tool_name = config_data.get('step_tool_name') or os.path.basename(output_dir)
         create_missing_csv(original_ids, filtered_ids_for_lookup, output_dir,
                            step_tool_name, operations,
                            rename_map=original_to_new_id if original_to_new_id else None,
                            removed_by_op=removed_by_op,
-                           missing_csv_path=missing_csv_path)
+                           missing_csv_path=missing_csv_path,
+                           declared_output_ids=declared_output_ids,
+                           produced_count=len(filtered_ids))
 
     # Merge upstream missing tables (from pool sources)
     upstream_missing_paths = config_data.get('upstream_missing_paths', [])

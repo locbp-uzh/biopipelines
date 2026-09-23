@@ -188,3 +188,78 @@ def test_it_works_when_timeout_is_missing(tmp_path):
 
     assert proc.returncode == 0
     assert "timeout: command not found" not in proc.stderr
+
+
+def _git_stub_with_origin(origin: str, git_dir: str, asked_file: str,
+                          ancestor_exit: int = 1, sha: str = "b" * 40) -> str:
+    """Like `_git_stub`, but answers `remote get-url origin` and records the URL that
+
+    `ls-remote` was actually asked for. It records to a file rather than stderr: the
+    script sends ls-remote's stderr to /dev/null, so a stderr probe sees nothing.
+    """
+    return (
+        'for a in "$@"; do\n'
+        '  case "$a" in\n'
+        f'    remote) echo "{origin}"; exit 0 ;;\n'
+        f'    ls-remote) echo "$4" > "{asked_file}"; echo "{sha}\trefs/heads/main"; exit 0 ;;\n'
+        f'    merge-base) exit {ancestor_exit} ;;\n'
+        f'    rev-parse) echo "{git_dir}"; exit 0 ;;\n'
+        "  esac\n"
+        "done\n"
+        "exit 0\n"
+    )
+
+
+def _asked(tmp_path) -> str:
+    """Where the stub records the URL, in a form bash can write to."""
+    return str(tmp_path / "asked.txt").replace("\\", "/")
+
+
+class TestWhichRemoteIsAsked:
+    """The lab's GitLab `main` is the line an internal clone tracks; GitHub's is a mirror.
+
+    Asking GitHub for every checkout answered the wrong question internally: GitHub's HEAD is
+    an ancestor of an internal clone's, so the check stayed silent while the line that had
+    actually moved went unmentioned.
+    """
+
+    def test_the_checkouts_own_origin_is_queried(self, tmp_path):
+        origin = "https://gitlab.uzh.ch/locbp/public/biopipelines-locbp.git"
+        asked = Path(_asked(tmp_path))
+        proc = _run(tmp_path, _git_stub_with_origin(origin, _git_dir(tmp_path), str(asked)))
+        assert asked.read_text().strip() == origin, "ls-remote did not use the configured origin"
+        assert "github.com" not in proc.stdout
+
+    def test_the_notice_names_that_remote(self, tmp_path):
+        origin = "https://gitlab.uzh.ch/locbp/public/biopipelines-locbp.git"
+        proc = _run(tmp_path, _git_stub_with_origin(origin, _git_dir(tmp_path), _asked(tmp_path)))
+        assert "gitlab.uzh.ch/locbp/public/biopipelines-locbp" in proc.stdout
+        assert ".git" not in proc.stdout.split("branch")[0].split("available")[-1]
+
+    def test_a_checkout_with_no_origin_falls_back_to_github(self, tmp_path):
+        """An export or a tarball still has a release line worth checking."""
+        proc = _run(tmp_path, _git_stub(ancestor_exit=1, git_dir=_git_dir(tmp_path)))
+        assert "github.com/locbp-uzh/biopipelines" in proc.stdout
+
+    def test_credentials_in_a_remote_url_never_reach_the_output(self, tmp_path):
+        """A token pasted into a remote would otherwise land in every job's log."""
+        origin = "https://oauth2:glpat-SECRETTOKEN@gitlab.uzh.ch/locbp/public/bp.git"
+        proc = _run(tmp_path, _git_stub_with_origin(origin, _git_dir(tmp_path), _asked(tmp_path)))
+        assert "glpat-SECRETTOKEN" not in proc.stdout
+        assert "oauth2" not in proc.stdout
+        assert "gitlab.uzh.ch/locbp/public/bp" in proc.stdout
+
+    def test_an_ssh_remote_is_shown_as_host_and_path(self, tmp_path):
+        origin = "git@gitlab.uzh.ch:locbp/public/biopipelines-locbp.git"
+        proc = _run(tmp_path, _git_stub_with_origin(origin, _git_dir(tmp_path), _asked(tmp_path)))
+        assert "gitlab.uzh.ch/locbp/public/biopipelines-locbp" in proc.stdout
+
+
+def test_it_never_waits_for_a_password(tmp_path):
+    """An internal remote can prompt, and a prompt inside ./submit hangs the job.
+
+    `timeout` bounds this only where coreutils exists, so refusing to prompt is the real guard.
+    """
+    source = CHECK_UPDATES.read_text(encoding="utf-8")
+    assert "GIT_TERMINAL_PROMPT=0" in source
+    assert "BatchMode=yes" in source

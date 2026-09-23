@@ -59,7 +59,7 @@ class RFdiffusion3(BaseConfig):
         target = PDB(pdb="7KDL")
         binder = RFdiffusion3(
             pdb=target,
-            contig="A50-100,80-100,\\0,A1-50",
+            contig="A50-100,80-100,/0,A1-50",
             select_hotspots="A67,A89",
             num_designs=20
         )
@@ -94,7 +94,7 @@ class RFdiffusion3(BaseConfig):
         # Advanced: Full JSON control
         config = {
             "design_1": {
-                "contig": "50-80,\\0,A1-100",
+                "contig": "50-80,/0,A1-100",
                 "length": "150-200",
                 "select_unfixed_sequence": "A20-35",
                 "partial_t": 10.0
@@ -107,9 +107,9 @@ class RFdiffusion3(BaseConfig):
             Use "min-max" for range or int for exact length.
             Example: "100-150" or 120
         contig (str or table column): Contig specification for motif-based design
-            (requires input PDB). Use '\\0' for chain breaks. Chain letters reference
+            (requires input PDB). Use '/0' for chain breaks. Chain letters reference
             input structure.
-            Example: "A50-100,80-100,\\0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
+            Example: "A50-100,80-100,/0,A1-50" (keep A50-100, design 80-100, break, keep A1-50)
             A ``tool.tables.X.col`` reference (or a ``(TableInfo, "column")`` tuple)
             gives each input PDB its own contig, resolved by id at runtime — use it
             when the structures differ in length, since one literal cannot name a
@@ -197,7 +197,7 @@ class RFdiffusion3(BaseConfig):
         - All-atom model (4 backbone + 10 sidechain atoms)
         - Use 'length' for de novo design, 'contig' for motif-based design
         - 'contig' requires input PDB, even for numeric ranges
-        - Chain breaks use '\\0' not '/' (different from RFdiffusion)
+        - Chain breaks use the literal token '/0'
         - Advanced parameters available via json_config
 
     See Also:
@@ -210,7 +210,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.4"
+    TOOL_VERSION = "3.6"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -326,7 +326,7 @@ fi
         Initialize RFdiffusion3 configuration.
 
         Args:
-            contig: Contig specification (use '\\0' for chain breaks)
+            contig: Contig specification (use '/0' for chain breaks)
             length: Length constraint (str "min-max" or int)
             pdb: Input PDB structure as DataStream or StandardizedOutput (optional)
             ligand: Ligand as a compounds stream (Ligand(codes="LIG") or any
@@ -501,18 +501,26 @@ fi
         if self.contig_reference is not None and self.pdb_stream is None:
             raise ValueError("A per-PDB contig reference requires an input structure (pdb=)")
 
-        # Check for incorrect chain break syntax
-        if self.contig and '/' in self.contig:
+        # Check for incorrect chain break syntax. The token is the literal
+        # "/0": foundry's contig parser (foundry/utils/components.py,
+        # get_design_pattern_with_constraints) tests `part == "/0"` and lets
+        # every other part fall through to int(part), so "\0" only fails at
+        # runtime — after the model has loaded on the GPU — with
+        # "invalid literal for int() with base 10: '\\0'".
+        if any('\\0' in contig for contig in self._all_contigs()):
             raise ValueError(
-                "RFdiffusion3 uses '\\0' for chain breaks, not '/'. "
+                "RFdiffusion3 uses '/0' for chain breaks, not '\\0'. "
                 "Please update your contig specification. "
-                "Example: '50-80,\\0,A1-100' instead of '50-80,/,A1-100'"
+                "Example: '60-95,/0,A24-220' instead of '60-95,\\0,A24-220'"
             )
 
         # Validate num_designs
         if self.num_designs <= 0:
             raise ValueError("num_designs must be positive")
 
+        # "/" is not in the freeform guard's reject set, so a "/0" chain break
+        # passes here unmodified; backslashes stay rejected, which is correct
+        # now that "\0" is known to be invalid syntax rather than required.
         _validate_freeform_string("contig", self.contig)
         _validate_freeform_string("prefix", self.prefix)
         if isinstance(self.length, str):
@@ -1059,7 +1067,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
 
         sequences = DataStream(
             name="sequences",
-            ids=structure_ids,
+            ids=self._sequence_row_ids(structure_ids),
             files=[],
             map_table=self.sequences_csv,
             format="csv"
@@ -1071,6 +1079,48 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             "tables": tables,
             "output_folder": self.output_folder
         }
+
+    def _sequence_row_ids(self, structure_ids: List[str]) -> List[str]:
+        """Declared ids for the `sequences` rows, which are per chain, not per structure.
+
+        `pipe_rfdiffusion3_postprocess.py` writes `<structure>_<chain>` when a design has more than one chain and the bare structure id when it has one. A contig carrying the `/0` chain break is exactly the case that produces several, and until that token was accepted the wrapper rejected every multi-chain contig, so declaring one id per structure was correct by construction. It no longer is: a consumer selecting `bb_1` against rows `bb_1_A, bb_1_B` matches nothing and the step silently folds zero designs.
+
+        The lazy bracket covers both shapes, so a single-chain design keeps the ids it had.
+        """
+        if not self._contig_has_chain_break():
+            return list(structure_ids)
+        return [f"{sid}[_<?>]" for sid in structure_ids]
+
+    def _contig_has_chain_break(self) -> bool:
+        """Can this contig yield more than one chain? Unknown means yes, since a missed chain row is silent."""
+        if self.contig_reference is not None:
+            # The contig arrives per structure at runtime and cannot be read here.
+            return True
+        return any("/0" in contig for contig in self._all_contigs())
+
+    def _all_contigs(self) -> List[str]:
+        """The `contig` argument plus every `contig` inside `json_config`, which is a first-class way to give one."""
+        found = [self.contig] if isinstance(self.contig, str) and self.contig else []
+        config = getattr(self, "json_config", None)
+        if isinstance(config, str):
+            try:
+                config = json.loads(config)
+            except ValueError:
+                return found
+
+        def walk(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "contig" and isinstance(value, str):
+                        found.append(value)
+                    else:
+                        walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(config)
+        return found
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration including RFdiffusion3-specific parameters."""

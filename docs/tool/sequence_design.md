@@ -8,6 +8,8 @@
 
 Reverse-translates protein sequences to DNA with organism-specific codon optimization. Uses thresholded weighted codon sampling based on CoCoPUTs genome frequency tables.
 
+**Tags**: design-sequence, nucleic-acid, protein, sequence-only
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -58,6 +60,8 @@ dna = DNAEncoder(
 
 Fast structure-conditioned inverse folding. Frame2Seq is a non-autoregressive masked-language model that generates multiple sequences per backbone in a single forward pass — same role as ProteinMPNN (structure → sequence), but materially faster, with slightly higher native-sequence recovery on CATH 4.2. Output IDs follow the ProteinMPNN multiplier convention `<structure_id>_<n>`.
 
+**Tags**: inverse-folding, protein
+
 **References**: https://github.com/dakpinaroglu/Frame2seq · https://arxiv.org/abs/2312.02447
 
 **Environment**: `frame2seq`
@@ -95,6 +99,8 @@ seqs = Frame2Seq(structures=rfd, num_sequences=10, temperature=0.5)
 ### Fuse
 
 Concatenates multiple sequences with flexible linkers. Creates fusion sequences with customizable linker lengths for domain engineering. Works with both protein and DNA sequences. Outputs include sequence/linker position columns in PyMOL selection format for easy visualization.
+
+**Tags**: design-sequence, protein, nucleic-acid, sequence-only
 
 **Environment**: `biopipelines`
 
@@ -140,6 +146,8 @@ fused = Fuse(
 ### LASErMPNN
 
 Ligand-conditioned inverse folding with all-atom sidechain packing. LASErMPNN redesigns a protein sequence around a bound ligand and packs the sidechains in a single pass, emitting full-atom complex PDBs (designed sequence + rotamers + ligand). Unlike LigandMPNN it reads the ligand straight from the input PDB's HETATM records — there is no ligand-code argument — and it controls fixed vs designed positions through the input B-factor column (`fixed`/`redesigned` are stamped as B-factors at runtime and run with `--fix_beta`). Output IDs follow the multiplier convention `<structure_id>_<n>`.
+
+**Tags**: inverse-folding, design-sequence, protein, small-molecule, pocket, all-atom, sidechain
 
 **References**: https://github.com/polizzilab/LASErMPNN
 
@@ -199,6 +207,8 @@ laser = LASErMPNN(
 
 Designs protein sequences optimized for ligand binding. Specialized version of ProteinMPNN that considers protein-ligand interactions during sequence design.
 
+**Tags**: inverse-folding, design-sequence, protein, small-molecule, pocket, all-atom, sidechain
+
 **References**: https://www.nature.com/articles/s41592-025-02626-1.
 
 **Installation**: As from the official repository (https://github.com/dauparas/LigandMPNN), go to your data folder then run:
@@ -217,7 +227,7 @@ pip3 install -r requirements.txt
 - `fixed`: str | (TableInfo, column) = "" - Fixed positions (LigandMPNN format "A3 A4 A5" or table reference)
 - `redesigned`: str | (TableInfo, column) = "" - Designed positions (LigandMPNN format or table reference)
 - `design_within`: float = 5.0 - Distance in Angstroms from ligand for post-generation analysis only (does not control design). For actually designing residues within a distance, use [DistanceSelector](analysis.md#distanceselector) to select positions first.
-- `chain`: str = "A" - Default chain ID applied to chainless position input (e.g. when positions are given as "10-20" without chain prefix)
+- `chains`: str | list[str] | None = None - The chains this step is about: which become `sequences` rows, and which a chainless position selection attaches to. Same contract as `ProteinMPNN`'s `chains` (see *Multi-chain backbones* under ProteinMPNN); LigandMPNN joins its chains with `:` rather than `/`. The old `chain` parameter is a deprecated alias. A chainless position on a multi-chain structure raises rather than defaulting to `"A"` as it used to.
 - `model`: str = "v_32_010" - LigandMPNN model version (v_32_005, v_32_010, v_32_020, v_32_025)
 - `num_batches`: int = 1 - Number of batches to run. Total sequences = num_sequences × num_batches
 - `remove_duplicates`: bool = True - Drop duplicate sequences from the output
@@ -229,18 +239,25 @@ pip3 install -r requirements.txt
 - `packs_per_design`: int = 1 - Independent packing samples per sequence (upstream default is 4). Each multiplies the `structures` stream.
 - `pack_with_ligand_context`: bool = True - Pack in the ligand's presence rather than against the bare backbone. For a ligand-binding pocket the ligand is the context that matters.
 
-**Streams**: `sequences`, `fasta` (one multi-record FASTA of the designs), `structures` (only when `pack_side_chains=True`)
+**Streams**: `sequences` (one row per designed chain), `designs` (one row per design — the grouping key), `fasta` (one multi-record FASTA of the designs), `structures` (only when `pack_side_chains=True`)
 
 **Tables**:
 - `sequences`:
 
-  | id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps |
-  |----|----------|--------|---|------|-------------------|-------------------|---------|------|
+  | id | design | structures.id | chain | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps |
+  |----|--------|---------------|-------|----------|--------|---|------|-------------------|-------------------|---------|------|
+
+- `designs`:
+
+  | id | structures.id | source_pdb | n_chains | overall_confidence | ligand_confidence | seq_rec |
+  |----|---------------|------------|----------|--------------------|-------------------|---------|
 
 - `missing`:
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
+
+**Note**: `sample` starts at 1 — the ids are `<structures.id>_1` ... `<structures.id>_<num_sequences>`. The input sequence heads each raw `.fa` and is dropped by the converter, so no row describes it.
 
 **Example**:
 ```python
@@ -260,6 +277,8 @@ lmpnn = LigandMPNN(
 ### Mutagenesis
 
 Performs mutagenesis at specified positions. Generates systematic amino acid substitutions for experimental library design or computational scanning.
+
+**Tags**: design-sequence, protein, residues, sequence-only
 
 **Environment**: `MutationEnv`
 
@@ -342,6 +361,8 @@ folded = AlphaFold(proteins=sdm, msas=sdm)   # per-mutant MSAs, keyed by mutant 
 
 Generates new protein sequences by composing mutations based on frequency analysis. Creates combinatorial mutants from mutation profiles with different sampling strategies.
 
+**Tags**: design-sequence, protein, residues, sequence-only
+
 **Installation**: Same environment as MutationProfiler.
 
 **Parameters**:
@@ -387,6 +408,8 @@ composer = MutationComposer(
 
 Designs protein sequences for given backbone structures. Uses graph neural networks to optimize sequences for structure stability while respecting fixed/designed region constraints.
 
+**Tags**: inverse-folding, design-sequence, protein
+
 **References**: https://www.science.org/doi/10.1126/science.add2187.
 
 **Installation**: Go to your data folder and clone the official repository (https://github.com/dauparas/ProteinMPNN). The model will then work in the same environment as RFdiffusion.
@@ -397,9 +420,9 @@ git clone https://github.com/dauparas/ProteinMPN
 **Parameters**:
 - `structures`: Union[DataStream, StandardizedOutput] (required) - Input structures
 - `num_sequences`: int = 1 - Number of sequences per structure
-- `fixed`: str | (TableInfo, column) = "" - Fixed positions (PyMOL selection or table reference)
-- `redesigned`: str | (TableInfo, column) = "" - Redesigned positions (PyMOL selection or table reference)
-- `chain`: str = "auto" - Chain to apply fixed positions ("auto" detects from input structure)
+- `fixed`: str | (TableInfo, column) | dict = "" - Fixed positions (PyMOL selection, table reference, or `{chain: selection}`)
+- `redesigned`: str | (TableInfo, column) | dict = "" - Redesigned positions, same three forms
+- `chains`: str | list[str] | None = None - The chains this step is about. `None` expects a single-chain backbone; `"A"` uses only that chain; `["A","B"]` one row per named chain; `"all"` every chain. See *Multi-chain backbones* below. (The old `chain` parameter is a deprecated alias.)
 - `sampling_temp`: float = 0.1 - Sampling temperature
 - `model_name`: str = "v_48_020" - ProteinMPNN model variant
 - `soluble_model`: bool = False - Use the soluble protein model (see `SolubleMPNN` for a convenience wrapper that locks this on)
@@ -410,20 +433,58 @@ git clone https://github.com/dauparas/ProteinMPN
 - `seed`: int = 0 - Random seed (0 = random)
 - `ca_noise_std`: float = 0.0 - Std. dev. of Gaussian noise added to Cα coordinates before design
 
-**Streams**: `sequences`, `fasta` (one multi-record FASTA of the designs)
+**Streams**: `sequences` (one row per designed chain), `designs` (one row per design — the grouping key), `fasta` (one multi-record FASTA of the designs)
 
 **Tables**:
 - `sequences`:
 
-  | id | structures.id | source_pdb | sequence | score | seq_recovery | gaps |
-  |----|---------------|------------|----------|-------|--------------|------|
+  | id | design | structures.id | source_pdb | chain | sequence | score | seq_recovery | gaps |
+  |----|--------|---------------|------------|-------|----------|-------|--------------|------|
+
+- `designs`:
+
+  | id | structures.id | source_pdb | n_chains | score | seq_recovery |
+  |----|---------------|------------|----------|-------|--------------|
 
 - `missing`:
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
 
-**Note**: Sample 0 is the original/template sequence, samples 1+ are designs.
+#### Multi-chain backbones
+
+ProteinMPNN writes every chain of its backbone into one record, joined by `/`. A `sequences` row is one polymer chain, so `chains=` says which chains become rows and the `designs` stream keeps the design itself addressable.
+
+| `chains=` | `sequences` ids | Rows per design |
+|---|---|---|
+| `None` (default) | `<structure>_<n>` | 1, and a multi-chain backbone is a failure in `missing.csv` naming the chains found |
+| `"A"` / `["A"]` | `<structure>_<n>` | 1 — the named chain |
+| `["A","B"]` | `<structure>_<n>_<chain>` | one per named chain |
+| `"all"` | `<structure>_<n>[_<?>]` (lazy) | one per chain in the backbone |
+
+Only a setting that can emit more than one chain adds a suffix, so a single-chain run keeps the ids it has always had. `"all"` is lazy because the chain letters are only known once the backbone is read; naming the chains instead keeps the ids deterministic.
+
+Chain letters are resolved by matching each segment's length against the backbone's per-chain residue counts. A design whose segments cannot be reconciled with its chains is dropped into `missing.csv` rather than mislabelled.
+
+**`chains` also says where chainless positions go.** There used to be a separate `chain` parameter for that, one letter away from this one and meaning something else. Naming the chains in play answers both questions, so there is now one parameter; `chain=` still binds it and prints a deprecation line.
+
+A selection with no chain prefix (`redesigned="10-20"`) attaches to the structure's only chain. On a structure with several, it is ambiguous and **raises** — it used to be attached to whichever chain came first, silently. Say which residues belong to which chain with a dict:
+
+```python
+ProteinMPNN(structures=backbones,
+            chains=["A", "B"],
+            redesigned={"A": backbones.tables.structures.designed, "B": "1-12"})
+```
+
+Each value takes any form the parameter accepts, so one chain can carry a literal and another a column reference — which is what the dict is *for*. A fully chain-qualified string (`"A10-20+B5"`) is unambiguous on its own and needs no dict: selections are parsed chain-aware, so each residue goes to the chain it names. This is also what RFdiffusion's `designed` column already emits, so a table reference carries its chains through without any extra spelling.
+
+To fold the chains of a design back into one complex, wrap the tool in `Grouped` — it groups the chain rows by the `designs` stream:
+
+```python
+folded = Boltz2(proteins=Bundle(Grouped(pmpnn), partner))
+```
+
+**Note**: The `designs` table holds **designs only**, one row each, with ids `<structures.id>_1` ... `<structures.id>_<num_sequences>`. Each raw `execution/seqs/<structure>.fa` opens with the input sequence that was fed in, and the converter drops that first record — so there is no `_0` row, and the `fasta` stream carries no native sequence either. To compare a design against its input, take the input from the structure it came from (`structures.id`); it is not in this table.
 
 **Example**:
 ```python
@@ -443,6 +504,8 @@ pmpnn = ProteinMPNN(
 
 `ProteinMPNN` with the soluble model locked on. Identical to `ProteinMPNN` in every other respect — same parameters (minus `soluble_model`), same environment and output. Use it instead of `ProteinMPNN(..., soluble_model=True)` when designing for soluble expression.
 
+**Tags**: inverse-folding, design-sequence, protein
+
 **Example**:
 ```python
 from biopipelines import SolubleMPNN
@@ -455,6 +518,8 @@ seqs = SolubleMPNN(structures=rfd, num_sequences=10)
 ### RBSDesigner
 
 Designs synthetic ribosome binding sites (RBS) to control protein expression in bacteria. Uses the Salis thermodynamic model to predict translation initiation rates and a simulated annealing optimizer to design RBS sequences matching a target expression level. Requires ViennaRNA for RNA free energy calculations.
+
+**Tags**: design-sequence, nucleic-acid, energy, sequence-only
 
 **Reference**: Salis, Mirsky & Voigt, *Nat. Biotechnol.* **27**, 946–950 (2009). doi:10.1038/nbt.1568
 
@@ -516,6 +581,8 @@ dG_tot = dG_mRNA:rRNA + dG_start + dG_spacing - dG_standby - dG_mRNA
 ### StitchSequences
 
 Combines a template sequence with two types of modifications: **substitutions** (position-to-position copying from equal-length sequences) and **indels** (segment replacement that can change sequence length). Generates all Cartesian product combinations.
+
+**Tags**: design-sequence, protein, sequence-only
 
 **Environment**: `biopipelines`
 

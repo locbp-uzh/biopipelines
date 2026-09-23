@@ -19,6 +19,8 @@ Where:
 - σ(x) = sigmoid function = 1/(1+e⁻ˣ)
 - σ⁻¹(p) = logit function = log(p/(1-p))
 
+**Tags**: data, protein, residues
+
 **Installation**: Requires the standard mutation-analysis Python environment with pandas, NumPy, matplotlib, and logomaker.
 
 **Parameters**:
@@ -101,6 +103,8 @@ composer = MutationComposer(
 
 Analyzes mutation patterns across sequence sets. Calculates position-specific amino acid frequencies for understanding sequence diversity.
 
+**Tags**: measure, data, protein, residues
+
 **Installation**: This tool only needs the a small environment:
 ```bash
 mamba create -n MutationEnv seaborn matplotlib pandas logomaker scipy
@@ -172,6 +176,8 @@ Where:
 - s²ᵢ,ₐₐ, s²ᵢ,¬ₐₐ = unbiased variances (ddof=1)
 
 Note: When n ≤ 1 for either group, correlation is set to 0.
+
+**Tags**: measure, data, protein, residues, fitness
 
 **Installation**: Requires the standard mutation-analysis Python environment with pandas, NumPy, matplotlib, and logomaker.
 

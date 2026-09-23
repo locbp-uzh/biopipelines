@@ -19,7 +19,7 @@ try:
     from .datastream import DataStream
     from .datastream_resolver import resolve_input_to_datastream
     from .combinatorics import (
-        Bundle, Each, get_mode, contains_combinatorics_wrapper,
+        Bundle, Each, Grouped, get_mode, contains_combinatorics_wrapper,
         generate_combinatorics_config, predict_output_ids_with_provenance,
     )
     from ._weights_cache import link_weights_block
@@ -31,7 +31,7 @@ except ImportError:
     from datastream import DataStream
     from datastream_resolver import resolve_input_to_datastream
     from combinatorics import (
-        Bundle, Each, get_mode, contains_combinatorics_wrapper,
+        Bundle, Each, Grouped, get_mode, contains_combinatorics_wrapper,
         generate_combinatorics_config, predict_output_ids_with_provenance,
     )
     from _weights_cache import link_weights_block
@@ -66,9 +66,15 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.7"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
+
+    # Pinned upstream versions, from the official install instructions at
+    # https://github.com/sokrypton/ColabFold#installation. mmseqs2 is pinned
+    # because colabfold_search is tested against that exact build.
+    COLABFOLD_VERSION = "1.6.3"
+    MMSEQS2_VERSION = "18.8cc5c"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -153,49 +159,54 @@ else
 fi
 """
 
-        # Skip only if the install dir AND a working colabfold-conda env are
-        # present — a bare dir (or one whose env was clobbered, e.g. by a
-        # downstream tool upgrading jax) must not read as "installed".
+        # Prefix env, not a named one: MMseqs2Server's bash resolves
+        # colabfold_search and mmseqs at <AlphaFold>/colabfold-conda/bin, and
+        # AF2BIND/BioEmu read params from <AlphaFoldParams>. Both paths are the
+        # layout LocalColabFold used to produce, so they are kept.
+        prefix = f"{repo_dir}/colabfold-conda"
+        # `import colabfold` is not a sufficient check: it imports the package
+        # __init__, which stays importable after an in-place pip upgrade breaks
+        # the model stack. `colabfold_batch --help` walks the whole jax chain.
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -d "{repo_dir}" ] && [ -x "{repo_dir}/colabfold-conda/bin/colabfold_batch" ] \\
-   && "{repo_dir}/colabfold-conda/bin/python" -c "import colabfold" >/dev/null 2>&1; then
-    echo "AlphaFold (LocalColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
+if [ -x "{prefix}/bin/colabfold_batch" ] && "{prefix}/bin/colabfold_batch" --help >/dev/null 2>&1; then
+    echo "AlphaFold (ColabFold) already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
-        # On force_reinstall, remove the bundled Miniconda and the conda env —
-        # install_colabbatch_linux.sh's Miniconda installer aborts if its target
-        # dir already exists. Keep colabfold/params so the weights aren't re-downloaded.
-        remove_block = f"""rm -rf "{repo_dir}/conda" "{repo_dir}/colabfold-conda"
+        # Keep <AlphaFoldParams> (the 5+ GB of AF2 weights) across reinstalls.
+        remove_block = f"""rm -rf "{prefix}"
 """ if force_reinstall else ""
-        return f"""echo "=== Installing AlphaFold (LocalColabFold) ==="
-{skip}{remove_block}cd {parent_dir}
-# install_colabbatch_linux.sh builds colabfold_batch into
-# <dir>/localcolabfold/colabfold-conda via its own bundled Miniconda
-# (python 3.10, jax[cuda11_pip]). Run it unmodified — it sources only the
-# `conda` shell function, so rewriting conda->mamba would break its internal
-# `conda activate` and leak installs into the active env. The subshell runs it
-# with no host env active (stray writes can't touch a tool env) and accepts
-# conda's ToS non-interactively (else `conda create` aborts).
-wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/v1.5.5/install_colabbatch_linux.sh
-# Ensure pip in the env it creates: `conda create ... python=3.10` (conda-forge
-# python ships no pip) is followed by `colabfold-conda/bin/pip install`, which
-# would otherwise be missing. Add pip to the create spec.
-sed -i 's/git python=3.10/git python=3.10 pip/' install_colabbatch_linux.sh
-(
-export CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
-{env_manager} deactivate 2>/dev/null || true
-bash install_colabbatch_linux.sh
-)
-rm install_colabbatch_linux.sh
+        return f"""echo "=== Installing AlphaFold (ColabFold {cls.COLABFOLD_VERSION}) ==="
+{skip}{remove_block}mkdir -p "{repo_dir}"
 
-# Verify installation
-if [ -d "{repo_dir}" ] && [ -x "{repo_dir}/colabfold-conda/bin/colabfold_batch" ]; then
+# Official instructions: https://github.com/sokrypton/ColabFold#installation
+# conda supplies python and the mmseqs2 build colabfold_search is tested
+# against; pip supplies colabfold and the CUDA 12 jax/openmm wheels.
+{env_manager} create -y -p "{prefix}" -c conda-forge -c bioconda \\
+    python=3.13 pip mmseqs2={cls.MMSEQS2_VERSION}
+"{prefix}/bin/pip" install --no-input \\
+    "colabfold[alphafold,openmm]=={cls.COLABFOLD_VERSION}" "jax[cuda12]" "openmm[cuda12]"
+
+# Verify installation. The jax_cuda12_plugin import is what catches a CPU-only
+# jax, which imports and runs fine on a login node and then folds on CPU; it is
+# importable without a GPU present, so this check works on any node.
+if [ -x "{prefix}/bin/colabfold_batch" ] \\
+   && [ -x "{prefix}/bin/colabfold_search" ] \\
+   && [ -x "{prefix}/bin/mmseqs" ] \\
+   && "{prefix}/bin/colabfold_batch" --help >/dev/null 2>&1 \\
+   && "{prefix}/bin/python" -c "import jax_cuda12_plugin" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== AlphaFold installation complete ==="
 else
-    echo "ERROR: AlphaFold verification failed (colabfold_batch not found)"
+    echo "ERROR: AlphaFold verification failed."
+    echo "  colabfold_batch:    $([ -x "{prefix}/bin/colabfold_batch" ] && echo present || echo MISSING)"
+    echo "  colabfold_search:   $([ -x "{prefix}/bin/colabfold_search" ] && echo present || echo MISSING)"
+    echo "  mmseqs:             $([ -x "{prefix}/bin/mmseqs" ] && echo present || echo MISSING)"
+    "{prefix}/bin/colabfold_batch" --help >/dev/null 2>&1 \\
+        && echo "  colabfold_batch --help: ok" || echo "  colabfold_batch --help: FAILED"
+    "{prefix}/bin/python" -c "import jax_cuda12_plugin" >/dev/null 2>&1 \\
+        && echo "  jax CUDA 12 plugin: present" || echo "  jax CUDA 12 plugin: MISSING (jax would run on CPU)"
     exit 1
 fi
 """
@@ -293,6 +304,16 @@ fi
 
         super().__init__(**kwargs)
 
+    @staticmethod
+    def _contains_grouped(value) -> bool:
+        if isinstance(value, Grouped):
+            return True
+        if isinstance(value, (Bundle, Each)):
+            return any(AlphaFold._contains_grouped(source) for source in value.sources)
+        if isinstance(value, (list, tuple)):
+            return any(AlphaFold._contains_grouped(item) for item in value)
+        return False
+
     def validate_params(self):
         """Validate AlphaFold-specific parameters."""
         if not self.sequences_stream or len(self.sequences_stream) == 0:
@@ -305,12 +326,13 @@ fi
                     f"AlphaFold requires MSAs in A3M format, got '{fmt}'. "
                     f"Use MSA(source, convert=\"a3m\") to convert first."
                 )
-            if self._proteins_mode == "bundle":
+            if self._proteins_mode == "bundle" or self._contains_grouped(self.proteins):
                 raise ValueError(
-                    "Pre-computed msas= are not supported together with a Bundle "
-                    "(multi-chain complex). Bundled complexes use ColabFold's own "
-                    "paired+unpaired MSA pipeline; drop msas= for the bundle, or "
-                    "fold the chains as separate monomers to reuse precomputed MSAs."
+                    "Pre-computed msas= are not supported for a multi-chain complex "
+                    "(Bundle or Grouped). ColabFold folds a complex with its own "
+                    "paired+unpaired MSA pipeline and never reads per-chain MSAs, so "
+                    "they would be dropped silently; drop msas=, or fold the chains as "
+                    "separate monomers to reuse precomputed MSAs."
                 )
 
         if self.num_relax < 0:
@@ -413,9 +435,13 @@ python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_
 
         msa_table_path = self.msas_input.tables.msas.info.path
 
+        # The queries CSV is written by _generate_script_prepare_sequences above,
+        # so it already reflects any upstream id filter. Without it the whole msas
+        # stream lands in the folder ColabFold scans.
         return f"""echo "Copying pre-computed MSA files to Folding (execution) directory"
 python "{self.msa_copy_py}" \\
     --msa-table "{msa_table_path}" \\
+    --queries-csv "{self.queries_csv}" \\
     --output-folder "{self.folding_folder}"
 
 """
@@ -441,6 +467,16 @@ python "{self.msa_copy_py}" \\
         if forwarded:
             forwarded = " " + forwarded
 
+        # Same reason: a quoted path must not land in the "Options:" echo.
+        # A pip ColabFold defaults its weights to $HOME/.cache/colabfold, which
+        # LocalColabFold used to patch away. Point it at the shared params cache
+        # AF2BIND and BioEmu already read, or the first run downloads a second
+        # copy of the weights into a home directory.
+        data_option = ""
+        af2_params_root = self.folders.get("AlphaFoldParams", "")
+        if scheduler != "colab" and af2_params_root:
+            data_option = f' --data "{af2_params_root}"'
+
         # Determine colabfold_batch command
         if scheduler == "colab":
             # Colab: colabfold installed into system python; run via /usr/local/bin
@@ -449,7 +485,7 @@ python "{self.msa_copy_py}" \\
             # Pure pip mode (no conda/mamba at all): rely on PATH
             colabfold_cmd = "colabfold_batch"
         else:
-            # Cluster: absolute path to LocalColabFold binary
+            # Cluster: absolute path into the colabfold-conda prefix env.
             colabfold_cmd = str(self.colabfold_batch)
 
         if scheduler == "colab":
@@ -457,7 +493,7 @@ python "{self.msa_copy_py}" \\
             # with Colab's JAX/GPU/tensorflow stack
             run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{forwarded})"""
         else:
-            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{forwarded}"""
+            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{data_option}{forwarded}"""
 
         # On Colab, colabfold_batch runs as the system Python and downloads its
         # AF2 params into $HOME/.cache/colabfold/params (i.e. /root/.cache/...),

@@ -116,13 +116,18 @@ def test_boltz2_forwards_onto_boltz_predict(local_config, isolated_cwd, new_pipe
     pipeline = new_pipeline("fwd_boltz2")
     with pipeline:
         s = Sequence(seq="MKTAYIAKQRQISFVKSHFSRQLEERLGL", type="protein", ids="p1")
-        Boltz2(proteins=s, step_scale=1.5)
+        # `step_scale` used to stand in for an untyped kwarg here; it became a real parameter
+        # when the memory controls landed, and a typed one is emitted directly rather than
+        # forwarded. `--write_full_pae` is still untyped, so it still exercises forwarding.
+        Boltz2(proteins=s, write_full_pae=True, step_scale=1.5)
         script = _step_script(pipeline.save(), "Boltz2")
 
     line = next(l for l in script.splitlines() if "boltz predict" in l)
-    record_case(input="Boltz2(step_scale=1.5)", expected='"--step_scale" "1.5"',
-                actual=line.strip()[:160])
-    assert '"--step_scale" "1.5"' in line
+    record_case(input="Boltz2(write_full_pae=True, step_scale=1.5)",
+                expected='"--write_full_pae" forwarded, --step_scale 1.5 typed',
+                actual=line.strip()[:200])
+    assert '"--write_full_pae"' in line, "an untyped kwarg must still reach boltz predict"
+    assert "--step_scale 1.5" in line, "a typed parameter is emitted directly, not forwarded"
 
 
 def test_neuralplexer_forwards_onto_the_inference_command(local_config, isolated_cwd, new_pipeline, record_case):

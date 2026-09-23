@@ -558,3 +558,90 @@ def pytest_sessionfinish(session, exitstatus):
     summary.append(["total tests", len(_RESULT_ROWS)])
 
     wb.save(RESULTS_XLSX)
+
+
+# --- a run tree built by the framework, not by a fixture's memory ----------------------------
+#
+# The readers (`job_status`, `lineage`, the MCP tools) are the only tests that consume an output
+# tree instead of producing one, so they have no producer to disagree with -- and three of them
+# invented a layout that did not exist. `bp_table` shipped listing `<step>/*.csv`, which is
+# empty for every real run: standalone tables go to `<step>/tables/` and a stream's map table
+# into the stream's own folder. Both the code and its fixture were written from the same wrong
+# picture in the same hour, so they agreed and CI stayed green.
+#
+# This factory takes every path from the framework -- `stream_map_path`, `tables_folder`,
+# `_compute_log_file_path` -- so a fixture cannot hold an opinion about the layout. If the
+# framework moves a folder, the readers' expectations fail here, loudly, instead of quietly
+# agreeing with a stale assumption.
+
+@pytest.fixture
+def produced_run(local_config, isolated_cwd):
+    """Factory: a real run tree on disk, laid out by the framework. Returns (job_dir, steps).
+
+    `steps` is a list of dicts:
+      {"streams": {name: n_ids}, "tables": {name: [row dicts]}, "status": "COMPLETED"|"FAILED"|None}
+
+    Every path written here comes from what the tool *declared* -- `stream.map_table`,
+    `TableInfo.path`, `_compute_log_file_path()` -- so the fixture cannot hold an opinion about
+    where things go. That is the whole point: the reader tests are the only ones that consume a
+    tree rather than produce one, and when they invent the tree they are testing their own
+    assumption. `bp_table` shipped listing `<step>/*.csv` -- empty for every real run -- because
+    its fixture agreed with it.
+    """
+    from biopipelines.mock import Mock
+    from biopipelines.pipeline import Pipeline
+
+    def _make(steps, job="produced"):
+        pipeline = Pipeline(project="TestSuite", job=job, description="fixture",
+                            on_the_fly=False, local_output=True, config="local")
+        made = []
+        with pipeline:
+            for spec in steps:
+                widest = max(spec.get("streams", {}).values(), default=1)
+                ids = [f"d{i}" for i in range(widest)]
+                streams = {name: {"format": "pdb", "file": "<id>.pdb"}
+                           for name in spec.get("streams", {})}
+                tables = {name: {"columns": list(rows[0]) if rows else ["id"]}
+                          for name, rows in spec.get("tables", {}).items()}
+                made.append((Mock(ids=ids, streams=streams or None, tables=tables or None), spec))
+            pipeline.save()
+
+        job_dir = os.path.dirname(made[0][0].output_folder) if made else ""
+        produced = {}
+        for out, spec in made:
+            step = os.path.basename(out.output_folder)
+            produced[step] = out
+
+            for name, count in spec.get("streams", {}).items():
+                stream = getattr(out.streams, name)
+                # These come back as reference proxies; str() is what makes them a path.
+                map_table = str(stream.map_table)
+                folder = os.path.dirname(map_table)
+                os.makedirs(folder, exist_ok=True)
+                with open(map_table, "w", encoding="utf-8", newline="") as handle:
+                    handle.write("id,file,value\n")
+                    for i in range(count):
+                        path = os.path.join(folder, f"d{i}.pdb")
+                        open(path, "w", encoding="utf-8").write("ATOM\n")
+                        handle.write(f"d{i},{path},\n")
+
+            for name, rows in spec.get("tables", {}).items():
+                # `TableInfo.path` comes back as a pipeline TableReference, whose str() is a
+                # reference token, not a path -- the folder itself is the authority.
+                target = os.path.join(out._producer.tables_folder, f"{name}.csv")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                columns = list(rows[0]) if rows else ["id"]
+                with open(target, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(",".join(columns) + "\n")
+                    for row in rows:
+                        handle.write(",".join(str(row[c]) for c in columns) + "\n")
+
+            status = spec.get("status", "COMPLETED")
+            if status:
+                open(os.path.join(job_dir, f"{step}_{status}"), "w", encoding="utf-8").write("")
+            log = out._producer._compute_log_file_path()
+            os.makedirs(os.path.dirname(log), exist_ok=True)
+            open(log, "w", encoding="utf-8").write(f"=== {step} ===\n")
+        return job_dir, produced
+
+    return _make

@@ -20,7 +20,7 @@ Usage:
     ligand: compounds-stream JSON; the residue `code` is read from it
     design_within: Distance cutoff for ligand-based design
     output_file: Path to output JSON file
-    default_chain: Fallback chain ID for chainless positions (default "A")
+    default_chain: Chain for chainless positions, or "auto" to read it off each structure
 
 Output:
     JSON file mapping design_id -> {fixed_option, redesigned_option} for LigandMPNN
@@ -202,26 +202,60 @@ def process_ligand_source(ligand, design_within, design_entries):
     return positions_data
 
 
-def write_positions_json(positions_data, output_file, default_chain="A"):
+def protein_chains_of(pdb_path):
+    """Sorted protein chain ids present in a structure."""
+    return sorted({atom.chain for atom in parse_pdb_file(pdb_path)
+                   if atom.res_name in STANDARD_RESIDUES})
+
+
+def resolve_default_chain(default_chain, pdb_path, has_chainless):
+    """The chain a chainless position attaches to for this structure.
+
+    "auto" means read it off the structure. One protein chain answers it; several make an
+    unqualified position ambiguous, which is an error rather than a guess. This used to be
+    the literal "A", which was silently wrong whenever the chain was called anything else.
+    """
+    if default_chain != "auto":
+        return default_chain
+    chains = protein_chains_of(pdb_path)
+    if len(chains) == 1:
+        return chains[0]
+    if len(chains) > 1:
+        if has_chainless:
+            raise ValueError(
+                f"{os.path.basename(pdb_path)}: {len(chains)} protein chains "
+                f"({'+'.join(chains)}) and an unqualified position selection: which chain do "
+                f"the residues belong to? Qualify them (\"{chains[0]}10-20\"), name them per "
+                f"chain (fixed={{'{chains[0]}': ...}}), or restrict the step with "
+                f"chains=\"{chains[0]}\".")
+        return chains[0]
+    return "A"
+
+
+def write_positions_json(positions_data, output_file, default_chain="auto"):
     """Write positions data as JSON for runtime lookup.
 
     Args:
         positions_data: Dict mapping design_id -> {fixed_positions, designed_positions, pdb_file}
         output_file: Path to output JSON file
-        default_chain: Fallback chain ID for chainless positions (default "A")
+        default_chain: Chain for chainless positions, or "auto" to read it off each structure
     """
     result = {}
     for design_id, positions in positions_data.items():
+        all_positions = positions['fixed_positions'] + positions['designed_positions']
+        has_chainless = any(not chain for chain, _ in all_positions)
+        chain_here = resolve_default_chain(default_chain, positions['pdb_file'], has_chainless)
+
         # Build fixed positions option for this design
         fixed_option = ""
         if positions['fixed_positions']:
-            fixed_str = " ".join([f"{chain if chain else default_chain}{resnum}" for chain, resnum in positions['fixed_positions']])
+            fixed_str = " ".join([f"{chain if chain else chain_here}{resnum}" for chain, resnum in positions['fixed_positions']])
             fixed_option = f'--fixed_residues "{fixed_str}"'
 
         # Build designed positions option for this design
         redesigned_option = ""
         if positions['designed_positions']:
-            designed_str = " ".join([f"{chain if chain else default_chain}{resnum}" for chain, resnum in positions['designed_positions']])
+            designed_str = " ".join([f"{chain if chain else chain_here}{resnum}" for chain, resnum in positions['designed_positions']])
             redesigned_option = f'--redesigned_residues "{designed_str}"'
 
         result[design_id] = {
@@ -251,7 +285,7 @@ def main():
     ligand_json = cfg["ligand"]  # compounds-stream JSON; `code` read from it below
     design_within = float(cfg["design_within"])
     output_file = cfg["output_file"]
-    default_chain = cfg.get("default_chain", "A")
+    default_chain = cfg.get("default_chain", "auto")
 
     # Load DataStream and get (id, file) pairs
     structures_ds = load_datastream(structures_json)

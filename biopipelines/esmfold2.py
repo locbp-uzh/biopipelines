@@ -205,7 +205,7 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "esmfold2"
 
     @classmethod

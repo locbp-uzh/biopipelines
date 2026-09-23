@@ -153,17 +153,19 @@ minimum to understand and use the codebase.
    - `docs/tool_index.md`: a table row **and** a bump of the `**Public-API count: N**` line; the row's version cell must equal the source `TOOL_VERSION`.
    - `docs/tool_reference.md`: an entry (the test greps for the tool name).
    - `docs/tool/<category>.md`: a real `##` or `###` heading whose text starts with the tool name. Prose mentioning the tool is not enough.
+   - `docs/tool/<category>.md`: a `**Tags**:` line in that section, from the closed vocabulary in `docs/tool_tags.md` — at least one ACTION tag, and every capability the tool actually exposes. `tests/test_tool_tags.py` fails without it, and also fails if the section's body argues for a capability (`covalent`, `symmetry`, `all-atom`, …) the tag line omits. Tag the wrapper, not the upstream project: if upstream has a capability this wrapper does not expose, the tag is off.
    - `README.md`: a tool-table row using the exact `<td><sub><b>Name</b>` markup the test greps for.
    - `environments:` entries in **three** config variants — `config.cluster.yaml`, `config.colab.yaml`, `config.container.yaml`. The test compares colab and container against cluster and fails on any gap; `config.daint.yaml` is exempt (aarch64).
+   - **Regenerate the agent index**: `python skills/biopipelines/build_tool_index.py`. `tests/test_skill_tool_index.py` compares it byte-for-byte, so a new tool (or an edited first sentence in `docs/tool/<category>.md`, or a changed README badge) fails the build until you rerun it.
    - `biopipelines/__init__.py`: export the class (not CI-enforced, but the tool is unreachable without it).
 
 8. **Run the gates locally before pushing** — see *Tests and gates* below.
 
 ### Tests and gates
 
-- **The local gate is `python -m pytest tests/ -q`.** Both CI pipelines (`.gitlab-ci.yml` and `.github/workflows/tests.yml`) run `pytest tests/` on Python 3.10–3.13, and on GitLab a red test stage blocks the mirror to the public GitHub repo. Run it before pushing.
+- **The local gate is `python -m pytest tests/ -q -m "not tool_parameters"`.** That `-m` matters: both CI pipelines (`.gitlab-ci.yml` and `.github/workflows/tests.yml`) run `pytest tests/ -v -m "not tool_parameters"` on Python 3.10–3.13, and passing `-m` on the command line **replaces** the default in `pyproject.toml`, which also excludes `network`. A bare `pytest tests/ -q` is therefore a weaker gate than CI: it silently skips the live-API tests, which then fail on the push. On GitLab a red test stage blocks the mirror to the public GitHub repo.
 - **The registration gate is `tests/test_registry_consistency.py`.** It is the test that fails when step 7 above is incomplete. Run it alone with `python -m pytest tests/test_registry_consistency.py -q` for a fast check while wiring a new tool up.
-- **The per-tool parameter suites are opt-in.** `pyproject.toml` sets `addopts = "-ra -m 'not tool_parameters'"`, so they are excluded by default; they are GPU-bound and run with `pytest tests/tool_parameters -m tool_parameters -v`. Do not expect them to have run just because `pytest tests/` was green.
+- **The per-tool parameter suites are opt-in.** `pyproject.toml` sets `addopts = "-ra -m 'not tool_parameters and not network'"`, so they are excluded by default; they are GPU-bound and run with `pytest tests/tool_parameters -m tool_parameters -v`. Do not expect them to have run just because `pytest tests/` was green. CI excludes them too.
 - **`pre-commit install` is required once per clone.** The `TOOL_VERSION` hook lives in `.pre-commit-config.yaml` and runs `python versions/check_tool_edits.py`; on a fresh clone that hook is not installed, so commits that skip the version bump go through silently and CI catches them later:
   ```bash
   pip install pre-commit
@@ -248,7 +250,7 @@ config change, the section below applies.
 Framework code should behave identically on cluster and Colab — they share
 the same Python API and runtime logic. The two genuine differences are:
 
-- **Where you can drive the test from.** On the cluster, you can operate end to end yourself (push → sync → submit → inspect → iterate) over `log.sh ssh`. On Colab it depends on whether the Colab MCP server is registered: if `mcp__colab-mcp__*` tools are in this session's tool list you can create the notebook, run its cells and read the outputs back yourself (see `colab.md`); if they are not, you cannot touch the runtime and the user has to execute the cells and paste back outputs. Check the tool list rather than assuming. Either way the cluster stays the default verification venue whenever it is available, since it needs no notebook round-trip at all.
+- **Where you can drive the test from.** On the cluster, you can operate end to end yourself (push → sync → submit → inspect → iterate) over `ssh`. On Colab it depends on whether the Colab MCP server is registered: if `mcp__colab-mcp__*` tools are in this session's tool list you can create the notebook, run its cells and read the outputs back yourself (see `skills/biopipelines/references/colab_backend.md`); if they are not, you cannot touch the runtime and the user has to execute the cells and paste back outputs. Check the tool list rather than assuming. Either way the cluster stays the default verification venue whenever it is available, since it needs no notebook round-trip at all.
 - **Install paths can diverge.** `.install()` scripts, `config.colab.yaml`
   env entries, and micromamba behavior are the one area where Colab needs
   separate testing even when the runtime logic is unchanged.
@@ -264,9 +266,9 @@ Do not bake site-specific assumptions into framework code without checking.
 
 You cannot run GPU code or SLURM submissions locally. To exercise a change
 end to end, ssh into the cluster. **Every `ssh` and `scp` call must be
-wrapped in `llm/log.sh`** — no raw cluster commands. The wrapper writes the
-command and its output to `llm/logs/YYYY-MM-DD.log`, which is the audit
-trail for the session. Read `cluster.md` for more information.
+recorded against the run it belongs to** in `<Job>_NNN/_operations.jsonl`,
+which is the audit
+trail for the session. Read `skills/biopipelines/references/cluster_backend.md` for more information.
 
 1. Push the branch.
 2. On the cluster: `cd <repo> && git fetch && git checkout <branch> && git reset --hard origin/<branch>`. Confirm the branch and the hard-reset target with the user first — this is destructive on the remote checkout.
@@ -287,7 +289,7 @@ If the change modifies any `.install()` script, `config.colab.yaml`, or the
 micromamba env setup, also verify on Colab — cluster verification will not
 catch install-side regressions.
 
-**If `mcp__colab-mcp__*` tools are in this session's tool list**, drive it yourself: follow the workflow in `colab.md` → "Workflow — running a test pipeline on Colab", which builds the same notebook and executes the cells over MCP.
+**If `mcp__colab-mcp__*` tools are in this session's tool list**, drive it yourself: follow the workflow in `skills/biopipelines/references/colab_backend.md` → "Workflow — running a test pipeline on Colab", which builds the same notebook and executes the cells over MCP.
 
 **Otherwise** you cannot drive Colab from this session; hand the user a notebook with:
 1. Replaced git clone line:

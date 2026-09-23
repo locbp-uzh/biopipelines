@@ -115,3 +115,31 @@ def test_bare_ligand_without_input_rejected(local_config, isolated_cwd, new_pipe
     import pytest as _pytest
     with _pytest.raises(Exception):
         _build(local_config, isolated_cwd, new_pipeline, length=100, ligand=Ligand(code="SAM"))
+
+
+def test_chain_break_contig_allowed(local_config, isolated_cwd, new_pipeline):
+    # A multi-chain contig — every binder design — spells the chain break "/0",
+    # the literal token foundry's get_design_pattern_with_constraints compares
+    # against. The wrapper used to reject any "/", making binder design
+    # impossible to express at all.
+    content = _build(local_config, isolated_cwd, new_pipeline,
+                     length=None, contig="60-95,/0,B1-114")
+    assert_substrings_in(content, ["60-95,/0,B1-114"])
+
+
+def test_backslash_chain_break_rejected(local_config, isolated_cwd, new_pipeline):
+    # "\0" is NOT the chain-break token; foundry falls through to int("\0") and
+    # dies only after the model has loaded on the GPU. Fail at config time with
+    # a message naming the right syntax.
+    import pytest as _pytest
+    with _pytest.raises(Exception, match=r"/0"):
+        _build(local_config, isolated_cwd, new_pipeline,
+               length=None, contig=r"60-95,\0,B1-114")
+
+
+def test_contig_rejects_other_shell_metacharacters(local_config, isolated_cwd, new_pipeline):
+    # Masking "\0" must not open the door to real injection vectors.
+    import pytest as _pytest
+    for bad in [r"60-95,\n,B1-114", '60-95,"x",B1-114', "60-95,$(id),B1-114"]:
+        with _pytest.raises(Exception):
+            _build(local_config, isolated_cwd, new_pipeline, length=None, contig=bad)

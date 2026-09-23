@@ -23,12 +23,13 @@ outputs/*
 # Personal pipelines
 my_pipelines/*
 !my_pipelines/README.md
-!my_pipelines/template.py
-!my_pipelines/template.ipynb
+!my_pipelines/_template.py
+!my_pipelines/_template.ipynb
 
 # Scripting tool scripts folder (user-authored two-phase scripts)
 my_scripts/*
 !my_scripts/README.md
+!my_scripts/_template.py
 !my_scripts/count_atoms.py
 !my_scripts/filter_structures.py
 !my_scripts/align_protein_openings.py
@@ -90,6 +91,29 @@ Thumbs.db
 # PDB files (input/output structures, not committed)
 *.pdb
 
+# Structure and reflection files. *.pdb alone was not enough: run outputs are
+# written as .cif, and crystallographic work adds reflection data. These are
+# large, run-specific, and often unpublished — and the `public` branch of this
+# GitLab repo is pushed to github.com/locbp-uzh/biopipelines automatically.
+*.cif
+*.mtz
+*.mmcif
+
+# Run outputs. Not ignored before, so `git add -A` would have swept in
+# hundreds of run-specific structures.
+results/
+
+# Personal launchers and cluster job scripts. These name a specific campaign,
+# username or billing account, so they are run-specific by nature even though
+# they sit at the repository root. my_scripts/ and my_pipelines/ are already
+# ignored for the same reason; these were simply outside both.
+/submit_s3_chain.sh
+jobs/
+
+# Local agent-skill symlink (CLAUDE.md: skills/biopipelines is symlinked here
+# so Claude Code discovers it). The target is tracked; the symlink is local.
+.claude/skills/
+
 # Legacy pablo-main layout (replaced by lowercase counterparts in Hub)
 MyPipelines/
 ExamplePipelines/
@@ -116,3 +140,4 @@ package-two.md
 
 # Build artifacts from `pip wheel` / `python -m build`
 build/
+.bp-mcp.json

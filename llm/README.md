@@ -1,9 +1,8 @@
 # `llm/` — using BioPipelines with an AI coding assistant
 
-This folder contains everything you need to drive BioPipelines from an LLM
-coding assistant (Claude Code, Cursor, Copilot Chat, etc.): five prompt files
-that set up the assistant, a small ssh/scp wrapper that logs every cluster
-command you run, and a template for cluster-specific resource notes.
+This folder holds the two session prompts and a template for cluster-specific resource notes. The backend references moved to `skills/biopipelines/references/` — they describe a cluster, not a prompt, so any host can read them there, while a file under `llm/` is only reachable by a session that was told to read `llm/`.
+
+**Register `bp-mcp` first if you can.** With the MCP server in place the assistant calls tools — `bp_tools`, `bp_submit`, `bp_status`, `bp_logs`, `bp_table` — instead of composing `ssh` commands, and each run records what was done to it as a side effect. The prompts here still describe the manual path, and mark it as the fallback. Setup: `pip install -e ".[mcp]"` then `claude mcp add --scope user biopipelines -- bp-mcp`; details in `skills/biopipelines/references/mcp_server.md`.
 
 ## Quick start
 
@@ -15,19 +14,17 @@ command you run, and a template for cluster-specific resource notes.
    works for most assistants. For framework work, swap in `llm/development.md`.
 
 2. **If you'll run on a cluster:** also do the one-time cluster setup —
-   follow `cluster.md` (add an ssh alias, smoke-test with
+   follow `skills/biopipelines/references/cluster_backend.md` (add an ssh alias, smoke-test with
    `ssh cluster echo ok`), then copy `resources.md.template` to
    `resources.md` and fill in your cluster's partitions, GPU types, and walltime policy by running the probe commands in `pipelines.md`. This gives the assistant honest defaults instead of generic guesses.
 
-   **If you'll run on Google Colab:** no cluster setup needed — `pipelines.md`
-   covers the in-notebook setup and `colab.md` covers the optional one-time Colab MCP server registration that lets the assistant execute cells itself. Skip `cluster.md` and `resources.md`.
+   **If you'll run on Google Colab:** no cluster setup needed — `pipelines.md` covers the in-notebook setup and `skills/biopipelines/references/colab_backend.md` covers the optional one-time Colab MCP server registration that lets the assistant execute cells itself. Skip the cluster reference and `resources.md`.
 
-   **If you'll run on CSCS Alps/Daint:** read `daint.md` as well — it is a SLURM
-   cluster, but aarch64, whole-node billing and the CSCS Container Engine make its defaults different.
+   **If you'll run on CSCS Alps/Daint:** read `skills/biopipelines/references/daint_backend.md` as well — it is a SLURM cluster, but aarch64, whole-node billing and the CSCS Container Engine make its defaults different.
 
 ## Which prompt to use
 
-Two of the five are session prompts — pick one of these to load first:
+Two session prompts live here — pick one to load first:
 
 - **`pipelines.md`** — when you want to *use* the framework: design a
   pipeline for a specific biological problem and run it. Covers both execution modes (SLURM cluster and Google Colab) — the prompt asks you which one applies up front and adapts its defaults accordingly.
@@ -36,29 +33,20 @@ Two of the five are session prompts — pick one of these to load first:
 
 If your task crosses both (e.g. you need a pipeline but also hit a bug in an existing tool), handle them in two separate sessions. The two prompts give different defaults and pull in different reference docs; mixing them tends to produce muddled answers.
 
-The other three are backend references that the two session prompts point at as needed — load them only for the backend you're on:
+The backend references the prompts point at are in `skills/biopipelines/references/` — load only the one you are on:
 
-- **`cluster.md`** — ssh alias setup and the `log.sh`-wrapped cluster idioms.
-- **`colab.md`** — Colab MCP server setup, Drive persistence, Colab gotchas.
-- **`daint.md`** — CSCS Alps/Daint: access, storage, node packing, the Container
-  Engine, and which tools are verified there.
+- **`cluster_backend.md`** — ssh alias setup and the cluster idioms, for a session without `bp-mcp`.
+- **`colab_backend.md`** — Colab MCP server setup, Drive persistence, Colab gotchas.
+- **`daint_backend.md`** — CSCS Alps/Daint: the variant's venv/EDF mechanism, then access, storage, node packing and which tools are verified there.
+- **`container_backend.md`** — any single-node GPU box via the generic `container` variant.
 
-## Logging cluster activity
+## Recording what was done
 
-(Cluster mode only — Colab notebooks log themselves via cell outputs.)
+A run's operational record lives **with the run**: `<Job>_NNN/_operations.jsonl`, next to its outputs and completion markers. It answers "what was done to this campaign" — submitted, resubmitted, cancelled, fetched — and it travels with the results when they are copied off the cluster. The same file is written on every backend, so Colab and container runs are covered identically.
 
-**All cluster commands must go through `llm/log.sh`.** This is not optional.
-Every `ssh` and `scp` invocation the assistant makes has to be wrapped, so that
-the command and its full output land in `logs/YYYY-MM-DD.log`.
-The assistant should refuse to run a raw `ssh`/`scp` outside of `log.sh`.
+This replaces `llm/log.sh`, which wrapped every `ssh`/`scp` into `logs/YYYY-MM-DD.log`. That shape logged the transport rather than the work, filed it by date rather than by run, covered only the cluster, and rested on the assistant remembering to use it. Anything already under `llm/logs/` is historical and untracked; nothing writes there now.
 
-```bash
-# Wrong — leaves no trace.
-ssh cluster 'squeue -u $(whoami)'
-
-# Right — logged to logs/YYYY-MM-DD.log.
-llm/log.sh ssh cluster 'squeue -u $(whoami)'
-```
+Where `bp-mcp` is registered, its tools reach the cluster themselves and write the record as they go — see `skills/biopipelines/references/mcp_server.md`.
 
 ## File inventory
 
@@ -66,10 +54,6 @@ llm/log.sh ssh cluster 'squeue -u $(whoami)'
 | ----------------------- | -------------------------------------------------------- | -------- |
 | `pipelines.md`          | Prompt for pipeline-author sessions                      | yes      |
 | `development.md`        | Prompt for framework-developer sessions                  | yes      |
-| `cluster.md`            | One-time ssh alias setup + `log.sh` usage                | yes      |
-| `colab.md`              | Colab MCP server setup + Colab-specific gotchas          | yes      |
-| `daint.md`              | CSCS Alps/Daint backend reference                        | yes      |
-| `log.sh`                | Generic command logger (wraps ssh / scp / anything)      | yes      |
 | `resources.md.template` | Schema for the user-local `resources.md`                 | yes      |
 | `resources.md`          | Your cluster-specific resource notes                     | no       |
-| `logs/`                 | Dated logs from `log.sh`                                 | no       |
+| `logs/`                 | Historical logs from the retired `log.sh`                | no       |

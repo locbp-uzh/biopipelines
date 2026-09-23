@@ -53,7 +53,7 @@ class DSSP(BaseConfig):
     """
 
     TOOL_NAME = "DSSP"
-    TOOL_VERSION = "2.0"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "dssp"
 
     @classmethod

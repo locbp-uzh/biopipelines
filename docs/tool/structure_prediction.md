@@ -10,17 +10,24 @@ Predicts protein structures from amino acid sequences using AlphaFold2. Generate
 
 By default each input sequence is folded as a separate monomer. Wrap `proteins` in `Bundle(...)` to fold the bundled sequences together as one multi-chain complex: ColabFold receives a single colon-joined query (`SEQ_A:SEQ_B`), auto-selects the multimer model, and runs its default paired+unpaired MSA pipeline. `Bundle(static, Each(...))` holds `static` fixed and folds it against each iterated sequence (one complex per element). A bundled complex's output id is the chain ids joined with `+` (e.g. `p1+p2`). Pre-computed `msas=` cannot be combined with a `Bundle` (a bundled complex always uses ColabFold's own MSA pipeline).
 
-**Resources**: GPU. H100 NVL is not compatible.
+**Tags**: predict-structure, protein, complex
 
-**Environment**: `localcolabfold` and `biopipelines`
+**Resources**: GPU. Verified on A100 and on H100 (sm_90); the CUDA 12 jax stack ships sm_90 kernels, so Hopper cards no longer need avoiding.
 
-**Installation**:
+**Environment**: `biopipelines`, plus a conda **prefix** env at `<AlphaFold>/colabfold-conda` that `AlphaFold.install()` builds. It is addressed by path rather than by an `environments:` name because `MMseqs2Server` resolves `colabfold_search` and `mmseqs` inside that same `bin/`, and `AF2BIND` and `BioEmu` read the AF2 weights from `<AlphaFoldParams>` beside it.
+
+**Installation**: `AlphaFold.install()`. It follows the [official ColabFold instructions](https://github.com/sokrypton/ColabFold#installation) — conda supplies python and the pinned `mmseqs2` build `colabfold_search` is tested against, pip supplies ColabFold itself and the CUDA 12 wheels:
+
 ```bash
-cd data
-wget https://raw.githubusercontent.com/YoshitakaMo/localcolabfold/main/install_colabbatch_linux.sh
-bash install_colabbatch_linux.sh
-rm install_colabbatch_linux.sh
+mamba create -y -p <AlphaFold>/colabfold-conda -c conda-forge -c bioconda python=3.13 pip mmseqs2=18.8cc5c
+<AlphaFold>/colabfold-conda/bin/pip install "colabfold[alphafold,openmm]==1.6.3" "jax[cuda12]" "openmm[cuda12]"
 ```
+
+The versions are pinned in the wrapper as `AlphaFold.COLABFOLD_VERSION` and `AlphaFold.MMSEQS2_VERSION`; bump them there, not here.
+
+Installation is verified by running `colabfold_batch --help` and importing `jax_cuda12_plugin`. The second check is what distinguishes a GPU-capable install from a CPU-only one, and it passes without a GPU present, so it is meaningful on a login node.
+
+`AlphaFold.install(force_reinstall=True)` removes and rebuilds `colabfold-conda` but keeps `<AlphaFoldParams>`, so the weights are not re-downloaded.
 
 **Parameters**:
 - `proteins`: DataStream | StandardizedOutput | Bundle | Each (required) - Input protein sequences. A bare input folds one monomer per sequence; `Bundle(...)` folds the bundled sequences as one multi-chain complex.
@@ -85,6 +92,8 @@ af = AlphaFold(proteins=Bundle(receptor, Each(binders)))
 
 Predicts biomolecular complexes including proteins, nucleic acids, and small molecules. State-of-the-art model for protein-ligand and protein-protein complex prediction.
 
+**Tags**: predict-structure, predict-property, protein, small-molecule, nucleic-acid, complex, binding, covalent, all-atom, sequence-only
+
 **Installation**:
 ```bash
 mamba create -n Boltz2Env python=3.11
@@ -100,13 +109,21 @@ pip install boltz[cuda] -U
 - `dsDNA`: Optional[Union[DataStream, StandardizedOutput]] = None - Double-stranded DNA sequences
 - `ssRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - Single-stranded RNA sequences
 - `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - Double-stranded RNA sequences
-- `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - Ligand compounds stream (e.g. from `Ligand` / `CompoundLibrary`)
+- `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - Ligand compounds stream (e.g. from `Ligand` / `CompoundLibrary`). May be the **only** input: a ligands-only job folds or scores compounds on their own. Pass `affinity=False` when you do — `affinity` defaults to `True` and a ligands-only prediction has no receptor to bind to, so `Boltz2(ligands=lib)` raises rather than silently scoring nothing.
 - `msas`: Optional[StandardizedOutput] = None - Pre-computed MSA files for recycling (pass entire tool output, not .msas).
   Supports recycling from AlphaFold via `MSA(af_result, convert="csv")`.
+- `single_sequence`: bool = False - Fold without an MSA. Mutually exclusive with `msas`. The `msas` stream comes back empty, and accuracy drops for anything that is not already well represented in the model — use it for speed or when no homologs exist, not as a default.
 - `affinity`: bool = True - Calculate binding affinity predictions
 - `output_format`: str = "pdb" - Output format (pdb, mmcif)
 - `recycling_steps`: Optional[int] = None - Number of recycling steps (default: model-specific)
 - `diffusion_samples`: Optional[int] = None - Number of diffusion samples (default: model-specific)
+- `sampling_steps`: Optional[int] = None - Diffusion sampling steps (boltz default 200)
+- `step_scale`: Optional[float] = None - Diffusion temperature; lower samples more diverse poses (boltz-2 default 1.5)
+- `max_msa_seqs`: Optional[int] = None - Cap on MSA depth (boltz default 8192). The first thing to lower when a large complex runs out of VRAM, since peak memory scales with MSA depth
+- `subsample_msa`: bool = False - Sample the MSA down rather than truncating it, keeping its diversity at a lower depth
+- `num_subsampled_msa`: Optional[int] = None - How many sequences to subsample (boltz default 1024). Requires `subsample_msa=True`; boltz ignores the count without the flag, so the wrapper refuses the pair rather than letting the run proceed at full depth
+- `max_parallel_samples`: Optional[int] = None - Diffusion samples held on the GPU at once (boltz default 5). Lower it to trade wall time for peak memory when `diffusion_samples` is high
+- `no_kernels`: bool = False - Disable the trifast/cuequivariance triangular kernels. Needed on GPUs those kernels do not support; slower where they do
 - `top_only`: bool = True - When True (default), keep only the top model as `<id>`. When False, surface every diffusion sample as a separate structure `<id>_1..N` — e.g. to feed a Boltz2 pose ensemble (with native covalent linkage / full scaffold) into downstream design. Pair with `diffusion_samples=N` to control how many.
 - `use_potentials`: bool = False - Enable external potentials
 - `template`: Optional[str] = None - Path to PDB template file for structure guidance
@@ -139,6 +156,8 @@ pip install boltz[cuda] -U
 
   | id | input_file | affinity_pred_value | affinity_probability_binary |
   |----|------------|---------------------|-----------------------------|
+
+  **Units.** `affinity_pred_value` is `log10(IC50)` with IC50 in µM, so **lower is stronger** — IC50 10⁻⁹ M gives −3, 10⁻⁶ M gives 0, 10⁻⁴ M gives 2. `affinity_probability_binary` is the probability the ligand binds at all, 0–1, **higher is more likely**. The two come from different training data and answer different questions: the probability for hit-finding, the value for hit-to-lead optimization. Neither is comparable to another tool's affinity number.
 
   Prefer `affinity_probability_binary` (binder probability, higher = more likely a binder) for ranking — it is more reliable than the `affinity_pred_value` regression score in most cases.
 
@@ -241,6 +260,8 @@ A network call is made only to resolve a name/CID/CAS or CCD lookup; a raw SMILE
 
 Blind diffusion-based docking: samples candidate ligand poses over translation, rotation, and torsion, then re-ranks them with a confidence model. Works directly from a protein PDB + a ligand (SMILES or SDF) **without a binding-box hint** — useful when the pocket is unknown. Output IDs follow the multi-axis pattern `<protein>+<ligand>_rank<N>`; the rank-1 pose is the `structures` stream, and the full ranked list is in the table.
 
+**Tags**: dock, protein, small-molecule, complex
+
 **References**: https://github.com/gcorso/DiffDock · https://arxiv.org/abs/2210.01776
 
 **Resources**: GPU (CPU fallback exists but is much slower).
@@ -279,6 +300,8 @@ dock = DiffDock(structures=target, compounds=lig)
 
 Flexible-backbone docking. DynamicBind is an equivariant generative model that predicts a **ligand-specific protein conformation**, letting the receptor backbone flex toward its bound state rather than docking into a rigid pocket. Reports per-pose lDDT and a predicted affinity; can optionally render a transition movie.
 
+**Tags**: dock, sample-ensemble, protein, small-molecule, complex, binding, flexibility, all-atom, sidechain
+
 **References**: https://github.com/luwei0917/DynamicBind · https://www.nature.com/articles/s41467-024-45461-2
 
 **Resources**: GPU. Pin `gpu="A100"` — DynamicBind's torch build is cu11x and crashes ("no kernel image") on newer cards like the H100.
@@ -302,6 +325,8 @@ Flexible-backbone docking. DynamicBind is an equivariant generative model that p
 
 **Tables**:
 - `affinity`: | id | structures.id | compounds.id | rank | lddt | affinity |
+
+  **Units.** `affinity` is passed through from upstream, which does not document its scale or direction — the DynamicBind README states only that it writes an "Affinity Score". Treat it as an ordinal score within one run and do not compare it to another tool's number, or convert it to a Kd, without checking the paper first.
 - `missing`: | id | removed_by | kind | cause |
 
 **Example**:
@@ -320,6 +345,8 @@ with Pipeline("Examples", "DynamicBind-demo"):
 ### ESMFold
 
 Predicts a protein's 3-D structure directly from its amino-acid sequence using a protein language model — **no MSA or templates needed**, so it is much faster to set up than AlphaFold for single-sequence predictions. One PDB per input sequence, with per-residue pLDDT (in the B-factor column) and a global pTM.
+
+**Tags**: predict-structure, protein, sequence-only, all-atom
 
 **References**: https://github.com/facebookresearch/esm
 
@@ -356,6 +383,8 @@ esm = ESMFold(sequences=seqs)
 ### ESMFold2
 
 Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antibody scFvs as multi-chain proteins) from sequence, building on ESMC representations through a recurrent folding stack and a diffusion module. Folds MSA-free in the single-sequence regime, or recycles a precomputed MSA per protein chain. Reports per-atom pLDDT, pTM, interface pTM (ipTM), and optionally PAE. Inference-time scaling is a first-class control: more folding loops, diffusion samples, or seeds raise quality, with best-of-N selection by ipTM (complex) / pLDDT (monomer).
+
+**Tags**: predict-structure, protein, small-molecule, nucleic-acid, complex, all-atom, covalent, sequence-only
 
 **References**: https://github.com/evolutionaryscale/esm — "Language Modeling Materializes a World Model of Protein Biology" (bioRxiv 2026). MIT-licensed; weights `biohub/ESMFold2` on HuggingFace.
 
@@ -427,6 +456,8 @@ Molecular docking and pose scoring with a CNN. Combines AutoDock Vina search wit
 - `"minimize"` — local energy minimization of the in-pocket pose, then score (`gnina --minimize`). Same inputs as `"score"`; emits the refined pose.
 
 In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETATM records (identified by the `compounds` residue code), bond-order-templated against its SMILES, and autoboxed on its own location (`autobox_add` padding). The `compounds` stream **must carry SMILES** in these modes — a code-only `Ligand`/`ligand="LIG"` string is rejected (no chemistry to template bond orders from). The docking-only parameters (`center`, `size`, `autobox_ligand`, `exhaustiveness`, `num_modes`, `num_runs`, `generate_conformers` and the conformer knobs, `rmsd_threshold`) must stay at their defaults outside `"docking"` mode — setting one raises.
+
+**Tags**: dock, predict-property, protein, small-molecule, pocket, binding, energy
 
 **Resources**: GPU recommended (CPU fallback available but slow).
 
@@ -535,9 +566,12 @@ AutoDock Vina docking. `Vina` is the AutoDock Vina engine as its own class: it k
 
 Two behavioural differences follow from Vina having no CNN:
 - `cnn_scoring` and `cnn_score_threshold` are rejected (setting either raises), and `scoring` selects the force field instead: `"vina"` (default), `"vinardo"`, or `"ad4"`.
+- **Units.** `vina_affinity` / `best_vina` / `mean_vina` are the Vina score in **kcal/mol**, so **lower is stronger** (same column semantics as Gnina's `vina_affinity`). It is a docking score, not a measured or calibrated affinity — do not compare it to Prodigy's ΔG or convert it to a Kd.
 - The output tables carry **no `cnn_*` columns** — they are absent, not blank. `docking_results` is `id | structures.id | compounds.id | conformer_id | run | pose | vina_score`, and `docking_summary` drops the three CNN aggregates.
 
 Vina reads and writes PDBQT only, so the wrapper converts the receptor and ligand in and the poses back to SDF with OpenBabel, re-attaching each affinity so the shared parsing and aggregation stages are unchanged. Vina's own `--autobox` has no reference-file form, so an `autobox_ligand` (or an auto-detected crystal ligand) is turned into an explicit centre and size from its coordinates. Receptor PDBQT is prepared with OpenBabel rather than the Meeko/ADFR route — adequate for ranking and pose selection, but treat absolute affinities with caution.
+
+**Tags**: dock, predict-property, protein, small-molecule, pocket, binding, energy
 
 **Resources**: CPU only. On a whole-node-billed cluster, pack several runs with `Parallel(pack=N)` rather than giving one dock an idle-GPU node. The thread pool is sized from `SLURM_CPUS_PER_TASK`.
 
@@ -583,6 +617,8 @@ docked = Vina(structures=protein, compounds=tmr,
 
 Predicts protein–ligand complex structures from a protein sequence/structure plus a ligand (SMILES/SDF), using a physics-inspired flow-based generative model — no binding-box hint required. Output IDs follow `<protein>+<ligand>_rank<N>`.
 
+**Tags**: predict-structure, sample-ensemble, protein, small-molecule, complex, all-atom
+
 **References**: https://github.com/zrqiao/NeuralPLexer · https://www.nature.com/articles/s42256-024-00792-z
 
 **Resources**: GPU. On Colab it needs a **high-RAM runtime** — the openfold attention + complex sampling OOM the free T4's 12 GB system RAM (verified end-to-end on an A100 high-RAM runtime).
@@ -617,6 +653,63 @@ cplx = NeuralPLexer(structures=target, compounds=lig, n_samples=16)
 
 ---
 
+### OpenFold3
+
+Open-source co-folding of proteins, nucleic acids and ligands: the OpenFold Consortium / AlQuraishi lab reimplementation of AlphaFold3, Apache 2.0 with weights included and no access request. It takes the same input axes as `Boltz2`, so the two are interchangeable in a pipeline and a prediction can be cross-checked against a second model.
+
+It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is no affinity head and ligands are non-covalent. For a binding-affinity readout or a covalent probe, use `Boltz2`.
+
+The whole batch folds in one process — `run_openfold predict` takes a single JSON holding every query — so a campaign pays one model load rather than one per complex.
+
+**Tags**: predict-structure, protein, small-molecule, nucleic-acid, complex, all-atom
+
+**References**: https://github.com/aqlaboratory/openfold-3 · method: AlphaFold3 (Abramson et al. 2024, https://www.nature.com/articles/s41586-024-07487-w), which OpenFold3 reimplements; no OpenFold3 paper is cited here
+
+**Resources**: GPU, CUDA 12.1 or newer, at least 32 GB of GPU memory. Weights (~2 GB) are downloaded by `OpenFold3.install()` (`setup_openfold`) into `$HOME/.openfold3`; they are not fetched on first prediction, and `run_openfold` refuses to start without them.
+
+**Parameters**
+
+- `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
+- `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement
+- `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them, so both models receive the same chemistry for the same input
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Requires `use_msa_server=False`; the two are mutually exclusive
+- `use_msa_server`: bool = True - generate alignments through the ColabFold server
+- `num_diffusion_samples`: Optional[int] = None - structures sampled per query (upstream default 5)
+- `num_model_seeds`: Optional[int] = None - random seeds per query (upstream default 1)
+- `seeds`: Optional[List[int]] = None - the explicit seed values, when a run has to be reproducible by seed. Contradicting `num_model_seeds` is refused rather than silently resolved
+- `output_format`: str = "cif" - "cif" or "pdb". A `.pdb` carries per-atom pLDDT in its B-factor column
+- `top_only`: bool = True - keep only the best sample as `<id>`. False surfaces every sample as `<id>_1..N`
+- `inference_ckpt_name`: Optional[str] = None - a checkpoint from the upstream list (default `openfold3_p2_v1`)
+- `inference_ckpt_path`: Optional[str] = None - an explicit checkpoint file. This is how a privately fine-tuned model, such as a federated checkpoint, runs through the same pipeline
+- `template`: Optional[str] = None - a CIF template applied to the protein chains
+- `template_chain_ids`: Optional[List[str]] = None - which chains the template applies to
+- `low_mem`: bool = False - add upstream's `low_mem` preset, for a GPU that cannot hold the default
+- `devices`: Optional[int] = None - GPUs to distribute over (upstream default 1)
+- `runner_yaml`: Optional[str] = None - a user-supplied runner YAML merged over the wrapper's. The escape hatch for upstream settings this wrapper does not name; the user's keys win
+
+**Streams**: `structures`
+
+**Tables**:
+- `confidence`:
+
+  | id | plddt | ptm | iptm | gpde | has_clash | disorder | ranking_score | seed | sample |
+  |----|-------|-----|------|------|-----------|----------|---------------|------|--------|
+
+  One row per query that entered, with blanks where a score is unavailable — a query that
+  produced no structure keeps its row, and `missing` says why. `plddt`, `disorder` and
+  `ranking_score` are upstream's `avg_plddt`, `disorder` and `sample_ranking_score`; `seed` and
+  `sample` name which of the generated samples this row is, so a `top_only` result says which
+  one was chosen.
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+With `top_only=True` (the default) the sample with the highest `ranking_score` is kept as
+`<id>` — the best, not the first. With `top_only=False` every sample is surfaced as
+`<id>_1..N`.
+
 ### PLACER
 
 Atomic-level graph neural network that stochastically regenerates coordinates from a partially corrupted input structure, producing a scored conformational ensemble. The wrapper exposes PLACER's two task modes, **selected by the inputs given** (no explicit mode flag):
@@ -627,6 +720,8 @@ Atomic-level graph neural network that stochastically regenerates coordinates fr
 PLACER reads PDB and RCSB mmCIF directly — no SDF staging. Each input produces `nsamples` models; the output IDs multiply by a sample index.
 
 > **Prefer mmCIF for multi-ligand / multi-chain inputs.** PLACER's PDB parser asserts that ligand chains and protein chains don't share a chain letter, and raises *"One or more of ligand chains already exist in parsed protein chains"* on structures where they collide (e.g. RCSB `4dtz` as a `.pdb`). Its mmCIF parser doesn't have this limitation, so for crystal complexes feed an mmCIF (`PDB("/path/4dtz.cif")` or any RCSB CIF) rather than the converted PDB. The driver dispatches on file extension automatically (`.cif`/`.cif.gz` → CIF parser, else PDB parser). Note RCSB-sourced mmCIF only — Rosetta/AF3 CIFs are not parsed correctly upstream.
+
+**Tags**: refine-structure, sample-ensemble, protein, small-molecule, pocket, all-atom, sidechain, covalent
 
 **Resources**: GPU (CUDA 12.1 / torch 2.3 stack).
 

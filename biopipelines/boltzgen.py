@@ -11,6 +11,8 @@ using diffusion models, inverse folding, and iterative structure validation.
 
 import os
 import json
+import re
+import shlex
 from typing import Dict, List, Any, Optional, Union
 
 try:
@@ -46,7 +48,7 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "boltzgen"
 
     @classmethod
@@ -54,10 +56,22 @@ class BoltzGen(BaseConfig):
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
+        # The local 0.3.1 patches lived only in site-packages, so a rebuild dropped them silently; apply (or confirm) them on every install.
+        patch_block = f"""BG_SITE="$({cls._env_run(env, env_manager)}python -c 'import boltzgen,os;print(os.path.dirname(os.path.dirname(boltzgen.__file__)))')"
+BG_PATCH="{biopipelines}/environments/patches/boltzgen-0.3.1-locbp.patch"
+if patch -d "$BG_SITE" -p1 -R --dry-run -s -f < "$BG_PATCH" >/dev/null 2>&1; then
+    echo "BoltzGen local patches already applied"
+elif patch -d "$BG_SITE" -p1 --forward -s < "$BG_PATCH"; then
+    echo "Applied BoltzGen local patches to $BG_SITE"
+else
+    echo "ERROR: the BoltzGen local patches do not apply to $BG_SITE (expected boltzgen 0.3.1)"
+    exit 1
+fi
+"""
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check}; then
     echo "BoltzGen already installed, skipping. Use force_reinstall=True to reinstall."
-    touch "$INSTALL_SUCCESS"
+{patch_block}    touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
@@ -66,6 +80,7 @@ fi
         return f"""echo "=== Installing BoltzGen ==="
 {skip}{remove_block}
 {env_block}
+{patch_block}
 
 # Verify installation
 if {cls._env_run(env, env_manager)}python -c "import boltzgen" >/dev/null 2>&1; then
@@ -148,6 +163,7 @@ fi
                  reuse: Union[DataStream, StandardizedOutput, str, None] = None,
                  steps: Optional[List[str]] = None,
                  cache_dir: Optional[str] = None,
+                 smiles_overrides: Optional[Dict[str, str]] = None,
                  **kwargs):
         """
         Initialize BoltzGen configuration.
@@ -239,6 +255,7 @@ fi
         self.devices = devices
         self.steps = steps or []
         self.cache_dir = cache_dir
+        self.smiles_overrides = smiles_overrides or {}
 
         # Track inputs from previous tools
         self.ligand_compounds_csv = None  # Path to compounds.csv from Ligand tool
@@ -346,6 +363,13 @@ fi
 
     def validate_params(self):
         """Validate BoltzGen parameters."""
+        for code, smiles in self.smiles_overrides.items():
+            # The code becomes an env-var name and is matched against the CIF res_name verbatim.
+            if not re.fullmatch(r"[A-Z0-9]{1,5}", str(code)):
+                raise ValueError(f"smiles_overrides key {code!r} must be a CCD-style code: "
+                                 f"1-5 uppercase letters or digits")
+            if not isinstance(smiles, str) or not smiles.strip() or any(c.isspace() for c in smiles):
+                raise ValueError(f"smiles_overrides[{code!r}] must be a single SMILES string")
         # Validate specification mode
         if self.spec_mode is None:
             raise ValueError(
@@ -698,6 +722,8 @@ fi
         script_content += self.generate_completion_check_header()
         script_content += compounds_block
         script_content += self.activate_environment()
+        for _code, _smi in self.smiles_overrides.items():
+            script_content += f'export BOLTZGEN_SMILES_{_code}={shlex.quote(_smi)}\n'
         script_content += f"""
 echo "Running BoltzGen binder design"
 echo "Protocol: {self.protocol}"
@@ -1131,7 +1157,7 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -1329,7 +1355,7 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

@@ -16,6 +16,8 @@ For MSA generation/conversion see [MSAs](msas.md); for molecule format conversio
 
 Creates compound collections from dictionaries with optional combinatorial expansion.
 
+**Tags**: fetch, small-molecule, covalent
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -119,6 +121,8 @@ Requires RDKit (`conda install -c conda-forge rdkit`).
 
 Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates from SMILES.
 
+**Tags**: fetch, small-molecule
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -210,6 +214,8 @@ Reload previously produced pipeline outputs back into a run.
 
 **Load** — loads a single tool's output folder.
 
+**Tags**: data
+
 **Parameters**:
 - `path`: str - Path to the tool's output folder (the one holding `.expected_outputs.json`)
 - `filter`: str = None - Pandas query filter
@@ -254,6 +260,8 @@ cycle10 = LoadMultiple("/path/to/job/", suffix="Cycle10")
 ### PDB
 
 Fetches protein structures with priority: `local_folder` → `pdbs/` → RCSB download. Accepts and emits mmCIF as readily as PDB, which is why it is also exported as `Structure` — see [Structure and Compound](../user_manual.md#structure-and-compound). Both spellings are first-class; outputs are named `PDB` either way.
+
+**Tags**: fetch, protein, small-molecule, residues, covalent
 
 **Environment**: `biopipelines`
 
@@ -336,6 +344,8 @@ hba_ab = PDB("1A3N", chain=["A", "B"])    # sequences: 1A3N_A, 1A3N_B (literal i
 
 Creates plots from CSV data.
 
+**Tags**: visualize
+
 **Environment**: None (uses matplotlib at execution time)
 
 **Operations**:
@@ -394,6 +404,8 @@ Plot(
 Creates PyMOL sessions using a declarative operation-based API.
 
 > **⚠ Ray-traced rendering is VERY SLOW.** With the default settings (`ray_trace_mode, 1`) every PNG is ray-traced at ~5–10 s each. `RenderEach` renders one image *per structure*, so on a few hundred–thousand structures it takes **hours** and can silently blow a short batch walltime. Only render a small, curated set (e.g. the top-N winners after scoring), never a full design pool. To inspect many structures cheaply, save a session (`Save`) and open it interactively instead.
+
+**Tags**: visualize, protein, small-molecule, residues
 
 **Resources**: Requires a GPU node.
 
@@ -524,6 +536,8 @@ PyMOL(session="alignment_view",
 ### RCSB
 
 Searches the RCSB PDB Search API v2 and downloads matching structures.
+
+**Tags**: fetch, protein, small-molecule
 
 **Environment**: `biopipelines`
 
@@ -818,6 +832,8 @@ The `[scripting]` extra pulls biopipelines' full runtime, so both the runner and
 
 Creates sequences from strings with auto-detection (protein/DNA/RNA).
 
+**Tags**: data, protein, nucleic-acid
+
 **Environment**: `biopipelines`
 
 **Parameters**:
@@ -853,6 +869,8 @@ dna = Sequence("ACGTACGT", type="dna", ids="my_gene")
 
 Direct table construction from an existing CSV or Excel file. Loads the file at config time, exposes it to downstream tools through the standard `tables.<name>` interface, and (for `.xlsx`/`.xls` inputs) writes a sibling CSV so the run stays CSV-native.
 
+**Tags**: data
+
 **Environment**: `biopipelines` (no extra installation).
 
 **Parameters**:
@@ -882,6 +900,8 @@ ProteinMPNN(structures=proteins, redesigned=tbl.tables.metrics.designed_position
 ### UniProt
 
 Fetches sequences and annotations from the UniProt REST API. Takes one or more UniProt accessions and produces a `sequences` stream (from the canonical FASTA endpoint) plus an annotations table with organism, length, GO terms, Pfam domains, EC number, and review status — ready for downstream filtering or design.
+
+**Tags**: fetch, protein
 
 **Environment**: `biopipelines`
 

@@ -20,11 +20,11 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
 ## Key Features
 
-**70+ integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
+**86 integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
 
 **Three ways to run** -- Let an AI coding assistant author and run pipelines for you, submit to HPC clusters (SLURM, LSF, PBS) with `biopipelines-submit`, or run interactively in Jupyter/Colab notebooks with on-the-fly execution.
 
-**Combinatorics** -- Cartesian products (`Each`) and grouping (`Bundle`) to systematically explore protein-ligand combinations.
+**Combinatorics** -- Cartesian products (`Each`), bundling (`Bundle`) and partitioning (`Grouped`, which keeps a design's chains together in one prediction) to systematically explore protein-ligand combinations.
 
 **Data management** -- DataStreams for file tracking, Tables for metrics, and Panda for pandas-style transformations (filter, sort, merge, concat).
 
@@ -49,7 +49,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
     > Read and follow `llm/pipelines.md`. <then describe the protocol you want>
 
-    The assistant reads the framework's contract from `llm/`, interviews you about any open choices, and writes and runs the pipeline. Four contracts available: `pipelines.md` (workflows), `development.md` (tool implementation), `cluster.md` (automated debugging on HPCs), `colab.md` (automated debugging on Google Colab).
+    The assistant reads the framework's contract from `llm/`, interviews you about any open choices, and writes and runs the pipeline. Two contracts live there: `pipelines.md` (workflows) and `development.md` (tool implementation). The backend notes moved to `skills/biopipelines/references/` so any assistant can read them: `cluster_backend.md` (HPC), `colab_backend.md` (Google Colab), `daint_backend.md` (CSCS Alps), `container_backend.md`.
 
 === "Cluster (conda/mamba)"
 
@@ -110,7 +110,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     BIOPIPELINES_CONFIG_VARIANT=daint biopipelines-submit my_pipeline.py
     ```
 
-    GPU tools run in containers through the CSCS Container Engine rather than a conda env — see `skills/biopipelines/references/daint_backend.md` (or `llm/daint.md`) in the repository for the EDF setup and which tools are supported.
+    GPU tools run in containers through the CSCS Container Engine rather than a conda env — see `skills/biopipelines/references/daint_backend.md` in the repository for the EDF setup and which tools are supported.
 
 === "Google Colab"
 

@@ -470,3 +470,46 @@ def test_ensemble_analysis_requires_groups():
     tool.reference = "mean"
     with pytest.raises(ValueError, match="groups is required"):
         tool.validate_params()
+
+
+# ── a manifest behind Bundle/Each is still found ─────────────────────────────
+
+class TestManifestBehindACombinatoricsWrapper:
+    """`Bundle` and `Each` hide their members' tables, and a filter's drops with them.
+
+    Found on a real campaign: `Boltz2(proteins=Bundle(filtered_designs, tag))` declared no
+    `missing` table at all, so when the upstream Panda filter kept 0 of 4 designs the fold step
+    was marked FAILED for the four outputs it correctly never produced. The wrappers expose only
+    `.sources` and no `.tables`, so `_missing_path_of` returned None for them and the manifest
+    was never collected.
+    """
+
+    def test_a_bundled_source_still_contributes_its_manifest(self):
+        from biopipelines.combinatorics import Bundle
+        designs = _FakeSource("/panda/tables/missing.csv")
+        tag = object()  # a bare sequence, no tables
+        paths = _bare_baseconfig()._collect_upstream_missing_paths(Bundle(designs, tag))
+        assert paths == ["/panda/tables/missing.csv"]
+
+    def test_an_each_wrapper_is_unwrapped_too(self):
+        from biopipelines.combinatorics import Each
+        designs = _FakeSource("/panda/tables/missing.csv")
+        paths = _bare_baseconfig()._collect_upstream_missing_paths(Each(designs))
+        assert paths == ["/panda/tables/missing.csv"]
+
+    def test_nesting_is_followed(self):
+        from biopipelines.combinatorics import Bundle, Each
+        a = _FakeSource("/a/tables/missing.csv")
+        b = _FakeSource("/b/tables/missing.csv")
+        paths = _bare_baseconfig()._collect_upstream_missing_paths(Bundle(Each(a), b))
+        assert paths == ["/a/tables/missing.csv", "/b/tables/missing.csv"]
+
+    def test_the_first_match_helper_sees_through_a_wrapper_as_well(self):
+        from biopipelines.combinatorics import Bundle
+        designs = _FakeSource("/panda/tables/missing.csv")
+        assert _bare_baseconfig()._get_upstream_missing_table_path(
+            Bundle(designs)) == "/panda/tables/missing.csv"
+
+    def test_a_wrapper_around_nothing_contributes_nothing(self):
+        from biopipelines.combinatorics import Bundle
+        assert _bare_baseconfig()._collect_upstream_missing_paths(Bundle(object())) == []

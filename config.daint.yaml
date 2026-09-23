@@ -1,6 +1,6 @@
 # BioPipelines Configuration — CSCS Daint (Alps, GH200/aarch64)
 # Select with Pipeline(config="daint") or BIOPIPELINES_CONFIG_VARIANT=daint.
-# Rationale and verified findings for every choice here: llm/daint.md
+# Rationale and verified findings for every choice here: skills/biopipelines/references/daint_backend.md
 # STATUS: partial. Only the tools under `environments:` are verified.
 
 machine:
@@ -84,7 +84,7 @@ folders:
     # The entries below are declared, not verified: their tools read the
     # checkout as a hard folders["<Tool>"] subscript, so omitting the key
     # makes the tool raise KeyError at config time instead of failing with
-    # the aarch64 reason recorded in llm/daint.md.
+    # the aarch64 reason recorded in skills/biopipelines/references/daint_backend.md.
     DiffDock: "<data>/DiffDock"
     DynamicBind: "<data>/DynamicBind"
     GEMS: "<data>/GEMS"
@@ -107,7 +107,7 @@ folders:
     BoltzGenCache: "<cache>/BoltzGen"
     # 234 GB downloaded, 1.9 TB once built (719 GB of that is the .idx files),
     # so <group>'s 1 TB quota cannot hold it. Scratch purges on 30-day access
-    # time and a rebuild is ~9 h — see llm/daint.md.
+    # time and a rebuild is ~9 h — see skills/biopipelines/references/daint_backend.md.
     ColabFoldDatabases: "<scratch>/mmseqs2_databases"
     MMseqs2Databases: "<ColabFoldDatabases>"
     # Shared by every AF2-consuming tool so the ~3.5 GB of params are
@@ -121,7 +121,7 @@ folders:
 # `biopipelines` venv, which carries the pure-python core (pyyaml + pandas).
 environments:
   # Empty + an edf: entry means the image supplies the interpreter, so there
-  # is no env to activate. Our venv cannot carry BioEmu — see llm/daint.md.
+  # is no env to activate. Our venv cannot carry BioEmu — see skills/biopipelines/references/daint_backend.md.
   BioEmu: ""
   Boltz2: "Boltz2Env"
   BoltzGen: "boltzgen"
@@ -138,7 +138,7 @@ environments:
   RFdiffusion3: "foundry"
   PoseBusters: "posebusters"
   # conda-forge envs (PyMOL, mkdssp have no aarch64 wheel), wrapped in a venv
-  # shim so `source <env>/bin/activate` works. See llm/daint.md.
+  # shim so `source <env>/bin/activate` works. See skills/biopipelines/references/daint_backend.md.
   ConformationalChange: "ProteinEnv"
   Contacts: "ProteinEnv"
   PoseChange: "ProteinEnv"

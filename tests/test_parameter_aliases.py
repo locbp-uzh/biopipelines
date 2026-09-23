@@ -351,3 +351,18 @@ def test_a_pipeline_built_through_compound_keeps_the_ligand_folder_name(
         pipeline.save()
 
     assert os.path.basename(pipeline.tools[0].output_folder) == "001_Ligand"
+
+
+def test_mpnn_chain_says_its_meaning_changed(local_config, capsys, isolated_cwd):
+    """chain= binds chains=, which also restricts the sequences rows; "still runs as written" was false."""
+    from biopipelines.mock import Mock
+    from biopipelines.pipeline import Pipeline
+    from biopipelines.protein_mpnn import ProteinMPNN
+
+    ce.reset_reported()
+    with Pipeline(project="TestSuite", job="alias", description="x", on_the_fly=False,
+                  local_output=True, config="local"):
+        source = Mock(ids=["bb"], streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
+        ProteinMPNN(structures=source.streams.structures, chain="B")
+    err = capsys.readouterr().err
+    assert "meaning changed" in err and "still runs as written" not in err

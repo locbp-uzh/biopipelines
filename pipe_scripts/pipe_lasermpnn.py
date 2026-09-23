@@ -123,6 +123,39 @@ def parse_fasta_scores(fasta_path):
     return result
 
 
+def _copy_verified(src, dest, attempts=3):
+    """Copy and CHECK the result, because a silent short write has happened.
+
+    A production run lost every byte written to the shared filesystem in a ~3 s
+    window: LASErMPNN's own design_*.pdb for four inputs and all 161 files this
+    function then wrote came out 0 bytes with no error raised anywhere. The step
+    was marked COMPLETED, the empty complexes flowed into the next stage, and
+    210 downstream Boltz2 jobs died on an empty target sequence — six hours of
+    GPU time lost to a failure nothing reported.
+
+    shutil.copyfile can also end short without raising on its own: on Linux it
+    uses os.sendfile, and a sendfile that returns 0 is read as EOF, so a
+    truncated copy looks like a complete one. Comparing sizes catches both,
+    and the retry uses a plain read/write loop rather than the fast path.
+    """
+    want = os.path.getsize(src)
+    for i in range(attempts):
+        if i == 0:
+            shutil.copyfile(src, dest)
+        else:
+            with open(src, "rb") as fi, open(dest, "wb") as fo:
+                shutil.copyfileobj(fi, fo)
+                fo.flush()
+                os.fsync(fo.fileno())
+        got = os.path.getsize(dest)
+        if got == want:
+            return
+        print(f"  short copy ({got}/{want} bytes) for {dest}"
+              f" — retry {i + 1}/{attempts - 1}", file=sys.stderr)
+    raise IOError(f"copy of {src} -> {dest} ended at "
+                  f"{os.path.getsize(dest)}/{want} bytes after {attempts} attempts")
+
+
 def collect(out_dir, structures_dir, structures_map, sequences_csv, missing_csv,
             entries, stem_to_id, num_sequences):
     """Rename designs into the structures stream and build the tables."""
@@ -148,9 +181,9 @@ def collect(out_dir, structures_dir, structures_map, sequences_csv, missing_csv,
 
         for n in range(num_sequences):
             out_id = f"{design_id}_{n + 1}"
-            if n in produced:
+            if n in produced and os.path.getsize(produced[n]) > 0:
                 dest = os.path.join(structures_dir, f"{out_id}.pdb")
-                shutil.copyfile(produced[n], dest)
+                _copy_verified(produced[n], dest)
                 struct_rows.append({"id": out_id, "file": dest, "structures.id": design_id})
 
                 # Sequence/score keyed by (input stem, design idx).
@@ -163,8 +196,10 @@ def collect(out_dir, structures_dir, structures_map, sequences_csv, missing_csv,
                 seq_rows.append({"id": out_id, "structures.id": design_id,
                                  "sequence": seq, "score": score})
             else:
+                cause = ("design file empty" if n in produced
+                         else "design not produced")
                 missing_rows.append({"id": out_id, "removed_by": "LASErMPNN",
-                                     "kind": "failure", "cause": "design not produced"})
+                                     "kind": "failure", "cause": cause})
 
     os.makedirs(os.path.dirname(structures_map), exist_ok=True)
     pd.DataFrame(struct_rows, columns=["id", "file", "structures.id"]).to_csv(structures_map, index=False)
@@ -175,7 +210,20 @@ def collect(out_dir, structures_dir, structures_map, sequences_csv, missing_csv,
     os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
     pd.DataFrame(missing_rows, columns=["id", "removed_by", "kind", "cause"]).to_csv(missing_csv, index=False)
 
+    # Same reason as _copy_verified: sequences.csv and structures_map.csv both
+    # landed at 0 bytes in that run, and an empty sequences.csv is worse than a
+    # missing one — every consumer reads it as "no sequences" rather than
+    # erroring. A DataFrame written with columns always has at least a header.
+    for path in (structures_map, sequences_csv, missing_csv):
+        if os.path.getsize(path) == 0:
+            raise IOError(f"{path} was written empty — the filesystem dropped "
+                          f"the write; rerun the step")
+
     print(f"Collected {len(struct_rows)} designs; {len(missing_rows)} missing.")
+    if missing_rows:
+        empties = sum(1 for r in missing_rows if r["cause"] == "design file empty")
+        if empties:
+            print(f"  {empties} design file(s) were empty on disk", file=sys.stderr)
     if not struct_rows:
         print("ERROR: LASErMPNN produced no designs", file=sys.stderr)
         sys.exit(1)
@@ -196,6 +244,10 @@ def main():
                         help="Shared run_batch_inference flags as one string")
     parser.add_argument("--positions-json", default=None)
     parser.add_argument("--fix-beta", action="store_true")
+    parser.add_argument("--collect-only", action="store_true",
+                        help="Skip inference and re-collect from an existing "
+                             "<exec>/designs tree. Repairs a step whose designs "
+                             "survived but whose streams did not.")
     args = parser.parse_args()
 
     ds = load_datastream(args.structures_json)
@@ -204,14 +256,30 @@ def main():
         raise ValueError(f"No structures in DataStream: {args.structures_json}")
 
     prepared_dir = os.path.join(args.exec_root, "_inputs")
-    list_txt, stem_to_id = prepare_inputs(entries, prepared_dir, args.positions_json, args.fix_beta)
+    staged = os.path.join(prepared_dir, "inputs.txt")
+    if args.collect_only and os.path.exists(staged):
+        # Rebuild the mapping from what the original run staged instead of
+        # re-staging: prepare_inputs re-stamps B-factors through a subprocess
+        # per input, and a repair has no business rewriting the step's inputs.
+        # prepare_inputs names each staged file <design_id>.pdb, so the stem IS
+        # the id.
+        list_txt = staged
+        with open(staged) as f:
+            stem_to_id = {_input_stem(p): _input_stem(p)
+                          for p in f.read().split() if p}
+    else:
+        list_txt, stem_to_id = prepare_inputs(entries, prepared_dir,
+                                              args.positions_json, args.fix_beta)
 
     out_dir = os.path.join(args.exec_root, "designs")
     run_options = shlex.split(args.run_options)
     if args.fix_beta:
         run_options = run_options + ["--fix_beta"]
-    run_inference(args.repo_parent, list_txt, out_dir, args.num_sequences,
-                  args.device, run_options)
+    if args.collect_only:
+        print(f"--collect-only: reusing designs already in {out_dir}")
+    else:
+        run_inference(args.repo_parent, list_txt, out_dir, args.num_sequences,
+                      args.device, run_options)
 
     collect(out_dir, args.structures_dir, args.structures_map, args.sequences_csv,
             args.missing_csv, entries, stem_to_id, args.num_sequences)

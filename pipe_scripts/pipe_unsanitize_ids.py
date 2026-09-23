@@ -102,16 +102,45 @@ def rename_files(folder: str, extension: str, unsanitize_map: Dict[str, str]) ->
     return renamed
 
 
+def _unsanitize_path(value, unsanitize_map: Dict[str, str]):
+    """Rewrite a path whose filename stem is a sanitized id, else return it unchanged.
+
+    Splits on the last separator by hand rather than via os.path: these CSVs are
+    written on a POSIX compute node but may be inspected on Windows, and
+    os.path.join would rewrite a "/" path with backslashes.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    cut = max(value.rfind('/'), value.rfind('\\'))
+    directory, basename = value[:cut + 1], value[cut + 1:]
+    if not basename:
+        return value
+    stem, ext = os.path.splitext(basename)
+    if stem not in unsanitize_map:
+        return value
+    return f"{directory}{unsanitize_map[stem]}{ext}"
+
+
 def fix_csv(csv_path: str, unsanitize_map: Dict[str, str]) -> int:
     """
-    Fix sanitized IDs in a CSV file's 'id' column.
+    Fix sanitized IDs in a CSV's 'id' column, and anywhere else they appear.
+
+    The other columns matter as much as the id: rename_files() has already moved
+    `barnase_barstar.pdb` to `barnase+barstar.pdb`, so a `structure` or `file`
+    column still holding the sanitized basename points at a file that no longer
+    exists. Provenance columns such as `sequences.id` carry bare ids and are
+    corrected the same way.
+
+    A cell changes only when its filename stem is exactly a key of the map, and
+    the map holds only ids whose sanitized form actually differs — so ordinary
+    paths, sequences and numbers are left alone.
 
     Args:
         csv_path: Path to CSV file
         unsanitize_map: Mapping from sanitized_id -> original_id
 
     Returns:
-        Number of IDs fixed
+        Number of cells fixed
     """
     if not os.path.exists(csv_path):
         print(f"Warning: CSV not found: {csv_path}")
@@ -132,12 +161,36 @@ def fix_csv(csv_path: str, unsanitize_map: Dict[str, str]) -> int:
         else:
             new_ids.append(oid)
 
-    if fixed > 0:
-        df['id'] = new_ids
-        df.to_csv(csv_path, index=False)
-        print(f"  Fixed {fixed} IDs in {os.path.basename(csv_path)}")
+    path_fixed = 0
+    new_columns = {}
+    for column in df.columns:
+        # No dtype guard: pandas 3 gives string columns a `str` dtype rather than
+        # `object`, so testing for `object` skipped every column this must fix.
+        # _unsanitize_path returns non-strings untouched.
+        if column == 'id':
+            continue
+        values = df[column].tolist()
+        rewritten = [_unsanitize_path(v, unsanitize_map) for v in values]
+        # isinstance guard, not a bare `old != new`: an empty CSV cell reads back
+        # as NaN, and NaN != NaN is True, so every blank counted as a change and
+        # forced a rewrite of a file with nothing to fix.
+        changed = sum(1 for old, new in zip(values, rewritten)
+                      if isinstance(old, str) and old != new)
+        if changed:
+            new_columns[column] = rewritten
+            path_fixed += changed
 
-    return fixed
+    if fixed > 0 or path_fixed:
+        df['id'] = new_ids
+        for column, values in new_columns.items():
+            df[column] = values
+        df.to_csv(csv_path, index=False)
+        detail = f"{fixed} IDs"
+        if path_fixed:
+            detail += f" and {path_fixed} path(s) in {', '.join(sorted(new_columns))}"
+        print(f"  Fixed {detail} in {os.path.basename(csv_path)}")
+
+    return fixed + path_fixed
 
 
 def main():

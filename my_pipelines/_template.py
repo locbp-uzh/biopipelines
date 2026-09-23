@@ -7,10 +7,9 @@
 A minimal starting point: fetch a structure, then run a custom Scripting step
 on it. Copy this file, rename it, and replace the body with your protocol.
 
-SLURM submission:
-    cd biopipelines && ./submit my_pipelines/template.py
-    or
-    bp-submit template.py     
+Submission:
+    bp_submit(script="my_pipelines/my_run.py")   # from an agent with bp-mcp registered
+    bp-submit my_pipelines/my_run.py             # or from a shell in the repo
 """
 
 from biopipelines.pipeline import *
@@ -26,11 +25,11 @@ with Pipeline(project="Template",
     # Entities (PDB / Sequence / Ligand / ...) provide typed inputs.
     protein = PDB("168L")
 
-    # A custom step. Scripting("template.py") resolves against the configured
+    # A custom step. Scripting("_template.py") resolves against the configured
     # scripts folder (folders.infrastructure.scripts, default my_scripts/), so
     # no absolute path is needed. The inputs dict keys are the names the script
     # reads back via inputs[...].
-    custom = Scripting("template.py",
+    custom = Scripting("_template.py",
                        inputs={"structures": protein})
 
     # custom.streams.structures / custom.tables.scores feed downstream tools

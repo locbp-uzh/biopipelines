@@ -9,7 +9,8 @@ ESMFold2 post-processing.
 Reads the per-id scores JSON written by the inference script and the predicted
 mmCIFs, then writes:
   - structures_map.csv  (id, file, + {axis}.id provenance columns)
-  - confidence.csv      (id, file, plddt, ptm, iptm[, max_pae])
+  - confidence.csv      (id, file, plddt, ptm, iptm[, max_pae]
+                         [, iptm_chain_<a>_<b> per chain pair])
   - compounds_map.csv   (ligand chemistry passthrough, when ligands were folded)
 
 Runs under the 'biopipelines' env. Drops ids whose mmCIF is missing so the map
@@ -84,6 +85,15 @@ def main():
                 "ptm": s.get("ptm"), "iptm": s.get("iptm")}
         if "max_pae" in s:
             crow["max_pae"] = s["max_pae"]
+        # Per-chain-pair ipTM (iptm_chain_<a>_<b>), when the inference script
+        # emitted it. Carried through by prefix rather than by name so the
+        # number of chains does not have to be known here; the fixed column
+        # list above would otherwise silently drop them. Absent for complexes
+        # the model did not return a pair matrix for, which is why these are
+        # copied only when present rather than defaulted to a column of NaN.
+        for k, v in s.items():
+            if k.startswith("iptm_chain_"):
+                crow[k] = v
         conf_rows.append(crow)
 
     if not struct_rows:

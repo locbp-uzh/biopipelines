@@ -98,7 +98,7 @@ class Panda(BaseConfig):
     """
 
     TOOL_NAME = "Panda"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
 
     # Internal column name used to track which input table a row came from
     # when concat runs over multiple inputs. Auto-added before the operation
@@ -958,6 +958,7 @@ echo "=== Panda ready ==="
             "pool_table_maps": getattr(self, 'pool_table_maps', []),
             "map_table_paths": getattr(self, 'map_table_paths', []),
             "rename": self.rename,
+            "declared_output_ids": self._renamed_output_ids(),
             "ignore_missing": self.ignore_missing,
             "step_tool_name": step_tool_name,
             "upstream_missing_paths": getattr(self, 'upstream_missing_paths', []),
@@ -1014,6 +1015,23 @@ fi
                 if n is not None:
                     counts.append(n)
         return min(counts) if counts else None
+
+    def _renamed_output_ids(self) -> List[str]:
+        """The concrete ids the rename declares, or ``[]`` when the count is not fixed.
+
+        These are handed to pipe_panda as ``declared_output_ids`` so the runtime
+        accounts for the slots a shrinking operation chain leaves unfilled with
+        the same spelling this declares them under.
+        """
+        # Only pool mode declares streams, so only it has slots to account for.
+        if not (self.use_pool_mode and getattr(self, "pool_outputs", None)):
+            return []
+        if not self.rename:
+            return []
+        count = self._get_predicted_output_count()
+        if count is None:
+            return []
+        return [f"{self.rename}_{i + 1}" for i in range(count)]
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after transformation."""
@@ -1142,7 +1160,7 @@ fi
                 sdata["files"] = deduped_files
 
             # Check if head/tail/sample limits the output count
-            predicted_count = self._get_predicted_output_count()
+            declared_ids = self._renamed_output_ids()
 
             # Build output streams — per-stream files + map_tables land in
             # their own stream folder; standalone tables (carried forward
@@ -1165,8 +1183,8 @@ fi
                 # runs at execution time in pipe_panda — here we just
                 # predict the output path.
                 if data.get("shared_src"):
-                    if self.rename and predicted_count is not None:
-                        new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                    if declared_ids:
+                        new_ids = list(declared_ids)
                     elif self.rename:
                         new_ids = [f"{self.rename}_[<#>]"]
                     else:
@@ -1184,8 +1202,8 @@ fi
 
                 # Value-based streams (no files): propagate as-is with original map_table
                 if not data["files"]:
-                    if self.rename and predicted_count is not None:
-                        new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
+                    if declared_ids:
+                        new_ids = list(declared_ids)
                     elif self.rename:
                         new_ids = [f"{self.rename}_[<#>]"]
                     else:
@@ -1201,10 +1219,12 @@ fi
 
                 ext = os.path.splitext(data["files"][0])[1]
 
-                if self.rename and predicted_count is not None:
-                    # Rename with known count: generate concrete IDs and file paths
-                    new_ids = [f"{self.rename}_{i+1}" for i in range(predicted_count)]
-                    new_files = [os.path.join(stream_dir, f"{nid}{ext}") for nid in new_ids]
+                if declared_ids:
+                    # Rename with known count: concrete ids, templated files. An
+                    # explicit path list carries no owner id, so nothing the
+                    # completion check knows could ever excuse one.
+                    new_ids = list(declared_ids)
+                    new_files = [os.path.join(stream_dir, f"<id>{ext}")]
                 elif self.rename:
                     # Rename with unknown count: lazy pattern
                     new_ids = [f"{self.rename}_[<#>]"]

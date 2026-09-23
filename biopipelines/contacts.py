@@ -46,7 +46,7 @@ class Contacts(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Contacts"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

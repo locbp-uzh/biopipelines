@@ -97,9 +97,24 @@ codex
 
 Any repository-aware assistant works (Claude Code, Codex, Cursor, Copilot Chat, …). The only requirement is that it can read files in the working directory.
 
-### 3. Point the assistant at the right prompt and state your goal
+### 3. Register the MCP server
 
-The `llm/` folder holds two session prompts, depending on what you want to do, backed by three per-backend references (`cluster.md`, `colab.md`, `daint.md`):
+The prompts in `llm/` let the assistant *read about* BioPipelines. The MCP server lets it *query* BioPipelines: search the tool catalog by what a tool produces or consumes, pull one tool's parameters without opening a file, list runs, read a failing step's log, print a result table, and submit a pipeline — locally or over ssh on a cluster.
+
+The MCP SDK is an optional extra, so it is not installed by default and nothing about authoring or running pipelines depends on it:
+
+```bash
+pip install -e ".[mcp]"
+claude mcp add --scope user biopipelines -- bp-mcp
+```
+
+`--scope user` registers it for every project on this machine and writes nothing into the repository. Check with `claude mcp list`, which should report `biopipelines … ✓ Connected`. For assistants other than Claude Code, the command to register is `bp-mcp` over **stdio**.
+
+The server runs on your own machine and reaches the cluster over your ssh config, so it needs no install rights there and leaves no process on a shared login node. The full tool list is in [`skills/biopipelines/references/mcp_server.md`](../skills/biopipelines/references/mcp_server.md).
+
+### 4. Point the assistant at the right prompt and state your goal
+
+The `llm/` folder holds two session prompts, depending on what you want to do. The per-backend references moved to `skills/biopipelines/references/` (`cluster_backend.md`, `colab_backend.md`, `daint_backend.md`, `container_backend.md`) so that any assistant can read them, not only one told to read `llm/`:
 
 - **`llm/pipelines.md`** — to *use* the framework: design and run a pipeline for a specific biological problem. This is what most users want.
 - **`llm/development.md`** — to *change* the framework itself: add a tool wrapper, fix a bug, refactor internals.
@@ -110,11 +125,11 @@ Open your session with a message like:
 
 The assistant reads the prompt, loads the framework's documentation, interviews you about any open choices (which tools, how many designs, which execution mode), and then writes and runs the pipeline.
 
-### 4. One-time setup for where the pipeline will run
+### 5. One-time setup for where the pipeline will run
 
 The assistant authors the pipeline locally, but the heavy compute runs elsewhere — on a cluster or on Colab. Set that up once:
 
-- **Cluster:** follow `llm/cluster.md` to add an ssh alias and the `llm/log.sh` command logger, then copy `llm/resources.md.template` to `llm/resources.md` and let the assistant fill in your cluster's partitions, GPU types, and walltime policy. This gives the assistant honest defaults instead of generic guesses.
+- **Cluster:** follow `skills/biopipelines/references/cluster_backend.md` to add an ssh alias, then copy `llm/resources.md.template` to `llm/resources.md` and let the assistant fill in your cluster's partitions, GPU types, and walltime policy. This gives the assistant honest defaults instead of generic guesses. With the MCP server registered, ask the assistant to run `bp_setup(host="<your alias>", repo="<path to the checkout on the cluster>")` — it verifies the ssh alias, the checkout, the config variant and the output root in one pass, stops at the first thing missing, and saves a working pair so later calls need no arguments.
 - **Colab:** no setup needed here — the assistant hands you notebook cells to run, and you paste back the outputs.
 
 After that, the assistant can push the pipeline, submit it, tail the logs, and report back the results — all from within the same session.
@@ -337,7 +352,7 @@ BIOPIPELINES_CONFIG_VARIANT=daint biopipelines-submit my_pipeline.py
 
 GPU tools do not use a conda env. Each is mapped in `config.daint.yaml`'s `edf:` block to an Environment Definition File, and its whole script runs via `srun --environment=<edf>`. The image comes from NVIDIA NGC, which publishes GH200-native PyTorch, so torch and CUDA arrive prebuilt rather than being ported. A tool's venv is layered on the image with `--system-site-packages` and must be built inside the same container.
 
-Not every tool is available. Tools needing an x86-64-only container image do not run on Daint — RFdiffusion is the clearest case, since the RosettaCommons images have no arm64 build. PyMOL, mkdssp and ProteinMPNN *do* run there, supplied by their EDF image. `config.daint.yaml`'s `environments:` block is a routing table, not a record of what has been verified: it names an env for every tool that has one, whether or not the tool has been run. `llm/daint.md` carries the list actually verified by running, and the blocked list with a reason for each.
+Not every tool is available. Tools needing an x86-64-only container image do not run on Daint — RFdiffusion is the clearest case, since the RosettaCommons images have no arm64 build. PyMOL, mkdssp and ProteinMPNN *do* run there, supplied by their EDF image. `config.daint.yaml`'s `environments:` block is a routing table, not a record of what has been verified: it names an env for every tool that has one, whether or not the tool has been run. `skills/biopipelines/references/daint_backend.md` carries the list actually verified by running, and the blocked list with a reason for each.
 
 ### Nodes are billed whole
 
@@ -599,9 +614,10 @@ Control how multiple inputs combine in tools like Boltz2:
 |------|----------|---------|
 | `Each` (default) | Cartesian product | 2 proteins × 3 ligands = 6 predictions |
 | `Bundle` | Group as one entity | 2 proteins bundled + 3 ligands = 3 predictions |
+| `Grouped` | One entity per group of rows | 4 chain rows in 2 designs = 2 predictions |
 
 ```python
-from biopipelines.combinatorics import Bundle, Each
+from biopipelines.combinatorics import Bundle, Each, Grouped
 
 # Default: Each protein with each ligand (6 predictions)
 boltz = Boltz2(
@@ -622,6 +638,28 @@ boltz = Boltz2(
     ligands=Bundle(Each(ligand_library), cofactor)
 )
 ```
+
+#### `Grouped`: when several rows are one entity
+
+`Each` makes one output per row and `Bundle` makes one output from every row. Neither can say *"these particular rows belong together"* — which is what a multi-chain design is: an inverse-folding tool emits one `sequences` row per designed chain, and the chains of one design have to be folded as one complex.
+
+`Grouped` is that third mode. It iterates the **groups** of a stream, taking the partition from a stream whose ids are the group keys — the same `groups=` shape `Consensus` uses:
+
+```python
+# One prediction per design, however many chains the design has.
+folded = Boltz2(proteins=Grouped(pmpnn))
+
+# The same, with a fixed partner held in every complex.
+folded = Boltz2(proteins=Bundle(Grouped(pmpnn), tag))
+```
+
+Passing the **tool output** rather than a bare stream lets the group stream default to that output's `designs` stream, so nothing has to be wired up. Name it explicitly when grouping something else:
+
+```python
+folded = Boltz2(proteins=Grouped(pmpnn.streams.sequences, groups=pmpnn.streams.designs))
+```
+
+Two properties are worth knowing. The output ids are the **group** ids, which are known at configuration time even when the member ids are not — so a grouped consumer keeps deterministic ids even when the member stream is lazy. And membership is resolved at runtime by the framework's id matching, so ids the upstream renamed still find their group; a bare `DataStream` cannot be grouped without `groups=`, because a stream does not carry its producer's other streams.
 
 **Output ID naming**: Output IDs are always the full cartesian product of all iterated axis IDs joined with `+`. For example, 1 protein (`prot1`) × 3 ligands (`lig1`, `lig2`, `lig3`) produces IDs `prot1+lig1`, `prot1+lig2`, `prot1+lig3`. There are no shortcuts — even with a single protein, the protein ID is always included. The `+` separator is deliberately distinct from `_`, which is reserved for parent→child suffixes (`protein_1`, `protein_2`), so a multi-axis ID is never mistaken for a suffixed one.
 
@@ -1214,26 +1252,32 @@ forward upgrades; the per-tool `environments/<tool>.<variant>.yaml` files stay
 loose for the same reason — site-specific CUDA drivers and ML-stack
 constraints make a single locked version unportable across clusters.
 
-**Per-run records.** A pipeline constructed with `debug=True` writes a complete
-runtime snapshot under `<output>/_debug_capture/` when the job runs:
+**Per-run records.** Every run records what produced it. Nothing has to be switched on: the question *"what exactly produced this result?"* is asked after a run, not before it.
 
-- `_debug_capture/environments/<env>.yaml` — `mamba env export --no-builds`
-  per environment used in the pipeline.
-- `_debug_capture/environments/<env>.pip.txt` — `pip freeze` per environment.
-- `_debug_capture/system/` — `uname`, `nvidia-smi`, scheduler version,
-  container-runtime version.
+- `<job>/manifest.json` — framework version and commit, site variant, scheduler, and per step the wrapper version, environments, container image and the parameters both as passed and as resolved. Carries a content hash covering everything that would make a rerun differ.
+- `<job>/environments/<env>.txt` — the environment export **with build strings**, plus `pip freeze`, taken on the node that ran the job.
+- `<job>/environments/<env>.sha256` — its digest, so two runs are comparable by one value and a rebuilt environment shows up as a different environment.
+
+Credentials are filtered out of those exports before they are written; see `provenance.md`.
+
+Read the record back with `bp_provenance` (and `bp_provenance(against=...)` to diff two runs), plan a rerun elsewhere with `bp_reproduce`, or render it for someone who does not call tools with `bp_lineage(page=True)`. `docs/provenance.md` covers all three.
+
+**The opt-in forensic layer.** `debug=True` additionally writes `<output>/_debug_capture/`: `mamba env export --no-builds` per environment, `pip freeze`, and a `system/` folder with `uname`, `nvidia-smi`, the scheduler version and the container-runtime version.
 
 ```python
 with Pipeline(project="Project", job="Job", debug=True):
     ...
-# the pipeline.sh now exports BIOPIPELINES_DEBUG=1 and snapshots the runtime
+# pipeline.sh exports BIOPIPELINES_DEBUG=1 and snapshots the runtime as well
 ```
+
+Use the manifest and the digests to ask *whether* two runs differ; use `_debug_capture/` to find out *why* an environment behaved as it did. Note that `--no-builds` is deliberate there and makes that export portable rather than identifying — which is why the unconditional capture keeps the build strings instead.
+
+!!! warning "Before 1.5.0"
+    `Pipeline(debug=True)` raised `NameError` at `save()` on every conda/mamba site, so `_debug_capture/` was never written on a cluster. A run from before this release has no environment record of either kind.
 
 This pair (loose `>=` for install, exact freeze per run) lets a third party
 reproduce a specific result by recreating the captured environment, while not
-forcing every clean install to use bleeding-edge versions. A reference
-artefact captured on UZH S3IT lives at
-`docs/reviewer_evidence/a6_debug_capture/environments/`.
+forcing every clean install to use bleeding-edge versions.
 
 ---
 

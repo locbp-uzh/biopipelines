@@ -92,7 +92,12 @@ folders:
   repositories:
     AF2BIND: "<data>/af2bind"
     AiZynthFinder: "<data>/aizynthfinder"
-    AlphaFold: "<data>/localcolabfold"
+    # The ColabFold env AlphaFold.install() builds, plus the AF2 weights beside
+    # it. On the group share so one install serves everyone and neither eats a
+    # personal home quota. A conda prefix env bakes absolute paths into its
+    # shebangs, so DO NOT repoint this (here or in the overlay) without running
+    # AlphaFold.install(force_reinstall=True) afterwards -- the env does not move.
+    AlphaFold: "<group>/models/localcolabfold"
     Boltz: "<data>/boltz"
     BoltzGen: "<data>/boltzgen"
     DiffDock: "<data>/DiffDock"
@@ -131,9 +136,12 @@ folders:
     ColabFoldDatabases: "<group>/models/mmseqs2_databases"
     # The MMseqs2 server serves the same ColabFold-formatted DBs.
     MMseqs2Databases: "<ColabFoldDatabases>"
-    # AF2 params shared by all AF2-consuming tools (AlphaFold, AF2BIND).
+    # AF2 params shared by all AF2-consuming tools (AlphaFold, AF2BIND, BioEmu).
     # Its params/ subdir holds params_model_*.npz; this is ColabDesign's data_dir.
-    AlphaFoldParams: "<data>/localcolabfold/colabfold"
+    # On the group share so the ~5 GB of weights exist once for the whole lab.
+    # AlphaFold passes this to colabfold_batch as --data; repointing it at an
+    # empty folder makes the next run download a fresh copy rather than fail.
+    AlphaFoldParams: "<group>/models/localcolabfold/colabfold"
 
   # Server paths
   server:
@@ -150,9 +158,11 @@ environments:
   Aggrescan3D: "Aggrescan3D"
   AlphaFold: "biopipelines"
   APBS: "apbs"
+  BFactor: "biopipelines"
   BayesianAdjuster: "MutationEnv"
   BioEmu: "bioemu"
   Boltz2: "Boltz2Env"
+  OpenFold3: "OpenFold3Env"
   BoltzGen: "boltzgen"
   BoltzGenImport: "boltzgen"
   BoltzGenMerge: "boltzgen"

@@ -261,3 +261,23 @@ class FolderManager:
     def __contains__(self, key: str) -> bool:
         """Check if folder key exists."""
         return key in self._folders
+
+
+def output_root(local_output: bool = False) -> str:
+    """Where this machine writes its runs — `biopipelines_output`, resolved, creating nothing.
+
+    An agent asking "where are my runs" must not have the side effects of constructing a
+    FolderManager, which makes directories for a project it invented to ask the question.
+    Only the `base` section is resolved, which is all `biopipelines_output` depends on.
+    """
+    if local_output:
+        return os.path.join(os.getcwd(), "outputs")
+
+    manager = object.__new__(FolderManager)
+    manager._folders = {}
+    manager._containers = {}
+    manager._local_output = False
+    manager._inject_runtime_values()
+    for key, template in (ConfigManager().get_folder_config().get("base", {})).items():
+        manager._folders[key] = manager._resolve_path(template, key)
+    return manager._folders["biopipelines_output"]

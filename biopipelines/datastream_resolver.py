@@ -194,7 +194,7 @@ def resolve_input_to_datastream(
     - None → returns None
     - DataStream → returned directly
     - StandardizedOutput → extracts stream by fallback_stream name
-    - Bundle/Each wrappers → unwraps recursively to get first leaf, then resolves
+    - Bundle/Each wrappers → unwraps recursively to get first leaf, then resolves; Grouped → its source
 
     The fallback_stream parameter is only used when a leaf is a StandardizedOutput
     and we need to know which stream to extract (e.g., "sequences", "compounds").
@@ -228,6 +228,10 @@ def resolve_input_to_datastream(
             return resolve_input_to_datastream(value.sources[0], fallback_stream)
         return None
 
+    # Grouped wrapper - the rows it partitions are its source's
+    if hasattr(value, 'source') and hasattr(value, 'resolve_groups'):
+        return resolve_input_to_datastream(value.source, fallback_stream)
+
     # StandardizedOutput - extract stream by name
     if hasattr(value, 'streams'):
         stream = getattr(value.streams, fallback_stream, None)
@@ -240,5 +244,5 @@ def resolve_input_to_datastream(
 
     raise ValueError(
         f"Cannot resolve {type(value).__name__} to DataStream. "
-        f"Expected DataStream, StandardizedOutput, Bundle, or Each."
+        f"Expected DataStream, StandardizedOutput, Bundle, Each or Grouped."
     )

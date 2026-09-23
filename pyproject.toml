@@ -32,7 +32,9 @@ colab = ["openbabel-wheel"]
 # imports biopipelines. `pip install -e ".[scripting]"` in the custom env pulls
 # the full runtime (base deps come with -e .; openbabel matches what tools expect).
 scripting = ["openbabel-wheel"]
-all = ["pytest>=7", "openbabel-wheel"]
+# `bp-mcp` only: the MCP SDK is not needed to author or run pipelines.
+mcp = ["mcp>=2.2"]
+all = ["pytest>=7", "openbabel-wheel", "mcp>=2.2"]
 
 [project.scripts]
 bp-submit = "biopipelines.cli:submit"
@@ -40,6 +42,7 @@ bp-config = "biopipelines.cli:config"
 bp-run = "biopipelines.cli:run"
 bp-warm = "biopipelines.cli:warm"
 bp-visualize = "biopipelines.cli:visualize"
+bp-mcp = "biopipelines.mcp_server:main"
 biopipelines-submit = "biopipelines.cli:submit"
 biopipelines-config = "biopipelines.cli:config"
 biopipelines-run = "biopipelines.cli:run"

@@ -547,8 +547,56 @@ def copy_local_ligand(lookup: str, custom_id: str, residue_code: str,
         return False, "", metadata
 
 
+# A fused ring system this flat after embedding is meant to be planar...
+_PLANAR_BEFORE = 0.10   # Angstrom, max out-of-plane deviation
+# ...and this far out of plane afterwards means the optimizer broke it.
+_PLANAR_DEGRADED = 0.25
+
+
+def _ring_systems(mol):
+    """Fused ring systems as atom-index sets (rings sharing >=2 atoms merge)."""
+    rings = [set(r) for r in mol.GetRingInfo().AtomRings()]
+    systems = []
+    for ring in rings:
+        merged = [s for s in systems if len(s & ring) >= 2]
+        for s in merged:
+            systems.remove(s)
+            ring = ring | s
+        systems.append(ring)
+    return systems
+
+
+def _worst_ring_planarity(mol):
+    """{system_index: max out-of-plane deviation} over fused ring systems."""
+    import numpy as np
+    conf = mol.GetConformer()
+    out = {}
+    for k, system in enumerate(_ring_systems(mol)):
+        if len(system) < 4:
+            continue
+        pts = np.array([list(conf.GetAtomPosition(i)) for i in sorted(system)])
+        centred = pts - pts.mean(0)
+        normal = np.linalg.svd(centred)[2][2]
+        out[k] = float(np.abs(centred @ normal).max())
+    return out
+
+
 def convert_smiles_to_sdf_rdkit(smiles: str, residue_code: str) -> Optional[str]:
-    """Convert SMILES to an SDF molblock using RDKit (ETKDG embed + MMFF).
+    """Convert SMILES to an SDF molblock using RDKit (ETKDG embed, then MMFF
+    only if it does not flatten-break a ring system).
+
+    MMFF94 silently wrecks conjugated ring systems it types badly. Measured on
+    the SiR silicon-xanthene dyes: ETKDG embeds the tricyclic core flat (max
+    deviation 0.005 A), and MMFFOptimizeMolecule then puckers it to 1.13 A.
+    MMFFHasAllMoleculeParams returns True throughout, so nothing raises and the
+    distorted conformer flows downstream — into GNINA, which treats rings as
+    RIGID and therefore docks the broken shape as given.
+
+    Rather than special-casing silicon, this protects any ring system the
+    embedder already made planar: if MMFF degrades one, its coordinates are
+    discarded and the ETKDG geometry is kept. Ordinary drug-like ligands are
+    unaffected — MMFF keeps their aromatic rings flat, so the check passes and
+    the optimized coordinates are used.
 
     SDF carries no residue code (the code lives on the compounds stream); the
     residue_code argument is accepted for signature parity but unused here."""
@@ -570,7 +618,19 @@ def convert_smiles_to_sdf_rdkit(smiles: str, residue_code: str) -> Optional[str]
                 print("  Error: Could not generate 3D coordinates")
                 return None
         try:
+            before = _worst_ring_planarity(mol)
+            embedded = mol.GetConformer().GetPositions().copy()
             AllChem.MMFFOptimizeMolecule(mol, maxIters=200)
+            after = _worst_ring_planarity(mol)
+            broken = [k for k, dev in after.items()
+                      if before.get(k, dev) <= _PLANAR_BEFORE and dev > _PLANAR_DEGRADED]
+            if broken:
+                conf = mol.GetConformer()
+                for i, xyz in enumerate(embedded):
+                    conf.SetAtomPosition(i, xyz.tolist())
+                worst = max(after[k] for k in broken)
+                print(f"  Warning: MMFF puckered {len(broken)} planar ring system(s) "
+                      f"(max deviation {worst:.2f} A); keeping ETKDG coordinates")
         except Exception as e:
             print(f"  Warning: MMFF optimization failed: {e}, using unoptimized coordinates")
         mol = Chem.RemoveHs(mol)
