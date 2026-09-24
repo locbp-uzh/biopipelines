@@ -15,6 +15,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **`Selection` 1.1 -> 1.2** - selection strings work as literals: `Selection("A10-20", ...)` and `Selection.add/subtract/intersect("A10-20+A45")` apply the same residues to every id. A string used to be stored as a table reference and raised `AttributeError: 'str' object has no attribute 'column'` at configuration time, although the docs promised the implicit `add()` accepted one. A malformed literal is refused at configuration time; a selection whose only `add()` operands are literals needs `structures=` to define its ids.
+
 ## [1.5.2] — 2026-09-23
 
 ### Framework

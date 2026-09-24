@@ -13,7 +13,7 @@ Usage:
     python pipe_selection.py <config_json>
 
 Config JSON:
-    - operations: list of {op, refs?, value?, stream_json?, filter_expr?, filter_column?} dicts
+    - operations: list of {op, refs?, literals?, value?, stream_json?, filter_expr?, filter_column?} dicts
     - structures_json: (optional) path to DataStream JSON with PDB files
     - output_csv: path to output CSV file
 
@@ -458,6 +458,8 @@ def process_selections(config_path: str):
             op_type = op["op"]
 
             if op_type == "add":
+                for literal in op.get("literals", []):
+                    current |= set(sele_to_list(literal))
                 for ref in op.get("refs", []):
                     k = (ref["table"], ref["column"])
                     src = ref_keymap[k].get(design_id, design_id)
@@ -468,6 +470,8 @@ def process_selections(config_path: str):
                     current |= stream_cache[key].get(src, set())
 
             elif op_type == "subtract":
+                for literal in op.get("literals", []):
+                    current -= set(sele_to_list(literal))
                 for ref in op.get("refs", []):
                     k = (ref["table"], ref["column"])
                     src = ref_keymap[k].get(design_id, design_id)
@@ -478,6 +482,8 @@ def process_selections(config_path: str):
                     current -= stream_cache[key].get(src, set())
 
             elif op_type == "intersect":
+                for literal in op.get("literals", []):
+                    current &= set(sele_to_list(literal))
                 for ref in op.get("refs", []):
                     k = (ref["table"], ref["column"])
                     src = ref_keymap[k].get(design_id, design_id)

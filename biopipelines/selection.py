@@ -34,6 +34,7 @@ Example::
 """
 
 import os
+import re
 import json
 from typing import Dict, List, Any, Optional, Union
 
@@ -54,13 +55,14 @@ except ImportError:
 class SelectionOp:
     """Lightweight descriptor for a selection operation."""
 
-    def __init__(self, op_type: str, refs=None, value=None,
+    def __init__(self, op_type: str, refs=None, literals=None, value=None,
                  stream: Optional[DataStream] = None,
                  filter_expr: Optional[str] = None,
                  direction: Optional[str] = None,
                  plane: Optional[Dict[str, str]] = None):
         self.op_type = op_type      # "add" | "subtract" | "expand" | "shrink" | "shift" | "invert"
         self.refs = refs or []      # list of TableReference (for table-based add/subtract)
+        self.literals = literals or []  # list of selection strings applied to every id
         self.value = value          # int (for expand/shrink/shift) or None
         self.stream = stream        # DataStream (for stream-based add/subtract)
         self.filter_expr = filter_expr    # e.g. "propensity>0.5", "rmsf<=0.3"
@@ -71,6 +73,8 @@ class SelectionOp:
         d = {"op": self.op_type}
         if self.refs:
             d["refs"] = [{"table": ref.path, "column": ref.column} for ref in self.refs]
+        if self.literals:
+            d["literals"] = self.literals
         if self.value is not None:
             d["value"] = self.value
         if self.stream is not None:
@@ -89,8 +93,40 @@ class SelectionOp:
             d["plane"] = self.plane
         return d
 
+    def describe_sources(self) -> str:
+        return ", ".join([ref.column for ref in self.refs] + [repr(lit) for lit in self.literals])
+
     PDB_AWARE_OPS = {"expand", "shrink", "shift", "invert", "plane_side",
                      "n_terminus", "c_terminus", "termini", "all_residues", "gaps"}
+
+
+_SPAN = re.compile(r"^[A-Z]?\d+(-\d+)?$")
+
+
+def _set_op(op_type: str, args, include: Optional[str], exclude: Optional[str]) -> SelectionOp:
+    """Build an add/subtract/intersect op from TableReferences, selection strings, or one DataStream."""
+    if len(args) == 1 and isinstance(args[0], DataStream):
+        if include is not None and exclude is not None:
+            raise ValueError(f"Selection.{op_type}: use either include= or exclude=, not both")
+        filter_expr = include if include is not None else exclude
+        return SelectionOp(op_type, stream=args[0], filter_expr=filter_expr)
+    if include is not None or exclude is not None:
+        raise ValueError(f"Selection.{op_type}: include=/exclude= are only valid with a DataStream argument")
+    refs, literals = [], []
+    for arg in args:
+        if isinstance(arg, TableReference):
+            refs.append(arg)
+        elif isinstance(arg, str):
+            # A typo here would otherwise become an empty selection on the compute node.
+            bad = [p for p in arg.split("+") if not _SPAN.match(p.strip())]
+            if not arg.strip() or bad:
+                raise ValueError(f"Selection.{op_type}: not a residue selection: {arg!r} "
+                                 f"(expected e.g. 'A10-20+A45' or '10-20')")
+            literals.append(arg.strip())
+        else:
+            raise TypeError(f"Selection.{op_type}: expected TableReference, selection string, "
+                            f"or a single DataStream, got {type(arg).__name__}")
+    return SelectionOp(op_type, refs=refs, literals=literals)
 
 
 class Selection(BaseConfig):
@@ -136,7 +172,7 @@ class Selection(BaseConfig):
     """
 
     TOOL_NAME = "Selection"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -162,24 +198,21 @@ class Selection(BaseConfig):
 
             Selection.add(fuse.tables.sequences.L1, fuse.tables.sequences.L2)
 
+        Literal (a selection string applied to every id)::
+
+            Selection.add("A10-20+A45")
+
         Stream-based (pass a DataStream of format resi-csv)::
 
             Selection.add(cpred.streams.propensities, include="propensity>0.5")
 
         Args:
-            *args:    One or more TableReference objects, or a single DataStream.
+            *args:    TableReference objects and/or selection strings, or a single DataStream.
             include:  Filter expression ``"column op value"`` for rows to include,
                       e.g. ``"propensity>0.5"``, ``"rmsf<=1.2"``.
             exclude:  Filter expression ``"column op value"`` for rows to exclude.
         """
-        if len(args) == 1 and isinstance(args[0], DataStream):
-            if include is not None and exclude is not None:
-                raise ValueError("Selection.add: use either include= or exclude=, not both")
-            filter_expr = include if include is not None else exclude
-            return SelectionOp("add", stream=args[0], filter_expr=filter_expr)
-        if include is not None or exclude is not None:
-            raise ValueError("Selection.add: include=/exclude= are only valid with a DataStream argument")
-        return SelectionOp("add", refs=list(args))
+        return _set_op("add", args, include, exclude)
 
     @staticmethod
     def subtract(*args, include: Optional[str] = None, exclude: Optional[str] = None) -> SelectionOp:
@@ -194,19 +227,12 @@ class Selection(BaseConfig):
             Selection.subtract(cpred.streams.propensities, include="propensity>0.8")
 
         Args:
-            *args:    One or more TableReference objects, or a single DataStream.
+            *args:    TableReference objects and/or selection strings, or a single DataStream.
             include:  Filter expression ``"column op value"`` for rows to subtract,
                       e.g. ``"propensity>0.8"``.
             exclude:  Filter expression ``"column op value"`` for rows to subtract (inverted).
         """
-        if len(args) == 1 and isinstance(args[0], DataStream):
-            if include is not None and exclude is not None:
-                raise ValueError("Selection.subtract: use either include= or exclude=, not both")
-            filter_expr = include if include is not None else exclude
-            return SelectionOp("subtract", stream=args[0], filter_expr=filter_expr)
-        if include is not None or exclude is not None:
-            raise ValueError("Selection.subtract: include=/exclude= are only valid with a DataStream argument")
-        return SelectionOp("subtract", refs=list(args))
+        return _set_op("subtract", args, include, exclude)
 
     @staticmethod
     def intersect(*args, include: Optional[str] = None, exclude: Optional[str] = None) -> SelectionOp:
@@ -222,17 +248,11 @@ class Selection(BaseConfig):
             # recall = overlap.n_residues / truth.n_residues
             # precision = overlap.n_residues / pred.n_residues
 
-        Table-based (TableReference objects) or stream-based (a resi-csv
-        DataStream with include=/exclude=), mirroring add/subtract.
+        Table-based (TableReference objects), literal (selection strings) or
+        stream-based (a resi-csv DataStream with include=/exclude=), mirroring
+        add/subtract.
         """
-        if len(args) == 1 and isinstance(args[0], DataStream):
-            if include is not None and exclude is not None:
-                raise ValueError("Selection.intersect: use either include= or exclude=, not both")
-            filter_expr = include if include is not None else exclude
-            return SelectionOp("intersect", stream=args[0], filter_expr=filter_expr)
-        if include is not None or exclude is not None:
-            raise ValueError("Selection.intersect: include=/exclude= are only valid with a DataStream argument")
-        return SelectionOp("intersect", refs=list(args))
+        return _set_op("intersect", args, include, exclude)
 
     @staticmethod
     def expand(n: int, direction: str = "nc") -> SelectionOp:
@@ -401,13 +421,21 @@ class Selection(BaseConfig):
                 "(n_terminus, c_terminus, termini, all_residues, gaps)."
             )
 
-        # Each add/subtract/intersect must have either refs or a stream (not neither)
         for op in self.operations:
             if op.op_type in ("add", "subtract", "intersect"):
-                if not op.refs and op.stream is None:
+                if not op.refs and not op.literals and op.stream is None:
                     raise ValueError(
-                        f"Selection.{op.op_type}() requires either TableReference args or a DataStream"
+                        f"Selection.{op.op_type}() requires TableReference args, selection strings, or a DataStream"
                     )
+
+        # A literal carries no ids, so output ids come from a table/stream add or from structures=.
+        has_id_source = any(op.op_type == "add" and (op.refs or op.stream is not None)
+                            for op in self.operations)
+        if not has_id_source and self.structures_stream is None:
+            raise ValueError(
+                "structures= is required when no add() takes a table column or stream: "
+                "a selection string applies to every id but does not define them."
+            )
 
         # PDB-aware ops require structures
         has_pdb_op = any(op.op_type in SelectionOp.PDB_AWARE_OPS for op in self.operations)
@@ -435,8 +463,7 @@ class Selection(BaseConfig):
                 if op.stream is not None:
                     op_summaries.append(f"{op.op_type}(stream, {op.filter_expr})")
                 else:
-                    cols = ", ".join(ref.column for ref in op.refs)
-                    op_summaries.append(f"{op.op_type}({cols})")
+                    op_summaries.append(f"{op.op_type}({op.describe_sources()})")
             elif op.value is not None:
                 dir_str = f", {op.direction}" if op.direction and op.direction != "nc" else ""
                 op_summaries.append(f"{op.op_type}({op.value}{dir_str})")
@@ -475,7 +502,7 @@ class Selection(BaseConfig):
         # Build display string for echo
         op_display = " -> ".join(
             op.op_type + (f"({op.value})" if op.value is not None else
-                          f"({', '.join(r.column for r in op.refs)})" if op.refs else "()")
+                          f"({op.describe_sources()})" if op.refs or op.literals else "()")
             for op in self.operations
         )
         num_structures = len(self.structures_stream) if self.structures_stream else "N/A"

@@ -1806,8 +1806,12 @@ Selection:
   files:
   - biopipelines/selection.py
   - pipe_scripts/pipe_selection.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-09-24'
+    note: >-
+      Selection strings are accepted as literals, positionally or inside add/subtract/intersect, and apply to every id. They used to be stored as table references and crashed at configuration time. A malformed literal is refused at configuration time, and a selection whose only add() operands are literals requires structures= to define its ids.
   - version: '1.1'
     date: '2026-07-09'
     note: >-

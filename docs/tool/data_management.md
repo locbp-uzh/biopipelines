@@ -364,9 +364,11 @@ Combines and modifies PyMOL-formatted selection strings using composable operati
 A bare column reference, stream, or selection string passed positionally is wrapped in `Selection.add(...)` implicitly, so `Selection(t.col, structures=...)` == `Selection(Selection.add(t.col), structures=...)`.
 
 **Operations**:
-- `Selection.add(*refs)` - Union of one or more column references
+- `Selection.add(*refs)` - Union of one or more column references or selection strings
 - `Selection.subtract(*refs)` - Remove residues from running selection
 - `Selection.intersect(*refs)` - Keep only residues also present in the given references (set intersection)
+
+A selection string (`"A10-20+A45"`, or chainless `"10-20"`) is a literal: the same residues apply to every id. It is checked at configuration time, and since a literal names no ids, a selection whose only `add()` operands are literals needs `structures=` to take its ids from. `Selection("A10-20", Selection.expand(2), structures=rfd)` expands the same span on every structure.
 - `Selection.expand(n)` - Add n residues on each side
 - `Selection.shrink(n)` - Remove n residues from each side
 - `Selection.shift(n)` - Shift all intervals by n

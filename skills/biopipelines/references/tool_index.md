@@ -57,7 +57,7 @@ Each line ends with the tool's tags — a closed 38-term vocabulary in four face
 - **Panda** v1.5 · CPU · x86-64, aarch64, Colab — Unified pandas-style table transformations. `docs/tool/data_management.md#panda` · tags: data
 - **Pool** v1.2 · CPU · x86-64, aarch64, Colab — Gathers N StandardizedOutputs from parallel runs of the same upstream tool into one combined StandardizedOutput. `docs/tool/data_management.md#pool` · tags: data
 - **ReMap** v1.2 · CPU · x86-64, aarch64, Colab — Renames IDs across all streams and tables from a source tool output. `docs/tool/data_management.md#remap` · tags: data
-- **Selection** v1.1 · CPU · x86-64, aarch64, Colab — Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right. `docs/tool/data_management.md#selection` · tags: data, residues
+- **Selection** v1.2 · CPU · x86-64, aarch64, Colab — Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right. `docs/tool/data_management.md#selection` · tags: data, residues
 
 ## Inputs & I/O
 
