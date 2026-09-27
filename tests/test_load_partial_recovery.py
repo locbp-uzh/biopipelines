@@ -32,7 +32,7 @@ IDS = [f"design_{i}" for i in range(1, 11)]
 # ── fixture builders ──────────────────────────────────────────────────────────
 
 def _build(tool_folder, *, declared_ids=None, produced_ids=None,
-           map_rows="all", tables=None, suffix=""):
+           map_rows="all", tables=None, suffix="", marker="COMPLETED"):
     """A Mock-shaped output folder.
 
     map_rows: "all" (one row per produced id) | "none" (no map_table file) |
@@ -41,6 +41,8 @@ def _build(tool_folder, *, declared_ids=None, produced_ids=None,
     suffix: text the producer puts between the id and the extension, so the
     declared template reads ``<id>_best.pdb`` rather than ``<id>.pdb``. Gnina,
     Aggrescan3D and CABSflex all ship such a template.
+
+    marker: the completion marker the step left, or None for one not yet run.
     """
     declared_ids = list(IDS if declared_ids is None else declared_ids)
     produced_ids = list(declared_ids if produced_ids is None else produced_ids)
@@ -102,6 +104,8 @@ def _build(tool_folder, *, declared_ids=None, produced_ids=None,
                 "output_folder": tool_folder,
             },
         }, f)
+    if marker:
+        _mark(tool_folder, marker)
     return tool_folder
 
 
@@ -335,9 +339,8 @@ def test_absent_map_table_is_distinct_from_an_empty_one(loadable_env, tmp_path, 
 def test_failed_marker_is_reported_and_the_partial_output_still_loads(loadable_env, 
         tmp_path, record_case):
     """A _FAILED step's output is still worth loading — but say where it came from."""
-    folder = _build(str(tmp_path / "001_Mock"), map_rows=IDS[:6])
+    folder = _build(str(tmp_path / "001_Mock"), map_rows=IDS[:6], marker="FAILED")
     _delete_files(folder, IDS[6:])
-    _mark(folder, "FAILED")
 
     loaded, out = _load(folder)
 
@@ -351,8 +354,7 @@ def test_failed_marker_is_reported_and_the_partial_output_still_loads(loadable_e
 
 
 def test_completed_marker_is_read_too(loadable_env, tmp_path, record_case):
-    folder = _build(str(tmp_path / "001_Mock"))
-    _mark(folder, "COMPLETED")
+    folder = _build(str(tmp_path / "001_Mock"), marker="COMPLETED")
     loaded, _ = _load(folder)
     record_case(input="_COMPLETED marker", expected="COMPLETED",
                 actual=loaded.completion_status)
@@ -360,12 +362,52 @@ def test_completed_marker_is_read_too(loadable_env, tmp_path, record_case):
 
 
 def test_no_marker_reads_as_none_not_as_failure(loadable_env, tmp_path, record_case):
-    folder = _build(str(tmp_path / "001_Mock"))
+    folder = _build(str(tmp_path / "001_Mock"), marker=None)
     loaded, _ = _load(folder)
     record_case(input="no completion marker", expected=None,
                 actual=loaded.completion_status)
     assert loaded.completion_status is None
     assert any("none found" in line for line in loaded.recovery_summary())
+
+
+def test_step_not_yet_run_passes_its_declared_ids_downstream(loadable_env, tmp_path, record_case):
+    """A queued step has only its manifest: its declared ids go downstream, not an empty stream."""
+    folder = _build(str(tmp_path / "001_Mock"), produced_ids=[], map_rows="none", marker=None)
+
+    loaded, out = _load(folder)
+    ds = out["structures"]
+
+    record_case(input="manifest only, no marker, no map_table, no files",
+                expected=(True, IDS), actual=(loaded.pending, list(ds.ids)))
+    assert loaded.pending
+    assert list(ds.ids) == IDS
+    assert ds.map_table == os.path.join(folder, "structures", "structures_map.csv")
+    assert not loaded.recovered_nothing
+    assert loaded.missing_files == []
+    assert any("pending" in line for line in loaded.recovery_summary())
+
+
+def test_running_step_is_not_narrowed_to_what_it_has_written_so_far(loadable_env, tmp_path):
+    folder = _build(str(tmp_path / "001_Mock"), produced_ids=IDS[:3], marker=None)
+    _, out = _load(folder)
+    assert list(out["structures"].ids) == IDS
+
+
+def test_filter_on_a_pending_step_is_refused(loadable_env, tmp_path):
+    folder = _build(str(tmp_path / "001_Mock"), marker=None)
+    with pytest.raises(ValueError, match="has not finished"):
+        _load(folder, filter="score > 0")
+
+
+def test_moved_folder_without_a_marker_is_not_pending(loadable_env, tmp_path):
+    """A copied step folder leaves its marker behind in the old job folder; it is still finished output."""
+    import shutil
+    src = _build(str(tmp_path / "old" / "001_Mock"), marker=None)
+    dst = str(tmp_path / "new" / "001_Mock")
+    shutil.copytree(src, dst)
+    loaded, out = _load(dst)
+    assert not loaded.pending
+    assert loaded.recovery["structures"]["source"] == "map_table"
 
 
 def test_populated_missing_csv_excuses_its_ids(loadable_env, tmp_path, record_case):
@@ -474,9 +516,8 @@ def _every_shape(root):
     f = _build(str(root / "f" / "001_Mock"), map_rows="zero")
     shapes.append(("zero-byte map_table", f))
 
-    f = _build(str(root / "g" / "001_Mock"), map_rows=IDS[:6])
+    f = _build(str(root / "g" / "001_Mock"), map_rows=IDS[:6], marker="FAILED")
     _delete_files(f, IDS[6:])
-    _mark(f, "FAILED")
     shapes.append(("_FAILED marker", f))
 
     f = _build(str(root / "h" / "001_Mock"), produced_ids=IDS[:8],
@@ -591,6 +632,7 @@ def test_real_mock_output_recovers_after_files_and_map_rows_are_lost(loadable_en
     for sid in IDS[6:]:
         os.remove(str(stream_dir / f"{sid}.pdb"))
 
+    _mark(str(out_dir), "FAILED")
     loaded, out = _load(str(out_dir))
 
     record_case(input="real pipe_mock.py output, last 4 rows and files removed",

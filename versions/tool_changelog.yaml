@@ -99,8 +99,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.7"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-09-27'
+    note: >-
+      Pre-computed `msas=` reach colabfold_batch. They were staged into the folding folder — which is where colabfold writes its own a3m — while the queries CSV stayed the input, and colabfold_batch reads alignments only from its input argument. So ColabFold ran its own MSA pipeline and queried the public server for every sequence while the staged files sat unread, making `msas=` a silent no-op for monomers. Supplied MSAs are now staged in `_execution/precomputed_msas` and that directory is passed as the input when `msas=` is set; behaviour is unchanged without it. Measured on an 8-sequence run: MSA-server submissions 8 → 0, polls 14 → 0, and folding from ~74 s to ~26 s per sequence.
   - version: '1.7'
     date: '2026-09-23'
     note: >-
@@ -931,8 +935,12 @@ LigandMPNN:
 Load:
   files:
   - biopipelines/load.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-09-25'
+    note: >-
+      A step that has not run yet loads as pending instead of as an empty stream. Its `.expected_outputs.json` is written at configuration time, so Load found the manifest, found no map_table, and reconciled every stream to zero ids. A folder with no `_COMPLETED`/`_FAILED` marker at its original path now propagates its declared ids and templates unreconciled; downstream tools resolve them against the map_table at execution time, once the pipeline waits for the producer (`Dependencies()` or any other chaining). A moved folder is never pending. `filter=` on a pending step is refused, since it reads a table that does not exist yet.
   - version: '1.4'
     date: '2026-09-11'
     note: >-

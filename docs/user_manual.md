@@ -911,6 +911,8 @@ with Pipeline("Project", "Job", "Description"):
     ...
 ```
 
+`Load()` works against a step of that job that has not finished yet: a folder with no completion marker is loaded as pending, and its declared ids resolve when the consumers run. See [Load](tool/inputs_io.md#load).
+
 ---
 
 ## Saving Without Submitting, and Background Services

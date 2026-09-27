@@ -15,6 +15,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **AlphaFold** 1.7 → 1.8. Pre-computed `msas=` reach `colabfold_batch`. They were staged into the folding folder while the queries CSV stayed the input, and `colabfold_batch` reads alignments only from its input argument — so ColabFold ran its own MSA pipeline and queried the public server for every sequence while the staged files sat unread. Supplied MSAs are now staged in `_execution/precomputed_msas` and that directory is passed as the input when `msas=` is set.
+
+- **Load** 1.4 → 1.5. A step that has not run yet (no `_COMPLETED`/`_FAILED` marker, folder at its original path) loads as `pending`: its declared ids pass downstream and resolve at execution time, so `Dependencies("<jobid>")` plus `Load("<running step>")` can be submitted while the producer is still running. It used to reconcile against a map_table that did not exist yet and hand downstream an empty stream. `filter=` on a pending step is refused.
+
 - **`Selection` 1.1 -> 1.2** - selection strings work as literals: `Selection("A10-20", ...)` and `Selection.add/subtract/intersect("A10-20+A45")` apply the same residues to every id. A string used to be stored as a table reference and raised `AttributeError: 'str' object has no attribute 'column'` at configuration time, although the docs promised the implicit `add()` accepted one. A malformed literal is refused at configuration time; a selection whose only `add()` operands are literals needs `structures=` to define its ids.
 
 ## [1.5.2] — 2026-09-23

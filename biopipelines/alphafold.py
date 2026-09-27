@@ -66,7 +66,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.8"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 
@@ -223,6 +223,9 @@ fi
     sequences_json = Path(lambda self: self.configuration_path(".input_sequences.json"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     folding_folder = Path(lambda self: self.execution_folder)
+    # colabfold_batch reads precomputed alignments only from its INPUT; the folding
+    # folder is where it writes its own, so supplied a3m must live somewhere else.
+    msa_input_folder = Path(lambda self: self.execution_path("precomputed_msas"))
     msas_folder = Path(lambda self: self.stream_folder("msas"))
     msa_csv = Path(lambda self: self.stream_map_path("msas"))
     structures_map = Path(lambda self: self.stream_map_path("structures"))
@@ -438,11 +441,12 @@ python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_
         # The queries CSV is written by _generate_script_prepare_sequences above,
         # so it already reflects any upstream id filter. Without it the whole msas
         # stream lands in the folder ColabFold scans.
-        return f"""echo "Copying pre-computed MSA files to Folding (execution) directory"
+        return f"""echo "Staging pre-computed MSA files as colabfold_batch input"
+mkdir -p "{self.msa_input_folder}"
 python "{self.msa_copy_py}" \\
     --msa-table "{msa_table_path}" \\
     --queries-csv "{self.queries_csv}" \\
-    --output-folder "{self.folding_folder}"
+    --output-folder "{self.msa_input_folder}"
 
 """
 
@@ -488,12 +492,18 @@ python "{self.msa_copy_py}" \\
             # Cluster: absolute path into the colabfold-conda prefix env.
             colabfold_cmd = str(self.colabfold_batch)
 
+        # With msas= the input is the a3m directory, not the queries CSV: given a CSV
+        # colabfold_batch runs its own MSA pipeline and queries the server regardless
+        # of what has been copied next to it.
+        colabfold_input = (f'"{self.msa_input_folder}"' if self.msas_input is not None
+                           else f"{self.queries_csv}")
+
         if scheduler == "colab":
             # Run in a clean subshell without conda env vars to avoid interference
             # with Colab's JAX/GPU/tensorflow stack
-            run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{forwarded})"""
+            run_colabfold = f"""(unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_SHLVL; PATH="/usr/local/bin:/usr/bin:/bin:$PATH" {colabfold_cmd} {colabfold_input} "{self.folding_folder}" {af_options}{forwarded})"""
         else:
-            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {self.queries_csv} "{self.folding_folder}" {af_options}{data_option}{forwarded}"""
+            run_colabfold = f"""{self.container_prefix()}{colabfold_cmd} {colabfold_input} "{self.folding_folder}" {af_options}{data_option}{forwarded}"""
 
         # On Colab, colabfold_batch runs as the system Python and downloads its
         # AF2 params into $HOME/.cache/colabfold/params (i.e. /root/.cache/...),

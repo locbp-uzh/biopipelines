@@ -234,6 +234,18 @@ With `validate_files=True` (the default), each file-based stream is resolved thr
 
 With `validate_files=False` nothing is resolved: ids propagate exactly as declared, including compact patterns. Downstream tools must then consume `tables/missing.csv` to excuse ids that were never produced.
 
+A step that has not run yet can be loaded too. Its `.expected_outputs.json` exists from configuration time, but it has no `_COMPLETED`/`_FAILED` marker; such a folder (at its original path) is `pending`, and its declared ids pass downstream unreconciled, to be resolved against the map_table when the consumers execute. The pipeline must wait for the producer, for example with `Dependencies()`:
+
+```python
+with Pipeline("Project", "Refine", "Continue a run that is still going"):
+    Dependencies("12345678")                        # the job producing 003_Boltz2
+    Resources(gpu="A100", time="4:00:00")
+    prev = Load("/path/to/job/003_Boltz2")          # pending: declared ids
+    seqs = LigandMPNN(structures=prev)
+```
+
+`filter=` is refused on a pending step, since its table does not exist yet; filter its tables downstream with `Panda.filter` instead. A folder moved away from its job folder has left its marker behind and is always treated as finished output.
+
 **LoadMultiple** — loads multiple outputs from a ToolOutputs folder. Returns a dict mapping identifiers to `Load` objects.
 
 **Parameters**:

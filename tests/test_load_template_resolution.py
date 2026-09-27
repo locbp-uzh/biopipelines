@@ -52,6 +52,7 @@ def _write_loadable(tool_folder, declared_ids, produced_ids, *,
                 "output_folder": tool_folder,
             },
         }, f)
+    open(os.path.join(os.path.dirname(tool_folder), "001_Mock_COMPLETED"), "w").close()
 
     return tool_folder
 

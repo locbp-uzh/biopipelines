@@ -108,11 +108,17 @@ class Load(BaseConfig):
     populated ``missing.csv`` are all recovered from — and it reports what it
     recovered and what it could not through ``recovery``, ``recovery_summary()``
     and ``recovered_nothing``.
+
+    A folder with no completion marker at its original path is ``pending``: the
+    step is queued or still running. Its declared ids and templates are passed
+    downstream as-is and resolved against the map_table at execution time, so a
+    pipeline can Load a step of a run that has not finished and wait for it
+    through the scheduler (``Dependencies()`` or any other chaining).
     """
 
     # Tool identification
     TOOL_NAME = "Load"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -146,6 +152,7 @@ echo "=== Load ready ==="
         self.original_tool_name = None
         self.filtered_ids = None
         self.completion_status = None
+        self.pending = False
         self.recovery = {}
         self.absent_tables = []
         self.absent_files_by_stream = {}
@@ -154,6 +161,8 @@ echo "=== Load ready ==="
         # Load and validate the result file
         self._load_and_validate_result()
         self._detect_completion_status()
+        if self.validate_files and not self.pending:
+            self._validate_file_existence()
 
         # Process filter if provided
         if self.filter_input:
@@ -221,10 +230,6 @@ echo "=== Load ready ==="
             self._rebased_map_tables = set()
             self._rebase_map_tables(output_structure, old_prefix, new_prefix)
 
-        # Validate file existence if requested
-        if self.validate_files:
-            self._validate_file_existence()
-
     def _detect_completion_status(self):
         """Read the step's COMPLETED/FAILED marker, if the producer left one.
 
@@ -247,6 +252,13 @@ echo "=== Load ready ==="
         if self.completion_status == "FAILED":
             print(f"Load: {prefix} carries a _FAILED marker — the step did not "
                   f"finish. Loading whatever it produced.")
+
+        # A moved folder is a finished run's copy, never a step still being produced.
+        if self.completion_status is None and getattr(self, '_path_rebase', None) is None:
+            self.pending = True
+            print(f"Load: {prefix} has no completion marker — treating it as pending. "
+                  f"Declared ids are passed downstream and resolved when it has run; "
+                  f"make this pipeline wait for it.")
 
     def _record_recovery(self, stream_name: str, *, declared: int, recovered: int,
                          source: str, unrecovered_ids=()):
@@ -282,8 +294,11 @@ echo "=== Load ready ==="
             lines.append(f"  completion marker: {self.completion_status}")
         else:
             lines.append("  completion marker: none found")
+        if self.pending:
+            lines.append("  pending: declared ids propagated unreconciled; "
+                         "they resolve against the map_table at execution time")
 
-        if not self.recovery:
+        if not self.recovery and not self.pending:
             lines.append("  streams: none declared")
         for name, rec in self.recovery.items():
             detail = f"  {name}: recovered {rec['recovered']} of {rec['declared']} " \
@@ -769,6 +784,12 @@ echo "=== Load ready ==="
         """Process filter input to determine which IDs to keep."""
         import pandas as pd
 
+        if self.pending:
+            raise ValueError(
+                f"Load: filter= reads the step's table at configuration time, but "
+                f"{self.tool_folder} has not finished (no completion marker). Drop "
+                f"filter= and filter downstream with Panda.filter instead.")
+
         # Find the main table to filter
         output_structure = self.loaded_result['output_structure']
         main_table_path = None
@@ -976,9 +997,9 @@ echo "=== Load ready ==="
         output_structure = self.loaded_result['output_structure'].copy()
 
         # Resolve glob patterns and match IDs to files when validate_files=True
-        if self.validate_files:
+        if self.validate_files and not self.pending:
             output_structure = self._resolve_file_paths(output_structure)
-        else:
+        elif not self.validate_files:
             print("Load: validate_files=False — ids are propagated as declared, "
                   "not reconciled against the map_table. Downstream tools must "
                   "consume tables/missing.csv to excuse ids that were never produced.")
@@ -986,7 +1007,7 @@ echo "=== Load ready ==="
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
             output_structure = self._apply_filter_to_output_structure(output_structure)
-        else:
+        elif not self.pending:
             # Check for missing table and exclude those IDs
             missing_ids = self._exclude_missing_ids(output_structure)
             if missing_ids:
@@ -1204,6 +1225,7 @@ echo "Files loaded from {original_tool} are ready for use"
                 f"Tool folder: {self.tool_folder}",
                 f"File validation: {'enabled' if self.validate_files else 'disabled'}",
                 f"Completion marker: {self.completion_status or 'none found'}",
+                f"Pending: {'yes' if self.pending else 'no'}",
             ])
 
             output_structure = self.loaded_result['output_structure']
@@ -1244,6 +1266,7 @@ echo "Files loaded from {original_tool} are ready for use"
             'unresolved_streams_count': len(self.unresolved_streams),
             'validation_enabled': self.validate_files,
             'completion_status': self.completion_status,
+            'pending': self.pending,
             'absent_tables': list(self.absent_tables),
             'recovery': {k: dict(v) for k, v in self.recovery.items()},
         }
