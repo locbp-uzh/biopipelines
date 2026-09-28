@@ -1670,8 +1670,12 @@ RFdiffusion:
   files:
   - biopipelines/rfdiffusion.py
   - pipe_scripts/pipe_rfdiffusion_table.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-09-28'
+    note: >-
+      Propagates the upstream `missing` manifest, and declares a `missing` table when an input axis carries one. An upstream filter drops ids at execution time, after this step's outputs have been declared, so without the manifest the completion check counted those ids as outputs still owed and marked the step FAILED — for inputs it had already, correctly, skipped with a "File not found for ID" warning. A Panda pool filtered to 3 of 5 structures produced all 300 intended backbones with the right contigs and still reported "301 of 501 declared outputs found", which then blocked every dependent batch behind it.
   - version: '2.2'
     date: '2026-09-08'
     note: >-

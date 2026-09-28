@@ -143,7 +143,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     # RFdiffusion's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -289,6 +289,7 @@ fi
     inference_py_file = Path(lambda self: os.path.join(self.folders["RFdiffusion"], "scripts", "run_inference.py"))
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
     #   contigs_json       — per-PDB resolved {contigs, inpaint, inpaint_str},
     #                        written at runtime by pipe_rfdiffusion_contigs.py.
     #   contigs_py         — that resolver (one pass over all ids → JSON).
@@ -673,6 +674,12 @@ fi
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
+        # An upstream filter drops ids at execution time, after this step's outputs were
+        # declared; without the manifest the completion check counts them as owed and
+        # fails the step for inputs it correctly skipped.
+        script_content += self.generate_missing_propagation(
+            self.pdb, self.pdb_stream, missing_csv=self.missing_csv
+        )
         script_content += self.generate_completion_check_footer()
         return script_content
 
@@ -944,6 +951,10 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
                 description="RFdiffusion structure generation results"
             )
         }
+
+        # Declare a `missing` table when any input axis carries one.
+        if self._collect_upstream_missing_paths(self.pdb, self.pdb_stream):
+            tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
             "structures": structures,

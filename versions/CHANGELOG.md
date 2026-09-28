@@ -15,6 +15,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **RFdiffusion** 2.2 → 2.3. Propagates the upstream `missing` manifest, and declares a `missing` table when an input axis carries one. An upstream filter drops ids at execution time, after this step's outputs have been declared, so without the manifest the completion check counted those ids as outputs still owed and marked the step FAILED — for inputs it had already, correctly, skipped. The run produced every intended backbone with the right contigs and still failed, blocking the dependent batches behind it.
+
 - **AlphaFold** 1.7 → 1.8. Pre-computed `msas=` reach `colabfold_batch`. They were staged into the folding folder while the queries CSV stayed the input, and `colabfold_batch` reads alignments only from its input argument — so ColabFold ran its own MSA pipeline and queried the public server for every sequence while the staged files sat unread. Supplied MSAs are now staged in `_execution/precomputed_msas` and that directory is passed as the input when `msas=` is set.
 
 - **Load** 1.4 → 1.5. A step that has not run yet (no `_COMPLETED`/`_FAILED` marker, folder at its original path) loads as `pending`: its declared ids pass downstream and resolve at execution time, so `Dependencies("<jobid>")` plus `Load("<running step>")` can be submitted while the producer is still running. It used to reconcile against a map_table that did not exist yet and hand downstream an empty stream. `filter=` on a pending step is refused.
