@@ -99,8 +99,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.8"
+  current: "1.9"
   history:
+  - version: '1.9'
+    date: '2026-09-29'
+    note: >-
+      The venv install route (the aarch64 one, where LocalColabFold's x86-only installer cannot be used) verifies that colabfold_batch actually runs, and skips only on the same evidence. It checked `import colabfold`, which loads the package __init__ and stays importable with alphafold-colabfold absent -- the conda route's own comment says why that is not sufficient, and the venv route had the weaker check anyway. A daint env installed from a pip file naming a mistyped extra therefore verified clean, reported "installation complete", and then short-circuited every later install with "already installed, skipping", while colabfold_batch raised "alphafold is not installed. Please run `pip install colabfold[alphafold]`" at import. Both the skip test and the verification now run `colabfold_batch --help`, which walks the whole model stack, plus the `import jax_cuda12_plugin` probe that catches a CPU-only jax; the failure branch prints what is missing instead of one line naming two possibilities. force_reinstall=True also removes the venv tree before rebuilding, since `python -m venv` over an existing directory leaves site-packages a different interpreter cannot read.
   - version: '1.8'
     date: '2026-09-27'
     note: >-
@@ -963,8 +967,12 @@ MMseqs2:
   - biopipelines/mmseqs2.py
   - pipe_scripts/pipe_mmseqs2_sequences.py
   - pipe_scripts/mmseqs2_client.sh
-  current: "1.8"
+  current: "1.9"
   history:
+  - version: '1.9'
+    date: '2026-09-29'
+    note: >-
+      The venv install route (the aarch64 one, where LocalColabFold's x86-only installer cannot be used) verifies that colabfold_batch actually runs, and skips only on the same evidence. It checked `import colabfold`, which loads the package __init__ and stays importable with alphafold-colabfold absent -- the conda route's own comment says why that is not sufficient, and the venv route had the weaker check anyway. A daint env installed from a pip file naming a mistyped extra therefore verified clean, reported "installation complete", and then short-circuited every later install with "already installed, skipping", while colabfold_batch raised "alphafold is not installed. Please run `pip install colabfold[alphafold]`" at import. Both the skip test and the verification now run `colabfold_batch --help`, which walks the whole model stack, plus the `import jax_cuda12_plugin` probe that catches a CPU-only jax; the failure branch prints what is missing instead of one line naming two possibilities. force_reinstall=True also removes the venv tree before rebuilding, since `python -m venv` over an existing directory leaves site-packages a different interpreter cannot read.
   - version: '1.8'
     date: '2026-09-20'
     note: >-

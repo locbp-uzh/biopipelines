@@ -66,7 +66,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.8"
+    TOOL_VERSION = "1.9"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 
@@ -125,16 +125,22 @@ fi
             biopipelines = folders.get("biopipelines", "")
             variant = ConfigManager().get_variant()
             pip_file = f"{biopipelines}/environments/alphafold.pip.{variant}.txt"
+            # `--help` walks the whole model stack, as in the conda branch below.
+            # `import colabfold` only loads the package __init__ and stays
+            # importable with alphafold-colabfold absent.
             skip = "" if force_reinstall else f"""# Check if already installed
-if [ -x "{cf}/bin/colabfold_search" ]; then
+if [ -x "{cf}/bin/colabfold_search" ] && "{cf}/bin/colabfold_batch" --help >/dev/null 2>&1; then
     echo "AlphaFold already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
+            # Rebuild rather than reuse: `python -m venv` over an existing tree
+            # leaves the old site-packages, which a different python cannot read.
+            wipe = f'rm -rf "{cf}"' + chr(10) if force_reinstall else ""
             return f"""echo "=== Installing AlphaFold (LocalColabFold, venv) ==="
 {skip}mkdir -p "{parent_dir}"
-python -m venv "{cf}"
+{wipe}python -m venv "{cf}"
 "{cf}/bin/pip" install -q -r "{pip_file}"
 
 # colabfold_search shells out to `mmseqs`, which the pip package does not ship.
@@ -149,12 +155,20 @@ if ! [ -x "{cf}/bin/mmseqs" ]; then
     fi
 fi
 
-# Verify installation
-if [ -x "{cf}/bin/colabfold_search" ] && "{cf}/bin/python" -c "import colabfold" >/dev/null 2>&1; then
+# Verify installation. jax_cuda12_plugin is what catches a CPU-only jax, which
+# imports and runs fine and then folds on CPU; it needs no GPU to import.
+if [ -x "{cf}/bin/colabfold_search" ] \
+   && "{cf}/bin/colabfold_batch" --help >/dev/null 2>&1 \
+   && "{cf}/bin/python" -c "import jax_cuda12_plugin" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== AlphaFold installation complete ==="
 else
-    echo "ERROR: AlphaFold verification failed (colabfold_search missing or colabfold not importable)"
+    echo "ERROR: AlphaFold verification failed."
+    echo "  colabfold_search:  $([ -x "{cf}/bin/colabfold_search" ] && echo present || echo MISSING)"
+    echo "  mmseqs:            $([ -x "{cf}/bin/mmseqs" ] && echo present || echo "MISSING (colabfold_search shells out to it)")"
+    "{cf}/bin/colabfold_batch" --help 2>&1 | tail -5
+    "{cf}/bin/python" -c "import jax_cuda12_plugin" >/dev/null 2>&1 \
+        && echo "  jax CUDA 12 plugin: present" || echo "  jax CUDA 12 plugin: MISSING (jax would run on CPU)"
     exit 1
 fi
 """
