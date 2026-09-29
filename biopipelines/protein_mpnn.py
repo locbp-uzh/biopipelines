@@ -36,7 +36,7 @@ class ProteinMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ProteinMPNN"
-    TOOL_VERSION = "2.9"
+    TOOL_VERSION = "2.10"
     # protein_mpnn_run.py is argparse and accepts far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     # `chain` and `chains` were one letter apart and meant different things, which is the
@@ -53,8 +53,7 @@ class ProteinMPNN(BaseConfig):
     ENV_NAME = "SE3nv"
 
     @classmethod
-    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
-                        cudatoolkit="11.3", **kwargs):
+    def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         try:
             from .config_manager import ConfigManager
         except ImportError:
@@ -121,15 +120,14 @@ else
 fi
 """
 
-        # Dedicated environment — create it and install PyTorch
+        # Dedicated environment
         remove_block = cls._env_remove_block(pmpnn_env, env_manager) if force_reinstall else ""
         return f"""echo "=== Installing ProteinMPNN ==="
 {skip}{clone_block}
 
 {remove_block}
-# Create dedicated ProteinMPNN environment
-{env_manager} create --name {pmpnn_env} -y || echo "WARNING: environment '{pmpnn_env}' may already exist, continuing"
-{cls._env_run(pmpnn_env, env_manager)}conda install pytorch torchvision torchaudio cudatoolkit={cudatoolkit} -c pytorch -y || echo "WARNING: PyTorch install failed, skipping"
+# Build from the env spec: hand-rolled conda calls broke non-conda managers.
+{cls._env_install_block(pmpnn_env, env_manager, biopipelines)}
 
 # Verify installation
 if [ -f "{repo_dir}/protein_mpnn_run.py" ] && {cls._env_run(pmpnn_env, env_manager)}python -c "import torch" >/dev/null 2>&1; then
