@@ -242,7 +242,9 @@ NGC publishes aarch64/GH200 PyTorch, so torch+CUDA arrive prebuilt rather than b
 
 ## MMseqs2 databases
 
-Built and working on scratch. The numbers, measured rather than estimated:
+**The 2026 migration wiped them, and they are not being rebuilt.** Everything below was measured before the move and still describes what a rebuild would cost; what remains at the old path is 8 KB. The split now is MSAs on the shared x86-64 cluster, folding here — `MMseqs2` runs there, its a3m output is staged across, and `AlphaFold(msas=...)` consumes it on a GH200. That avoids paying ~9 h to rebuild 1.9 TB onto a filesystem that purges at 30 days, twice over, for a search step that does not need a GPU.
+
+The numbers, measured rather than estimated:
 
 | | |
 |---|---|
@@ -262,7 +264,9 @@ Server startup is not instant, which is why the server belongs in a packed block
 
 ## What runs here
 
-These 17 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2, ProteinMPNN, LigandMPNN, PoseBusters, Vina.
+These 18 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2, ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold.
+
+**AlphaFold folds here; it does not search here.** The venv carries `alphafold-colabfold 2.3.20` and `colabfold 1.6.3`, `colabfold_batch --help` exits 0, and `jax 0.11.2` reports `[CudaDevice(id=0)]` on a GH200. `colabfold_search` is installed but shells out to an `mmseqs` binary the wheel does not ship, and the databases are gone — so alignments come from the other cluster and arrive through `msas=`.
 
 Docking is Vina, not GNINA. `Vina` (a `Gnina` subclass with `backend="vina"`) runs on CPU from a conda-forge env; verified on 9RTM + tetramethylrhodamine, crystal-ligand autobox best −10.4 kcal/mol with the pose centroid 0.6 Å from the crystal ligand. Two bring-up bugs, both outside the tool: a venv shim inherits conda *packages* but not *executables*, so `vina`/`obabel` needed symlinking (`_link_conda_binaries`); and a 5-character CCD code (`A1EI4`) overflows the 3-column residue field, shifting every later column so `parse_pdb_file` silently dropped every ligand atom — that fix is in `pdb_parser.py` and applies repo-wide, not just here.
 
