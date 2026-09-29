@@ -160,6 +160,10 @@ environments:
   # environments/biopipelines.pip.daint.txt rather than the conda yaml. Every
   # BP-native tool needing nothing beyond it is listed, so the block reads as the
   # supported set rather than leaving them on the implicit fallback.
+  # LocalColabFold is a venv at <AlphaFold>/colabfold-conda built by the tool's
+  # own installer from environments/alphafold.pip.daint.txt; the base env here is
+  # only what the install script and the wrapper's python run in.
+  AlphaFold: "biopipelines"
   Angle: "biopipelines"
   CompoundLibrary: "biopipelines"
   Consensus: "biopipelines"
