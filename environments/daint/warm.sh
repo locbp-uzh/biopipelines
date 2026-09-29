@@ -24,7 +24,8 @@ REPO="${SLURM_SUBMIT_DIR:-$HOME/biopipelines}"
 [ "$#" -ge 1 ] || { echo "usage: sbatch warm.sh <Tool> [Tool...]" >&2; exit 1; }
 TOOLS="$*"
 
-srun --environment=bp-base bash -c '
+# Absolute path: a bare name resolves only against ~/.edf and the CSCS public dir.
+srun --environment=/capstor/store/cscs/uzh/uzh67/edf/bp-base.toml bash -c '
 set -euo pipefail
 cd "'"$REPO"'"
 export BIOPIPELINES_CONFIG_VARIANT=container

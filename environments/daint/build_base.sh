@@ -7,8 +7,9 @@
 # needs outbound network (apt, micromamba). podman storage lives in /dev/shm
 # (wiped at job end), so build + enroot import happen in one allocation.
 #
-# Builds into $HOME (image) and writes the EDF to ~/.edf. Nothing is written to
-# the shared lab store. Tool envs are created later on $SCRATCH by bootstrap.sh.
+# Image and EDF go to the lab store ($GROUP), beside the other project .sqsh
+# files: an image on $SCRATCH is purged after 30 days and costs a 30-min rebuild.
+# Tool envs are created later on $SCRATCH by bootstrap.sh.
 #SBATCH --account=uzh67
 #SBATCH --partition=debug
 #SBATCH --nodes=1
@@ -24,9 +25,11 @@ NAME="biopipelines-base"
 
 # sbatch spools the batch script, so $0 is not in the repo; locate the build
 # context from the submit dir instead (submit from the repo root).
-HERE="${SLURM_SUBMIT_DIR:-$(pwd)}/environments/daint"
-IMAGES="${HOME}/images"
-EDF_DIR="${HOME}/.edf"
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"
+HERE="${REPO}/environments/daint"
+GROUP=/capstor/store/cscs/uzh/uzh67
+IMAGES="${GROUP}/images"
+EDF_DIR="${GROUP}/edf"
 # Persistent BioPipelines root on scratch: micromamba envs, caches, outputs.
 BP_ROOT="${SCRATCH}/bp"
 
@@ -62,8 +65,8 @@ enroot import -x mount -o "${SQSH}" "podman://${NAME}:${VERSION}" || true
 #   CC/CXX      JIT-compiling tools (Boltz-2/Triton) need a compiler on PATH.
 cat > "${EDF_DIR}/bp-base.toml" <<EOF
 image = "${SQSH}"
-mounts = ["\${SCRATCH}:\${SCRATCH}", "\${HOME}:\${HOME}"]
-workdir = "${HOME}/biopipelines"
+mounts = ["/capstor", "/iopsstor", "\${SCRATCH}:\${SCRATCH}", "\${HOME}:\${HOME}"]
+workdir = "${REPO}"
 
 [env]
 PATH = "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -82,5 +85,5 @@ echo "edf    ${EDF_DIR}/bp-base.toml"
 echo "root   ${BP_ROOT}"
 echo
 echo "verify on a GPU node:"
-echo "  srun -A uzh67 -p debug -t 00:10:00 -N1 -n1 --environment=bp-base \\"
+echo "  srun -A uzh67 -p debug -t 00:10:00 -N1 -n1 --environment=${EDF_DIR}/bp-base.toml \\"
 echo "    bash -lc 'micromamba --version; gcc --version | head -1; nvidia-smi -L'"
