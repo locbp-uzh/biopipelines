@@ -117,16 +117,27 @@ Select the variant with `BIOPIPELINES_CONFIG_VARIANT=daint` or `Pipeline(config=
 
    The account is mandatory: CSCS rejects jobs without `--account`.
 
-4. **Clone and install.** Use a venv on `$SCRATCH`, not conda and not `$STORE` — see Storage below.
+4. **Build the base container image**, once per project. It supplies the compilers and the micromamba binary that the tools whose envs cannot be resolved by pip need, and it is what `warm.sh` runs inside:
 
    ```bash
-   /usr/bin/python3.11 -m venv $SCRATCH/venvs/biopipelines   # no `python` on login nodes
-   source $SCRATCH/venvs/biopipelines/bin/activate
-   pip install -r environments/biopipelines.pip.daint.txt    # aarch64 wheels, not the conda yaml
-   pip install -e .
+   sbatch -A <project> -p debug -t 00:30:00 environments/daint/build_base.sh 0.1.0
    ```
 
-5. **Install tools** with `example_pipelines/install_daint.py`, or `bp-warm <Tool>` individually.
+   It writes `<group>/images/biopipelines-base-0.1.0.sqsh` and `<group>/edf/bp-base.toml`. Both go to the lab store rather than `$SCRATCH`, which purges after 30 days — a rebuild is another half hour. Address the EDF by absolute path; a bare `--environment=bp-base` resolves only against the caller's private `~/.edf` and fails with `failed to find a readable environment file`.
+
+5. **Provision the envs** with `environments/daint/provision_venv.sh`, in stages. Do not hand-roll the base venv.
+
+   ```bash
+   sbatch -p normal -t 02:00:00 environments/daint/provision_venv.sh base
+   sbatch -p debug  -t 00:30:00 environments/daint/warm.sh Boltz2
+   sbatch -p normal -t 08:00:00 environments/daint/provision_venv.sh tools
+   sbatch -p normal -t 01:00:00 environments/daint/provision_venv.sh boltz2env
+   sbatch -p debug  -t 00:20:00 environments/daint/provision_venv.sh verify
+   ```
+
+   **The interpreter trap, which is why `base` is a script and not four commands.** A venv records the absolute path of the interpreter that created it, and it propagates that interpreter to every tool env built on top. The login node's `/usr/bin/python3.11` is the obvious candidate and it is wrong twice over: nothing pins it to the version the tools need — RFdiffusion3's `rc-foundry` requires `>=3.12,<3.13`, and a 3.11 base makes its install fail with `Could not find a version that satisfies the requirement rc-foundry[all] (from versions: none)` — and a venv made from it cannot inherit the conda layer that supplies the packages with no aarch64 wheel. The compute node's `python3` is 3.6.15 with no pip, so it cannot create one either. `base` therefore creates a conda env pinned to python 3.12 under `conda_env_root` and makes the venv with *that* python; it checks `pyvenv.cfg`'s `home` on every run and rebuilds a venv any other interpreter produced.
+
+   `tools` takes the tool list from `CR_TOOLS`; `boltz2env` wraps the container-built `Boltz2Env` rather than rebuilding it (pip cannot close boltz's graph on aarch64 — see Environments below), so `warm.sh Boltz2` must have succeeded first.
 
 ## Partitions
 
@@ -192,6 +203,8 @@ There are three routes, and the choice is not stylistic.
 **A conda env wrapped in a venv shim** covers packages with no aarch64 wheel — PyMOL, `mkdssp`, `openbabel` all exist on conda-forge, and micromamba has an aarch64 build. Set `machine.env_manager.conda_binary` and an env yaml naming conda packages is built with conda, then wrapped in a venv created by *its* python: that inherits the packages via `--system-site-packages` and supplies the `bin/activate` the framework sources. Binaries are not inherited and need symlinking (`dssp` does this for `mkdssp`).
 
 **A prebuilt `.sqsh` image** covers what neither can — BioEmu is the example. Five images cost 5 inodes and 28 GB against ~101k inodes for equivalent venvs, they survive the purge, and they are genuinely shareable where a venv on personal scratch is not. Recipes live in `environments/scripts/`; the images themselves belong on `$STORE`, never in git.
+
+BioPipelines has one of its own, `bp-base` (`environments/daint/Containerfile`, built by `build_base.sh`, EDF at `<group>/edf/bp-base.toml`). It bakes only the generic runtime — CUDA 12.4 libs, a C/C++ toolchain, and the aarch64 micromamba binary — and deliberately no biopipelines package and no tool env, so adding a tool never rebuilds it. `warm.sh` runs inside it, and it is what makes `Boltz2Env` buildable at all: boltz pins `gemmi==0.6.5`, which conda-forge does not carry for linux-aarch64 and pip must therefore compile, so the env resolves only where a compiler is on `PATH`. `provision_venv.sh boltz2env` then wraps that container-built env in a host venv rather than trying to rebuild it (three rebuild attempts all ended in `ResolutionImpossible`).
 
 Two traps common to all three:
 
