@@ -61,6 +61,13 @@ if [ "$STAGE" = "base" ]; then
     echo "[base] conda interpreter already present"
   fi
 
+  # Refuse a venv built by any other interpreter: one made by the login node's
+  # /usr/bin/python3.11 looks fine here and then fails rc-foundry (needs 3.12).
+  if [ -d "$BASE_VENV" ] && ! grep -qx "home = $BASE_CONDA/bin" "$BASE_VENV/pyvenv.cfg" 2>/dev/null; then
+    echo "[base] existing venv was not built by $BASE_CONDA/bin/python; rebuilding"
+    echo "       (was: $(grep '^home' "$BASE_VENV/pyvenv.cfg" 2>/dev/null || echo unknown))"
+    rm -rf "$BASE_VENV"
+  fi
   if [ ! -d "$BASE_VENV" ]; then
     echo "[base] creating the venv from that interpreter"
     # --system-site-packages so the venv inherits the conda layer, matching what
