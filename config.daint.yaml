@@ -50,7 +50,8 @@ machine:
 folders:
   base:
     home: "/users/<username>"
-    scratch: "/capstor/scratch/cscs/<username>"
+    # /capstor/scratch is SCRATCH_OLD since the 2026 migration.
+    scratch: "/ritom/scratch/cscs/<username>"
     # $STORE — shared across the uzh67 project, setgid, backed up.
     group: "/capstor/store/cscs/uzh/uzh67"
     user: "<group>"
