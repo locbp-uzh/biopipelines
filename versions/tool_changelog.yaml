@@ -1678,8 +1678,12 @@ RFdiffusion:
   files:
   - biopipelines/rfdiffusion.py
   - pipe_scripts/pipe_rfdiffusion_table.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-09-30'
+    note: >-
+      Fixes 2.3, which raised `AttributeError: 'RFdiffusion' object has no attribute 'pdb'` at configuration time for every call -- with or without a pdb= input -- so the tool could not be constructed at all. 2.3 passed `self.pdb` to the missing-manifest helpers, but __init__ only ever stored `self.pdb_stream`; the original argument was discarded, and it is the one that matters, since the upstream `missing` table hangs off the output's `.tables` and the extracted DataStream does not carry them. The argument is now kept as `self.pdb_input` and both call sites use it, so the manifest is found rather than merely not crashing. The `missing` table is documented in docs/tool/structure_generation.md, which 2.3 also omitted.
   - version: '2.3'
     date: '2026-09-28'
     note: >-

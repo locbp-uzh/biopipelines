@@ -143,7 +143,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     # RFdiffusion's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -460,6 +460,9 @@ fi
         # Resolve optional pdb input — store stream for runtime resolution.
         # All input PDBs are iterated at execution time (see generate_script);
         # never index ids[0] at config time, which breaks under lazy IDs.
+        # Kept whole: the upstream `missing` manifest hangs off the output's
+        # .tables, which the extracted stream does not carry.
+        self.pdb_input = pdb
         self.pdb_stream: Optional[DataStream] = None
         if pdb is not None:
             if isinstance(pdb, StandardizedOutput):
@@ -678,7 +681,7 @@ fi
         # declared; without the manifest the completion check counts them as owed and
         # fails the step for inputs it correctly skipped.
         script_content += self.generate_missing_propagation(
-            self.pdb, self.pdb_stream, missing_csv=self.missing_csv
+            self.pdb_input, self.pdb_stream, missing_csv=self.missing_csv
         )
         script_content += self.generate_completion_check_footer()
         return script_content
@@ -953,7 +956,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         }
 
         # Declare a `missing` table when any input axis carries one.
-        if self._collect_upstream_missing_paths(self.pdb, self.pdb_stream):
+        if self._collect_upstream_missing_paths(self.pdb_input, self.pdb_stream):
             tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {

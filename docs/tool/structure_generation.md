@@ -245,6 +245,10 @@ The guiding-potential types differ per RFdiffusion variant, so each tool exposes
 
   `fixed` / `designed` are chain-aware residue selections of the output; `source_fixed` is the motif's residues in the input PDB (motif scaffolding only). `plddt_mean` is RFdiffusion's own per-trajectory pLDDT averaged over residues at the final step (empty when the trb carries none).
 
+- `missing` (only when an input axis carries one): | id | removed_by | kind | cause |
+
+  The upstream manifest, forwarded. An upstream filter drops ids at execution time, after this step has declared its outputs; without the manifest the completion check counts those ids as outputs still owed and marks the step FAILED for inputs it correctly skipped.
+
 **Examples**:
 ```python
 from biopipelines.rfdiffusion import RFdiffusion

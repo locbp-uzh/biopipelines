@@ -12,7 +12,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.5 | `biopipelines/boltzgen.py` |
 | 2 | PocketGen | Structure Generation           | 2.0 | `biopipelines/pocketgen.py` |
-| 3 | RFdiffusion | Structure Generation           | 2.3 | `biopipelines/rfdiffusion.py` |
+| 3 | RFdiffusion | Structure Generation           | 2.4 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.6 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFdiffusionAllAtom | Structure Generation           | 2.3 | `biopipelines/rfdiffusion_allatom.py` |
 | 6 | RFdiffusion2              | Structure Generation           | 1.4 | `biopipelines/rfdiffusion2.py` |
