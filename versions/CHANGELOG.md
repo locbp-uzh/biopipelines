@@ -15,9 +15,21 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
-- **RFdiffusion** 2.3 → 2.4. Fixes 2.3, which raised `AttributeError: 'RFdiffusion' object has no attribute 'pdb'` at configuration time for every call, so the tool could not be constructed at all. 2.3 passed `self.pdb` to the missing-manifest helpers, but `__init__` only stored `self.pdb_stream` — and the discarded argument is the one that matters, since the upstream `missing` table hangs off the output's `.tables`, which a `DataStream` does not carry. Kept as `self.pdb_input` and used at both call sites, so the manifest is actually found. The `missing` table is now documented too.
+## [1.5.3] — 2026-09-30
+
+### Framework
+
+- **Daint follows the CSCS storage migration.** `config.daint.yaml` points scratch at `/ritom/scratch/cscs/<username>`; the old `/capstor/scratch` is being retired and was still receiving venvs, conda envs and run outputs. `build_base.sh` writes the base image and its EDF to the group store instead of `$HOME`, `warm.sh` addresses the EDF by absolute path (a bare name resolves only against the caller's `~/.edf`), and the EDF mounts `/capstor` and `/iopsstor` and takes its workdir from the submit directory.
+
+- `provision_venv.sh` rebuilds the base venv when `pyvenv.cfg` shows it was built by a foreign interpreter. A venv left by the login node's Python 3.11 used to be reused as "already present", and every tool venv inherited 3.11, which RFdiffusion3's `rc-foundry` (>=3.12,<3.13) refuses. AlphaFold is declared under `environments:` in `config.daint.yaml`, and the Daint reference documents the provisioning scripts instead of a hand-rolled venv setup.
+
+- `versions/check_private.py` lists files marked with a leading `#PRIVATE` comment that a merge would carry into a public branch, walking every commit in the range rather than only the tip, and exits non-zero if there are any.
+
+### Tools
 
 - **RFdiffusion** 2.2 → 2.3. Propagates the upstream `missing` manifest, and declares a `missing` table when an input axis carries one. An upstream filter drops ids at execution time, after this step's outputs have been declared, so without the manifest the completion check counted those ids as outputs still owed and marked the step FAILED — for inputs it had already, correctly, skipped. The run produced every intended backbone with the right contigs and still failed, blocking the dependent batches behind it.
+
+- **RFdiffusion** 2.3 → 2.4. Fixes 2.3, which raised `AttributeError: 'RFdiffusion' object has no attribute 'pdb'` at configuration time for every call, so the tool could not be constructed at all. 2.3 passed `self.pdb` to the missing-manifest helpers, but `__init__` only stored `self.pdb_stream` — and the discarded argument is the one that matters, since the upstream `missing` table hangs off the output's `.tables`, which a `DataStream` does not carry. Kept as `self.pdb_input` and used at both call sites, so the manifest is actually found. The `missing` table is now documented too.
 
 - **AlphaFold** 1.7 → 1.8. Pre-computed `msas=` reach `colabfold_batch`. They were staged into the folding folder while the queries CSV stayed the input, and `colabfold_batch` reads alignments only from its input argument — so ColabFold ran its own MSA pipeline and queried the public server for every sequence while the staged files sat unread. Supplied MSAs are now staged in `_execution/precomputed_msas` and that directory is passed as the input when `msas=` is set.
 
@@ -27,7 +39,7 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 - **ProteinMPNN** 2.9 → 2.10. Builds its `SE3nv` environment through the framework installer instead of a hand-rolled `<manager> create --name SE3nv -y` plus `conda install pytorch ... cudatoolkit=11.3`. The literal pair assumed a conda-like manager, so under `machine.env_manager: venv` it emitted `venv create --name SE3nv -y` — not a venv command — and then a `conda install` from inside a venv; both failures were swallowed by `|| echo WARNING ... continuing`, so the install reported progress and only the verification step noticed. It now reads `environments/SE3nv.<variant>.yaml` and the matching pip file, which exist for every variant. The unused `cudatoolkit=` parameter of `_install_script` is removed.
 
-- **`Selection` 1.1 -> 1.2** - selection strings work as literals: `Selection("A10-20", ...)` and `Selection.add/subtract/intersect("A10-20+A45")` apply the same residues to every id. A string used to be stored as a table reference and raised `AttributeError: 'str' object has no attribute 'column'` at configuration time, although the docs promised the implicit `add()` accepted one. A malformed literal is refused at configuration time; a selection whose only `add()` operands are literals needs `structures=` to define its ids.
+- **Selection** 1.1 → 1.2. Selection strings work as literals: `Selection("A10-20", ...)` and `Selection.add/subtract/intersect("A10-20+A45")` apply the same residues to every id. A string used to be stored as a table reference and raised `AttributeError: 'str' object has no attribute 'column'` at configuration time, although the docs promised the implicit `add()` accepted one. A malformed literal is refused at configuration time; a selection whose only `add()` operands are literals needs `structures=` to define its ids.
 
 ## [1.5.2] — 2026-09-23
 
