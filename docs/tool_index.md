@@ -12,7 +12,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.5 | `biopipelines/boltzgen.py` |
 | 2 | PocketGen | Structure Generation           | 2.0 | `biopipelines/pocketgen.py` |
-| 3 | RFdiffusion | Structure Generation           | 2.2 | `biopipelines/rfdiffusion.py` |
+| 3 | RFdiffusion | Structure Generation           | 2.3 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.6 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFdiffusionAllAtom | Structure Generation           | 2.3 | `biopipelines/rfdiffusion_allatom.py` |
 | 6 | RFdiffusion2              | Structure Generation           | 1.4 | `biopipelines/rfdiffusion2.py` |
@@ -24,10 +24,10 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 12 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
 | 13 | Mutagenesis               | Sequence Design                | 1.2 | `biopipelines/mutagenesis.py` |
 | 14 | MutationComposer          | Sequence Design                | 1.0 | `biopipelines/mutation_composer.py` |
-| 15 | ProteinMPNN | Sequence Design                | 2.9 | `biopipelines/protein_mpnn.py` |
+| 15 | ProteinMPNN | Sequence Design                | 2.10 | `biopipelines/protein_mpnn.py` |
 | 16 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 17 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
-| 18 | AlphaFold                 | Structure Prediction & Docking | 1.8 | `biopipelines/alphafold.py` |
+| 18 | AlphaFold                 | Structure Prediction & Docking | 1.9 | `biopipelines/alphafold.py` |
 | 19 | Boltz2 | Structure Prediction & Docking | 2.9 | `biopipelines/boltz2.py` |
 | 20 | DiffDock | Structure Prediction & Docking | 2.1 | `biopipelines/diffdock.py` |
 | 21 | DynamicBind | Structure Prediction & Docking | 2.2 | `biopipelines/dynamicbind.py` |
@@ -88,7 +88,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 76 | MSA                       | MSAs                           | 1.2 | `biopipelines/msa.py` |
 | 77 | CompoundLibrary           | Inputs & I/O                   | 1.0 | `biopipelines/compound_library.py` |
 | 78 | Ligand                    | Inputs & I/O                   | 1.5 | `biopipelines/ligand.py` |
-| 79 | Load | Inputs & I/O                   | 1.4 | `biopipelines/load.py` |
+| 79 | Load | Inputs & I/O                   | 1.5 | `biopipelines/load.py` |
 | 80 | PDB | Inputs & I/O                   | 1.6 | `biopipelines/pdb.py` |
 | 81 | Plot                      | Inputs & I/O                   | 1.0 | `biopipelines/plot.py` |
 | 82 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |
