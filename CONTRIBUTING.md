@@ -34,7 +34,7 @@ Thank you for your interest in contributing! Below are the guidelines for differ
 
 ## What to avoid
 
-- Do not include private project files, internal data, or unpublished sequences/structures.
+- Do not include private project files, internal data, or unpublished sequences/structures. A file that must never be published carries a line beginning `#PRIVATE` in its header — a valid comment as-is in Python, YAML and shell. `python versions/check_private.py` lists any such file that a publish would carry into `public`, and exits non-zero if there is one; it walks the whole commit range, because merging publishes full ancestry and a file deleted later is still readable in history. It marks whole files only, so plumbing that merely names a private tool (configs, fixtures, generated indexes) still needs reading by eye.
 - Do not add dependencies without discussion — open an issue first for significant new dependencies.
 - Keep PRs focused. One feature or fix per PR is easier to review and merge.
 
