@@ -162,6 +162,11 @@ class SlurmBackend(SchedulerBackend):
         # untyped `gpu:N` — a typed request there is rejected outright.
         if single_gpu_type:
             return f"#SBATCH --gres=gpu:{n}", []
+        # An integer is a count, not a model: `gpu=1` used to reach `.startswith` and raise
+        # AttributeError inside pipeline generation, so the run directory was written and no job
+        # was ever submitted.
+        elif isinstance(gpu_spec, int) or str(gpu_spec).strip().isdigit():
+            return f"#SBATCH --gpus={int(gpu_spec)}", []
         elif gpu_spec == "high-memory":
             return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\"", []
         elif gpu_spec == "gpu" or gpu_spec == "any":
