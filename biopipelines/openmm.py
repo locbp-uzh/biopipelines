@@ -25,6 +25,7 @@ try:
     from .biopipelines_io import TableReference
     from .file_paths import Path
     from .datastream import DataStream
+    from .sele_utils import sele_to_chains_and_list
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -32,6 +33,7 @@ except ImportError:
     from biopipelines_io import TableReference
     from file_paths import Path
     from datastream import DataStream
+    from sele_utils import sele_to_chains_and_list
 
 
 class OpenMM(BaseConfig):
@@ -88,12 +90,15 @@ class OpenMM(BaseConfig):
             C-S single bond).
         covalent_max_distance: how far the anchor may be from the ligand and
             still count as bonded, in Angstroms (default 3.0).
-        mobile_selection: chain-aware selection whose side chains are free to
-            move; every other protein atom is frozen, and the ligand stays
-            mobile. Backbone atoms of the selected residues are frozen too, so
-            only rotamers relax. Empty (default) = whole structure mobile.
-        frozen_selection: chain-aware selection frozen outright (all atoms).
-            Mutually exclusive with mobile_selection.
+        mobile_selection: chain-aware selection (``A10-20+B5``; a bare chain
+            letter such as ``B`` selects the whole chain) whose side chains are
+            free to move; every other protein atom is frozen, and the ligand
+            stays mobile. Backbone atoms of the selected residues are frozen
+            too, so only rotamers relax. Empty (default) = whole structure mobile.
+        frozen_selection: chain-aware selection in the same syntax, frozen
+            outright (all atoms). Mutually exclusive with mobile_selection.
+            For either, a selection that is unparseable or matches no protein
+            atom is an error rather than a no-op.
 
     Frozen atoms have their mass set to zero, which makes them immovable rather
     than merely penalised — unlike restraint_selection, which lets the whole
@@ -110,7 +115,7 @@ class OpenMM(BaseConfig):
     """
 
     TOOL_NAME = "OpenMM"
-    TOOL_VERSION = "3.2"
+    TOOL_VERSION = "3.3"
     ENV_NAME = "openmm"
 
     @classmethod
@@ -260,10 +265,14 @@ fi
                 "mobile_selection already freezes everything it does not name")
         # A TableReference resolves per-structure at runtime, so only a literal
         # string reaches the generated script and can be checked here.
-        if self.mobile_selection and not isinstance(self.mobile_selection, TableReference):
-            _validate_freeform_string("mobile_selection", self.mobile_selection)
-        if self.frozen_selection and not isinstance(self.frozen_selection, TableReference):
-            _validate_freeform_string("frozen_selection", self.frozen_selection)
+        for name in ("mobile_selection", "frozen_selection"):
+            value = getattr(self, name)
+            if value and not isinstance(value, TableReference):
+                _validate_freeform_string(name, value)
+                try:
+                    sele_to_chains_and_list(value)
+                except ValueError as e:
+                    raise ValueError(f"{name}: {e}") from None
         if self.ligand_charge_method not in self._CHARGE_METHODS:
             raise ValueError(
                 f"ligand_charge_method must be one of {self._CHARGE_METHODS}, "

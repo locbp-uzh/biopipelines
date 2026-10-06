@@ -64,44 +64,76 @@ def sele_to_list(s):
         Sorted list of (chain, resnum) tuples.  Chain is ``''`` for chainless input.
     """
     result = []
-    if not s or str(s) in ("nan", "-"):
-        return result
-
-    s = str(s)
-
-    # Split on '+' or whitespace (legacy)
-    if '+' in s:
-        parts = s.split('+')
-    else:
-        parts = s.split()
-
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-
-        # Detect leading chain letter: uppercase letter followed by a digit
-        chain = ''
-        body = part
-        if len(part) >= 2 and part[0].isalpha() and part[0].isupper() and part[1].isdigit():
-            chain = part[0]
-            body = part[1:]
-
-        if '-' in body and not body.startswith('-'):
-            range_parts = body.split('-')
-            if len(range_parts) == 2:
-                start, end = int(range_parts[0]), int(range_parts[1])
-                for r in range(start, end + 1):
-                    result.append((chain, r))
-            else:
-                print(f"Warning: Malformed range '{part}', skipping")
-        else:
-            try:
-                result.append((chain, int(body)))
-            except ValueError:
-                print(f"Warning: Could not parse '{part}', skipping")
+    for part in _sele_parts(s):
+        try:
+            result.extend(_parse_sele_token(part))
+        except _SeleTokenError as e:
+            print(f"Warning: {e}, skipping")
 
     return sorted(result, key=lambda x: (x[0], x[1]))
+
+
+def sele_to_chains_and_list(s):
+    """Strictly parse a selection that may also name whole chains.
+
+    A bare chain letter (``B``) selects the whole chain, so ``B`` and
+    ``A10-20+B`` are valid. Unlike :func:`sele_to_list`, any unparseable token
+    or an empty result raises ``ValueError``.
+
+    Returns:
+        (whole_chains, residues): a set of chain IDs and a sorted list of
+        (chain, resnum) tuples.
+    """
+    chains, residues = set(), []
+    for part in _sele_parts(s):
+        if len(part) == 1 and part.isalpha():
+            chains.add(part)
+            continue
+        try:
+            residues.extend(_parse_sele_token(part, lowercase_chain=True))
+        except ValueError as e:
+            raise ValueError(f"Invalid selection '{s}': {e}") from None
+    if not chains and not residues:
+        raise ValueError(f"Selection '{s}' selects nothing")
+    return chains, sorted(residues, key=lambda x: (x[0], x[1]))
+
+
+class _SeleTokenError(ValueError):
+    pass
+
+
+def _sele_parts(s):
+    """Split a selection on '+' or, for the legacy format, on whitespace."""
+    if not s or str(s) in ("nan", "-"):
+        return []
+    s = str(s)
+    parts = s.split('+') if '+' in s else s.split()
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _parse_sele_token(part, lowercase_chain=False):
+    """Expand one ``A10``, ``A10-20``, ``10`` or ``10-20`` token to (chain, resnum) tuples."""
+    chain = ''
+    body = part
+    if (len(part) >= 2 and part[0].isalpha() and part[1].isdigit()
+            and (part[0].isupper() or lowercase_chain)):
+        chain = part[0]
+        body = part[1:]
+
+    if '-' in body and not body.startswith('-'):
+        range_parts = body.split('-')
+        if len(range_parts) != 2:
+            raise _SeleTokenError(f"Malformed range '{part}'")
+        try:
+            start, end = int(range_parts[0]), int(range_parts[1])
+        except ValueError:
+            # Plain ValueError so the lenient parser still raises on a bad bound.
+            raise ValueError(f"Malformed range '{part}'") from None
+        return [(chain, r) for r in range(start, end + 1)]
+    try:
+        return [(chain, int(body))]
+    except ValueError:
+        raise _SeleTokenError(f"Could not parse '{part}'") from None
 
 
 def sele_group_by_chain(s):

@@ -1086,10 +1086,10 @@ Energy-minimises protein structures (Amber14 + implicit GBn2 solvent) to relieve
 - `covalent_k`: float = 300000.0 — Restraint force constant, kJ/mol/nm².
 - `covalent_length`: float = 0.18 — Restraint equilibrium length in **nm** (0.18 nm ≈ a C–S single bond).
 - `covalent_max_distance`: float = 3.0 — How far the anchor may sit from the ligand and still count as bonded, in **Å**. Note the unit differs from `covalent_length`.
-- `mobile_selection`: str | (TableInfo, "column") = "" — Chain-aware selection whose side chains are free to move; every other protein atom is frozen and the ligand stays mobile. Backbone atoms of the selected residues are frozen too, so only rotamers relax. Empty (the default) means the whole structure is mobile.
-- `frozen_selection`: str | (TableInfo, "column") = "" — Chain-aware selection frozen outright, all atoms. Empty means nothing is frozen. Mutually exclusive with `mobile_selection`.
+- `mobile_selection`: str | (TableInfo, "column") = "" — Chain-aware selection (`A10-20+B5`; a bare chain letter such as `B` selects the whole chain) whose side chains are free to move; every other protein atom is frozen and the ligand stays mobile. Backbone atoms of the selected residues are frozen too, so only rotamers relax. Empty (the default) means the whole structure is mobile.
+- `frozen_selection`: str | (TableInfo, "column") = "" — Chain-aware selection in the same syntax (a bare chain letter freezes the whole chain), frozen outright, all atoms. Empty means nothing is frozen. Mutually exclusive with `mobile_selection`.
 
-Frozen atoms have their mass set to zero, which makes them **immovable**, unlike `restraint_selection` which only applies a harmonic penalty and lets the whole structure drift. Both selections accept a per-structure `(TableInfo, "column")` reference, so a different region can be held for each input.
+Frozen atoms have their mass set to zero, which makes them **immovable**, unlike `restraint_selection` which only applies a harmonic penalty and lets the whole structure drift. Both selections accept a per-structure `(TableInfo, "column")` reference, so a different region can be held for each input. A selection that cannot be parsed, an empty per-structure cell, or one that matches no protein atom is an error rather than a silent no-op: a literal is rejected at configuration time, and a structure whose selection fails is reported as failed instead of being minimised unconstrained.
 
 **Streams**: `structures` (minimized PDB per input), `compounds` (only when `ligand=` was given: the input compounds stream, passed straight through)
 

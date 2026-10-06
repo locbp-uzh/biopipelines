@@ -1153,8 +1153,12 @@ OpenMM:
   files:
   - biopipelines/openmm.py
   - pipe_scripts/pipe_openmm.py
-  current: "3.2"
+  current: "3.3"
   history:
+  - version: '3.3'
+    date: '2026-10-06'
+    note: >-
+      `frozen_selection` and `mobile_selection` fail loudly instead of selecting nothing. A bare chain letter (`frozen_selection="B"`) printed `Warning: Could not parse 'B', skipping` and minimised with zero atoms frozen, so a frozen-body relaxation ran as a whole-complex one and still reported success. A bare chain letter now selects the whole chain, a lowercase chain prefix (`b10-20`) is read as a chain, and an unparseable token, an empty per-structure cell, or a selection matching no protein atom is an error: at configuration time for a literal, and as a failed structure for a table reference.
   - version: '3.2'
     date: '2026-09-11'
     note: >-

@@ -15,6 +15,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **OpenMM** 3.2 → 3.3. `frozen_selection` / `mobile_selection` accept a bare chain letter (`"B"`) as the whole chain, and a selection that is unparseable, empty, or matches no protein atom is an error instead of a warning followed by an unconstrained minimisation.
+
 ## [1.5.3] — 2026-09-30
 
 ### Framework

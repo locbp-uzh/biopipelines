@@ -25,7 +25,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files  # noqa: E402
-from biopipelines.sele_utils import sele_to_list  # noqa: E402
+from biopipelines.sele_utils import sele_to_list, sele_to_chains_and_list  # noqa: E402
 
 import openmm  # noqa: E402
 from openmm import LangevinMiddleIntegrator, Platform, unit  # noqa: E402
@@ -90,43 +90,54 @@ def _as_reference(value):
     return None
 
 
+def _parse_selection(value, name):
+    """(whole_chains, residue set) of a selection; raises when it selects nothing."""
+    try:
+        chains, pairs = sele_to_chains_and_list(value)
+    except ValueError as e:
+        raise ValueError(f"{name}: {e}") from None
+    return chains, set(pairs)
+
+
 def _matches(atom, sel):
-    """True when an atom's residue is in a (chain, resnum) selection set."""
+    """True when an atom's residue is in a (whole_chains, residue set) selection."""
+    chains, pairs = sel
+    chain = atom.residue.chain.id
+    if chain in chains:
+        return True
     try:
         resnum = int(atom.residue.id)
     except (TypeError, ValueError):
         return False
-    chain = atom.residue.chain.id
-    return (chain, resnum) in sel or ("", resnum) in sel
+    return (chain, resnum) in pairs or ("", resnum) in pairs
 
 
-def _apply_freeze(system, topology, mobile_pairs, frozen_pairs, ligand_resnames):
+def _apply_freeze(system, topology, mobile_sel, frozen_sel, ligand_resnames):
     """Zero the mass of every atom that must not move.
 
     A zero-mass particle is immovable in OpenMM, unlike a restrained one which
     only pays an energy penalty. Returns (n_mobile, n_frozen).
     """
-    if not mobile_pairs and not frozen_pairs:
+    if not mobile_sel and not frozen_sel:
         return system.getNumParticles(), 0
 
-    freeze = []
-    if mobile_pairs:
-        sel = set(mobile_pairs)
-        for atom in topology.atoms():
-            if atom.residue.name in ligand_resnames:
-                continue
-            # Mobile residues keep their side chains free; backbone stays put so
-            # the fold cannot drift and contaminate a downstream pose metric.
-            if _matches(atom, sel) and atom.name not in BACKBONE:
-                continue
-            freeze.append(atom.index)
+    sel = mobile_sel or frozen_sel
+    matched = [atom for atom in topology.atoms()
+               if atom.residue.name not in ligand_resnames and _matches(atom, sel)]
+    if not matched:
+        kind = "mobile_selection" if mobile_sel else "frozen_selection"
+        raise ValueError(
+            f"{kind} matched no protein atom. Check that its chain ids and residue "
+            f"numbers match the structure.")
+
+    if mobile_sel:
+        # Mobile residues keep their side chains free; backbone stays put so
+        # the fold cannot drift and contaminate a downstream pose metric.
+        free = {a.index for a in matched if a.name not in BACKBONE}
+        freeze = [a.index for a in topology.atoms()
+                  if a.residue.name not in ligand_resnames and a.index not in free]
     else:
-        sel = set(frozen_pairs)
-        for atom in topology.atoms():
-            if atom.residue.name in ligand_resnames:
-                continue
-            if _matches(atom, sel):
-                freeze.append(atom.index)
+        freeze = [a.index for a in matched]
 
     frozen = set(freeze)
     for idx in freeze:
@@ -349,7 +360,7 @@ def _ligand_molecule(ligand_path, smiles, charge_method):
 
 def minimise(pdb_path, out_path, max_iterations, tolerance_kjmolnm,
              forcefield_name, solvent_name, platform_name, restraint_pairs, restraint_k,
-             mobile_pairs, frozen_pairs, ligand_resnames, ligand_smiles, charge_method,
+             mobile_sel, frozen_sel, ligand_resnames, ligand_smiles, charge_method,
              work_dir, sid, ligand_forcefield="gaff-2.11", covalent_anchor="",
              covalent_k=300000.0, covalent_length_nm=0.18,
              covalent_max_distance=3.0):
@@ -438,7 +449,7 @@ def minimise(pdb_path, out_path, max_iterations, tolerance_kjmolnm,
     # Freezing runs after the covalent term is added. A frozen anchor with a mobile
     # ligand is the pivot case and works as intended; the ligand is never frozen, so
     # the restraint can never end up between two immovable atoms.
-    n_mobile, n_frozen = _apply_freeze(system, topology, mobile_pairs, frozen_pairs,
+    n_mobile, n_frozen = _apply_freeze(system, topology, mobile_sel, frozen_sel,
                                        ligand_resnames)
     if n_mobile == 0:
         raise ValueError(
@@ -506,10 +517,14 @@ def main():
     # resolved inside the loop rather than parsed once here.
     mobile_ref = _as_reference(args.mobile_selection)
     frozen_ref = _as_reference(args.frozen_selection)
-    mobile_pairs = ([] if mobile_ref else
-                    sele_to_list(args.mobile_selection) if args.mobile_selection else [])
-    frozen_pairs = ([] if frozen_ref else
-                    sele_to_list(args.frozen_selection) if args.frozen_selection else [])
+    try:
+        mobile_sel = (None if mobile_ref or not args.mobile_selection else
+                      _parse_selection(args.mobile_selection, "mobile_selection"))
+        frozen_sel = (None if frozen_ref or not args.frozen_selection else
+                      _parse_selection(args.frozen_selection, "frozen_selection"))
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     ligand_resnames, ligand_smiles = set(), None
     if args.ligand_json:
@@ -526,17 +541,11 @@ def main():
     for sid, pdb_path in iterate_files(ds):
         out_path = os.path.join(args.output_dir, f"{sid}.pdb")
         try:
-            this_mobile, this_frozen = mobile_pairs, frozen_pairs
-            if mobile_ref is not None:
-                this_mobile = sele_to_list(mobile_ref.resolve(sid) or "")
-                if not this_mobile:
-                    # An empty cell would silently minimise the whole structure free,
-                    # which is the opposite of what asking for a mobile region means.
-                    raise ValueError(
-                        f"mobile_selection resolved to nothing for {sid}; nothing would "
-                        f"be held and the whole structure would relax")
-            if frozen_ref is not None:
-                this_frozen = sele_to_list(frozen_ref.resolve(sid) or "")
+            # An empty per-structure cell is an error: it would silently relax the whole structure.
+            this_mobile = (_parse_selection(mobile_ref.resolve(sid) or "", "mobile_selection")
+                           if mobile_ref is not None else mobile_sel)
+            this_frozen = (_parse_selection(frozen_ref.resolve(sid) or "", "frozen_selection")
+                           if frozen_ref is not None else frozen_sel)
 
             e0, e1, n_mob, n_frz, charge_used = minimise(
                 pdb_path, out_path, args.max_iterations, args.tolerance,
