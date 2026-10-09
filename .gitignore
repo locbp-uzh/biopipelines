@@ -33,6 +33,7 @@ my_scripts/*
 !my_scripts/count_atoms.py
 !my_scripts/filter_structures.py
 !my_scripts/align_protein_openings.py
+!my_scripts/pool_rfd3_designs.py
 
 # Ligands folder (cached ligand files)
 ligands/*
