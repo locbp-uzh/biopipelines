@@ -1715,8 +1715,12 @@ RFdiffusion3:
   - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
   - pipe_scripts/pipe_rfdiffusion3_postprocess.py
   - pipe_scripts/pipe_rfdiffusion3_table.py
-  current: "3.6"
+  current: "3.7"
   history:
+  - version: '3.7'
+    date: '2026-10-09'
+    note: >-
+      `prefix` reaches the output ids when a PDB input is given. It was consulted only in the de-novo branch: with `pdb=`, each design key was the input pdb id alone, so every step sharing one input emitted the same `<pdb>_1 ... <pdb>_N`. Nothing failed at the time, since each step writes its own folder -- the loss appears only when the steps are pooled, where N steps collapse onto N ids and everything but the last is silently dropped. One real run put 3,700 designs onto 100 ids and was recovered only from the per-step tables. The design key is now `<prefix>_<pdb id>`, built by the runtime inputs builder (new `--key-prefix`), matched by the declared ids, and stripped along with the design suffix when structures_map.csv recovers each design's parent, so provenance is unchanged. Without a prefix the keys and ids are exactly as before.
   - version: '3.6'
     date: '2026-09-23'
     note: >-

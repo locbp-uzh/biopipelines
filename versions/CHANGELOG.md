@@ -15,6 +15,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **RFdiffusion3** 3.6 → 3.7. `prefix` reaches the output ids when a PDB input is given. It was consulted only in the de-novo branch, so with `pdb=` each design key was the input pdb id alone and every step sharing one input emitted the same `<pdb>_1 ... <pdb>_N`. Nothing fails at the time — each step writes its own folder — and the loss appears only when steps are pooled, where N steps collapse onto N ids and all but the last are silently dropped. The design key is now `<prefix>_<pdb id>`, built by the runtime inputs builder (new `--key-prefix`), matched by the declared ids, and stripped along with the design suffix when `structures_map.csv` recovers each design's parent. Without a prefix, keys and ids are unchanged.
+
 - **OpenMM** 3.2 → 3.3. `frozen_selection` / `mobile_selection` accept a bare chain letter (`"B"`) as the whole chain, and a selection that is unparseable, empty, or matches no protein atom is an error instead of a warning followed by an unconstrained minimisation.
 
 ## [1.5.3] — 2026-09-30

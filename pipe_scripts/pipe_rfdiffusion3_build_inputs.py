@@ -13,8 +13,9 @@ final JSON from:
 
   - a config-time TEMPLATE entry holding the shared design params,
   - the input structures DataStream (one entry per pdb id, keyed by that id,
-    with its resolved `input` path) — or, with no PDB, a single de-novo entry
-    keyed by the given prefix and no `input`,
+    or by `<key-prefix>_<pdb id>` when a prefix was given, with its resolved
+    `input` path) — or, with no PDB, a single de-novo entry keyed by the given
+    prefix and no `input`,
   - the ligand residue `code` resolved from the compounds stream (broadcast to
     every entry), when a ligand was provided,
   - a per-PDB `contig`, when one was given as a table-column reference rather
@@ -50,6 +51,10 @@ def main():
                     help="Compounds-stream JSON; the residue `code` is read from it")
     ap.add_argument("--denovo-prefix", default=None,
                     help="Design key for the no-PDB (de novo) single-entry case")
+    ap.add_argument("--key-prefix", default=None,
+                    help="Prepended to each PDB-derived design key, as "
+                         "'<key-prefix>_<pdb id>', so sibling steps sharing an "
+                         "input PDB do not emit colliding output ids")
     ap.add_argument("--contig-reference", default=None,
                     help="TABLE_REFERENCE:<path>:<column> holding one contig per pdb id")
     args = ap.parse_args()
@@ -84,7 +89,8 @@ def main():
                 if not contig:
                     raise ValueError(f"contig resolved to empty for {pdb_id}")
                 entry["contig"] = contig
-            config[pdb_id] = entry
+            key = f"{args.key_prefix}_{pdb_id}" if args.key_prefix else pdb_id
+            config[key] = entry
         if not config:
             raise ValueError(f"No structures found in DataStream: {args.structures_json}")
     else:

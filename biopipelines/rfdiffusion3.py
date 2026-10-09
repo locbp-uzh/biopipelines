@@ -126,7 +126,10 @@ class RFdiffusion3(BaseConfig):
         num_models (int): Number of models per design (default: 1).
             WARNING: RFdiffusion3's internal default is 8 models per design. Always
             explicitly pass this parameter to avoid unexpected behavior.
-        prefix (str): Prefix for output file names (default: uses pipeline name)
+        prefix (str): Prepended to every output id, as `<prefix>_<pdb id>_<n>`
+            with a PDB input and `<prefix>_<n>` without one. Give it when sibling
+            steps share an input PDB, whose id would otherwise be their only one
+            (default: uses pipeline name, de-novo case only)
         IMPORTANT — selection keys are <chain><resnum>, NOT residue names. Every
         per-residue/atom selector below (select_hotspots, select_fixed_atoms,
         select_buried, select_exposed, select_hbond_donor/acceptor) keys its dict by
@@ -189,7 +192,7 @@ class RFdiffusion3(BaseConfig):
         design_startnum (int): Starting number for design numbering (default: 1)
 
     Outputs:
-        structures: DataStream of PDB files ({prefix}_d{D}_m{M}.pdb, ...)
+        structures: DataStream of PDB files ({key}_d{D}_m{M}.pdb, ...)
         tables.structures: CSV with columns: id, design, model, pdb, contig, length, time, status
 
     Notes:
@@ -210,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.6"
+    TOOL_VERSION = "3.7"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -337,7 +340,8 @@ fi
             num_designs: Number of designs to generate
             num_models: Number of models per design (default: 1). WARNING: RFdiffusion3's
                 internal default is 8. Always pass explicitly.
-            prefix: Prefix for output file names (defaults to pipeline name)
+            prefix: Prepended to every output id; needed when sibling steps
+                share an input PDB (defaults to pipeline name, de-novo only)
             select_hotspots: Hotspot residues specification
             select_fixed_atoms: Atoms with fixed 3D coordinates (True/str/dict)
             select_buried: Atoms to bury in protein (RASA control)
@@ -423,9 +427,10 @@ fi
     def _get_prefix(self) -> str:
         """Design key for the de-novo (no-PDB) single-entry case.
 
-        With PDB input, each design key is its input pdb id (resolved at
-        runtime), so this is only the fallback name for the no-PDB case and for
-        config-time artifact filenames (e.g. the template JSON).
+        With PDB input the design key is `<prefix>_<pdb id>` when a prefix was
+        given and the bare pdb id otherwise, both resolved at runtime, so this
+        is the fallback name for the no-PDB case and for config-time artifact
+        filenames (e.g. the template JSON).
         """
         if self.prefix:
             return self.prefix
@@ -779,6 +784,8 @@ fi
         builder_args = f'--template "{self.json_template}" --output "{self.json_file}"'
         if self.pdb_stream:
             builder_args += f' --structures-json "{self.pdb_ds_json}"'
+            if self.prefix:
+                builder_args += f' --key-prefix "{self.prefix}"'
         else:
             builder_args += f' --denovo-prefix "{self._get_prefix()}"'
         if self.ligand_stream is not None:
@@ -893,8 +900,8 @@ python -c "import torch; import torchvision" 2>/dev/null || true
         # activates the env with whatever env_manager is configured.
         activate_biopipelines = self.activate_environment(name="biopipelines")
         # Output structure ids are keyed by the foundry design key (the input
-        # pdb id per entry), so no single --prefix is passed; the postprocess
-        # derives each id from the produced filename.
+        # pdb id per entry, prefixed when `prefix` was given), so no single
+        # --prefix is passed; the postprocess derives each id from the filename.
         pylibs = self._get_postprocess_pylibs()
         # Where the container's python must look for biopython; see _get_postprocess_pylibs.
         pylibs_block = (
@@ -971,6 +978,9 @@ python "{self.table_py_file}" \\
         # The regex is RFd3's id shape, passed to the tool-agnostic helper.
         if self.pdb_stream:
             suffix_re = r"_d\d+_m\d+$" if self.num_models > 1 else r"_\d+$"
+            # The prefix sits in front of the parent id, so it has to come off too.
+            if self.prefix:
+                suffix_re = f"^{re.escape(self.prefix)}_|" + suffix_re
             prov_arg = (f' --provenance-from-suffix "structures.id"'
                         f' --suffix-regex "{suffix_re}"')
         else:
@@ -995,7 +1005,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             - output_folder: Tool's output directory
         """
         # Generate pattern-based IDs. The base is each design key — the input
-        # pdb id(s) in the multi-PDB case, or the de-novo prefix otherwise.
+        # pdb id(s), prefixed when `prefix` was given, or the de-novo prefix.
         d_start = self.design_startnum
         d_end = self.design_startnum + self.num_designs - 1
         m_start = self.design_startnum
@@ -1008,7 +1018,11 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         else:
             suffix_pattern = f"<{d_start}..{d_end}>"
 
-        base_keys = self.pdb_stream.ids if self.pdb_stream else [self._get_prefix()]
+        if self.pdb_stream:
+            base_keys = ([f"{self.prefix}_{i}" for i in self.pdb_stream.ids]
+                         if self.prefix else self.pdb_stream.ids)
+        else:
+            base_keys = [self._get_prefix()]
         structure_ids = generate_multiplied_ids_pattern(
             base_keys, suffix_pattern, input_stream_name="structures"
         )
