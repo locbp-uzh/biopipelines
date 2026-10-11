@@ -15,6 +15,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **MSA** 1.2 → 1.3. A conversion that wrote every one of its files was still marked FAILED. The wrapper declared the input stream's ids against the file pattern `<id>.a3m`, while `pipe_msa.py` named files after `sequences.id`; an MMseqs2 source carries an `_msa` suffix on its ids and not on `sequences.id`, so the two disagreed on every row and the completion check found only the map table. Id and filename now follow one rule on both sides — the input id, with `_msa` appended when absent. Consumers resolve MSAs through the map table's `file` column, so nothing downstream changes; on disk an MMseqs2-sourced conversion now writes `<id>_msa.a3m`.
+
 - **RFdiffusion3** 3.6 → 3.7. `prefix` reaches the output ids when a PDB input is given. It was consulted only in the de-novo branch, so with `pdb=` each design key was the input pdb id alone and every step sharing one input emitted the same `<pdb>_1 ... <pdb>_N`. Nothing fails at the time — each step writes its own folder — and the loss appears only when steps are pooled, where N steps collapse onto N ids and all but the last are silently dropped. The design key is now `<prefix>_<pdb id>`, built by the runtime inputs builder (new `--key-prefix`), matched by the declared ids, and stripped along with the design suffix when `structures_map.csv` recovers each design's parent. Without a prefix, keys and ids are unchanged.
 
 - **OpenMM** 3.2 → 3.3. `frozen_selection` / `mobile_selection` accept a bare chain letter (`"B"`) as the whole chain, and a selection that is unparseable, empty, or matches no protein atom is an error instead of a warning followed by an unconstrained minimisation.

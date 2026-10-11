@@ -139,14 +139,15 @@ def main():
 
     for _, row in df.iterrows():
         msa_file = row['file']
-        row_id = row.get('id', '')
-        seq_id = row.get('sequences.id', row_id)
+        row_id = str(row.get('id', '') or '')
+        seq_id = str(row.get('sequences.id', row_id) or row_id)
 
         if not msa_file or not os.path.exists(msa_file):
             print(f"Warning: MSA file not found: {msa_file}")
             continue
 
-        output_file = os.path.join(output_folder, f"{seq_id}{ext}")
+        out_id = row_id if row_id.endswith("_msa") else f"{seq_id}_msa"
+        output_file = os.path.join(output_folder, f"{out_id}{ext}")
 
         if convert == "a3m":
             query_seq = convert_csv_to_a3m(msa_file, output_file)
@@ -156,7 +157,7 @@ def main():
             print(f"Converted A3M -> CSV: {os.path.basename(msa_file)} -> {os.path.basename(output_file)}")
 
         output_rows.append({
-            'id': f"{seq_id}_msa",
+            'id': out_id,
             'sequences.id': seq_id,
             'sequence': query_seq,
             'file': output_file

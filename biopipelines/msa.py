@@ -44,7 +44,7 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -142,14 +142,16 @@ python "{self.msa_py}" --config "{self.config_json}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after MSA conversion."""
-        sequence_ids = list(self.msas_stream.ids)
+        # Mirrors pipe_msa.py: an id already carrying the suffix is passed through, so a chain of conversions does not accumulate `_msa_msa`.
+        msa_ids = [i if i.endswith("_msa") else f"{i}_msa"
+                   for i in self.msas_stream.ids]
 
         ext = ".a3m" if self.convert == "a3m" else ".csv"
         msa_files = [os.path.join(self.output_msas_folder, f"<id>{ext}")]
 
         msas = DataStream(
             name="msas",
-            ids=sequence_ids,
+            ids=msa_ids,
             files=msa_files,
             map_table=self.output_msas_csv,
             format=self.convert
