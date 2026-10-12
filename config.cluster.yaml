@@ -223,6 +223,7 @@ environments:
   RTMScore: "rtmscore"
   SASA: "ProteinEnv"
   Selection: "ProteinEnv"
+  SelectionTransfer: "biopipelines"
   Sequence: "biopipelines"
   SequenceMetricCorrelation: "MutationEnv"
   StitchSequences: "biopipelines"

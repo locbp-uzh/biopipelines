@@ -420,3 +420,44 @@ scores = Panda(
                          "precision": "ovl_n_residues / pred_n_residues"}),
     ])
 ```
+
+---
+
+## SelectionTransfer
+
+Carries a residue selection from the structures it is numbered on onto structures from a later stage of the pipeline — after trimming, extending, shifting, renumbering, renaming chains, point mutations or circular permutation.
+
+**Tags**: data, residues, protein
+
+**Environment**: `biopipelines`
+
+**Parameters**:
+- `selection`: column reference | str - The selection in reference numbering. A column reference (e.g. `rfd.tables.structures.designed`) is looked up by reference id; a selection string (`"A45-60+A72"`) applies to every reference. A chainless selection needs a single-chain reference.
+- `reference`: StandardizedOutput | DataStream - Structures the selection is numbered on. One structure is broadcast to every target; otherwise each target is paired with its reference by id matching (exact, parent/child, then provenance through the target stream's map table).
+- `structures`: StandardizedOutput | DataStream - Structures to map the selection onto. They define the output ids.
+
+**How residues are matched.** Each selected reference chain is aligned (global, BLOSUM62, free end gaps) against every protein chain of the target, and the best-scoring target chain is used, with the same chain id winning a tie. The reference sequence is doubled before aligning, so a circular permutant — the reference's C-terminal half, a linker, then its N-terminal half — aligns as one contiguous block. A selected residue aligned to a gap is listed in `unmapped`, never guessed, and does not appear in `selection`. Only the 20 standard residues are read; a selected residue the reference does not contain fails that id.
+
+Correspondence is by sequence, so it holds as long as the sequence is recognisably conserved. After a full redesign (e.g. ProteinMPNN on every position) the alignment is meaningless: transfer the selection *before* redesign, or check `identity`.
+
+**Tables**:
+- `selections`: `id | selection | n_residues | source_selection | unmapped | identity | reference.id` — `selection` is chain-aware in target numbering, `n_residues` counts mapped residues, `source_selection` is the input in reference numbering, `identity` is the fraction of identical aligned pairs over the chains used, `reference.id` the paired reference. A failed id keeps its row with empty values.
+- `missing`: `id | removed_by | kind | cause`
+
+**Example**:
+
+```python
+from biopipelines.selection_transfer import SelectionTransfer
+
+rfd = RFdiffusion(pdb=target, contigs="A1-40/10-20/A61-120", num_designs=10)
+af = AlphaFold(proteins=later_stage)  # trimmed, tagged, fused or permuted versions of the designs
+
+# The designed loop, renumbered onto each folded variant
+st = SelectionTransfer(selection=rfd.tables.structures.designed,
+                       reference=rfd,
+                       structures=af)
+ProteinMPNN(structures=af, redesigned=st.tables.selections.selection)
+
+# A literal selection on the wild type, carried onto every design
+SelectionTransfer(selection="A45-60", reference=PDB("1GFL"), structures=af)
+```

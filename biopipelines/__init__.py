@@ -89,6 +89,7 @@ from .structure_cluster import StructureCluster
 from .scripting import Scripting
 from .mutagenesis import Mutagenesis
 from .selection import Selection
+from .selection_transfer import SelectionTransfer
 from .distance_selector import DistanceSelector
 from .ligand_atom_selector import LigandAtomSelector
 from .bfactor import BFactor
@@ -228,6 +229,7 @@ __all__ = [
     'Scripting',
     'Mutagenesis',
     'Selection',
+    'SelectionTransfer',
     'DistanceSelector',
     'LigandAtomSelector',
     'BFactor',

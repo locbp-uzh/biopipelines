@@ -1853,6 +1853,17 @@ Selection:
     note: >-
       Out-of-env import fallback uses sys.path.append instead of sys.path.insert(0, ...), matching every other wrapper; no behaviour change in package-import mode.
 
+SelectionTransfer:
+  files:
+  - biopipelines/selection_transfer.py
+  - pipe_scripts/pipe_selection_transfer.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-12'
+    note: >-
+      New tool. Maps a residue selection from the structures it is numbered on onto later-stage structures by per-chain sequence alignment against the doubled reference, so trims, shifts, renumbering, chain renames and circular permutations map; residues with no counterpart are reported as unmapped.
+
 Sequence:
   files:
   - biopipelines/sequence.py

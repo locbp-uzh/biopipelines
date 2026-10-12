@@ -146,6 +146,7 @@ environments:
   PyMOL: "ProteinEnv"
   SASA: "ProteinEnv"
   Selection: "ProteinEnv"
+  SelectionTransfer: "biopipelines"
   DSSP: "dssp"
   # CPU docking. GNINA is absent on purpose: it ships only a prebuilt x86-64
   # binary. conda-forge builds vina, openbabel and rdkit for aarch64.

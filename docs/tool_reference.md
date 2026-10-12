@@ -139,6 +139,7 @@ Filter, transform, and route tables and streams.
 - [Pool](tool/data_management.md#pool) — Gather parallel-run outputs
 - [ReMap](tool/data_management.md#remap) — Rename IDs across streams and tables
 - [Selection](tool/data_management.md#selection) — Selection string manipulation
+- [SelectionTransfer](tool/data_management.md#selectiontransfer) — Map a residue selection onto trimmed, shifted or permuted structures
 
 ---
 
