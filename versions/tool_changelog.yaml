@@ -1863,8 +1863,12 @@ Sequence:
 Scripting:
   files:
   - biopipelines/scripting.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-12'
+    note: >-
+      Docstring only: the `script` argument now names the scripts-folder lookup (bare filename resolved against `folders.infrastructure.scripts`, default `my_scripts/`). No change to resolution, generated scripts or outputs.
   - version: '1.1'
     date: '2026-09-02'
     note: >-

@@ -48,7 +48,7 @@ class Scripting(BaseConfig):
     """Run a user script as a typed, two-phase pipeline step.
 
     Args:
-        script: Path to a .py file defining ``configuration(inputs)`` and ``execution(inputs, outputs)``.
+        script: A .py file defining ``configuration(inputs)`` and ``execution(inputs, outputs)``. Keep it in the scripts folder (``folders.infrastructure.scripts``, default ``my_scripts/``) and pass the bare filename; an existing absolute or cwd-relative path is used as given.
         inputs: Dict mapping a name to a StandardizedOutput, DataStream, a whole table (``tool.tables.x`` / a TableInfo), or a table-column reference (``tool.tables.x.col`` or ``(TableInfo, "col")``). A StandardizedOutput prefers an exact key match (``{"structures": tool}`` → ``tool.streams.structures``), else falls back to its single non-empty stream; pass ``tool.streams.<name>`` to disambiguate.
         env: Conda env the execution phase runs in. Defaults to the biopipelines env. The tool does not create it. The script's ``execution`` may import biopipelines when that env carries biopipelines' deps — the default env does, and a custom env does after ``pip install -e ".[scripting]"``.
 
@@ -57,7 +57,7 @@ class Scripting(BaseConfig):
     """
 
     TOOL_NAME = "Scripting"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     # The user script's configuration() names its own streams.
     USER_STREAM_NAMES = True

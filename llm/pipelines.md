@@ -222,6 +222,7 @@ time requested.
 - Produce a `.py` script. Place it in `my_pipelines/`. The folder is
   gitignored, so `git push` will not propagate it — scp it to the cluster
   instead.
+- A step script for `Scripting` is not a pipeline: place it in `my_scripts/` and pass the bare filename (`Scripting(script="my_step.py", ...)`), which resolves against the configured scripts folder on the cluster. Do not pass `my_pipelines/my_step.py`; that resolves only when the pipeline is configured from the repo root. `my_scripts/` is gitignored too and `bp_submit(upload=...)` copies only the pipeline, so scp the step script to `~/biopipelines/my_scripts/` before submitting.
 - Keep input data on the cluster. Do **not** stage CSVs / FASTA / PDB inputs
   inside the local working copy (also gitignored, but more importantly:
   large inputs don't belong in a code repo); scp them directly to the
@@ -260,6 +261,7 @@ Only when those tools are **not** in your tool list. Then all cluster interactio
 | --------------------------------- | -------------------------------------------------------------------------------------- |
 | Sync remote repo to a branch      | `ssh s3it "cd ~/biopipelines && git fetch && git reset --hard origin/<branch>"` |
 | Copy a personal pipeline / inputs | `scp my_pipelines/foo.py s3it:~/biopipelines/my_pipelines/`              |
+| Copy a `Scripting` step script    | `scp my_scripts/my_step.py s3it:~/biopipelines/my_scripts/`              |
 | Submit                            | `ssh s3it "cd ~/biopipelines && ./submit my_pipelines/foo.py"`           |
 | Resume after cancel/fail          | `ssh s3it "cd ~/biopipelines && ./resubmit <RunTime>/<job script>"`      |
 | Watch the queue                   | `ssh s3it 'squeue -u $(whoami)'`                                         |
