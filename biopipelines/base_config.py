@@ -1137,6 +1137,7 @@ echo "=============================="
         out_csv: str,
         columns: Optional[List[str]] = None,
         required_columns: Optional[List[str]] = None,
+        input_sources: Optional[List[Any]] = None,
     ) -> str:
         """
         Bash block that materializes a filtered map_table under the biopipelines env.
@@ -1145,6 +1146,9 @@ echo "=============================="
         id filter) and writes ``out_csv``. The materializer imports biopipelines,
         so it must run in the biopipelines env — not the tool env. Emit this
         before activating the tool env for the consumer step.
+
+        Pass ``input_sources`` so ids an upstream tool dropped on purpose (and
+        recorded in its `missing` manifest) are excused rather than raising.
         """
         from .biopipelines_io import Resolve
 

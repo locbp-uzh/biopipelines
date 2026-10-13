@@ -49,6 +49,36 @@ def test_filtered_subset_preserves_order(tmp_path, record_case):
     assert actual == expected
 
 
+def test_absent_id_raises_when_not_excused(tmp_path, record_case):
+    ds, table = _seq_stream(tmp_path, [{"id": "a", "sequence": "AAA"}])
+    ds.ids = ["a", "b"]
+    out = tmp_path / "out.csv"
+
+    with pytest.raises(KeyError) as err:
+        write_filtered_map_table(ds, str(out))
+
+    actual = "b" in str(err.value)
+    record_case(input="declared id b missing, no manifest", expected=True, actual=actual)
+    assert actual
+
+
+def test_excused_id_is_dropped_not_raised(tmp_path, record_case):
+    """An id an upstream tool dropped on purpose is absent at runtime by design."""
+    ds, table = _seq_stream(tmp_path, [
+        {"id": "a", "sequence": "AAA"},
+        {"id": "c", "sequence": "CCC"},
+    ])
+    ds.ids = ["a", "b", "c"]
+    out = tmp_path / "out.csv"
+
+    write_filtered_map_table(ds, str(out), excused_ids=["b"])
+
+    actual = pd.read_csv(out)["id"].tolist()
+    expected = ["a", "c"]
+    record_case(input="declared id b excused by manifest", expected=expected, actual=actual)
+    assert actual == expected
+
+
 def test_filtered_numeric_like_ids_match_as_strings(tmp_path, record_case):
     table = tmp_path / "seqs.csv"
     table.write_text("id,sequence\n001,AAA\n002,BBB\n")

@@ -57,7 +57,7 @@ import json
 import os
 import shutil
 import sys
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import pandas as pd
 
@@ -359,6 +359,7 @@ def write_filtered_map_table(
     out_csv: str,
     columns: Optional[List[str]] = None,
     required_columns: Optional[List[str]] = None,
+    excused_ids: Optional[Iterable[str]] = None,
 ) -> str:
     """
     Materialize a map_table projected to the stream's expanded ids.
@@ -374,6 +375,8 @@ def write_filtered_map_table(
         out_csv: destination CSV path
         columns: optional column subset to write (``id`` always included); None = all
         required_columns: columns that must exist in the source map_table
+        excused_ids: ids an upstream `missing` manifest records as intentionally
+            dropped; these are omitted from the output instead of raising
 
     Returns:
         out_csv
@@ -417,12 +420,16 @@ def write_filtered_map_table(
         return out_csv
 
     id_to_row = {row['id']: row for _, row in df.iterrows()}
-    missing_ids = [i for i in keep_ids if i not in id_to_row]
+    # An id declared at config time can be legitimately absent at runtime when an
+    # upstream tool dropped it and said so in its `missing` manifest.
+    excused = {str(i) for i in (excused_ids or ())}
+    missing_ids = [i for i in keep_ids if i not in id_to_row and i not in excused]
     if missing_ids:
         raise KeyError(
             f"ids absent from map_table for '{ds.name}': {missing_ids[:10]}"
             f"{' ...' if len(missing_ids) > 10 else ''}"
         )
+    keep_ids = [i for i in keep_ids if i in id_to_row]
 
     out_columns = ['id'] + [c for c in (columns or list(df.columns)) if c != 'id']
     rows = [{c: id_to_row[i][c] for c in out_columns} for i in keep_ids]
@@ -1043,6 +1050,7 @@ class Resolve:
         out_csv: str,
         columns: Optional[List[str]] = None,
         required_columns: Optional[List[str]] = None,
+        missing_paths: Optional[List[str]] = None,
     ) -> str:
         """
         Bash command that materializes a filtered map_table at runtime.
@@ -1058,6 +1066,8 @@ class Resolve:
             cmd += f' --columns "{",".join(columns)}"'
         if required_columns:
             cmd += f' --require "{",".join(required_columns)}"'
+        if missing_paths:
+            cmd += " --excused" + "".join(f' "{p}"' for p in missing_paths)
         return cmd
 
     @staticmethod

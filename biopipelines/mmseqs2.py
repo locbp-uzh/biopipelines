@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.8"
+    TOOL_VERSION = "1.9"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -236,6 +236,7 @@ echo "=== MMseqs2 ready ==="
             script_content += self.generate_filtered_map_table_block(
                 self.sequences_json, self.input_sequences_csv,
                 required_columns=["id", "sequence"],
+                input_sources=[self.sequences_input],
             )
         script_content += self.activate_environment()
         script_content += self._generate_script_run_mmseqs2()
@@ -391,7 +392,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.8"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,

@@ -13,7 +13,13 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `write_filtered_map_table` takes `excused_ids`, and `generate_filtered_map_table_block` takes the consumer's `input_sources` so it can pass the upstream `missing` manifests down to `materialize_filtered_map_table.py` (new `--excused`). An id declared at configuration time and absent at runtime raised `KeyError: ids absent from map_table` even when an upstream manifest recorded it as intentionally dropped — the contract everywhere else is that such ids are excused, not failed. Two duplicate sequences out of 2,800, dropped by ProteinMPNN and correctly carried through `Pool`'s merged manifest, stopped a campaign at its MSA step. An absent id with no manifest entry still raises.
+
 ### Tools
+
+- **AlphaFold** 1.9 → 1.10, **MMseqs2** 1.8 → 1.9. Both pass their sequence input to `generate_filtered_map_table_block`, so ids an upstream tool dropped on purpose no longer abort the step. See the Framework entry above.
+
+- **MMseqs2Server** 1.7 → 1.8. No behavior change; it shares `mmseqs2.py` with the MMseqs2 fix above.
 
 - **Scripting** 1.1 → 1.2. Docstring only: the `script` argument now says a step script belongs in the scripts folder (`my_scripts/` by default) and is passed by bare filename, matching the tool documentation. `llm/pipelines.md` now gives the same rule and the scp step for it, since a `my_pipelines/<script>` path resolves only when the pipeline is configured from the repo root. Resolution is unchanged.
 

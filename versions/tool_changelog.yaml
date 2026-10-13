@@ -99,8 +99,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.9"
+  current: "1.10"
   history:
+  - version: '1.10'
+    date: '2026-10-13'
+    note: >-
+      The filtered-queries materialization excuses ids an upstream tool dropped on purpose. It projected the map table onto the stream's config-time ids and raised `KeyError: ids absent from map_table` for any id the run had legitimately filtered out -- a ProteinMPNN batch that sampled the same sequence twice drops the duplicate and records it in its `missing` manifest, and Pool merges that manifest correctly, but the materializer never read it. Two duplicates out of 2,800 sequences stopped a whole campaign at the MSA step. The upstream manifests are now passed to the materializer, which omits excused ids and still raises for an id that is absent with no manifest entry explaining it.
   - version: '1.9'
     date: '2026-09-29'
     note: >-
@@ -967,8 +971,12 @@ MMseqs2:
   - biopipelines/mmseqs2.py
   - pipe_scripts/pipe_mmseqs2_sequences.py
   - pipe_scripts/mmseqs2_client.sh
-  current: "1.8"
+  current: "1.9"
   history:
+  - version: '1.9'
+    date: '2026-10-13'
+    note: >-
+      The filtered-queries materialization excuses ids an upstream tool dropped on purpose. It projected the map table onto the stream's config-time ids and raised `KeyError: ids absent from map_table` for any id the run had legitimately filtered out -- a ProteinMPNN batch that sampled the same sequence twice drops the duplicate and records it in its `missing` manifest, and Pool merges that manifest correctly, but the materializer never read it. Two duplicates out of 2,800 sequences stopped a whole campaign at the MSA step. The upstream manifests are now passed to the materializer, which omits excused ids and still raises for an id that is absent with no manifest entry explaining it.
   - version: '1.8'
     date: '2026-09-20'
     note: >-
@@ -1007,8 +1015,12 @@ MMseqs2Server:
   files:
   - biopipelines/mmseqs2.py
   - pipe_scripts/mmseqs2_server_gpu.sh
-  current: "1.7"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-10-13'
+    note: >-
+      No behavior change. Shares `biopipelines/mmseqs2.py` with the MMseqs2 fix that passes the upstream `missing` manifests to the filtered map-table materializer; the server wrapper itself is untouched.
   - version: '1.7'
     date: '2026-09-20'
     note: >-

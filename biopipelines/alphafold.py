@@ -66,7 +66,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.9"
+    TOOL_VERSION = "1.10"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 
@@ -440,7 +440,8 @@ python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_
             # an upstream id filter), then re-activate the AlphaFold env.
             self.sequences_stream.save_json(self.sequences_json)
             block = self.generate_filtered_map_table_block(
-                self.sequences_json, self.queries_csv, required_columns=["id", "sequence"]
+                self.sequences_json, self.queries_csv, required_columns=["id", "sequence"],
+                input_sources=[self.proteins],
             )
             block += self.activate_environment()
             return block

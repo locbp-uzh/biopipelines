@@ -19,7 +19,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import load_datastream, write_filtered_map_table
+from biopipelines.biopipelines_io import (load_datastream, read_upstream_missing,
+                                          write_filtered_map_table)
 
 
 def main():
@@ -28,6 +29,8 @@ def main():
     parser.add_argument("out_csv")
     parser.add_argument("--columns", default=None, help="comma-separated column subset (id always kept)")
     parser.add_argument("--require", default=None, help="comma-separated columns that must exist")
+    parser.add_argument("--excused", nargs="*", default=None,
+                        help="upstream missing.csv path(s); ids listed there may be absent")
     args = parser.parse_args()
 
     ds = load_datastream(args.ds_json)
@@ -35,7 +38,10 @@ def main():
     columns = args.columns.split(",") if args.columns else None
     required = args.require.split(",") if args.require else None
 
-    write_filtered_map_table(ds, args.out_csv, columns=columns, required_columns=required)
+    excused = [r.get("id") for r in read_upstream_missing(args.excused)]
+
+    write_filtered_map_table(ds, args.out_csv, columns=columns, required_columns=required,
+                             excused_ids=excused)
     print(f"Wrote filtered map_table ({len(ds.ids_expanded)} id(s)) to {args.out_csv}")
 
 
