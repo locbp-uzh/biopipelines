@@ -70,7 +70,7 @@ class ESMFold(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold"
-    TOOL_VERSION = "2.0"
+    TOOL_VERSION = "2.1"
     ENV_NAME = "esmfold"
 
     @classmethod
@@ -154,6 +154,8 @@ fi
             cpu_only:             Run on CPU only — very slow (default: False).
             **kwargs:             Forwarded to BaseConfig.
         """
+        # Kept whole: the upstream `missing` manifest hangs off .tables, not off a DataStream.
+        self.sequences_input = sequences
         if isinstance(sequences, StandardizedOutput):
             self.sequences_stream: DataStream = sequences.streams.sequences
         elif isinstance(sequences, DataStream):
@@ -226,7 +228,8 @@ fi
 
         # Phase 0: materialize filtered sequences CSV (biopipelines env)
         script_content += self.generate_filtered_map_table_block(
-            self.sequences_ds_json, sequences_csv, required_columns=["id", "sequence"]
+            self.sequences_ds_json, sequences_csv, required_columns=["id", "sequence"],
+            input_sources=[self.sequences_input],
         )
 
         # Phase 1: inference under esmfold env

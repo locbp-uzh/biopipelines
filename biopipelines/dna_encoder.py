@@ -43,7 +43,7 @@ class DNAEncoder(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "DNAEncoder"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -93,6 +93,8 @@ echo "=== DNAEncoder ready ==="
             Tables:
                 sequences: id | sequence (DNA) | protein_sequence | organism | method
         """
+        # Kept whole: the upstream `missing` manifest hangs off .tables, not off a DataStream.
+        self.sequences_input = sequences
         # Resolve input to DataStream
         if isinstance(sequences, StandardizedOutput):
             self.sequences_stream: DataStream = sequences.streams.sequences
@@ -161,7 +163,8 @@ echo "=== DNAEncoder ready ==="
         script_content += "# DNAEncoder execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.generate_filtered_map_table_block(
-            self.sequences_json, self.sequences_csv_path, required_columns=["id", "sequence"]
+            self.sequences_json, self.sequences_csv_path, required_columns=["id", "sequence"],
+            input_sources=[self.sequences_input],
         )
         script_content += self.activate_environment()
         script_content += self.generate_script_run_encoding()

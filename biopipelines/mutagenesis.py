@@ -40,7 +40,7 @@ class Mutagenesis(BaseConfig):
     """
 
     TOOL_NAME = "Mutagenesis"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -168,6 +168,9 @@ echo "=== Mutagenesis ready ==="
         self.combinatorial = combinatorial
 
         # Handle input types
+        # Kept whole: the upstream `missing` manifest hangs off .tables, not off a DataStream.
+        self.original_input = original
+        self.msas_input = msas
         self.sequences_stream = None
 
         if isinstance(original, StandardizedOutput):
@@ -247,11 +250,13 @@ echo "=== Mutagenesis ready ==="
         script_content += self.generate_filtered_map_table_block(
             self.sequences_input_json, self.sequences_input_csv,
             required_columns=["id", "sequence"],
+            input_sources=[self.original_input],
         )
         if self.msas_stream is not None:
             self.msas_stream.save_json(self.msas_input_json)
             script_content += self.generate_filtered_map_table_block(
                 self.msas_input_json, self.msas_input_csv,
+                input_sources=[self.msas_input],
             )
         script_content += self.activate_environment()
 

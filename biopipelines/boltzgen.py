@@ -48,7 +48,7 @@ class BoltzGen(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "BoltzGen"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     ENV_NAME = "boltzgen"
 
     @classmethod
@@ -309,6 +309,8 @@ fi
 
     def _resolve_ligand_input(self, ligand: Union[DataStream, StandardizedOutput, None]):
         """Resolve ligand input to compounds CSV path."""
+        # Kept whole: the upstream `missing` manifest hangs off .tables, not off a DataStream.
+        self.ligand_input = ligand
         if ligand is None:
             return
 
@@ -675,6 +677,7 @@ fi
             self.ligand_compounds_csv = self.compounds_input_csv
             compounds_block = self.generate_filtered_map_table_block(
                 self.compounds_input_json, self.compounds_input_csv,
+                input_sources=[self.ligand_input],
             )
 
         # Parse binder spec
@@ -1161,7 +1164,7 @@ class BoltzGenMerge(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenMerge"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -1359,7 +1362,7 @@ class BoltzGenImport(BaseConfig):
     """
 
     TOOL_NAME = "BoltzGenImport"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -1467,6 +1470,8 @@ echo "=== BoltzGenImport ready ==="
 
     def _resolve_sequences_input(self, sequences: Union[DataStream, StandardizedOutput, None]):
         """Resolve sequences input to CSV path."""
+        # Kept whole: the upstream `missing` manifest hangs off .tables, not off a DataStream.
+        self.sequences_input = sequences
         if sequences is None:
             return
 
@@ -1497,6 +1502,8 @@ echo "=== BoltzGenImport ready ==="
 
     def _resolve_ligand_input(self, ligand: Union[DataStream, StandardizedOutput, None]):
         """Resolve ligand input to compounds CSV path."""
+        # Kept whole: the upstream `missing` manifest hangs off .tables, not off a DataStream.
+        self.ligand_input = ligand
         if ligand is None:
             return
 
@@ -1578,12 +1585,14 @@ echo "=== BoltzGenImport ready ==="
             filter_block += self.generate_filtered_map_table_block(
                 self.sequences_input_json, self.sequences_input_csv,
                 required_columns=["id", "sequence"],
+                input_sources=[self.sequences_input],
             )
         if self.compounds_stream is not None:
             self.compounds_stream.save_json(self.compounds_input_json)
             self.ligand_compounds_csv = self.compounds_input_csv
             filter_block += self.generate_filtered_map_table_block(
                 self.compounds_input_json, self.compounds_input_csv,
+                input_sources=[self.ligand_input],
             )
 
         # Build structures list file — config-time artefact.

@@ -21,6 +21,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 - **MMseqs2Server** 1.7 → 1.8. No behavior change; it shares `mmseqs2.py` with the MMseqs2 fix above.
 
+- **BoltzGen** 2.5 → 2.6, **BoltzGenImport** 2.4 → 2.5, **BoltzGenMerge** 2.4 → 2.5, **DNAEncoder** 1.2 → 1.3, **ESMFold** 2.0 → 2.1, **Mutagenesis** 1.2 → 1.3. The remaining callers of `generate_filtered_map_table_block` pass their input too, so an id an upstream tool dropped on purpose no longer aborts them either. Each kept its input only as a `DataStream`, which carries no `missing` manifest, so each now keeps the whole object beside it. BoltzGenMerge is bumped because it shares `boltzgen.py`.
+
 - **Scripting** 1.1 → 1.2. Docstring only: the `script` argument now says a step script belongs in the scripts folder (`my_scripts/` by default) and is passed by bare filename, matching the tool documentation. `llm/pipelines.md` now gives the same rule and the scp step for it, since a `my_pipelines/<script>` path resolves only when the pipeline is configured from the repo root. Resolution is unchanged.
 
 - **SelectionTransfer** — new tool (1.0). Carries a residue selection (a table column or a literal) from reference structures onto later-stage structures — trimmed, extended, renumbered, chain-renamed or circularly permuted — by per-chain sequence alignment, reporting residues with no counterpart instead of guessing.
