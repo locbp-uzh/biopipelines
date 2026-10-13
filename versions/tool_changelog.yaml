@@ -1910,8 +1910,12 @@ Sequence:
 Scripting:
   files:
   - biopipelines/scripting.py
-  current: "1.2"
+  current: "1.3"
   history:
+  - version: '1.3'
+    date: '2026-10-13'
+    note: >-
+      The step copies the script it was given into `<step>/_configuration/` and runs that copy. `my_scripts/` is gitignored, so a run kept no record of which version of a helper produced its outputs, and a helper edited between submission and execution changed a step that had already been configured. The runner takes `--script-origin-dir` and puts the script's own folder on `sys.path`, so a helper importing a sibling module is unaffected.
   - version: '1.2'
     date: '2026-10-12'
     note: >-

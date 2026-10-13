@@ -17,6 +17,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Scripting** 1.2 → 1.3. The step copies the script it was given into `<step>/_configuration/` and runs that copy, so the run keeps the code that produced its outputs — `my_scripts/` is gitignored, so nothing else recorded it — and an edit between submission and execution can no longer change a step that is already configured. `pipe_scripting.py` takes `--script-origin-dir` and keeps the script's own folder on `sys.path` for sibling imports.
+
 - **AlphaFold** 1.9 → 1.10, **MMseqs2** 1.8 → 1.9. Both pass their sequence input to `generate_filtered_map_table_block`, so ids an upstream tool dropped on purpose no longer abort the step. See the Framework entry above.
 
 - **MMseqs2Server** 1.7 → 1.8. No behavior change; it shares `mmseqs2.py` with the MMseqs2 fix above.

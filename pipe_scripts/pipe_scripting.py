@@ -201,7 +201,11 @@ class _Outputs:
             handle._write(columns=self._table_columns.get(name))
 
 
-def _load_user_module(script_path):
+def _load_user_module(script_path, origin_dir=None):
+    # The step runs a snapshot of the script, not the file the user keeps; a helper
+    # importing a sibling module needs the folder it was written in on sys.path.
+    if origin_dir and os.path.isdir(origin_dir) and origin_dir not in sys.path:
+        sys.path.insert(0, origin_dir)
     spec = importlib.util.spec_from_file_location("_bp_scripting_user", script_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -230,6 +234,8 @@ def _build_inputs(inputs_manifest):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", required=True)
+    parser.add_argument("--script-origin-dir", default=None,
+                        help="folder the script was taken from; added to sys.path")
     parser.add_argument("--inputs", required=True)
     parser.add_argument("--outputs", required=True)
     args = parser.parse_args()
@@ -239,7 +245,7 @@ def main():
     with open(args.outputs) as f:
         out_manifest = json.load(f)
 
-    module = _load_user_module(args.script)
+    module = _load_user_module(args.script, args.script_origin_dir)
     inputs = _build_inputs(inputs_manifest)
     outputs = _Outputs(out_manifest)
 

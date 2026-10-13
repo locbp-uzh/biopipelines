@@ -14,6 +14,7 @@ any other tool's output.
 import importlib.util
 import json
 import os
+import shutil
 from typing import Any, Dict, Optional, Union
 
 try:
@@ -48,7 +49,7 @@ class Scripting(BaseConfig):
     """Run a user script as a typed, two-phase pipeline step.
 
     Args:
-        script: A .py file defining ``configuration(inputs)`` and ``execution(inputs, outputs)``. Keep it in the scripts folder (``folders.infrastructure.scripts``, default ``my_scripts/``) and pass the bare filename; an existing absolute or cwd-relative path is used as given.
+        script: A .py file defining ``configuration(inputs)`` and ``execution(inputs, outputs)``. Keep it in the scripts folder (``folders.infrastructure.scripts``, default ``my_scripts/``) and pass the bare filename; an existing absolute or cwd-relative path is used as given. The resolved file is copied to ``<step>/_configuration/`` and that copy is what runs, so the run keeps the code that produced it and a later edit cannot change a queued step; the original folder stays on ``sys.path`` for sibling imports.
         inputs: Dict mapping a name to a StandardizedOutput, DataStream, a whole table (``tool.tables.x`` / a TableInfo), or a table-column reference (``tool.tables.x.col`` or ``(TableInfo, "col")``). A StandardizedOutput prefers an exact key match (``{"structures": tool}`` → ``tool.streams.structures``), else falls back to its single non-empty stream; pass ``tool.streams.<name>`` to disambiguate.
         env: Conda env the execution phase runs in. Defaults to the biopipelines env. The tool does not create it. The script's ``execution`` may import biopipelines when that env carries biopipelines' deps — the default env does, and a custom env does after ``pip install -e ".[scripting]"``.
 
@@ -57,7 +58,7 @@ class Scripting(BaseConfig):
     """
 
     TOOL_NAME = "Scripting"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     # The user script's configuration() names its own streams.
     USER_STREAM_NAMES = True
@@ -74,6 +75,9 @@ echo "=== Scripting ready ==="
     outputs_json = Path(lambda self: self.configuration_path("scripting_outputs.json"))
     dropped_csv = Path(lambda self: self.configuration_path("scripting_dropped.csv"))
     runner_py = Path(lambda self: self.pipe_script_path("pipe_scripting.py"))
+    # The run keeps the code it ran: my_scripts/ is gitignored, so without this
+    # copy nothing records which version of the helper produced the outputs.
+    script_snapshot = Path(lambda self: self.configuration_path(os.path.basename(self.script)))
 
     def __init__(self,
                  script: str,
@@ -252,13 +256,18 @@ echo "=== Scripting ready ==="
         with open(self.outputs_json, "w") as f:
             json.dump(out_manifest, f, indent=2)
 
+        shutil.copy2(self.script, self.script_snapshot)
+
         script_content = "#!/bin/bash\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment(name=self.env)
+        # The snapshot is what runs, so an edit between submission and the step
+        # starting cannot change the run.
         script_content += f"""
 echo "Running Scripting: {os.path.basename(self.script)}"
 python "{self.runner_py}" \\
-    --script "{self.script}" \\
+    --script "{self.script_snapshot}" \\
+    --script-origin-dir "{os.path.dirname(self.script)}" \\
     --inputs "{self.inputs_json}" \\
     --outputs "{self.outputs_json}"
 """
