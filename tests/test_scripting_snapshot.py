@@ -110,3 +110,17 @@ def test_origin_dir_keeps_a_sibling_import_working(tmp_path):
     with_dir = run(["--script-origin-dir", str(home)])
     assert with_dir.returncode == 0, with_dir.stderr[-400:]
     assert "7" in open(out_csv, encoding="utf-8").read()
+
+
+def test_output_streams_carry_their_producers_manifest(tmp_path, local_config,
+                                                       isolated_cwd, new_pipeline):
+    """A consumer must be able to find where its input's producer records drops."""
+    from biopipelines.mock import Mock
+
+    pipeline = new_pipeline("manifest_stamp")
+    with pipeline:
+        m = Mock(ids=["a"], streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
+
+    stamped = m.streams.structures.metadata.get("missing_table")
+    assert stamped, "no missing_table stamped on the output stream"
+    assert stamped.endswith(os.path.join("tables", "missing.csv")), stamped

@@ -79,6 +79,51 @@ def test_excused_id_is_dropped_not_raised(tmp_path, record_case):
     assert actual == expected
 
 
+def test_manifest_beside_the_map_table_excuses_an_id(tmp_path, record_case):
+    """A tool that drops an id only while running declares no manifest at config time."""
+    step = tmp_path / "035_Pool"
+    (step / "sequences").mkdir(parents=True)
+    (step / "tables").mkdir()
+    table = step / "sequences" / "sequences.csv"
+    pd.DataFrame([{"id": "a", "sequence": "AAA"},
+                  {"id": "c", "sequence": "CCC"}]).to_csv(table, index=False)
+    pd.DataFrame([{"id": "b", "removed_by": "010_ProteinMPNN",
+                   "kind": "filter", "cause": "Duplicate of a"}]).to_csv(
+        step / "tables" / "missing.csv", index=False)
+
+    ds = DataStream(name="sequences", ids=["a", "b", "c"], files=[],
+                    map_table=str(table), format="csv")
+    out = tmp_path / "out.csv"
+
+    write_filtered_map_table(ds, str(out))
+
+    actual = pd.read_csv(out)["id"].tolist()
+    expected = ["a", "c"]
+    record_case(input="id b excused by the step's own manifest", expected=expected, actual=actual)
+    assert actual == expected
+
+
+def test_stamped_manifest_excuses_an_id(tmp_path, record_case):
+    """A stream carries where its producer records drops, wherever that file lives."""
+    manifest = tmp_path / "elsewhere" / "missing.csv"
+    manifest.parent.mkdir()
+    pd.DataFrame([{"id": "b", "removed_by": "010_ProteinMPNN",
+                   "kind": "filter", "cause": "Duplicate of a"}]).to_csv(manifest, index=False)
+
+    ds, _ = _seq_stream(tmp_path, [{"id": "a", "sequence": "AAA"},
+                                   {"id": "c", "sequence": "CCC"}])
+    ds.ids = ["a", "b", "c"]
+    ds.metadata["missing_table"] = str(manifest)
+    out = tmp_path / "out.csv"
+
+    write_filtered_map_table(ds, str(out))
+
+    actual = pd.read_csv(out)["id"].tolist()
+    expected = ["a", "c"]
+    record_case(input="id b excused by the stamped manifest", expected=expected, actual=actual)
+    assert actual == expected
+
+
 def test_filtered_numeric_like_ids_match_as_strings(tmp_path, record_case):
     table = tmp_path / "seqs.csv"
     table.write_text("id,sequence\n001,AAA\n002,BBB\n")

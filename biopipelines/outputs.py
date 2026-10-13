@@ -102,9 +102,19 @@ class StandardizedOutput:
         self._producer = config
         self.streams.__dict__["_producer"] = config
         from .datastream import DataStream
+        # Where this stream's owner would record ids it drops. Carried on the stream
+        # (and so into its JSON) because a tool that only discovers a drop while
+        # running declares no `missing` table at configuration time, leaving a
+        # consumer nothing to consult about an id that legitimately disappeared.
+        try:
+            manifest = config.table_path("missing")
+        except Exception:  # noqa: BLE001 — folders may not be resolved yet
+            manifest = None
         for stream in self.streams._streams.values():
             if isinstance(stream, DataStream) and getattr(stream, "_producer", None) is None:
                 stream._producer = config
+                if manifest:
+                    stream.metadata.setdefault("missing_table", manifest)
         return self
 
     def _inherit_producer(self, parent: 'StandardizedOutput') -> 'StandardizedOutput':

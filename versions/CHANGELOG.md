@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- A stream carries where its producer records dropped ids. `_stamp_producer` stamps `metadata["missing_table"]` on every stream it claims, and `write_filtered_map_table` reads every manifest that can describe a stream — the explicit argument, the stamped path, and the step's own `<step>/tables/missing.csv`. The previous commit's plumbing only reached a consumer whose input *declared* a `missing` table, and a tool that discovers a drop while running declares none: ProteinMPNN de-duplicating its own samples wrote a correct manifest that nothing downstream was told to look for, and the consumer still aborted. An id absent with no manifest explaining it still raises.
+
 - `write_filtered_map_table` takes `excused_ids`, and `generate_filtered_map_table_block` takes the consumer's `input_sources` so it can pass the upstream `missing` manifests down to `materialize_filtered_map_table.py` (new `--excused`). An id declared at configuration time and absent at runtime raised `KeyError: ids absent from map_table` even when an upstream manifest recorded it as intentionally dropped — the contract everywhere else is that such ids are excused, not failed. Two duplicate sequences out of 2,800, dropped by ProteinMPNN and correctly carried through `Pool`'s merged manifest, stopped a campaign at its MSA step. An absent id with no manifest entry still raises.
 
 ### Tools

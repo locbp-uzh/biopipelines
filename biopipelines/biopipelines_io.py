@@ -354,6 +354,38 @@ def iterate_values(
         yield (item_id, values)
 
 
+def _excused_ids_for(ds: DataStream) -> set:
+    """Every id a `missing` manifest describing ``ds`` records as dropped.
+
+    Two manifests can describe one stream and both are read, because neither is
+    always available: the producing tool stamps ``metadata["missing_table"]`` on
+    the streams it emits, and a step's own manifest also sits at
+    ``<step>/tables/missing.csv``, two levels up from a map table in
+    ``<step>/<stream>/``. A stream that was loaded rather than produced has no
+    stamp; a tool that writes its manifest elsewhere has no file at the
+    conventional path. A missing file is not an error — a step that dropped
+    nothing writes none.
+    """
+    candidates = []
+    stamped = (ds.metadata or {}).get("missing_table")
+    if stamped:
+        candidates.append(stamped)
+    if ds.map_table:
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(ds.map_table))),
+            "tables", "missing.csv"))
+
+    ids = set()
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            ids |= {str(i) for i in pd.read_csv(path, dtype={'id': str})['id'].tolist()}
+        except Exception as e:  # noqa: BLE001 — a malformed manifest must not abort the projection
+            print(f"Warning: could not read {path}: {e}", file=sys.stderr)
+    return ids
+
+
 def write_filtered_map_table(
     ds: DataStream,
     out_csv: str,
@@ -421,8 +453,11 @@ def write_filtered_map_table(
 
     id_to_row = {row['id']: row for _, row in df.iterrows()}
     # An id declared at config time can be legitimately absent at runtime when an
-    # upstream tool dropped it and said so in its `missing` manifest.
+    # upstream tool dropped it and said so in its `missing` manifest. A tool that
+    # only discovers the drop while running declares no `missing` table at config
+    # time, so the manifest beside the map table is read here as well.
     excused = {str(i) for i in (excused_ids or ())}
+    excused |= _excused_ids_for(ds)
     missing_ids = [i for i in keep_ids if i not in id_to_row and i not in excused]
     if missing_ids:
         raise KeyError(
