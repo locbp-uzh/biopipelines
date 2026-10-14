@@ -19,6 +19,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **AlphaFold** 1.10 → 1.11. `msas=` accepts a producer that emits a3m files without an `msas` table — a `Scripting` step building single-sequence alignments raised `AttributeError: No table named 'msas'` at configuration time. Falls back to the stream's map table, whose id|file is all the staging helper reads.
+
 - **Scripting** 1.2 → 1.3. The step copies the script it was given into `<step>/_configuration/` and runs that copy, so the run keeps the code that produced its outputs — `my_scripts/` is gitignored, so nothing else recorded it — and an edit between submission and execution can no longer change a step that is already configured. `pipe_scripting.py` takes `--script-origin-dir` and keeps the script's own folder on `sys.path` for sibling imports.
 
 - **AlphaFold** 1.9 → 1.10, **MMseqs2** 1.8 → 1.9. Both pass their sequence input to `generate_filtered_map_table_block`, so ids an upstream tool dropped on purpose no longer abort the step. See the Framework entry above.

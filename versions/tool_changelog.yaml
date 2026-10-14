@@ -99,8 +99,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.10"
+  current: "1.11"
   history:
+  - version: '1.11'
+    date: '2026-10-14'
+    note: >-
+      `msas=` accepts a producer that emits a3m files without declaring an `msas` table. The staging step read `msas_input.tables.msas` unconditionally, so a `Scripting` step building alignments -- single-sequence ones, for instance -- raised `AttributeError: No table named 'msas'` at configuration time and no pipeline was generated. It now falls back to the msas stream's own map table, which carries the id|file the copier reads, and raises a named error if neither exists.
   - version: '1.10'
     date: '2026-10-13'
     note: >-
