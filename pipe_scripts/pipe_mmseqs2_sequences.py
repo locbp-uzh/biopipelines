@@ -13,6 +13,7 @@ and generates an MSA CSV file compatible with Boltz2 format.
 import argparse
 import pandas as pd
 import os
+import shutil
 import sys
 import subprocess
 import tempfile
@@ -435,19 +436,50 @@ def submit_sequence_to_server(sequence, sequence_id, client_script, output_forma
         log(f"ERROR: Exception processing sequence {sequence_id}: {str(e)}")
         return None
 
+
+def _a3m_meta_path(csv_file):
+    """Sidecar holding the A3M `#` meta line and `>` headers for a converted CSV.
+
+    Boltz rejects a CSV whose columns are not exactly ('key', 'sequence'), so the
+    identifiers cannot ride in the table itself and live beside it instead.
+    """
+    return os.path.splitext(csv_file)[0] + ".a3m_meta"
+
+
+def _write_a3m_meta(csv_file, meta, headers):
+    """Write the meta line, then one header per MSA row in order."""
+    if not meta and not any(headers):
+        return
+    try:
+        with open(_a3m_meta_path(csv_file), 'w') as f:
+            f.write((meta or "") + "\n")
+            for hdr in headers:
+                f.write(hdr + "\n")
+    except OSError as e:
+        log(f"WARNING: could not write A3M meta sidecar for {csv_file}: {e}")
+
+
 def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_positions=None):
     """Convert A3M file to CSV format with optional masking, and return summary row."""
     try:
         with open(a3m_file, 'r') as f:
             sequences = []
+            headers = []
+            meta = ""
             current_seq = ""
 
             for line in f:
                 line = line.strip()
+                # The `#` meta line carries query length(s) and chain cardinality.
+                if line.startswith('#'):
+                    if not meta:
+                        meta = line
+                    continue
                 if line.startswith('>'):
                     if current_seq:
                         sequences.append(current_seq)
                         current_seq = ""
+                    headers.append(line[1:])
                 else:
                     current_seq += line
 
@@ -460,10 +492,14 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_posit
             log(f"Applying mask to {len(sequences)} MSA sequences (positions: {mask_positions[:10]}...)")
             sequences = apply_mask_to_msa(sequences, mask_positions)
 
-        # Create CSV file with all MSA sequences (key=-1 for all rows)
+        # Create CSV file with all MSA sequences (key=-1 for all rows). The columns stay
+        # exactly ('key', 'sequence') because Boltz rejects anything else; the UniRef
+        # identifiers go to a sidecar so an A3M rebuilt from this CSV keeps them.
+        headers = (headers + [""] * len(sequences))[:len(sequences)]
         msa_data = [{'key': -1, 'sequence': seq} for seq in sequences]
         msa_df = pd.DataFrame(msa_data)
         msa_df.to_csv(output_csv_file, index=False)
+        _write_a3m_meta(output_csv_file, meta, headers)
         log(f"Converted A3M to CSV: {output_csv_file}")
 
         # Get query sequence (first sequence in A3M)
@@ -575,6 +611,15 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
             msa_df = pd.DataFrame(msa_data)
             msa_df.to_csv(output_csv_file, index=False)
             log(f"Saved masked MSA to: {output_csv_file}")
+
+            # Masking rewrites alignment columns, not which homolog each row is, so the
+            # sidecar's identifiers still describe these rows; carry it across if present.
+            src_meta = _a3m_meta_path(csv_file)
+            if os.path.exists(src_meta) and src_meta != _a3m_meta_path(output_csv_file):
+                try:
+                    shutil.copyfile(src_meta, _a3m_meta_path(output_csv_file))
+                except OSError as e:
+                    log(f"WARNING: could not carry A3M meta sidecar: {e}")
         else:
             # No masking - need to ensure key column exists
             df_original = pd.read_csv(csv_file)

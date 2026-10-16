@@ -34,8 +34,13 @@ class MSA(BaseConfig):
     Converts Multiple Sequence Alignment files between CSV (Boltz2 public server)
     and A3M (AlphaFold/ColabFold) formats, enabling MSA recycling between tools.
 
-    Note: AlphaFold → CSV → Boltz2 recycling works. Boltz2 → A3M → AlphaFold
-    does not — ColabFold ignores converted A3M files and re-queries the MSA server.
+    Note: a CSV holds only `key, sequence` — Boltz rejects any other column — so the
+    `>` headers carrying the UniRef identifiers ColabFold pairs chains on are kept in
+    an `.a3m_meta` sidecar written beside it. convert="a3m" restores them when that
+    sidecar is present, and falls back to synthesised indices when it is not, which is
+    the case for any CSV produced before the sidecar existed. Such an A3M folds as a
+    monomer but cannot pair complex chains, so prefer MMseqs2(output_format="a3m")
+    when the alignment is destined for AlphaFold.
 
     Example:
         af_result = AlphaFold(proteins=seq)
@@ -44,7 +49,7 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

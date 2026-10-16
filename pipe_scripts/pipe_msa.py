@@ -31,6 +31,39 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def a3m_meta_path(csv_file: str) -> str:
+    """Sidecar beside a CSV MSA holding its A3M `#` meta line and `>` headers.
+
+    Boltz rejects a CSV whose columns are not exactly ('key', 'sequence'), so the
+    identifiers cannot be a column and live next to the file instead.
+    """
+    return os.path.splitext(csv_file)[0] + ".a3m_meta"
+
+
+def read_a3m_meta(csv_file: str):
+    """Return (meta_line, headers) for a CSV MSA, or ("", []) when there is no sidecar."""
+    path = a3m_meta_path(csv_file)
+    if not os.path.exists(path):
+        return "", []
+    with open(path) as f:
+        lines = f.read().split("\n")
+    meta = lines[0].strip() if lines else ""
+    headers = list(lines[1:])
+    while headers and headers[-1] == "":
+        headers.pop()
+    return meta, headers
+
+
+def write_a3m_meta(csv_file: str, meta: str, headers) -> None:
+    """Persist the A3M meta line and per-row headers beside a CSV MSA."""
+    if not meta and not any(headers):
+        return
+    with open(a3m_meta_path(csv_file), 'w') as f:
+        f.write((meta or "") + "\n")
+        for hdr in headers:
+            f.write(hdr + "\n")
+
+
 def convert_csv_to_a3m(csv_file: str, output_a3m: str) -> str:
     """
     Convert a Boltz2-style CSV MSA file to A3M format.
@@ -42,6 +75,9 @@ def convert_csv_to_a3m(csv_file: str, output_a3m: str) -> str:
     Field order matters: ColabFold splits that line on tab and reads field 1 as
     the per-chain query length(s) and field 2 as the chain cardinality, then
     treats anything with cardinality != 1 as a multi-chain complex.
+
+    A CSV with an `.a3m_meta` sidecar round-trips its real UniRef identifiers; without
+    one the headers are synthesised as indices, which ColabFold cannot pair chains on.
 
     Args:
         csv_file: Input CSV with columns `key, sequence`
@@ -59,12 +95,15 @@ def convert_csv_to_a3m(csv_file: str, output_a3m: str) -> str:
     if not sequences:
         raise ValueError(f"No sequences found in CSV file: {csv_file}")
 
-    query_len = len(sequences[0])
+    meta, headers = read_a3m_meta(csv_file)
+    headers = (headers + [""] * len(sequences))[:len(sequences)]
+    if not meta:
+        meta = f"#{len(sequences[0])}\t1"
 
     with open(output_a3m, 'w') as f:
-        f.write(f"#{query_len}\t1\n")
-        for i, seq in enumerate(sequences):
-            f.write(f">{100 + i}\n{seq}\n")
+        f.write(meta + "\n")
+        for i, (seq, hdr) in enumerate(zip(sequences, headers)):
+            f.write(f">{hdr or (100 + i)}\n{seq}\n")
 
     return sequences[0]
 
@@ -73,8 +112,8 @@ def convert_a3m_to_csv(a3m_file: str, output_csv: str) -> str:
     """
     Convert an A3M file to Boltz2-style CSV format.
 
-    Skips comment/header lines (starting with ``#``) that carry A3M metadata
-    such as sequence count and column width.
+    The ``#`` metadata line and every ``>`` header are kept in an `.a3m_meta` sidecar,
+    so converting the CSV back to A3M restores the original identifiers.
 
     Args:
         a3m_file: Input A3M file
@@ -84,17 +123,24 @@ def convert_a3m_to_csv(a3m_file: str, output_csv: str) -> str:
         Query sequence (first sequence in the A3M)
     """
     sequences = []
+    headers = []
+    meta = ""
     current_seq = ""
 
     with open(a3m_file, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line:
+                continue
+            if line.startswith('#'):
+                if not meta:
+                    meta = line
                 continue
             if line.startswith('>'):
                 if current_seq:
                     sequences.append(current_seq)
                     current_seq = ""
+                headers.append(line[1:])
             else:
                 current_seq += line
 
@@ -104,9 +150,12 @@ def convert_a3m_to_csv(a3m_file: str, output_csv: str) -> str:
     if not sequences:
         raise ValueError(f"No sequences found in A3M file: {a3m_file}")
 
+    headers = (headers + [""] * len(sequences))[:len(sequences)]
     msa_data = [{'key': -1, 'sequence': seq} for seq in sequences]
     msa_df = pd.DataFrame(msa_data)
     msa_df.to_csv(output_csv, index=False)
+
+    write_a3m_meta(output_csv, meta, headers)
 
     return sequences[0]
 

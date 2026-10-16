@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.9"
+    TOOL_VERSION = "1.10"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -96,13 +96,14 @@ echo "=== MMseqs2 ready ==="
         Args:
             sequences: Input sequences - can be sequence string, list, DataStream or StandardizedOutput
             output_format: the format this step emits, "csv" (default) or "a3m".
-                csv is the Boltz2 convention: `key, sequence` rows, no headers.
-                a3m is written exactly as the search returned it, `#` meta line
-                and `>` headers intact, which is what AlphaFold needs and the
-                only form that carries the UniRef identifiers ColabFold pairs
-                complex chains on. A ColabFold-protocol server (server_url)
-                always returns a3m on the wire; with output_format="csv" it is
-                converted on arrival.
+                csv is the Boltz2 convention: `key, sequence` rows and nothing
+                else, since Boltz rejects any other column set. The `#` meta line
+                and `>` headers are written to an `.a3m_meta` sidecar next to each
+                CSV, so MSA(convert="a3m") rebuilds the original identifiers rather
+                than synthesising indices. a3m is written exactly as the search
+                returned it, which is what AlphaFold reads directly. A
+                ColabFold-protocol server (server_url) always returns a3m on the
+                wire; with output_format="csv" it is converted on arrival.
             timeout: Timeout in seconds for server response
             server_url: ColabFold-protocol MSA server to query over HTTP (e.g.
                   "https://api.colabfold.com"). When set, no local MMseqs2 server
@@ -392,7 +393,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    TOOL_VERSION = "1.8"
+    TOOL_VERSION = "1.9"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,
