@@ -967,8 +967,12 @@ LigandMPNN:
 Load:
   files:
   - biopipelines/load.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-16'
+    note: >-
+      A producer's `missing.csv` is honoured whenever it exists, not only when the step carried a completion marker at configuration time. The exclusion sat behind `elif not self.pending`, so a pipeline generated while its producer was still running declared every id the producer had promised, including the ones it went on to drop. One sequence out of 801 that legitimately got no MSA was therefore declared downstream, the consumer counted 800 of 801 expected outputs and wrote a `_FAILED` marker, and 132 queued jobs stranded on `DependencyNeverSatisfied`. A genuinely pending step, which has no `missing.csv` yet, no longer reports the absent file as a warning.
   - version: '1.5'
     date: '2026-09-25'
     note: >-

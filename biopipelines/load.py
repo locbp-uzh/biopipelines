@@ -118,7 +118,7 @@ class Load(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Load"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -947,8 +947,9 @@ echo "=== Load ready ==="
 
         # A declared-but-absent missing.csv is what a step killed mid-write leaves behind, and raising here would deny the user every id it did produce.
         if not os.path.exists(missing_path):
-            print(f"Warning: Load: tables/missing.csv is declared but absent "
-                  f"({missing_path}); no ids excused")
+            if not self.pending:
+                print(f"Warning: Load: tables/missing.csv is declared but absent "
+                      f"({missing_path}); no ids excused")
             return set()
 
         try:
@@ -1007,8 +1008,9 @@ echo "=== Load ready ==="
         # Apply filtering if filter was provided
         if self.filtered_ids is not None:
             output_structure = self._apply_filter_to_output_structure(output_structure)
-        elif not self.pending:
-            # Check for missing table and exclude those IDs
+        else:
+            # A pending step has no missing.csv yet, but one that ran after this pipeline
+            # was generated does, and its dropped ids must not be declared downstream.
             missing_ids = self._exclude_missing_ids(output_structure)
             if missing_ids:
                 self._filter_missing_ids(output_structure, missing_ids)
