@@ -81,8 +81,12 @@ Aggrescan3D:
   files:
   - biopipelines/aggrescan3d.py
   - pipe_scripts/pipe_aggrescan3d.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-21'
+    note: >-
+      An id an upstream step filtered away is excused instead of flagged. The tool declared every id it received and owned no missing table, so a gated input left it reporting legitimate absences as lost outputs: on a 2,799-design campaign it marked 118 geometrically rejected structures as failures and failed the step, stalling every job behind it although all 2,682 real outputs were written.
   - version: '2.1'
     date: '2026-09-04'
     note: >-

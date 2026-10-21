@@ -72,7 +72,7 @@ class Aggrescan3D(BaseConfig):
     """
 
     TOOL_NAME = "Aggrescan3D"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     # The `aggrescan` binary is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Aggrescan3D"
@@ -117,6 +117,7 @@ fi
     aggregation_map = Path(lambda self: self.stream_map_path("aggregation"))
     scores_csv = Path(lambda self: self.table_path("scores"))
     aggregation_all_csv = Path(lambda self: self.table_path("aggregation_all"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
     helper_script = Path(lambda self: self.pipe_script_path("pipe_aggrescan3d.py"))
 
     def __init__(self,
@@ -125,6 +126,7 @@ fi
                  distance: float = 10.0,
                  max_parallel: int = 1,
                  **kwargs):
+        self.structures = structures
         if isinstance(structures, StandardizedOutput):
             self.structures_stream: DataStream = structures.streams.structures
         elif isinstance(structures, DataStream):
@@ -176,6 +178,9 @@ fi
         script_content += self.activate_environment(name="biopipelines")
         script_content += self.extra_args_echo()
         script_content += self._generate_run_aggrescan()
+        script_content += self.generate_missing_propagation(
+            self.structures, missing_csv=self.missing_csv
+        )
         script_content += self.generate_completion_check_footer()
         return script_content
 
@@ -350,6 +355,10 @@ fi
                 description="Per-residue A3D aggregation scores from all input structures (merged)",
             ),
         }
+
+        # Declare a `missing` table when the input carries one.
+        if self._collect_upstream_missing_paths(self.structures):
+            tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
             "structures": structures,
