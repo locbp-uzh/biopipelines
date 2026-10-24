@@ -107,6 +107,7 @@ environments:
   BFactor: "biopipelines"
   BayesianAdjuster: "MutationEnv"
   BioEmu: "bioemu"
+  BioEmu2: "bioemu2"
   Boltz2: "Boltz2Env"
   OpenFold3: "OpenFold3Env"
   BoltzGen: "boltzgen"

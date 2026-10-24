@@ -210,6 +210,23 @@ BioEmu:
     note: >-
       Emits a warning when a container image is configured: this tool runs its model in-process (or dispatches host-env sub-processes) and does not support container execution; it runs in environment mode.
 
+BioEmu2:
+  files:
+  - biopipelines/bioemu2.py
+  - pipe_scripts/pipe_bioemu2.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-24'
+    note: >-
+      Initial release. Wraps microsoft/bioemu2, the ligand-capable successor
+      of bioemu v1. Each run is one (sequence, ligand set) system YAML; apo
+      runs omit the ligand entity. Forwards contact and covalent-linkage
+      constraints verbatim into the bioemu2 YAML. Supports a precomputed MSA
+      (a3m file or Boltz2 MSA CSV) by pre-populating bioemu2's own
+      sequence-hash cache under `~/.cache/bioemu2`, skipping the ColabFold
+      cold-start per new sequence.
+
 Boltz2:
   files:
   - biopipelines/boltz2.py

@@ -365,6 +365,54 @@ ens = BioEmu(sequences=seqs, num_samples=10)
 
 ---
 
+### BioEmu2
+
+Ligand-capable successor of BioEmu (microsoft/bioemu2). Each run is one (sequence, ligand set) system YAML with the protein as chain A and each ligand as a subsequent chain; apo runs omit the ligand entity. Forwards contact and covalent-linkage constraints verbatim into the bioemu2 YAML schema, so the same wrapper covers free-pose, soft-contact and covalent-anchor sampling.
+
+A precomputed MSA (a3m file, or a Boltz2 MSA CSV from an earlier pipeline step) can be handed in via `precomputed_msa`; the wrapper pre-populates bioemu2's own sequence-hash cache under `~/.cache/bioemu2`, so the first run for a new sequence does not pay the ColabFold cold-start.
+
+**Tags**: sample-ensemble, protein, small-molecule, complex, ensemble, flexibility, all-atom, covalent
+
+**References**: https://github.com/microsoft/bioemu2
+
+**Resources**: GPU.
+
+**Environment**: `bioemu2`
+
+**Installation**: `BioEmu2.install()` creates the env and pip-installs the `bioemu2` package. Weights (bioemu2-preview) download on first run from Hugging Face.
+
+**Parameters**:
+- `sequences`: DataStream | StandardizedOutput (required) — Input sequences.
+- `ligands`: DataStream | StandardizedOutput | None = None — Ligands (SMILES). None for an apo ensemble.
+- `num_samples`: int = 100 — Conformers per run.
+- `batch_size`: int = 16 — Samples denoised together per forward pass.
+- `seed`: int | None = None — RNG seed; `None` reseeds every run.
+- `sampler`: str = "edm" — One of `edm`, `edm_gd`, `edm_fk`, `edm_fkc`.
+- `contacts`: list[dict] | None = None — bioemu2 contact-constraint dicts, forwarded verbatim.
+- `covalent_linkage`: dict | None = None — bioemu2 covalent-bond dict (chain, position, protein_atom, ligand_atom).
+- `precomputed_msa`: DataStream | None = None — Optional precomputed MSA; a3m or Boltz2 MSA CSV.
+- `physicality_filter`: str = "high_quality" — One of `high_quality`, `medium_quality`, `low_quality`, `no_filter`.
+
+**Streams**:
+- `structures` — per-conformer PDBs, ids `<run>_<1..N>`.
+- `trajectories` — one `samples.xtc` + `topology.cif` per run.
+
+**Tables**:
+- `summary`: | id | sequence.id | ligand.id | n_samples | n_residues |
+- `physicality`: | id | frame | invalid_bond | clash | chirality | chain_break |
+- `missing`: | id | removed_by | kind | cause |
+
+**Example**:
+```python
+from biopipelines import BioEmu2, Sequence, Ligand
+
+seqs = Sequence("MSKGEELFTGVV...", ids="design_6")
+coa  = Ligand(smiles="CC(C)(COP(=O)...)...NCCSC(=O)C", ids="acetyl_coa")
+ens  = BioEmu2(sequences=seqs, ligands=coa, num_samples=100)
+```
+
+---
+
 ### CABSflex
 
 Fast coarse-grained Monte Carlo simulation of protein structure flexibility. Produces conformational ensembles and per-residue RMSF profiles. Optionally rebuilds models to all-atom representation using MODELLER.

@@ -83,6 +83,7 @@ from .xtb import XTB
 from .rtmscore import RTMScore
 from .gems import GEMS
 from .bioemu import BioEmu
+from .bioemu2 import BioEmu2
 from .cabsflex import CABSflex
 from .ensemble_analysis import EnsembleAnalysis
 from .structure_cluster import StructureCluster
@@ -223,6 +224,7 @@ __all__ = [
     'RTMScore',
     'GEMS',
     'BioEmu',
+    'BioEmu2',
     'CABSflex',
     'EnsembleAnalysis',
     'StructureCluster',

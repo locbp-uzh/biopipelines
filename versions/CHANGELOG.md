@@ -25,6 +25,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **BioEmu2** 1.0 (new) — ligand-capable equilibrium-ensemble emulation (microsoft/bioemu2). Each run is one (sequence, ligand set) system YAML; forwards contact and covalent-linkage constraints verbatim. Pre-populates bioemu2's `~/.cache/bioemu2` MSA cache from an .a3m file or a Boltz2 MSA CSV, skipping ColabFold cold-starts across the pipeline. v1 wrapper (`BioEmu`) stays in place and is unchanged.
+
 - **LigandMPNN** 3.0 → 3.1. Exposes upstream `--save_stats` as `save_stats` (per-position amino-acid distributions in `execution/stats/`, no new stream) and `--ligand_mpnn_use_atom_context` as `use_atom_context` (default True, unchanged behaviour).
 
 - **ESMFold2** 2.4 → 2.5. Adds `seed_offset`, the first seed value, so repeated runs of a large complex draw new samples instead of reproducing seed 0.

@@ -71,6 +71,7 @@ Analyze structures, interactions, stability, and fitness.
 - [BFactor](tool/analysis.md#bfactor) — Per-residue B-factor, summarized over named selections
 - [BindingData](tool/analysis.md#bindingdata) — Measured binding affinities (ChEMBL, BindingDB)
 - [BioEmu](tool/analysis.md#bioemu) — Equilibrium ensemble sampling
+- [BioEmu2](tool/analysis.md#bioemu2) — Ligand-capable equilibrium ensemble sampling
 - [CABSflex](tool/analysis.md#cabsflex) — Fast flexibility simulation
 - [ConformationalChange](tool/analysis.md#conformationalchange) — Structural changes
 - [Consensus](tool/analysis.md#consensus) — Per-group aggregation of a resi-csv stream
