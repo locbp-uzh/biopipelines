@@ -185,10 +185,11 @@ fi
     For tables: an id that failed or was dropped still gets its row in every result table this tool emits, with the unavailable values as NaN. The table records that the id was processed, the missing manifest records why it has no entity. Do not filter a table on a metric threshold: emit it complete and let the user apply Panda.filter, keeping selection an explicit pipeline step.
     (In bash, to sample one PRESENT id without tripping on a filtered one, use Resolve.stream_ids(..., valid_set=True) - see gnina.py autobox.)
 
-    MISSING PROPAGATION - two patterns, pick one:
-    (A) propagation step (shown below): the pipe writes only its OWN failures/drops to a separate local file (execution/local_missing.csv), then generate_missing_propagation(*inputs, local_missing=..., missing_csv=...) emits a second step that merges upstream manifests + that local file into tables/missing.csv. Modular; the pipe never touches upstream tables. Use local_missing=self.local_missing_csv so those rows survive the merge; drop it if the tool never skips per-id.
-    (B) all-in-one: the pipe itself reads the upstream missing table (passed as --upstream-missing) and writes the merged tables/missing.csv in one pass, with no separate propagation step. Exemplars: dssp.py, gnina.py.
-    Either way ids dropped upstream stay excused instead of counting as failures. Do NOT do both.
+    MISSING PROPAGATION - nothing to wire unless this tool records rows of its own. generate_completion_check_footer() discovers the upstream manifests from the instance's own attributes, emits the propagation block, and declares the `missing` table, so a tool that only consumes ids is covered with no code here.
+    Write one of these only when the tool drops or fails ids itself:
+    (A) propagation step (shown below): the pipe writes only its OWN failures/drops to a separate local file (execution/local_missing.csv), then generate_missing_propagation(*inputs, local_missing=..., missing_csv=...) merges upstream manifests + that local file into tables/missing.csv. Modular; the pipe never touches upstream tables.
+    (B) all-in-one: the pipe itself reads the upstream missing table (passed as --upstream-missing, from upstream_missing_flag()) and writes the merged tables/missing.csv in one pass. Exemplars: dssp.py, gnina.py.
+    Either call claims the manifest, so the central block stands down — it would otherwise rewrite the file and erase this tool's own rows. Do NOT do both, and declare the `missing` TableInfo in get_output_files() whenever you pick one.
     """
     def generate_script(self, script_path: str) -> str:
         self.structures_stream.save_json(self.structures_json)

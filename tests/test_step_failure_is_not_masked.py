@@ -96,6 +96,15 @@ def test_the_footer_does_not_overwrite_an_earlier_capture(tmp_path):
     assert _run_script(tmp_path, body).returncode != 0
 
 
+class _FakeConfig:
+    """The two lookups `_missing_propagation_block` makes on its instance."""
+
+    output_folder = "/me"
+
+    def pipe_script_path(self, *parts):
+        return "/pipe/" + "/".join(parts)
+
+
 def test_both_emitters_carry_the_capture():
     """Pin the emitted text, so a refactor cannot silently drop it."""
     import inspect
@@ -105,8 +114,19 @@ def test_both_emitters_carry_the_capture():
     assert "BP_MAIN_RC=${{BP_MAIN_RC:-$?}}" in footer
     assert 'exit "${{BP_MAIN_RC}}"' in footer
 
-    propagation = inspect.getsource(BaseConfig.generate_missing_propagation)
-    assert "BP_MAIN_RC=$?" in propagation
+    block = BaseConfig._missing_propagation_block
+    mid_script = block(_FakeConfig(), ["/up/tables/missing.csv"], "/me/tables/missing.csv",
+                       capture_rc=True)
+    assert "BP_MAIN_RC=$?" in mid_script, "a tool emitting the block mid-script loses the status"
+
+
+def test_the_footers_own_block_does_not_recapture():
+    """The footer saved the real status before calling the block; a second capture loses it."""
+    from biopipelines.base_config import BaseConfig
+
+    in_footer = BaseConfig._missing_propagation_block(
+        _FakeConfig(), ["/up/tables/missing.csv"], "/me/tables/missing.csv")
+    assert "BP_MAIN_RC" not in in_footer
 
 
 # ── the vacuous-check half ────────────────────────────────────────────────────

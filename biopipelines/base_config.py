@@ -1536,7 +1536,14 @@ fi
         """
         # Get expected outputs as JSON string
         expected_outputs = self.get_expected_output_paths()
-        
+
+        # One discovery drives both the block and the declaration that makes it readable
+        auto_propagation = self._auto_missing_propagation(expected_outputs)
+        # Reset here, not in the header: some tools claim the manifest before emitting
+        self._missing_propagation_emitted = False
+        if auto_propagation:
+            expected_outputs = self._with_declared_missing_table(expected_outputs)
+
         # Convert TableInfo objects to dictionaries for JSON serialization
         def make_json_safe(obj, seen=None):
             """Recursively convert TableInfo objects to dictionaries."""
@@ -1648,7 +1655,7 @@ fi
 # the missing-propagation block has it set there, right after its own command;
 # one that does not reaches this footer directly, so $? is still its own.
 BP_MAIN_RC=${{BP_MAIN_RC:-$?}}
-{completion_environment}
+{auto_propagation}{completion_environment}
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
 
@@ -1678,10 +1685,22 @@ fi
     
     @staticmethod
     def _missing_path_of(input_source) -> Optional[str]:
-        """Extract one input source's `missing` table path, or None."""
-        if input_source is None or not hasattr(input_source, 'tables'):
+        """Extract one input source's `missing` table path, or None.
+
+        A `DataStream` carries no ``.tables``, so it resolves through the producer
+        that stamped it. The stamped ``metadata["missing_table"]`` is a canonical
+        path every producer has, written or not, so it is trusted only once the
+        producer is seen to DECLARE the table — otherwise an id generator would
+        look like a filter.
+        """
+        if input_source is None:
             return None
-        tables = input_source.tables
+        try:
+            tables = input_source.tables
+        except AttributeError:
+            return BaseConfig._stream_missing_path(input_source)
+        except Exception:  # noqa: BLE001 — `tables` is a property that runs the producer
+            return None
         if hasattr(tables, '_tables') and 'missing' in tables._tables:
             missing_info = tables._tables['missing']
             return missing_info.info.path if hasattr(missing_info, 'info') else str(missing_info)
@@ -1693,6 +1712,34 @@ fi
                 return missing_info.info.path
             return str(missing_info)
         return None
+
+    @staticmethod
+    def _stream_missing_path(stream) -> Optional[str]:
+        """A `DataStream`'s producer's `missing` manifest, or None."""
+        metadata = getattr(stream, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        stamped = metadata.get("missing_table")
+        if not stamped:
+            return None
+        producer = getattr(stream, "_producer", None)
+        if producer is None or not hasattr(producer, "get_output_files"):
+            return None
+        cached = getattr(producer, "_declares_missing_cache", None)
+        if cached is None:
+            try:
+                tables = producer.get_output_files().get("tables") or {}
+            except Exception:  # noqa: BLE001 — an upstream that cannot describe itself propagates nothing
+                return None
+            # Cached because get_output_files can write to disk, and discovery asks repeatedly
+            cached = isinstance(tables, dict) and "missing" in tables
+            try:
+                producer._declares_missing_cache = cached
+            except Exception:  # noqa: BLE001 — a producer that refuses the attribute is simply re-asked
+                pass
+        if not cached:
+            return None
+        return stamped
 
     @staticmethod
     def _unwrap_combinatorics(input_source) -> List[Any]:
@@ -1711,13 +1758,15 @@ fi
         except ImportError:
             from combinatorics import Grouped
         found: List[Any] = []
+        seen_ids = set()
 
         def walk(item):
             # Depth first, so a nested member keeps its source's position: the
             # collector documents order-preserving output and a breadth-first
             # walk would put `Bundle(Each(a), b)` in the order b, a.
-            if item is None:
+            if item is None or id(item) in seen_ids:
                 return
+            seen_ids.add(id(item))
             if isinstance(item, Grouped):
                 walk(item.source)
                 return
@@ -1751,6 +1800,93 @@ fi
                     paths.append(p)
         return paths
 
+    def claim_missing_manifest(self) -> None:
+        """Declare that this tool writes its own ``tables/missing.csv``.
+
+        Keeps the completion footer's central propagation out of the way, since
+        ``pipe_propagate_missing.py`` rewrites its destination and would erase
+        rows the tool produced itself. ``generate_missing_propagation``,
+        ``upstream_missing_flag`` and ``_get_upstream_missing_table_path`` claim
+        it implicitly; a tool that reads the manifests some other way calls this.
+        """
+        self._missing_propagation_emitted = True
+
+    def _discovered_missing_sources(self) -> List[Any]:
+        """Every attribute this instance retained that could carry an upstream manifest.
+
+        Attribute NAMES are not a usable key: the same input is `structures`,
+        `structures_input`, `pdbs_input` or `stream_input` depending on the tool.
+        The filter is the one ``_missing_path_of`` already applies — an object
+        carrying a `missing` table, or a stream whose producer declares one.
+        `__dict__` is insertion-ordered, so the result is deterministic.
+        """
+        found: List[Any] = []
+        seen_ids = set()
+        for value in list(vars(self).values()):
+            if value is None or isinstance(value, (str, bytes, int, float, bool)):
+                continue
+            for member in self._unwrap_combinatorics(value):
+                key = id(member)
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                if self._missing_path_of(member):
+                    found.append(member)
+        return found
+
+    def auto_missing_paths(self) -> List[str]:
+        """The upstream manifests the central path will propagate, discovered from the instance."""
+        return self._collect_upstream_missing_paths(*self._discovered_missing_sources())
+
+    def _with_declared_missing_table(self, expected_outputs: Any) -> Any:
+        """A copy of the expected outputs carrying the `missing` table the footer will write.
+
+        `pipe_check_completion` excuses a dropped id only through
+        ``tables.missing.path``, so the central propagation is useless unless the
+        manifest is declared alongside it. A tool that declares one already keeps it.
+        """
+        if not isinstance(expected_outputs, dict):
+            return expected_outputs
+        tables = expected_outputs.get("tables")
+        if isinstance(tables, dict) and "missing" in tables:
+            return expected_outputs
+        if tables is not None and not isinstance(tables, dict):
+            return expected_outputs
+        info = self.missing_table_info(getattr(self, "missing_csv", None))
+        merged = dict(expected_outputs)
+        merged["tables"] = {**(tables or {}), "missing": info}
+        return merged
+
+    def _auto_missing_propagation(self, expected_outputs: Any) -> str:
+        """The propagation block the footer emits for a tool that owns no manifest of its own.
+
+        ``pipe_propagate_missing.py`` rewrites its destination, so the central
+        block must stay out of the way of a tool that writes that file itself:
+        a raw upstream merge would erase the tool's own rows, and an erased
+        ``kind="filter"`` row turns a legitimate absence back into a FAILED
+        marker. A tool declares ownership by DECLARING the table — explicitly,
+        or implicitly by consulting ``generate_missing_propagation`` /
+        ``upstream_missing_flag`` / ``_get_upstream_missing_table_path`` while
+        building its script.
+        """
+        if getattr(self, "_missing_propagation_emitted", False):
+            return ""
+        if self._declares_missing_table(expected_outputs):
+            return ""
+        paths = self.auto_missing_paths()
+        if not paths:
+            return ""
+        self.claim_missing_manifest()
+        return self._missing_propagation_block(
+            paths, getattr(self, "missing_csv", None) or self.table_path("missing"))
+
+    def _declares_missing_table(self, expected_outputs: Any) -> bool:
+        """Whether this tool already promises a `missing` table of its own."""
+        if not isinstance(expected_outputs, dict):
+            return False
+        tables = expected_outputs.get("tables")
+        return isinstance(tables, dict) and "missing" in tables
+
     def _get_upstream_missing_table_path(self, *input_sources) -> Optional[str]:
         """
         Get the path to the missing table from upstream tool outputs.
@@ -1765,6 +1901,7 @@ fi
         Returns:
             Path to upstream missing.csv, or None if no missing table exists
         """
+        self.claim_missing_manifest()
         paths = self._collect_upstream_missing_paths(*input_sources)
         return paths[0] if paths else None
 
@@ -1779,6 +1916,7 @@ fi
         every axis fixes the multi-input case where only the first manifest
         would otherwise propagate.
         """
+        self.claim_missing_manifest()
         paths = self._collect_upstream_missing_paths(*input_sources)
         if not paths:
             return ""
@@ -1787,10 +1925,10 @@ fi
     def missing_table_info(self, missing_csv: Optional[str] = None) -> "TableInfo":
         """The standard `missing` TableInfo (schema id|removed_by|kind|cause).
 
-        Tools that consume ids declare this in ``get_output_files()`` whenever an
-        upstream manifest exists, so ``pipe_check_completion`` excuses the dropped
-        ids instead of flagging them FAILED. Defaults the path to
-        ``self.table_path("missing")``.
+        ``pipe_check_completion`` excuses an upstream-dropped id only through this
+        table, and the completion footer declares it for any tool that does not.
+        A tool declares it itself only when it owns the file — it writes rows of
+        its own, or its path is not ``self.table_path("missing")``.
         """
         return TableInfo(
             name="missing",
@@ -1822,17 +1960,33 @@ fi
         paths = self._collect_upstream_missing_paths(*input_sources)
         if not paths and not local_missing:
             return ""
+        self.claim_missing_manifest()
         out_csv = missing_csv or self.table_path("missing")
+        return self._missing_propagation_block(paths, out_csv, local_missing=local_missing,
+                                               capture_rc=True)
+
+    def _missing_propagation_block(self, paths: List[str], out_csv: str,
+                                   local_missing: Optional[str] = None,
+                                   capture_rc: bool = False) -> str:
+        """The propagation bash itself, shared by the per-tool call and the footer.
+
+        ``capture_rc`` saves ``$?`` first: a tool emitting this mid-script must,
+        since this block and the completion check both succeed on their own and
+        the failure guard would otherwise see a clean step. The footer has
+        already captured by the time it calls this, and a second capture there
+        would overwrite the real status with this block's own.
+        """
         propagate_py = self.pipe_script_path("pipe_propagate_missing.py")
         folders = " ".join(f'"{os.path.dirname(p)}"' for p in paths) or '""'
         local_arg = f' --local-missing "{local_missing}"' if local_missing else ""
-        return f"""
-# Capture the main command's status BEFORE anything else runs: this block and
+        capture = """# Capture the main command's status BEFORE anything else runs: this block and
 # the completion check that follows both succeed on their own, and without this
 # the script would exit 0 and the failure guard would see a clean step.
 BP_MAIN_RC=$?
 
-# Propagate `missing` manifest(s) from upstream tools — writes tables/missing.csv.
+""" if capture_rc else ""
+        return f"""
+{capture}# Propagate `missing` manifest(s) from upstream tools — writes tables/missing.csv.
 echo "Propagating upstream missing manifest(s)"
 python "{propagate_py}" \\
     --upstream-folders {folders} \\
