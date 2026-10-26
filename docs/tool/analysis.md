@@ -478,6 +478,8 @@ This wrapper runs A3D in static mode only. The FoldX-backed repair / solubility-
   | id | chain | resi | score |
   |----|-------|------|-------|
 
+- `missing`: `id | removed_by | kind | cause` — structures the scorer failed on, plus upstream-filtered ids.
+
 **Example**:
 ```python
 from biopipelines.aggrescan3d import Aggrescan3D

@@ -13,7 +13,7 @@ Each line ends with the tool's tags — a closed 38-term vocabulary in four face
 - **ADMETAI** v2.0 · CPU · x86-64, Colab — ADMET endpoint predictions for compound libraries via the ADMET-AI Chemprop-RDKit model. `docs/tool/analysis.md#admetai` [repo](https://github.com/swansonk14/admet_ai) [paper](https://doi.org/10.1093/bioinformatics/btae416) · tags: predict-property, small-molecule
 - **AF2BIND** v2.0 · GPU · x86-64, Colab — Small-molecule binding-residue prediction from a single protein structure, leveraging AlphaFold2's internal pair representation through a trained line `docs/tool/analysis.md#af2bind` [repo](https://github.com/sokrypton/af2bind) [paper](https://www.biorxiv.org/content/10.1101/2023.10.15.562410v1) · tags: detect, predict-property, protein, pocket, residues, small-molecule
 - **APBS** v2.0 · CPU · x86-64, Colab — Electrostatic surface potential. `docs/tool/analysis.md#apbs` [repo](https://github.com/Electrostatics/apbs) [paper](https://doi.org/10.1002/pro.3280) · tags: measure, protein, energy
-- **Aggrescan3D** v2.1 · CPU · x86-64, Colab — Structure-based prediction of protein aggregation propensity. `docs/tool/analysis.md#aggrescan3d` [repo](https://bitbucket.org/lcbio/aggrescan3d) [paper](https://academic.oup.com/nar/article/47/W1/W300/5485072) · tags: predict-property, protein, residues, solubility
+- **Aggrescan3D** v2.2 · CPU · x86-64, Colab — Structure-based prediction of protein aggregation propensity. `docs/tool/analysis.md#aggrescan3d` [repo](https://bitbucket.org/lcbio/aggrescan3d) [paper](https://academic.oup.com/nar/article/47/W1/W300/5485072) · tags: predict-property, protein, residues, solubility
 - **Angle** v1.0 · CPU · x86-64, aarch64, Colab — Calculates angles between atoms in structures. `docs/tool/analysis.md#angle` · tags: measure, protein, small-molecule, residues
 - **BFactor** v1.2 · CPU · x86-64, aarch64, Colab — Reads the B-factor column per residue and summarizes it over any number of named selections. `docs/tool/analysis.md#bfactor` · tags: measure, protein, residues
 - **BindingData** v1.2 · CPU · x86-64, aarch64, Colab — Experimentally measured protein–ligand binding affinities for a compounds stream, retrieved from the ChEMBL REST API and the BindingDB RESTful service `docs/tool/analysis.md#bindingdata` · tags: fetch, small-molecule, protein, complex, binding
@@ -63,7 +63,7 @@ Each line ends with the tool's tags — a closed 38-term vocabulary in four face
 
 - **CompoundLibrary** v1.0 · CPU · x86-64, aarch64, Colab — Creates compound collections from dictionaries with optional combinatorial expansion. `docs/tool/inputs_io.md#compoundlibrary` · tags: fetch, small-molecule, covalent
 - **Ligand** v1.5 · CPU · x86-64, aarch64, Colab — Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates from SMILES. `docs/tool/inputs_io.md#ligand` · tags: fetch, small-molecule
-- **Load** v1.5 · CPU · x86-64, aarch64, Colab — Reload previously produced pipeline outputs back into a run. `docs/tool/inputs_io.md#load` · tags: data
+- **Load** v1.6 · CPU · x86-64, aarch64, Colab — Reload previously produced pipeline outputs back into a run. `docs/tool/inputs_io.md#load` · tags: data
 - **LoadMultiple** CPU · x86-64, aarch64, Colab — Reload previously produced pipeline outputs back into a run. `docs/tool/inputs_io.md#load` · tags: data
 - **PDB** v1.6 · CPU · x86-64, aarch64, Colab — Fetches protein structures with priority: local_folder → pdbs/ → RCSB download. `docs/tool/inputs_io.md#pdb` · tags: fetch, protein, small-molecule, residues, covalent
 - **Plot** v1.0 · CPU · x86-64, aarch64, Colab — Creates plots from CSV data. `docs/tool/inputs_io.md#plot` · tags: visualize
@@ -76,9 +76,9 @@ Each line ends with the tool's tags — a closed 38-term vocabulary in four face
 
 ## MSAs
 
-- **MMseqs2** v1.9 · CPU · x86-64 — Generates multiple sequence alignments for structure prediction by querying a local MMseqs2 server. `docs/tool/msas.md#mmseqs2` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: build-msa, fetch, msa, protein
-- **MMseqs2Server** v1.8 · CPU · x86-64 — Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated MSA queries hit a warm local server instead of the public endpoint. `docs/tool/msas.md#mmseqs2server` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: data, build-msa, msa, protein
-- **MSA** v1.3 · CPU · x86-64, aarch64, Colab — Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). `docs/tool/msas.md#msa` · tags: data, msa
+- **MMseqs2** v1.10 · CPU · x86-64 — Generates multiple sequence alignments for structure prediction by querying a local MMseqs2 server. `docs/tool/msas.md#mmseqs2` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: build-msa, fetch, msa, protein
+- **MMseqs2Server** v1.9 · CPU · x86-64 — Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated MSA queries hit a warm local server instead of the public endpoint. `docs/tool/msas.md#mmseqs2server` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: data, build-msa, msa, protein
+- **MSA** v1.4 · CPU · x86-64, aarch64, Colab — Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). `docs/tool/msas.md#msa` · tags: data, msa
 
 ## Sequence Design
 
