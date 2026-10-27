@@ -27,6 +27,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **IPSAE** 1.0 (new). Scores the interface of a predicted complex with ipSAE by running Dunbrack's upstream `ipsae.py`, so the formulas stay upstream's. Takes `structures` and a per-id `pae` stream (`npz` in Boltz layout, or `json` in ColabFold or AlphaFold3 layout) and emits `ipsae`, one row per id for `binder_chain` against the best-scoring of `target_chains` (default every other chain), and `ipsae_pairs`, every chain-pair row upstream printed. `pdockq`, `pdockq2` and `iptm_af` are NaN when the PAE file carries no pLDDT or ipTM, where upstream would print a number computed from zeros. `IPSAE.install()` downloads `ipsae.py` unpinned into `folders.repositories.IPSAE`, which is a new key in every shipped config.
+
 - **ESMFold2** 2.5 → 2.6. New `pae` stream with the full predicted aligned error matrix of each structure, declared only with `include_pae=True`. Each kept sample's token x token matrix is written to `pae/<id>.npz` (array key `pae`, float32, Angstrom, the layout Boltz writes), under the same ids as `structures`, with a map_table listing only the ids whose file exists. The matrix used to be reduced to `max_pae` and discarded. Existing outputs, the confidence table and the default run are unchanged.
 
 - **OpenFold3** 1.4 → 1.5. New `pae` stream. The kept sample's full confidence file (`*_confidences.json`: `plddt`, `pde`, `pae`) is copied unchanged to `pae/<id>.json` under the same ids as `structures`, with a map_table listing only the ids whose file exists. Not declared when a user `runner_yaml` disables the file or writes it as npz, so such a run is not failed for an output it never produced. Existing outputs and the default run are unchanged.

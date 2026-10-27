@@ -2171,3 +2171,16 @@ BFactor:
       literal selection string or a table column reference resolved per structure id. Emits a
       resi-csv stream consumable by Selection and Consensus, plus a per-structure summary
       carrying <name>_delta, the selection's mean minus the whole structure's.
+IPSAE:
+  files:
+  - biopipelines/ipsae.py
+  - pipe_scripts/pipe_ipsae.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      Initial release. Scores the interface of a predicted complex with ipSAE by running the upstream ipsae.py per id
+      and parsing its score table; the formulas are not reimplemented. Takes structures and a per-id pae stream (npz in Boltz layout,
+      json in ColabFold or AlphaFold3 layout). Emits ipsae (one row per id: binder_chain against the best of target_chains),
+      ipsae_pairs (every chain-pair row) and missing. pdockq, pdockq2 and iptm_af are NaN when the PAE file carries no pLDDT or ipTM.

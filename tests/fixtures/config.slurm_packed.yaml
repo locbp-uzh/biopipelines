@@ -44,6 +44,7 @@ folders:
   # without raising KeyError, since no upstream binary is executed.
   repositories:
     ProteinMPNN: "<biopipelines>/_stub_repos/ProteinMPNN"
+    IPSAE: "<biopipelines>/_stub_repos/IPSAE"
     LASErMPNN: "<biopipelines>/_stub_repos/LASErMPNN"
     LigandMPNN: "<biopipelines>/_stub_repos/LigandMPNN"
     Boltz2: "<biopipelines>/_stub_repos/boltz"

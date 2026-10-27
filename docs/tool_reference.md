@@ -84,6 +84,7 @@ Analyze structures, interactions, stability, and fitness.
 - [StructureCluster](tool/analysis.md#structurecluster) — Cluster designs by fold and rank the families by mean metrics
 - [FPocket](tool/analysis.md#fpocket) — Alpha-sphere pocket detection
 - [GEMS](tool/analysis.md#gems) — Protein–ligand affinity (GNN)
+- [IPSAE](tool/analysis.md#ipsae) — Interface confidence (ipSAE) from a predictor's PAE matrix
 - [OpenMM](tool/analysis.md#openmm) — Energy minimization
 - [P2Rank](tool/analysis.md#p2rank) — Ligand binding-site prediction
 - [PLIP](tool/analysis.md#plip) — Interaction profiling

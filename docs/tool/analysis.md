@@ -1068,6 +1068,67 @@ aff.tables.affinity
 
 ---
 
+### IPSAE
+
+Scores the interface of a predicted complex with ipSAE, by running the upstream `ipsae.py` (Dunbrack, MIT) once per structure. ipSAE reads the predictor's PAE matrix and keeps only the residue pairs whose predicted aligned error is below a cutoff, which makes the score of an interface less sensitive to disordered regions and to how far a sequence was trimmed than AlphaFold's whole-complex ipTM. Upstream also reports ipTM recomputed from the PAE, pDockQ, pDockQ2 and LIS. The formulas are upstream's; this wrapper stages the inputs, runs the unmodified script and parses the score table it writes.
+
+Each chain pair is scored in both directions (`asym`: chain 1's residues as the alignment reference, PAE of chain 2's residues) and as their maximum (`max`). The `ipsae` table summarizes the interface of one chain of interest against its partners from the `max` rows; `ipsae_pairs` keeps every row upstream printed for every chain of the structure.
+
+**Tags**: measure, protein, complex
+
+**Environment**: `biopipelines` (upstream needs numpy only; CPU).
+
+**Installation**: `IPSAE.install()` downloads `ipsae.py` from the `main` branch of https://github.com/DunbrackLab/IPSAE, unpinned, into the folder `folders.repositories.IPSAE` of the active config, and checks that it parses and that numpy imports. Every run prints the sha256 of the script it used at the top of the step log.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) - predicted complexes, PDB or mmCIF.
+- `pae`: DataStream | StandardizedOutput (required) - per-id PAE matrices: a predictor output carrying a `pae` stream (`predictor.streams.pae`) or a DataStream of PAE files. Format `npz` (Boltz layout, key `pae`) or `json` (ColabFold or AlphaFold3 layout, key `pae` or `predicted_aligned_error`). A predictor that exposes no `pae` stream is refused at configuration time, naming the streams it does have. The file is paired with the structure by id.
+- `binder_chain`: str = "A" - the chain whose interface the `ipsae` table summarizes. Must be a chain of the structures, otherwise that id is recorded as a failure listing the chains it has.
+- `target_chains`: str | List[str] = None - chains scored against `binder_chain`. `None` means every other chain of the structure.
+- `pae_cutoff`: float = 10.0 - residue pairs with PAE below this (A) enter the score.
+- `dist_cutoff`: float = 10.0 - distance cutoff (A) upstream uses when counting interface residues (`dist1`, `dist2`).
+
+The defaults of `binder_chain`, `target_chains` and `pae_cutoff` are those of the `ipsae` block of RosettaCommons Chaperone (https://github.com/RosettaCommons/chaperone); `dist_cutoff` is the 10 A of upstream's AlphaFold3 and Boltz usage examples. Chaperone's headline `ipsae` is the lowest per-target score (its `ipsae_max` is the highest) where this tool reports the highest; the per-target rows are in `ipsae_pairs` for either reading.
+
+**Tables**:
+- `ipsae`:
+
+  | id | binder_chain | target_chain | ipsae | ipsae_d0chn | ipsae_d0dom | iptm_af | iptm_d0chn | pdockq | pdockq2 | lis |
+  |----|--------------|--------------|-------|-------------|-------------|---------|------------|--------|---------|-----|
+
+  Exactly one row per id that entered. The row is the `max`-type result of `binder_chain` against the target chain with the highest `ipsae` (the first listed wins a tie), and `target_chain` names that chain. All score columns are NaN for an id that failed.
+
+- `ipsae_pairs`:
+
+  | id | chain1 | chain2 | type | pae_cutoff | dist_cutoff | ipsae | ipsae_d0chn | ipsae_d0dom | iptm_af | iptm_d0chn | pdockq | pdockq2 | lis | n0res | n0chn | n0dom | d0res | d0chn | d0dom | nres1 | nres2 | dist1 | dist2 |
+  |----|--------|--------|------|------------|-------------|-------|-------------|-------------|---------|------------|--------|---------|-----|-------|-------|-------|-------|-------|-------|-------|-------|-------|-------|
+
+  Upstream's columns, lowercased: for each chain pair, one `asym` row per direction and one `max` row, so a structure of N chains has 3 N (N-1) / 2 rows. `ipsae` uses d0 from the number of chain 2 residues with PAE below the cutoff for each chain 1 residue; `ipsae_d0chn` and `ipsae_d0dom` use d0 from the summed chain lengths and from the residues of the pair with any PAE below the cutoff. `n0*` and `d0*` are the residue counts and d0 values behind them, `nres1` and `nres2` the residues of each chain with PAE below the cutoff to the other, and `dist1` and `dist2` those that are also within `dist_cutoff`. An id that failed has no rows here and its row in `ipsae` is NaN.
+
+- `missing`: | id | removed_by | kind | cause |
+
+An id is recorded in `missing` as a failure when its PAE file is absent, when `binder_chain` or a listed target chain is not in the structure, when the structure has no chain besides `binder_chain`, or when upstream raises or writes no score table (it exits 0 after printing a message when an input file is unusable, so the table, not the exit code, decides). Ids already dropped upstream are carried over.
+
+**Values upstream cannot compute from the supplied PAE file are NaN.** `pdockq` and `pdockq2` need pLDDT, and `iptm_af` the predictor's own ipTM. An `npz` PAE file carries neither (upstream looks for `plddt_*.npz` and `confidence_*.json` beside it, which are not staged), so those three columns are NaN for every `npz`. A ColabFold `json` supplies them through its `plddt` and `iptm` keys; an AlphaFold3 `json` supplies pLDDT through `atom_plddts` but its ipTM lives in a separate summary file, so `iptm_af` is NaN there. Left alone, upstream prints a number computed from zeros in all these cases. `ipsae`, `ipsae_d0chn`, `ipsae_d0dom`, `iptm_d0chn` and `lis` come from the PAE matrix alone and are always present.
+
+**Staging.** Upstream writes next to its input and builds file names by substituting substrings of the whole path, so each id is copied to `model.pdb` or `model.cif` plus `pae_model.<ext>` in `_execution/runs/<id>/`, the script runs there, and the copies are removed afterwards. Upstream's own outputs (`model_<pae>_<dist>.txt`, `_byres.txt`, `.pml`) stay in that folder; the `_byres.txt` file holds the per-residue scores. The structure atoms must match the PAE tokens the way upstream expects (one CA per residue; ligand atoms are skipped), otherwise upstream fails and the id is recorded as a failure with its message.
+
+**Example**:
+```python
+from biopipelines.ipsae import IPSAE
+
+with Pipeline("Project", "Interface", description="ipSAE of a predicted complex"):
+    folded = Boltz2(proteins=designs, msas=msas)
+    scores = IPSAE(structures=folded, pae=folded, binder_chain="A", target_chains="B")
+
+# Keep the complexes whose interface is confidently placed
+good = Panda(tables=scores.tables.ipsae, operations=[Panda.filter("ipsae >= 0.6")])
+```
+
+**Reference**: Dunbrack (2025) *Rēs ipSAE loquuntur*: What's wrong with AlphaFold's ipTM score and how to fix it. *bioRxiv*. https://www.biorxiv.org/content/10.1101/2025.02.10.637595 - code: https://github.com/DunbrackLab/IPSAE
+
+---
+
 ### LigandAtomSelector
 
 Distance-based residue selection referenced to a **subset of atoms inside one ligand residue**, rather than to the whole residue. [DistanceSelector](#distanceselector) measures from every atom of its reference; this measures only from the atom names you name.
