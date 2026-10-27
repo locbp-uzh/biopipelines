@@ -8,17 +8,20 @@ import json
 import pandas as pd
 import os
 import glob
+import shutil
 import numpy as np
 
 parser = argparse.ArgumentParser(description='Extract confidence metrics from AlphaFold/ColabFold JSON files')
 parser.add_argument('folding_folder', type=str, help='Path to AlphaFold Folding folder containing output files')
 parser.add_argument('output_folder', type=str, help='Path to output folder for main structures')
 parser.add_argument('confidence_csv', type=str, help='Output CSV file path for confidence metrics')
+parser.add_argument('--pae-folder', type=str, default=None, help='Destination folder for the scores JSON (full PAE matrix) of each best model')
+parser.add_argument('--pae-map', type=str, default=None, help='Path to pae_map.csv, written for the ids whose scores JSON was copied')
 
 # Parse the arguments
 args = parser.parse_args()
 
-def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv):
+def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, pae_folder=None, pae_map=None):
     """
     Extract confidence metrics from AlphaFold/ColabFold JSON files.
 
@@ -31,8 +34,11 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv):
         folding_folder: Path to Folding subfolder with raw ColabFold outputs
         output_folder: Path to main output folder where simplified structures are stored
         confidence_csv: Output CSV file path
+        pae_folder: If set, each best model's scores JSON (which carries the full `pae` matrix) is copied here as <id>.json
+        pae_map: Path of the pae stream map, listing the ids copied to pae_folder
     """
     confidence_data = []
+    pae_files = {}
 
     # Look for unrelaxed or relaxed rank_001 PDB files (best models)
     for pdb_file in glob.glob(os.path.join(folding_folder, "*_rank_001_*.pdb")):
@@ -68,6 +74,12 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv):
             print(f"Error reading JSON file {json_file}: {e}")
             continue
 
+        if pae_folder:
+            os.makedirs(pae_folder, exist_ok=True)
+            pae_path = os.path.join(pae_folder, f"{seq_id}.json")
+            shutil.copy2(json_file, pae_path)
+            pae_files[seq_id] = pae_path
+
         # Extract metrics
         plddt_array = metrics.get('plddt', [])
         max_pae = metrics.get('max_pae', None)
@@ -96,6 +108,12 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv):
     else:
         print("Warning: No confidence data extracted")
 
+    if pae_map and pae_files:
+        pae_df = pd.DataFrame([{'id': pae_id, 'file': pae_path} for pae_id, pae_path in sorted(pae_files.items())])
+        pae_df.to_csv(pae_map, index=False)
+        print(f"Copied the scores JSON of {len(pae_files)} structures to {pae_folder}")
+
 # Run the extraction
 if __name__ == "__main__":
-    extract_alphafold_confidence(args.folding_folder, args.output_folder, args.confidence_csv)
+    extract_alphafold_confidence(args.folding_folder, args.output_folder, args.confidence_csv,
+                                 pae_folder=args.pae_folder, pae_map=args.pae_map)

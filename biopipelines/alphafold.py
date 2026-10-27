@@ -66,7 +66,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.11"
+    TOOL_VERSION = "1.12"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 
@@ -229,6 +229,7 @@ fi
     #   configuration/  — queries CSV/FASTA passed to colabfold_batch.
     #   execution/      — raw ColabFold Folding dumps.
     #   structures/     — best-rank PDBs + structures_map.csv.
+    #   pae/            — scores JSON (full PAE matrix) of each best model + pae_map.csv.
     #   msas/           — per-ID .a3m files + msas_map.csv.
     #   tables/         — confidence, missing.
     queries_csv = Path(lambda self: self.configuration_path(f"{self.pipeline_name}_queries.csv"))
@@ -243,6 +244,7 @@ fi
     msas_folder = Path(lambda self: self.stream_folder("msas"))
     msa_csv = Path(lambda self: self.stream_map_path("msas"))
     structures_map = Path(lambda self: self.stream_map_path("structures"))
+    pae_map = Path(lambda self: self.stream_map_path("pae"))
     missing_csv = Path(lambda self: self.table_path("missing"))
 
     # Helper script paths
@@ -277,7 +279,8 @@ fi
             rand_seed: Random seed for reproducible results (0 = random)
 
         Output:
-            Streams: structures (.pdb), msas (.a3m)
+            Streams: structures (.pdb), pae (.json), msas (.a3m)
+                pae: one <id>.json per structure id, the ColabFold scores JSON of the best model (full matrix under the key "pae")
             Tables:
                 structures: id | file
                 confidence: id | structure | plddt | max_pae | ptm
@@ -631,8 +634,9 @@ python {self.update_map_py} --structures-map "{self.structures_map}" --output-fo
     def _generate_script_extract_confidence(self) -> str:
         """Generate script section to extract confidence metrics from JSON files."""
         structures_dir = self.stream_folder("structures")
+        pae_dir = self.stream_folder("pae")
         return f"""echo "Extracting confidence metrics from JSON files"
-python {self.alphafold_confidence_py} "{self.folding_folder}" "{structures_dir}" "{self.confidence_csv}"
+python {self.alphafold_confidence_py} "{self.folding_folder}" "{structures_dir}" "{self.confidence_csv}" --pae-folder "{pae_dir}" --pae-map "{self.pae_map}"
 
 """
 
@@ -651,13 +655,16 @@ python {self.alphafold_msas_py} "{self.msas_folder}" "{self.queries_csv}" "{self
         the structures_map.csv is written later, from the actual PDBs.
         """
         structures_dir = self.stream_folder("structures")
+        pae_dir = self.stream_folder("pae")
         return f"""echo "Restoring original IDs (unsanitizing ColabFold output)"
 python {self.unsanitize_ids_py} \\
     --predicted-ids "{self.queries_csv}" \\
     --rename-files "{structures_dir}" pdb \\
     --rename-files "{self.msas_folder}" a3m \\
+    --rename-files "{pae_dir}" json \\
     --fix-csv "{self.confidence_csv}" \\
-    --fix-csv "{self.msa_csv}"
+    --fix-csv "{self.msa_csv}" \\
+    --fix-csv "{self.pae_map}"
 
 """
 
@@ -691,6 +698,16 @@ python {self.unsanitize_ids_py} \\
             files=structure_files,
             map_table=self.structures_map,
             format="pdb"
+        )
+
+        # ColabFold's scores JSON of each best model carries the full `pae` matrix.
+        # Its map_table, written at runtime by pipe_alphafold_confidence.py, lists only the ids whose JSON was copied.
+        pae = DataStream(
+            name="pae",
+            ids=sequence_ids,
+            files=[self.stream_path("pae", "<id>.json")],
+            map_table=self.pae_map,
+            format="json"
         )
 
         # MSA files (AlphaFold generates .a3m files)
@@ -732,6 +749,7 @@ python {self.unsanitize_ids_py} \\
 
         return {
             "structures": structures,
+            "pae": pae,
             "msas": msas,
             "tables": tables,
             "output_folder": self.output_folder,

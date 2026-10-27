@@ -25,6 +25,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Boltz2** 2.9 → 2.10. New `pae` output stream: the full predicted aligned error matrix of every structure, `pae/<id>.npz` with the array under the key `pae`. `boltz predict` gets `--write_full_pae` and the postprocessing step copies each sample's `pae_<input>_model_<n>.npz` next to its structure, so the ids are the `structures` ids, `<id>_<k>` per diffusion sample under `top_only=False` included. `pae_map.csv` is written at runtime for the ids whose file exists. No other output changes.
+
+- **AlphaFold** 1.11 → 1.12. New `pae` output stream: the ColabFold scores JSON of each best model, `pae/<id>.json`, whose `pae` key holds the full predicted aligned error matrix (the confidence table keeps only `max_pae`). The ids are the `structures` ids, and the unsanitize pass restores the `+` of a bundled complex in the file name and the map. No other output changes.
+
 - **BioEmu2** 1.0 (new) — ligand-capable equilibrium-ensemble emulation (microsoft/bioemu2). Each run is one (sequence, ligand set) system YAML; forwards contact and covalent-linkage constraints verbatim. Pre-populates bioemu2's `~/.cache/bioemu2` MSA cache from an .a3m file or a Boltz2 MSA CSV, skipping ColabFold cold-starts across the pipeline. v1 wrapper (`BioEmu`) stays in place and is unchanged.
 
 - **LigandMPNN** 3.0 → 3.1. Exposes upstream `--save_stats` as `save_stats` (per-position amino-acid distributions in `execution/stats/`, no new stream) and `--ligand_mpnn_use_atom_context` as `use_atom_context` (default True, unchanged behaviour).

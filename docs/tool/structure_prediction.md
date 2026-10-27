@@ -42,7 +42,9 @@ Installation is verified by running `colabfold_batch --help` and importing `jax_
 - `num_recycle`: int = 3 - Number of recycling iterations
 - `rand_seed`: int = 0 - Random seed (0 = random)
 
-**Streams**: `structures`, `msas`
+**Streams**: `structures`, `pae`, `msas`
+
+`pae` holds one `<id>.json` per structure id (the `structures` ids, so `p1+p2` for a bundled complex): ColabFold's scores JSON of the best model, copied as ColabFold wrote it. Its `pae` key is the full predicted aligned error matrix (a list of lists, residues x residues, in angstroms), next to `plddt` (per residue) and the scalars `max_pae` and `ptm` (plus `iptm` for a complex). A model without a PAE head (plain `alphafold2`, not the ptm or multimer models) writes no `pae` key; the file is still handed over, so a consumer reads the missing key as an error of its own. The stream's map lists only the ids whose JSON exists.
 
 **Tables**:
 - `structures`:
@@ -141,7 +143,9 @@ pip install boltz[cuda] -U
 - `disulfide_bonds`: Optional[List[Dict[str, Any]]] = None - Disulfide bond constraints
 - `metal_coord`: Optional[List[Dict[str, Any]]] = None - Metal-coordination bond constraints
 
-**Streams**: `structures`, `sequences`, `compounds` (only when ligands are folded), `msas` (empty when `single_sequence=True`)
+**Streams**: `structures`, `pae`, `sequences`, `compounds` (only when ligands are folded), `msas` (empty when `single_sequence=True`)
+
+`pae` holds one `<id>.npz` per structure id: the full predicted aligned error matrix of that model, as a numpy array under the key `pae` with shape tokens x tokens (`numpy.load(path)["pae"]`). Its ids are exactly the `structures` ids, so with `top_only=False` each diffusion sample `<id>_<k>` has its own matrix, taken from the same model as its structure. The wrapper passes `--write_full_pae` to `boltz predict` and copies `pae_<input>_model_<n>.npz` from the raw `execution/` dump; the stream's map lists only the ids whose file Boltz wrote. The file is a compressed npz, but the matrix grows with the square of the token count, so a large library adds up.
 
 **Tables**:
 - `structures`:
@@ -183,7 +187,7 @@ pip install boltz[cuda] -U
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
 
-  Beyond the declared columns above, `structures`, `confidence` and `affinity` each gain one `<axis>.id` provenance column per input axis (`sequences.id`, `compounds.id`, …), appended at runtime by the postprocessing step (`pipe_boltz_postprocessing.py:334`, `:364`, `:393`). They track which protein and ligand produced each row, so filtering and joins need no ID-string parsing. The same step also writes an undeclared `value` column onto `structures` (`:327`); treat it as an implementation detail rather than part of the contract.
+  Beyond the declared columns above, `structures`, `confidence` and `affinity` each gain one `<axis>.id` provenance column per input axis (`sequences.id`, `compounds.id`, …), appended at runtime by the postprocessing step (`pipe_boltz_postprocessing.py`); the `pae` map carries the same ones. They track which protein and ligand produced each row, so filtering and joins need no ID-string parsing. The same step also writes an undeclared `value` column onto `structures` and `pae`; treat it as an implementation detail rather than part of the contract.
 
 **Example**:
 ```python

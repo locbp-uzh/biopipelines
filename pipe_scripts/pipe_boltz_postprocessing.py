@@ -17,6 +17,8 @@ parser.add_argument('SEQUENCE_IDS_FILE', type=str, help='CSV file with sequence 
 parser.add_argument('--structures-map', type=str, default=None, help='Path to structures_map.csv to update with runtime IDs')
 parser.add_argument('--structures-folder', type=str, default=None, help='Destination folder for predicted PDB/CIF files')
 parser.add_argument('--msas-folder', type=str, default=None, help='Destination folder for MSA files')
+parser.add_argument('--pae-folder', type=str, default=None, help='Destination folder for the full PAE matrices (<id>.npz)')
+parser.add_argument('--pae-map', type=str, default=None, help='Path to pae_map.csv, written for the ids whose PAE file exists')
 parser.add_argument('--confidence-csv', type=str, default=None, help='Path for confidence_scores.csv')
 parser.add_argument('--affinity-csv', type=str, default=None, help='Path for affinity_scores.csv')
 parser.add_argument('--sequences-csv', type=str, default=None, help='Path for sequences.csv')
@@ -85,11 +87,31 @@ STRUCTURES_MAP = args.structures_map
 
 STRUCTURES_FOLDER = args.structures_folder or OUTPUT_FOLDER
 MSAS_FOLDER = args.msas_folder or os.path.join(OUTPUT_FOLDER, "MSAs")
+PAE_FOLDER = args.pae_folder or os.path.join(OUTPUT_FOLDER, "pae")
+PAE_MAP = args.pae_map or os.path.join(PAE_FOLDER, "pae_map.csv")
 CONFIDENCE_CSV = args.confidence_csv or os.path.join(OUTPUT_FOLDER, "confidence_scores.csv")
 AFFINITY_CSV = args.affinity_csv or os.path.join(OUTPUT_FOLDER, "affinity_scores.csv")
 SEQUENCES_CSV = args.sequences_csv or os.path.join(OUTPUT_FOLDER, "sequences.csv")
 MSAS_CSV = args.msas_csv or os.path.join(OUTPUT_FOLDER, "msas.csv")
 SCORES_INFO = args.scores_info or os.path.join(OUTPUT_FOLDER, "scores_info.txt")
+
+
+def copy_pae(predictions_path, config_id, model_idx, out_id):
+    """Copy one sample's full PAE matrix to <PAE_FOLDER>/<out_id>.npz; None when boltz wrote none."""
+    src = os.path.join(predictions_path, f"pae_{config_id}_model_{model_idx}.npz")
+    if not os.path.exists(src):
+        print(f"No PAE file found for {out_id}: {os.path.basename(src)}")
+        return None
+    target = os.path.join(PAE_FOLDER, f"{out_id}.npz")
+    try:
+        os.makedirs(PAE_FOLDER, exist_ok=True)
+        shutil.copy2(src, target)
+    except Exception as e:
+        print(f"Error copying {src}: {e}")
+        return None
+    print(f"Copied {os.path.basename(src)} to {out_id}.npz")
+    return target
+
 
 # Load provenance from combinatorics config if available
 stored_provenance = {}
@@ -127,6 +149,7 @@ os.makedirs(msas_folder, exist_ok=True)
 confidence_data = {}  # dictionary mapping NAME -> flattened confidence dict
 affinity_data = {}  # dictionary mapping NAME -> flattened affinity dict
 structural_files = {} # dictionary mapping NAME -> pdb or cif file
+pae_files = {}  # dictionary mapping NAME -> full PAE matrix npz
 
 # ----- Process each boltz_results folder -----
 folder_to_sequence_map = {}  # Map folder names to sequence IDs
@@ -313,6 +336,9 @@ for boltz_folder_path, config_id in work_items:
             except Exception as e:
                 print(f"Error reading confidence file {conf_filepath}: {e}")
             structural_files[out_id] = os.path.join(results_folder, f"{out_id}{ext}")
+            pae_path = copy_pae(predictions_path, config_id, midx, out_id)
+            if pae_path:
+                pae_files[out_id] = pae_path
 
 # Update structures_map.csv with actual runtime IDs and file paths
 # (config-time map only has prefix IDs when inputs use lazy patterns)
@@ -335,6 +361,21 @@ if STRUCTURES_MAP and structural_files:
 
     map_df.to_csv(STRUCTURES_MAP, index=False)
     print(f"Updated {STRUCTURES_MAP} with {len(map_rows)} structures")
+
+# pae_map.csv lists only the ids whose PAE file was written
+if pae_files:
+    pae_rows = [{'id': pae_id, 'file': pae_path, 'value': ''} for pae_id, pae_path in pae_files.items()]
+    pae_df = pd.DataFrame(pae_rows)
+    if stored_provenance and stored_predicted_ids:
+        prov_index = _provenance_indices([r['id'] for r in pae_rows], stored_predicted_ids)
+        for stream_name, prov_ids in stored_provenance.items():
+            col_values = []
+            for row in pae_rows:
+                idx = prov_index.get(row['id'])
+                col_values.append(prov_ids[idx] if idx is not None and idx < len(prov_ids) else '')
+            pae_df[f"{stream_name}.id"] = col_values
+    pae_df.to_csv(PAE_MAP, index=False)
+    print(f"Created {PAE_MAP} with {len(pae_rows)} PAE matrices")
 
 # Check if we have any data
 print(f"> Total sequences processed: {len(confidence_data)}")

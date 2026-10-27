@@ -39,7 +39,7 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "2.9"
+    TOOL_VERSION = "2.10"
     # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Boltz2Env"
@@ -447,6 +447,7 @@ fi
     #                     sequence_ids.csv, the ligands-from-SMILES helper CSV.
     #   execution/      — raw boltz_results_* dumps go here.
     #   structures/     — predicted PDB/CIF + structures_map.csv.
+    #   pae/            — full PAE matrix per structure (<id>.npz) + pae_map.csv.
     #   sequences/      — content-bearing stream CSV (sequences.csv acts as map).
     #   msas/           — MSA files (.csv or .a3m) + msas_map.csv.
     #   tables/         — standalone TableInfo CSVs: confidence, affinity, missing.
@@ -467,6 +468,7 @@ fi
 
     # Stream maps (lineage)
     structures_map_csv = Path(lambda self: self.stream_map_path("structures"))
+    pae_map_csv = Path(lambda self: self.stream_map_path("pae"))
     msas_csv = Path(lambda self: self.stream_map_path("msas"))
     # Emitted compounds map: same ids/SMILES as the input ligands, but with the
     # `code` column overwritten with the residue code Boltz assigns (CCD code
@@ -601,7 +603,8 @@ fi
             **kwargs: Additional parameters
 
         Output:
-            Streams: structures (.pdb/.mmcif), sequences (.csv), compounds (.csv), msas (.csv/.a3m)
+            Streams: structures (.pdb/.mmcif), pae (.npz), sequences (.csv), compounds (.csv), msas (.csv/.a3m)
+                pae: one <id>.npz per structure id, the full tokens x tokens PAE matrix under the key "pae"
             Tables:
                 structures: id | file
                 confidence: id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt
@@ -930,7 +933,7 @@ echo "Using direct YAML configuration: {config_file_path}"
 
         # Build Boltz2 options — boltz writes boltz_results_* under
         # execution_folder (raw model dumps).
-        boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.execution_folder}{msa_option} --output_format {self.output_format}"
+        boltz_options = f"--cache {boltz_cache_folder} --out_dir {self.execution_folder}{msa_option} --output_format {self.output_format} --write_full_pae"
 
         if self.recycling_steps is not None:
             boltz_options += f" --recycling_steps {self.recycling_steps}"
@@ -1054,11 +1057,14 @@ python {self.boltz_msa_copy_py} \\
         doesn't have to know the layout convention.
         """
         structures_dir = self.stream_folder("structures")
+        pae_dir = self.stream_folder("pae")
         return f"""
 echo "Post-processing Boltz2 results"
 python {self.boltz_postprocessing_py} {self.execution_folder} {self.output_folder} {self.sequence_ids_file} \\
     --structures-map {self.structures_map_csv} \\
     --structures-folder "{structures_dir}" \\
+    --pae-map {self.pae_map_csv} \\
+    --pae-folder "{pae_dir}" \\
     --msas-folder "{self.msa_cache_folder}" \\
     --confidence-csv "{self.confidence_csv}" \\
     --affinity-csv "{self.affinity_csv}" \\
@@ -1155,6 +1161,16 @@ python {self.boltz_compounds_py} \\
             format=self.output_format
         )
 
+        # One full PAE matrix per structure, so the ids mirror the structures stream exactly.
+        # Its map_table, written at runtime by pipe_boltz_postprocessing.py, lists only the ids whose npz boltz wrote.
+        pae = DataStream(
+            name="pae",
+            ids=structure_ids,
+            files=[self.stream_path("pae", "<id>.npz")],
+            map_table=self.pae_map_csv,
+            format="npz"
+        )
+
         # Supplied MSAs keep their upstream format; public-server MSAs are csv.
         msa_fmt = self._supplied_msa_format() if self.msas is not None else "csv"
         msa_files = [self.stream_path("msas", f"<id>.{msa_fmt}")]
@@ -1242,6 +1258,7 @@ python {self.boltz_compounds_py} \\
 
         return {
             "structures": structures,
+            "pae": pae,
             "sequences": sequences,
             "compounds": compounds,
             "msas": msas,
