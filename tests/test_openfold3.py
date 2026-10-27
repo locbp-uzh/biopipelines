@@ -169,7 +169,7 @@ class TestTheQueryJson:
 
 class TestTheDeclaredOutputs:
 
-    def test_top_only_off_declares_a_sample_suffix(self, tool):
+    def test_top_only_off_declares_a_sample_suffix(self, tool, monkeypatch):
         """The postprocess writes <id>_1..N then; declaring the bare id would make the
         completion check demand files that were never meant to exist."""
         made = tool(top_only=False, num_diffusion_samples=3)
@@ -182,7 +182,7 @@ class TestTheDeclaredOutputs:
         made.output_folder = "/x"
         made.missing_table_info = lambda p: None
         import biopipelines.openfold3 as module
-        module.predict_output_ids_with_provenance = lambda **k: (["q1"], {})
+        monkeypatch.setattr(module, "predict_output_ids_with_provenance", lambda **k: (["q1"], {}))
         out = OpenFold3.get_output_files(made)
         assert out["structures"].ids == ["q1_<1..3>"]
 
@@ -266,3 +266,134 @@ def test_msas_alone_turn_the_server_off(local_config, isolated_cwd):
         assert pipeline.tools[-1].use_msa_server is False
         with pytest.raises(ValueError, match="use_msa_server must be False"):
             OpenFold3(proteins=seqs.streams.sequences, msas=msas.streams.msas, use_msa_server=True)
+
+
+class TestThePaeStream:
+    """The full confidence JSON, copied per kept structure, for a downstream reader of `pae`.
+
+    Layout pinned from upstream's writer: `<prefix>_confidences.json` holds `plddt` (per atom),
+    `pde` and `pae` (token x token). The real files and their token order are not covered here.
+    """
+
+    @staticmethod
+    def _sample(pred, query, sample, ranking, with_json=True):
+        """One sample's structure, aggregated scores and (optionally) full confidence JSON."""
+        folder = pred / query / "seed_1"
+        folder.mkdir(parents=True, exist_ok=True)
+        prefix = f"{query}_seed_1_sample_{sample}"
+        (folder / f"{prefix}_model.cif").write_text(f"data_{query}_{sample}\n")
+        (folder / f"{prefix}_confidences_aggregated.json").write_text(
+            json.dumps({"sample_ranking_score": ranking}))
+        if with_json:
+            (folder / f"{prefix}_confidences.json").write_text(json.dumps({
+                "plddt": [90.0, 91.0], "pde": [[0.0, 1.0], [1.0, 0.0]],
+                "pae": [[0.5, float(sample)], [float(sample), 0.5]]}, indent=4))
+
+    @staticmethod
+    def _collect(tmp_path, queries, *flags):
+        import subprocess
+        out = tmp_path / "out"
+        (tmp_path / "queries.json").write_text(json.dumps({"queries": {q: {} for q in queries}}))
+        script = os.path.join(REPO_ROOT, "pipe_scripts", "pipe_openfold3_postprocess.py")
+        return out, subprocess.run(
+            [sys.executable, script, "--prediction-folder", str(tmp_path / "pred"),
+             "--combinatorics-config", str(tmp_path / "none.json"),
+             "--queries-json", str(tmp_path / "queries.json"),
+             "--structures-dir", str(out / "structures"),
+             "--structures-map-csv", str(out / "structures" / "m.csv"),
+             "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(out / "x.csv"),
+             *flags], capture_output=True, text=True)
+
+    @staticmethod
+    def _pae_flags(tmp_path):
+        return ["--pae-dir", str(tmp_path / "out" / "pae"),
+                "--pae-map-csv", str(tmp_path / "out" / "pae" / "pae_map.csv")]
+
+    def test_the_kept_sample_json_is_copied_unchanged_under_the_structure_id(self, tmp_path):
+        """The best sample by ranking score is kept, so its JSON, not the first sample's, is the one copied."""
+        pred = tmp_path / "pred"
+        self._sample(pred, "q1", 1, ranking=0.2)
+        self._sample(pred, "q1", 2, ranking=0.9)
+        out, done = self._collect(tmp_path, ["q1"], *self._pae_flags(tmp_path))
+        assert done.returncode == 0, done.stderr
+        source = pred / "q1" / "seed_1" / "q1_seed_1_sample_2_confidences.json"
+        assert (out / "pae" / "q1.json").read_bytes() == source.read_bytes()
+        assert json.loads((out / "pae" / "q1.json").read_text())["pae"] == [[0.5, 2.0], [2.0, 0.5]]
+        assert (out / "structures" / "q1.cif").read_text() == "data_q1_2\n"
+
+    def test_every_sample_is_copied_when_all_are_kept(self, tmp_path):
+        pred = tmp_path / "pred"
+        self._sample(pred, "q1", 1, ranking=0.2)
+        self._sample(pred, "q1", 2, ranking=0.9)
+        out, done = self._collect(tmp_path, ["q1"], "--top-only", "False", *self._pae_flags(tmp_path))
+        assert done.returncode == 0, done.stderr
+        structures = sorted(p.stem for p in (out / "structures").glob("*.cif"))
+        assert structures == sorted(p.stem for p in (out / "pae").glob("*.json")) == ["q1_1", "q1_2"]
+
+    def test_the_map_lists_only_ids_that_have_a_json(self, tmp_path):
+        import pandas as pd
+        pred = tmp_path / "pred"
+        self._sample(pred, "q1", 1, ranking=0.5)
+        self._sample(pred, "q2", 1, ranking=0.5, with_json=False)
+        out, done = self._collect(tmp_path, ["q1", "q2"], *self._pae_flags(tmp_path))
+        assert done.returncode == 0, done.stderr
+        assert pd.read_csv(out / "pae" / "pae_map.csv")["id"].tolist() == ["q1"]
+        assert "q2" in done.stdout
+        assert pd.read_csv(out / "structures" / "m.csv")["id"].tolist() == ["q1", "q2"]
+
+    def test_without_the_flags_nothing_extra_is_written(self, tmp_path):
+        """A run that does not ask for the stream (a runner_yaml that disabled the file) is unchanged."""
+        self._sample(tmp_path / "pred", "q1", 1, ranking=0.5)
+        out, done = self._collect(tmp_path, ["q1"])
+        assert done.returncode == 0, done.stderr
+        assert not (out / "pae").exists()
+        assert sorted(p.name for p in out.iterdir()) == ["c.csv", "structures", "x.csv"]
+
+    @staticmethod
+    def _declared(new_pipeline, tmp_path, runner=None, **kwargs):
+        from pathlib import Path
+        from biopipelines.sequence import Sequence
+        if runner is not None:
+            (tmp_path / "runner.yaml").write_text(runner)
+            kwargs["runner_yaml"] = str(tmp_path / "runner.yaml")
+        pipeline = new_pipeline("of3_pae")
+        with pipeline:
+            tool = OpenFold3(proteins=Sequence(seq="MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ",
+                                               type="protein", ids="p1"), **kwargs)
+            script_path = pipeline.save()
+        steps = sorted(Path(script_path).parent.glob("*_OpenFold3.sh"))
+        return tool, "\n".join(step.read_text(encoding="utf-8", errors="replace") for step in steps)
+
+    def test_the_stream_is_declared_by_default_with_the_structures_ids(
+            self, local_config, isolated_cwd, new_pipeline):
+        tool, script = self._declared(new_pipeline, isolated_cwd)
+        assert tool.streams.pae.ids == tool.streams.structures.ids == ["p1"]
+        assert tool.streams.pae.format == "json"
+        assert tool.streams.pae.files[0].endswith(os.path.join("pae", "<id>.json"))
+        assert tool.streams.pae.map_table.endswith(os.path.join("pae", "pae_map.csv"))
+        assert f'--pae-dir "{os.path.dirname(tool.streams.pae.map_table)}"' in script
+        assert f'--pae-map-csv "{tool.streams.pae.map_table}"' in script
+
+    def test_every_sample_is_declared_when_all_are_kept(self, local_config, isolated_cwd, new_pipeline):
+        tool, _script = self._declared(new_pipeline, isolated_cwd, top_only=False,
+                                       num_diffusion_samples=2, num_model_seeds=3)
+        assert tool.streams.pae.ids == tool.streams.structures.ids == ["p1_<1..6>"]
+
+    @pytest.mark.parametrize("runner", [
+        "output_writer_settings:\n  write_full_confidence_scores: False\n",
+        "output_writer_settings:\n  full_confidence_output_format: npz\n",
+    ])
+    def test_a_runner_yaml_that_removes_the_json_removes_the_stream(
+            self, local_config, isolated_cwd, new_pipeline, runner):
+        """Declaring a file run_openfold will not write would fail a run that worked."""
+        tool, script = self._declared(new_pipeline, isolated_cwd, runner=runner)
+        assert len(tool.streams.pae) == 0
+        assert "--pae-dir" not in script
+
+    def test_a_runner_yaml_that_leaves_the_json_alone_keeps_the_stream(
+            self, local_config, isolated_cwd, new_pipeline):
+        tool, _script = self._declared(
+            new_pipeline, isolated_cwd,
+            runner="output_writer_settings:\n  write_full_confidence_scores: True\n"
+                   "  full_confidence_output_format: json\n")
+        assert tool.streams.pae.ids == ["p1"]

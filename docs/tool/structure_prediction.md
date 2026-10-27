@@ -412,11 +412,13 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 - `num_diffusion_samples`: int = 1 — Diffusion samples per seed.
 - `num_seeds`: int = 1 — Independent seeds; the best by ipTM (complex) / pLDDT (monomer) is kept.
 - `msa_max_depth`: int = 1024 — MSA subsampling depth per loop.
-- `include_pae`: bool = False — Also predict and tabulate PAE (adds `max_pae` to the confidence table).
+- `include_pae`: bool = False — Also tabulate PAE (adds `max_pae` to the confidence table) and write each structure's full PAE matrix to the `pae` stream.
 - `top_only`: bool = True — Keep only the best sample per complex. When False, surface every diffusion sample as `<id>_1..N` (pair with `num_diffusion_samples=N`).
 - `model_name`: str = "biohub/ESMFold2" — HuggingFace checkpoint id (e.g. a Fast variant).
 
-**Streams**: `structures` (mmCIF), `compounds` (ligand passthrough when ligands are folded)
+**Streams**: `structures` (mmCIF), `pae` (only with `include_pae=True`), `compounds` (ligand passthrough when ligands are folded)
+
+`pae` holds one `<id>.npz` per structure, under the same ids as `structures`. The array under key `pae` is the N x N predicted aligned error in Å (0 to 32), float32, over all chains concatenated in token order, where a token is one residue, or one atom for ligands and modified residues. This is the layout Boltz writes, so one reader serves both. The stream's map_table lists only the ids whose matrix was written; a matrix that is not square is skipped with a warning and the structure is kept. Read one with `np.load(path)["pae"]`.
 
 **Tables**:
 - `structures`: | id | file |
@@ -693,7 +695,9 @@ The whole batch folds in one process — `run_openfold predict` takes a single J
 - `devices`: Optional[int] = None - GPUs to distribute over (upstream default 1)
 - `runner_yaml`: Optional[str] = None - a user-supplied runner YAML merged over the wrapper's. The escape hatch for upstream settings this wrapper does not name; the user's keys win
 
-**Streams**: `structures`
+**Streams**: `structures`, `pae`
+
+`pae` holds one `<id>.json` per structure, under the same ids as `structures`. It is upstream's full confidence file for the kept sample (`*_confidences.json`), copied unchanged: a JSON object with the keys `plddt` (N_atom floats), `pde` and `pae` (N_token x N_token nested lists, so `np.array(json.load(f)["pae"])` is the matrix). `pae` is the predicted aligned error in Å (0 to 32). Rows and columns are OpenFold3's tokens over all chains, following AlphaFold3 tokenization: one per standard residue, one per atom for ligands and modified residues. The stream's map_table lists only the ids whose file exists. It is not declared when a user `runner_yaml` sets `write_full_confidence_scores: false` or a `full_confidence_output_format` other than `json`. The file grows with the square of the token count, because upstream writes both `pde` and `pae` with one indented line per value, so a campaign of many large designs pays for it in disk.
 
 **Tables**:
 - `confidence`:

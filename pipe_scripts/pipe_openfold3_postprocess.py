@@ -9,6 +9,8 @@
 confidence JSON beside it. This turns that into one `<id>` per complex (or `<id>_1..K` when the
 user asked for every sample), a structures map_table, and a confidence table.
 
+With --pae-dir, the full confidence JSON beside each kept structure (keys plddt, pde, pae) is copied to `<pae-dir>/<id>.json` and listed in a pae map_table.
+
 Three artifacts, kept separate on purpose: the confidence table has a row for every id that
 ENTERED, with NaN where a number is unavailable; the stream map has only the ids whose file was
 really written; the local missing table says why an id has no structure. A query that failed is
@@ -21,6 +23,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -89,6 +92,11 @@ def read_confidence(structure_path: str) -> Dict[str, Optional[float]]:
     return {column: data.get(key) for column, key in CONFIDENCE_KEYS.items()}
 
 
+def full_confidence_path(structure_path: str) -> str:
+    """The `<prefix>_confidences.json` run_openfold writes beside `<prefix>_model.<ext>`."""
+    return f"{structure_path.rsplit('_model.', 1)[0]}_confidences.json"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Collect OpenFold3 predictions")
     parser.add_argument("--prediction-folder", required=True)
@@ -97,6 +105,8 @@ def main():
     parser.add_argument("--structures-dir", required=True)
     parser.add_argument("--structures-map-csv", required=True)
     parser.add_argument("--confidence-csv", required=True)
+    parser.add_argument("--pae-dir", default=None)
+    parser.add_argument("--pae-map-csv", default=None)
     parser.add_argument("--local-missing-csv", required=True)
     parser.add_argument("--output-format", default="cif")
     parser.add_argument("--top-only", default="True")
@@ -121,11 +131,12 @@ def main():
 
     for directory in (args.structures_dir, os.path.dirname(args.structures_map_csv),
                       os.path.dirname(args.confidence_csv),
-                      os.path.dirname(args.local_missing_csv)):
+                      os.path.dirname(args.local_missing_csv),
+                      args.pae_dir, os.path.dirname(args.pae_map_csv or "")):
         if directory:
             os.makedirs(directory, exist_ok=True)
 
-    map_rows, confidence_rows, missing_rows = [], [], []
+    map_rows, confidence_rows, missing_rows, pae_rows = [], [], [], []
     produced = 0
 
     for query in queries:
@@ -152,6 +163,15 @@ def main():
             with open(path, "rb") as source, open(destination, "wb") as target:
                 target.write(source.read())
             map_rows.append({"id": out_id, "file": destination})
+            if args.pae_dir:
+                confidences = full_confidence_path(path)
+                if os.path.exists(confidences):
+                    pae_destination = os.path.join(args.pae_dir, f"{out_id}.json")
+                    shutil.copyfile(confidences, pae_destination)
+                    pae_rows.append({"id": out_id, "file": pae_destination})
+                else:
+                    print(f"WARNING: no {os.path.basename(confidences)} for {out_id}, "
+                          f"left out of the pae stream")
             row = {"id": out_id, "seed": seed, "sample": sample}
             row.update({k: v for k, v in scores.items() if v is not None})
             confidence_rows.append(row)
@@ -161,6 +181,12 @@ def main():
         writer = csv.DictWriter(handle, fieldnames=["id", "file"])
         writer.writeheader()
         writer.writerows(map_rows)
+
+    if args.pae_map_csv:
+        with open(args.pae_map_csv, "w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["id", "file"])
+            writer.writeheader()
+            writer.writerows(pae_rows)
 
     with open(args.confidence_csv, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=CONFIDENCE_COLUMNS)

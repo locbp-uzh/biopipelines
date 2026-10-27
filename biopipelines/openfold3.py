@@ -68,6 +68,13 @@ class OpenFold3(BaseConfig):
     Outputs:
         Streams:
             structures: one `<id>.cif` (or `.pdb`) per predicted complex.
+            pae:        one `<id>.json` per structure, with the same ids as `structures`.
+                        Upstream's full confidence file for the kept sample (`*_confidences.json`) is copied unchanged.
+                        It is a JSON object with keys `plddt` (N_atom floats), `pde` and `pae` (N_token x N_token nested lists).
+                        `pae` is the predicted aligned error in Angstrom (0 to 32), one list of N_token floats per row.
+                        Read it as `numpy.array(json.load(f)["pae"])`.
+                        Rows and columns are OpenFold3's tokens over all chains, following AlphaFold3 tokenization: one per standard residue, one per atom for ligands and modified residues.
+                        The stream is absent when a user `runner_yaml` sets `write_full_confidence_scores: false` or a `full_confidence_output_format` other than json.
         Tables:
             confidence: id | plddt | ptm | iptm | gpde | has_clash | disorder |
                         ranking_score | seed | sample
@@ -75,7 +82,7 @@ class OpenFold3(BaseConfig):
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     ENV_NAME = "openfold3"
 
     # Upstream spells its flags with underscores. The auto-generated option table in the docs
@@ -133,6 +140,8 @@ fi
     prediction_folder = Path(lambda self: self.execution_folder)
 
     structures_map_csv = Path(lambda self: self.stream_map_path("structures"))
+    pae_folder = Path(lambda self: self.stream_folder("pae"))
+    pae_map_csv = Path(lambda self: self.stream_map_path("pae"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     missing_csv = Path(lambda self: self.table_path("missing"))
     local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
@@ -300,6 +309,20 @@ fi
                      (self.proteins, self.ssDNA, self.dsDNA, self.ssRNA, self.dsRNA, self.ligands)
                      if axis is not None)
 
+    def _writes_full_confidence_json(self) -> bool:
+        """Whether run_openfold writes the `*_confidences.json` the pae stream is copied from.
+
+        Only a user runner_yaml can turn it off; the writer's defaults are on and json.
+        """
+        if not self.runner_yaml or not os.path.exists(self.runner_yaml):
+            return True
+        import yaml
+
+        with open(self.runner_yaml) as handle:
+            writer = (yaml.safe_load(handle) or {}).get("output_writer_settings") or {}
+        return (writer.get("write_full_confidence_scores", True) is not False
+                and writer.get("full_confidence_output_format", "json") == "json")
+
     def _write_runner_yaml(self):
         """Settings upstream reads from a runner YAML rather than the command line.
 
@@ -396,6 +419,9 @@ python "{self.config_py}" \\
 """
 
     def _generate_postprocess_section(self) -> str:
+        pae_flags = ""
+        if self._writes_full_confidence_json():
+            pae_flags = f'    --pae-dir "{self.pae_folder}" \\\n    --pae-map-csv "{self.pae_map_csv}" \\\n'
         return f"""echo "Collecting OpenFold3 predictions"
 python "{self.postprocess_py}" \\
     --prediction-folder "{self.prediction_folder}" \\
@@ -404,7 +430,7 @@ python "{self.postprocess_py}" \\
     --structures-dir "{self.stream_folder('structures')}" \\
     --structures-map-csv "{self.structures_map_csv}" \\
     --confidence-csv "{self.confidence_csv}" \\
-    --local-missing-csv "{self.local_missing_csv}" \\
+{pae_flags}    --local-missing-csv "{self.local_missing_csv}" \\
     --output-format "{self.output_format}" \\
     --top-only "{str(self.top_only)}"
 
@@ -432,6 +458,16 @@ python "{self.postprocess_py}" \\
             format=self.output_format,
         )
 
+        pae = DataStream.empty("pae", "json")
+        if self._writes_full_confidence_json():
+            pae = DataStream(
+                name="pae",
+                ids=structure_ids,
+                files=[self.stream_path("pae", "<id>.json")],
+                map_table=self.pae_map_csv,
+                format="json",
+            )
+
         tables = {
             "confidence": TableInfo(
                 name="confidence",
@@ -445,6 +481,7 @@ python "{self.postprocess_py}" \\
 
         return {
             "structures": structures,
+            "pae": pae,
             "tables": tables,
             "output_folder": self.output_folder,
         }

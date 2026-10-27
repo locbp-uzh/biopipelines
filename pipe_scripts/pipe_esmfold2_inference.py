@@ -13,6 +13,8 @@ with ESMFold2 over `num_seeds` independent seeds, keeps the best sample by ipTM
 (complex) / pLDDT (monomer), and writes one mmCIF per id plus a per-id scores
 JSON consumed by the post-processing script.
 
+With --pae-dir, also writes the full token x token PAE matrix of each kept sample to <pae-dir>/<id>.npz (array key `pae`, Angstrom), the layout Boltz uses.
+
 Runs under the 'esmfold2' conda environment.
 """
 
@@ -49,6 +51,27 @@ _RNA_COMPLEMENT = str.maketrans("ACGU", "UGCA")
 def reverse_complement(seq, entity_type):
     table = _RNA_COMPLEMENT if "rna" in entity_type else _DNA_COMPLEMENT
     return seq.translate(table)[::-1]
+
+
+def pae_matrix(pae):
+    """The PAE of one sample as a square float32 numpy array, or ValueError if it is not one."""
+    import numpy as np
+    if hasattr(pae, "detach"):
+        pae = pae.detach().float().cpu().numpy()
+    matrix = np.asarray(pae, dtype=np.float32)
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError(f"PAE must be a square token x token matrix, got shape {matrix.shape}")
+    return matrix
+
+
+def write_pae(pae_dir, out_id, pae):
+    """Write <pae_dir>/<out_id>.npz with the matrix under key `pae`; returns the path."""
+    import numpy as np
+    matrix = pae_matrix(pae)
+    os.makedirs(pae_dir, exist_ok=True)
+    path = os.path.join(pae_dir, f"{out_id}.npz")
+    np.savez_compressed(path, pae=matrix)
+    return path
 
 
 def load_axis_records(axis):
@@ -431,6 +454,7 @@ def main():
                         "across several low-memory runs of a large complex.")
     p.add_argument("--msa-max-depth", type=int, default=1024)
     p.add_argument("--include-pae", action="store_true")
+    p.add_argument("--pae-dir", default=None)
     p.add_argument("--all-samples", action="store_true")
     p.add_argument("--msas-table", default=None)
     p.add_argument("--constraints", default=None)
@@ -522,6 +546,11 @@ def main():
                 out_path = os.path.join(args.output_dir, f"{out_id}.cif")
                 with open(out_path, "w") as fh:
                     fh.write(res.complex.to_mmcif())
+                if args.pae_dir and getattr(res, "pae", None) is not None:
+                    try:
+                        write_pae(args.pae_dir, out_id, res.pae)
+                    except ValueError as e:
+                        print(f"WARNING: no PAE matrix written for {out_id}: {e}", file=sys.stderr)
                 scores.append(dict(id=out_id, **metrics))
 
             if args.all_samples:

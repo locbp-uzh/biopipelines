@@ -634,8 +634,12 @@ ESMFold2:
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-27'
+    note: >-
+      New `pae` stream, declared only with `include_pae=True`. Each structure's full N x N predicted aligned error is written to `pae/<id>.npz` (array key `pae`, float32, Angstrom, all chains in token order), with the same ids as `structures` and a map_table written by the post-processing step for the ids whose file exists. Until now only `max_pae` reached the confidence table and the matrix was discarded. A matrix that is not square is skipped with a warning and costs the id its pae file, not its structure. Nothing else changes: the structures, the confidence table and the default run are unchanged.
   - version: '2.5'
     date: '2026-10-27'
     note: >-
@@ -1347,8 +1351,12 @@ OpenFold3:
   - pipe_scripts/pipe_openfold3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-27'
+    note: >-
+      New `pae` stream. Upstream writes the full per-sample confidence file `<prefix>_confidences.json` (keys `plddt`, `pde`, `pae`) and the wrapper discarded it; the post-processing step now copies the kept sample's file, unchanged, to `pae/<id>.json` with the same ids as `structures`, and writes the map_table for the ids whose file exists. `pae` is the N_token x N_token predicted aligned error as nested lists. The stream is not declared when a user `runner_yaml` sets `write_full_confidence_scores: false` or a `full_confidence_output_format` other than json, so a run that disabled the file does not fail on an output it never wrote. Nothing else changes.
   - version: '1.4'
     date: '2026-09-23'
     note: >-

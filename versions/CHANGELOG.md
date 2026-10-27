@@ -23,7 +23,13 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 - `write_filtered_map_table` takes `excused_ids`, and `generate_filtered_map_table_block` takes the consumer's `input_sources` so it can pass the upstream `missing` manifests down to `materialize_filtered_map_table.py` (new `--excused`). An id declared at configuration time and absent at runtime raised `KeyError: ids absent from map_table` even when an upstream manifest recorded it as intentionally dropped — the contract everywhere else is that such ids are excused, not failed. Two duplicate sequences out of 2,800, dropped by ProteinMPNN and correctly carried through `Pool`'s merged manifest, stopped a campaign at its MSA step. An absent id with no manifest entry still raises.
 
+- `pae` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-id predicted aligned error matrix a structure predictor can emit for a downstream scorer to read.
+
 ### Tools
+
+- **ESMFold2** 2.5 → 2.6. New `pae` stream with the full predicted aligned error matrix of each structure, declared only with `include_pae=True`. Each kept sample's token x token matrix is written to `pae/<id>.npz` (array key `pae`, float32, Angstrom, the layout Boltz writes), under the same ids as `structures`, with a map_table listing only the ids whose file exists. The matrix used to be reduced to `max_pae` and discarded. Existing outputs, the confidence table and the default run are unchanged.
+
+- **OpenFold3** 1.4 → 1.5. New `pae` stream. The kept sample's full confidence file (`*_confidences.json`: `plddt`, `pde`, `pae`) is copied unchanged to `pae/<id>.json` under the same ids as `structures`, with a map_table listing only the ids whose file exists. Not declared when a user `runner_yaml` disables the file or writes it as npz, so such a run is not failed for an output it never produced. Existing outputs and the default run are unchanged.
 
 - **Boltz2** 2.9 → 2.10. New `pae` output stream: the full predicted aligned error matrix of every structure, `pae/<id>.npz` with the array under the key `pae`. `boltz predict` gets `--write_full_pae` and the postprocessing step copies each sample's `pae_<input>_model_<n>.npz` next to its structure, so the ids are the `structures` ids, `<id>_<k>` per diffusion sample under `top_only=False` included. `pae_map.csv` is written at runtime for the ids whose file exists. No other output changes.
 

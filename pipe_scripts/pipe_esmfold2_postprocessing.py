@@ -12,9 +12,10 @@ mmCIFs, then writes:
   - confidence.csv      (id, file, plddt, ptm, iptm[, max_pae]
                          [, iptm_chain_<a>_<b> per chain pair])
   - compounds_map.csv   (ligand chemistry passthrough, when ligands were folded)
+  - pae_map.csv         (id, file, + {axis}.id provenance columns, when --pae-map is given)
 
-Runs under the 'biopipelines' env. Drops ids whose mmCIF is missing so the map
-stays honest under partial failure.
+Runs under the 'biopipelines' env. Drops ids whose mmCIF is missing, and from the
+PAE map ids whose <id>.npz is missing, so the maps stay honest under partial failure.
 """
 
 import argparse
@@ -53,6 +54,8 @@ def main():
     p.add_argument("--predictions-dir", required=True)
     p.add_argument("--structures-map", required=True)
     p.add_argument("--confidence-csv", required=True)
+    p.add_argument("--pae-dir", default=None)
+    p.add_argument("--pae-map", default=None)
     p.add_argument("--ligands-table", default=None)
     p.add_argument("--compounds-map", default=None)
     args = p.parse_args()
@@ -69,7 +72,7 @@ def main():
     with open(scores_path) as f:
         scores = json.load(f)
 
-    struct_rows, conf_rows = [], []
+    struct_rows, conf_rows, pae_rows = [], [], []
     for s in scores:
         cid = s["id"]
         cif = os.path.join(args.predictions_dir, f"{cid}.cif")
@@ -80,6 +83,12 @@ def main():
         for axis in axes:
             srow[f"{axis}.id"] = prov.get(base_id(cid, prov), {}).get(axis, "")
         struct_rows.append(srow)
+
+        pae_file = os.path.join(args.pae_dir, f"{cid}.npz") if args.pae_dir else None
+        if pae_file and os.path.exists(pae_file):
+            pae_rows.append({**srow, "file": pae_file})
+        elif pae_file:
+            print(f"WARNING: missing PAE matrix for {cid}, left out of the pae stream", file=sys.stderr)
 
         crow = {"id": cid, "file": cif, "plddt": s.get("plddt"),
                 "ptm": s.get("ptm"), "iptm": s.get("iptm")}
@@ -105,6 +114,12 @@ def main():
     os.makedirs(os.path.dirname(args.confidence_csv), exist_ok=True)
     pd.DataFrame(conf_rows).to_csv(args.confidence_csv, index=False)
     print(f"Wrote {len(struct_rows)} structures to {args.structures_map}")
+
+    if args.pae_map:
+        os.makedirs(os.path.dirname(args.pae_map), exist_ok=True)
+        pae_columns = list(struct_rows[0].keys())
+        pd.DataFrame(pae_rows, columns=pae_columns).to_csv(args.pae_map, index=False)
+        print(f"Wrote {len(pae_rows)} PAE matrices to {args.pae_map}")
 
     if args.ligands_table and args.compounds_map:
         if not os.path.exists(args.ligands_table):

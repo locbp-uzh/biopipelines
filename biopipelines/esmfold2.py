@@ -171,7 +171,8 @@ class ESMFold2(BaseConfig):
                     differ only in seed_offset, and the samples pooled. Without it every
                     run starts at seed 0, so repeating a fold reproduces the same sample.
         msa_max_depth: MSA subsampling depth per loop
-        include_pae: also predict and tabulate PAE (max PAE in the confidence table)
+        include_pae: also tabulate PAE (max PAE in the confidence table) and write the
+                    full PAE matrix of each structure to the `pae` stream
         top_only:   keep only the best sample per complex (True) or surface every
                     diffusion sample as <id>_1..N (False)
         model_name: HuggingFace checkpoint id (default biohub/ESMFold2)
@@ -191,6 +192,12 @@ class ESMFold2(BaseConfig):
     Outputs:
         Streams:
             structures: predicted mmCIF, one per complex (B-factor = per-atom pLDDT)
+            pae:        only with include_pae=True, with the same ids as `structures`
+                        One `<id>.npz` per structure holds the N x N predicted aligned error under array key `pae`.
+                        Values are float32 in Angstrom (0 to 32), over all chains concatenated in token order.
+                        A token is one residue, or one atom for ligands and modified residues.
+                        This is the layout Boltz writes, so one reader serves both.
+                        An id whose matrix could not be written has no row.
         Tables:
             structures: id | file
             confidence: id | file | plddt | ptm | iptm [| max_pae]
@@ -210,7 +217,7 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     ENV_NAME = "esmfold2"
 
     @classmethod
@@ -256,6 +263,8 @@ fi
     msas_table_file           = Path(lambda self: self.configuration_path(".input_msas.csv"))
     predictions_folder        = Path(lambda self: self.stream_folder("structures"))
     structures_map_csv        = Path(lambda self: self.stream_map_path("structures"))
+    pae_folder                = Path(lambda self: self.stream_folder("pae"))
+    pae_map_csv               = Path(lambda self: self.stream_map_path("pae"))
     compounds_map_csv         = Path(lambda self: self.stream_map_path("compounds"))
     confidence_csv            = Path(lambda self: self.table_path("confidence"))
     missing_csv               = Path(lambda self: self.table_path("missing"))
@@ -486,7 +495,7 @@ fi
         # Phase 1: inference under the esmfold2 env
         script += self.activate_environment()  # esmfold2 (primary env)
 
-        pae_flag = " --include-pae" if self.include_pae else ""
+        pae_flag = f' --include-pae --pae-dir "{self.pae_folder}"' if self.include_pae else ""
         top_flag = "" if self.top_only else " --all-samples"
         msa_flag = f' --msas-table "{msas_table}"' if msas_table else ""
 
@@ -520,11 +529,16 @@ fi
                 f' --compounds-map "{self.compounds_map_csv}"'
             )
 
+        pae_post_flag = (
+            f' --pae-dir "{self.pae_folder}" --pae-map "{self.pae_map_csv}"'
+            if self.include_pae else ""
+        )
+
         script += f"""python "{self.postprocess_py}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
     --predictions-dir "{self.predictions_folder}" \\
     --structures-map "{self.structures_map_csv}" \\
-    --confidence-csv "{self.confidence_csv}"{compounds_flag}
+    --confidence-csv "{self.confidence_csv}"{pae_post_flag}{compounds_flag}
 
 if [ $? -eq 0 ]; then
     echo "ESMFold2 post-processing completed successfully"
@@ -562,6 +576,16 @@ fi
             map_table=self.structures_map_csv,
             format="cif",
         )
+
+        pae = DataStream.empty("pae", "npz")
+        if self.include_pae:
+            pae = DataStream(
+                name="pae",
+                ids=structure_ids,
+                files=[self.stream_path("pae", "<id>.npz")],
+                map_table=self.pae_map_csv,
+                format="npz",
+            )
 
         confidence_columns = ["id", "file", "plddt", "ptm", "iptm"]
         if self.include_pae:
@@ -603,6 +627,7 @@ fi
 
         return {
             "structures": structures,
+            "pae": pae,
             "sequences": DataStream.empty("sequences", "fasta"),
             "compounds": compounds if compounds is not None else DataStream.empty("compounds", "csv"),
             "tables": tables,

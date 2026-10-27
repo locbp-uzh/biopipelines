@@ -32,11 +32,11 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 20 | DiffDock | Structure Prediction & Docking | 2.1 | `biopipelines/diffdock.py` |
 | 21 | DynamicBind | Structure Prediction & Docking | 2.2 | `biopipelines/dynamicbind.py` |
 | 22 | ESMFold | Structure Prediction & Docking | 2.1 | `biopipelines/esmfold.py` |
-| 23 | ESMFold2 | Structure Prediction & Docking | 2.5 | `biopipelines/esmfold2.py` |
+| 23 | ESMFold2 | Structure Prediction & Docking | 2.6 | `biopipelines/esmfold2.py` |
 | 24 | Gnina | Structure Prediction & Docking | 2.2 | `biopipelines/gnina.py` |
 | 25 | Vina | Structure Prediction & Docking | 2.2 | `biopipelines/gnina.py` |
 | 26 | NeuralPLexer | Structure Prediction & Docking | 2.1 | `biopipelines/neuralplexer.py` |
-| 27 | OpenFold3 | Structure Prediction & Docking | 1.4 | `biopipelines/openfold3.py` |
+| 27 | OpenFold3 | Structure Prediction & Docking | 1.5 | `biopipelines/openfold3.py` |
 | 28 | PLACER | Structure Prediction & Docking | 2.1 | `biopipelines/placer.py` |
 | 29 | ADMETAI | Analysis                       | 2.0 | `biopipelines/admet_ai.py` |
 | 30 | AF2BIND | Analysis                       | 2.0 | `biopipelines/af2bind.py` |
