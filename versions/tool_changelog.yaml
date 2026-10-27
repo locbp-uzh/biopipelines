@@ -2206,3 +2206,14 @@ IPSAE:
       and parsing its score table; the formulas are not reimplemented. Takes structures and a per-id pae stream (npz in Boltz layout,
       json in ColabFold or AlphaFold3 layout). Emits ipsae (one row per id: binder_chain against the best of target_chains),
       ipsae_pairs (every chain-pair row) and missing. pdockq, pdockq2 and iptm_af are NaN when the PAE file carries no pLDDT or ipTM.
+
+Peppr:
+  files:
+  - biopipelines/peppr.py
+  - pipe_scripts/pipe_peppr.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      Initial release. Scores predicted structures against reference structures with the peppr package: backbone RMSD, TM-score, lDDT, lDDT-PLI, fnat, iRMSD, LRMSD and DockQ, one column each in a `peppr` table with one row per prediction. A single reference scores every prediction; several are matched by id, and a sibling id is not a match. A metric peppr cannot compute is NaN, and a prediction that cannot be evaluated at all is NaN throughout and recorded in `missing`. Runs in its own env, with biotite kept below 2.0.

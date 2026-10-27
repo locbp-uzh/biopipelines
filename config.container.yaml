@@ -151,6 +151,7 @@ environments:
   P2Rank: "p2rank"
   Panda: "biopipelines"
   PDB: "biopipelines"
+  Peppr: "peppr"
   PLACER: "placer"
   PLIP: "plip"
   PLM_Sol: "plm_sol"

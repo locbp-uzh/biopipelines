@@ -104,6 +104,7 @@ from .pool import Pool
 from .pdb import PDB, Structure
 from .sasa import SASA
 from .pose_change import PoseChange
+from .peppr import Peppr
 from .bayesian_adjuster import BayesianAdjuster
 from .thermompnn import ThermoMPNN
 from .vespag import VespaG
@@ -251,6 +252,7 @@ __all__ = [
     'Table',
     'SASA',
     'PoseChange',
+    'Peppr',
     'BayesianAdjuster',
     'ThermoMPNN',
     'VespaG',

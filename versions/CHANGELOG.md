@@ -27,6 +27,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **`Peppr` 1.0** (new) - scores predicted complexes against reference structures with [peppr](https://github.com/aivant/peppr): `rmsd`, `tm_score`, `lddt`, `lddt_pli`, `fnat`, `irmsd`, `lrmsd` and `dockq` per prediction, after peppr matches chains and atoms between the two (chain permutations and symmetric ligands included). One reference scores every prediction, or several are matched to the predictions by id, where a sibling id is not a match. A metric peppr cannot compute is NaN; a prediction that cannot be evaluated at all keeps an all-NaN row and gets a `failure` row in `missing`. It runs in its own `peppr` env, because peppr needs Python 3.11 and `biotite` is kept below 2.0, which peppr 0.13.1 does not import against.
+
 - **Foldseek** 1.0 (new). Clusters a structures stream with `foldseek easy-cluster` (single chains) or `easy-multimercluster` (complexes) at each TM-score threshold in `tm_thresholds`, and reports every structure's cluster number, representative and the cluster count of the whole set. Installs from bioconda into its own `foldseek` env, with a BioContainers image registered for container runs. It runs the real aligner, where StructureCluster is a superposition-free proxy that ranks families.
 
 - **SequenceIdentityGate** 1.0 (new). Novelty gate for designed sequences: the maximum global (Needleman-Wunsch, BLOSUM62) identity of each design to a references stream, the nearest reference and a `passed` flag against `threshold`. Runs in the base env on Biopython and never filters; the table is emitted complete for a downstream `Panda.filter`.

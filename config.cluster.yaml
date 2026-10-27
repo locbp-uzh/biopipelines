@@ -205,6 +205,7 @@ environments:
   P2Rank: "p2rank"
   Panda: "biopipelines"
   PDB: "biopipelines"
+  Peppr: "peppr"
   PLACER: "placer"
   PLIP: "biopipelines"  # container mode: host env only needs pandas + helpers
   PLM_Sol: "plm_sol"

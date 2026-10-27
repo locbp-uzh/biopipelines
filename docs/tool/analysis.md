@@ -1331,6 +1331,65 @@ pred = P2Rank(structures=af, config="alphafold")
 
 ---
 
+### Peppr
+
+Scores predicted structures against reference structures with [peppr](https://github.com/aivant/peppr). The atoms of each prediction are matched to its reference, chain permutations and symmetric ligands included, and the CASP/CAPRI metrics are computed: backbone RMSD, TM-score, lDDT, lDDT-PLI, fnat, iRMSD, LRMSD and DockQ. Every value is a plain number per id; nothing is filtered on it, so apply `Panda.filter` downstream.
+
+**Tags**: measure, protein, small-molecule, complex
+
+**Environment**: `peppr`
+
+**Installation**: `Peppr.install()` creates a dedicated conda env (Python 3.11 or newer, which `ProteinEnv` does not guarantee) and installs `peppr` through pip. `biotite` is kept below 2.0 in `environments/peppr.yaml`: peppr 0.13.1 imports a biotite class that 2.0 renamed, so an unbounded install fails at `import peppr`. The verification step imports peppr, so it catches this.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) - Predicted structures (PDB or mmCIF).
+- `references`: Union[DataStream, StandardizedOutput] (required) - Reference structures (PDB or mmCIF). A stream with one id is the reference of every prediction. A stream with several is matched to the predictions by id: the same id, or a parent or child of it (a refold `design_3_1` finds `design_3`). A sibling id is not a match, so a prediction whose reference is absent is not scored against another molecule's.
+- `metrics`: Optional[List[str]] = None - Keys to compute, in column order. Default: all eight.
+
+| key | peppr class | what the value is |
+|-----|-------------|-------------------|
+| `rmsd` | `MonomerRMSD` | Backbone RMSD (Cα, and C3' for nucleic acids) of each polymer chain after superposing it alone, averaged over chains weighted by atom count. Å. |
+| `tm_score` | `MonomerTMScore` | TM-score of each protein chain, averaged the same way. |
+| `lddt` | `MonomerLDDTScore` | lDDT of the contacts inside each polymer chain, averaged the same way. Contacts between chains are not included. |
+| `lddt_pli` | `LDDTPLIScore` | CASP lDDT-PLI, the lDDT of the polymer-ligand interactions. NaN when no ligand touches the polymer in the reference. |
+| `fnat` | `ContactFraction` | Fraction of the reference's contacts between two polymer chains that the prediction reproduces, averaged over chain pairs. |
+| `irmsd` | `InterfaceRMSD` | Interface RMSD between two polymer chains, averaged over pairs. Å. |
+| `lrmsd` | `LigandRMSD` | Backbone RMSD of the shorter chain of each polymer pair in contact, after superposing the longer one, averaged over pairs. Å. |
+| `dockq` | `DockQScore` | DockQ of each chain pair, polymer-ligand pairs included, averaged over pairs. 0 to 1, higher is better. |
+
+`rmsd`, `tm_score` and `lddt` score each chain on its own superposition, so they say nothing about how the chains sit relative to each other; `fnat`, `irmsd`, `lrmsd` and `dockq` do. The four pair metrics are NaN for a structure with one chain. peppr's own `MonomerRMSD` takes an RMSD threshold, but only to bin the summary it can print over many systems; it never changes the value, so there is no `rmsd_threshold` parameter here.
+
+**Input requirements** (peppr's, not this wrapper's): each molecule, polymer chain or ligand, needs its own chain id, and bonds must be known. biotite reads them: polymer bonds come from the Chemical Component Dictionary, ligand bonds from `CONECT` records in a PDB file or from `chem_comp_bond` (else the dictionary) in an mmCIF file. A ligand in a PDB file without `CONECT` records has no bonds and its id fails to match, so give such structures as mmCIF. Hydrogens, solvent and monoatomic ions are dropped. Prediction and reference must contain the same molecules (sequence identity of at least 0.95 per chain); otherwise the id fails with peppr's message in `missing`.
+
+**Tables**:
+- `peppr`: one row per prediction that entered, NaN where a metric could not be computed.
+
+  | id | rmsd | tm_score | lddt | lddt_pli | fnat | irmsd | lrmsd | dockq |
+  |----|------|----------|------|----------|------|-------|-------|-------|
+
+  The columns are `id` plus the requested `metrics`, in that order. A metric peppr cannot compute for a system, such as an interface metric on a monomer, is NaN and is not an error.
+- `missing`: ids that could not be evaluated at all, with `kind` = `failure` and peppr's reason in `cause`. These are a prediction with no matching reference, a file that cannot be read, atoms that cannot be matched to the reference, or every requested metric failing. Their row in `peppr` is all NaN. Ids dropped by an upstream filter are carried over from the upstream `missing` table.
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+**Example**:
+```python
+from biopipelines.peppr import Peppr
+
+# Refolds against one crystal structure
+scores = Peppr(structures=boltz, references=crystal)
+
+# Each refold against the design it derives from, interface metrics only
+scores = Peppr(structures=refolds, references=designs, metrics=["fnat", "irmsd", "lrmsd", "dockq"])
+
+scores.tables.peppr          # id | fnat | irmsd | lrmsd | dockq
+```
+
+**Reference**: peppr, https://github.com/aivant/peppr. The pair metrics and DockQ follow Mirabello & Wallner (2024), https://doi.org/10.1093/bioinformatics/btae586.
+
+---
+
 ### PLM_Sol
 
 Sequence-based protein solubility prediction. PLM_Sol embeds each sequence with ProtT5-XL and classifies it with a biLSTM/TextCNN head trained on the updated E. coli solubility dataset (UESolDS); it is among the strongest sequence-only solubility predictors. It needs no structure — only sequence — so it complements the structure-based aggregation scorer Aggrescan3D. The output `solubility` is a probability in [0,1] (higher = more soluble); `soluble` is the ≥ 0.5 binary call.

@@ -88,6 +88,7 @@ Analyze structures, interactions, stability, and fitness.
 - [IPSAE](tool/analysis.md#ipsae) — Interface confidence (ipSAE) from a predictor's PAE matrix
 - [OpenMM](tool/analysis.md#openmm) — Energy minimization
 - [P2Rank](tool/analysis.md#p2rank) — Ligand binding-site prediction
+- [Peppr](tool/analysis.md#peppr) — Score predictions against references (RMSD, TM-score, lDDT, DockQ)
 - [PLIP](tool/analysis.md#plip) — Interaction profiling
 - [PLM_Sol](tool/analysis.md#plm_sol) — Sequence-based solubility prediction
 - [SequenceIdentityGate](tool/analysis.md#sequenceidentitygate) — Global identity of designs to natural references

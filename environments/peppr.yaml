@@ -1,0 +1,17 @@
+# Peppr environment - scoring of predicted complexes against references.
+# peppr needs Python >= 3.11, which ProteinEnv (python < 3.13, resolved to 3.10 on older installs) cannot promise.
+# biotite is bounded below 2: peppr 0.13.1 imports biotite.structure.AffineTransformation, which biotite 2.0 renamed, so an unbounded install fails at `import peppr`.
+# pandas and pyyaml are what pipe_peppr.py and the biopipelines helpers it imports need.
+name: peppr
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11,<3.14
+  - pip
+  - rdkit
+  - biotite<2
+  - pandas
+  - numpy
+  - pyyaml
+  - pip:
+      - peppr
