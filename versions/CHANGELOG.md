@@ -25,6 +25,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **LigandMPNN** 3.0 → 3.1. Exposes upstream `--save_stats` as `save_stats` (per-position amino-acid distributions in `execution/stats/`, no new stream) and `--ligand_mpnn_use_atom_context` as `use_atom_context` (default True, unchanged behaviour).
+
 - **ESMFold2** 2.4 → 2.5. Adds `seed_offset`, the first seed value, so repeated runs of a large complex draw new samples instead of reproducing seed 0.
 
 - **Aggrescan3D** 2.1 → 2.2. An id an upstream step filtered away is excused instead of flagged. The wrapper owned no `missing` table and declared every id it received, so a gated input left legitimate absences counted as lost outputs: on a 2,799-design campaign 118 structures the geometric gate had rejected were reported as failures and the step wrote a `_FAILED` marker, stranding every job behind it although all 2,682 real outputs were on disk. It now propagates its input's manifest into its own `tables/missing.csv`, which required keeping the input source whole — only the structures stream was retained before.

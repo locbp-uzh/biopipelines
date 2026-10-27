@@ -40,7 +40,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "3.0"
+    TOOL_VERSION = "3.1"
     # `chain` and `chains` were one letter apart and meant different things, which is the
     # Ligand code/codes mistake again. `chains` now answers both.
     PARAMETER_ALIASES = {"chain": "chains"}
@@ -113,6 +113,7 @@ fi
     lmpnn_out_folder = Path(lambda self: self.execution_folder)
     seqs_folder = Path(lambda self: self.execution_path("seqs"))
     packed_folder = Path(lambda self: self.stream_folder("structures"))
+    stats_folder = Path(lambda self: self.execution_path("stats"))
     queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     designs_csv = Path(lambda self: self.stream_path("designs", "designs.csv"))
@@ -147,6 +148,8 @@ fi
                  pack_side_chains: bool = False,
                  packs_per_design: int = 1,
                  pack_with_ligand_context: bool = True,
+                 save_stats: bool = False,
+                 use_atom_context: bool = True,
                  **kwargs):
         """
         Initialize LigandMPNN configuration.
@@ -198,6 +201,55 @@ fi
             pack_with_ligand_context: Pack in the ligand's presence rather than the bare
                        backbone (upstream --pack_with_ligand_context). On by default: for a
                        ligand-binding pocket the ligand is the context that matters.
+            save_stats: Write LigandMPNN's per-position amino-acid distributions
+                       (upstream --save_stats). Off by default, so no existing
+                       pipeline changes behaviour. One torch .pt per input
+                       structure lands in `execution/stats/<id>.pt` holding
+                       `log_probs` and `sampling_probs` of shape [B, L, 21]
+                       alongside `generated_sequences`, `native_sequence`,
+                       `decoding_order`, `seed` and `temperature`.
+
+                       These are NOT added to the output streams: the file is a
+                       torch tensor, not a table, and declaring a stream would
+                       change this tool's output structure for every pipeline
+                       that already uses it. Read it from `stats_folder`.
+
+                       The probabilities are autoregressive and therefore
+                       conditional on the decoding order. Redesign several
+                       positions at once and a row is conditioned on whatever
+                       the model happened to place at the positions decoded
+                       before it, which is rarely what you want.
+
+                       With ONE position redesigned the row IS a marginal --
+                       that position is decoded last, over a fully known context
+                       -- but it is still not deterministic, and treating it as
+                       such is a mistake worth naming. LigandMPNN randomises the
+                       decoding order of the FIXED positions too, and the
+                       decoder builds each representation causally along that
+                       order, so the context feeding the designed position
+                       differs between batch members even though the set of
+                       known residues does not. Measured on a 353-residue
+                       protein: relative sd about 10% on the leading amino acids
+                       across 32 members.
+
+                       So average PROBABILITIES over the batch, which
+                       marginalises over decoding orders, and take batch_size x
+                       num_batches large enough that the residual matters less
+                       than the effect being measured. Averaging log
+                       probabilities instead over-weights whichever orders came
+                       out most confident.
+            use_atom_context: Let the model see the ligand's atoms (upstream
+                       --ligand_mpnn_use_atom_context). True by default, which is
+                       upstream's default too, so nothing changes for existing
+                       pipelines -- the flag is only emitted when it is False.
+
+                       False is the ablated control: the SAME structure file, the
+                       same everything, with only the ligand-atom channel turned
+                       off. Prefer it over deleting the HETATM records when what
+                       you want is the ligand's contribution, because a stripped
+                       file also changes what side-chain context parsing sees
+                       (run.py gates `parse_all_atoms_flag` on ligand presence),
+                       so the two inputs differ in more than the one variable.
 
         Output:
             Streams: sequences (.csv), fasta (.fasta), structures (.pdb, only when
@@ -237,6 +289,8 @@ fi
         self.pack_side_chains = pack_side_chains
         self.packs_per_design = packs_per_design
         self.pack_with_ligand_context = pack_with_ligand_context
+        self.save_stats = save_stats
+        self.use_atom_context = use_atom_context
 
         super().__init__(**kwargs)
 
@@ -389,6 +443,15 @@ python {self.runtime_positions_py} "{self.positions_args_json}"
         options += self.extra_args_tokens()
 
         option_array = " ".join('"' + token.replace('"', '\\"') + '"' for token in options)
+
+        # Upstream takes an int, not a store_true, and creates out_folder/stats
+        # itself when it is non-zero.
+        if self.save_stats:
+            base_options += ' --save_stats 1'
+
+        # Upstream defaults this to 1, so emit it only to turn the context OFF.
+        if not self.use_atom_context:
+            base_options += ' --ligand_mpnn_use_atom_context 0'
 
         return f"""echo "Executing LigandMPNN commands..."
 cd {self.lmpnn_folder}
@@ -545,6 +608,8 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
                 "design_within": self.design_within,
                 "model": self.model,
                 "remove_duplicates": self.remove_duplicates,
+                "save_stats": self.save_stats,
+                "use_atom_context": self.use_atom_context,
                 "temperature": self.temperature,
                 "bias_AA_per_residue": self.bias_AA_per_residue,
                 "seed": self.seed,
