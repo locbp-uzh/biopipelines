@@ -423,6 +423,12 @@ def main():
     p.add_argument("--num-sampling-steps", type=int, default=100)
     p.add_argument("--num-diffusion-samples", type=int, default=1)
     p.add_argument("--num-seeds", type=int, default=1)
+    p.add_argument("--seed-offset", type=int, default=0,
+                   help="First seed value. Seeds run offset..offset+num_seeds-1. "
+                        "Without it every run starts at seed 0, so repeating a fold "
+                        "reproduces the same samples instead of drawing new ones -- "
+                        "which makes it impossible to accumulate independent samples "
+                        "across several low-memory runs of a large complex.")
     p.add_argument("--msa-max-depth", type=int, default=1024)
     p.add_argument("--include-pae", action="store_true")
     p.add_argument("--all-samples", action="store_true")
@@ -461,7 +467,8 @@ def main():
             # fold() returns a list of per-diffusion-sample results (a single
             # MolecularComplexResult when num_diffusion_samples==1); normalize to a list.
             samples = []  # (rank, metrics, result) across all seeds x diffusion samples
-            for seed in range(args.num_seeds):
+            for seed in range(args.seed_offset,
+                              args.seed_offset + args.num_seeds):
                 with torch.no_grad():
                     out = folder.fold(
                         model, spi,

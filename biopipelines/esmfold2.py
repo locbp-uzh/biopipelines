@@ -165,6 +165,11 @@ class ESMFold2(BaseConfig):
         num_sampling_steps: diffusion sampling steps
         num_diffusion_samples: diffusion samples per seed
         num_seeds:  independent seeds; best by ipTM (complex) / pLDDT (monomer) is kept
+        seed_offset: first seed value; seeds run offset..offset+num_seeds-1. Peak GPU
+                    memory is set by num_diffusion_samples, so a complex too large to
+                    sample deeply in one run can be sampled across several runs that
+                    differ only in seed_offset, and the samples pooled. Without it every
+                    run starts at seed 0, so repeating a fold reproduces the same sample.
         msa_max_depth: MSA subsampling depth per loop
         include_pae: also predict and tabulate PAE (max PAE in the confidence table)
         top_only:   keep only the best sample per complex (True) or surface every
@@ -205,7 +210,7 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     ENV_NAME = "esmfold2"
 
     @classmethod
@@ -278,6 +283,7 @@ fi
         num_sampling_steps: int = 100,
         num_diffusion_samples: int = 1,
         num_seeds: int = 1,
+        seed_offset: int = 0,
         msa_max_depth: int = 1024,
         include_pae: bool = False,
         top_only: bool = True,
@@ -322,6 +328,7 @@ fi
         self.num_sampling_steps = num_sampling_steps
         self.num_diffusion_samples = num_diffusion_samples
         self.num_seeds = num_seeds
+        self.seed_offset = seed_offset
         self.msa_max_depth = msa_max_depth
         self.include_pae = include_pae
         self.top_only = top_only
@@ -353,6 +360,10 @@ fi
         ):
             if not isinstance(val, int) or val < 1:
                 raise ValueError(f"{name} must be a positive integer")
+
+        # 0 is valid and the default, so it cannot go in the >= 1 loop above.
+        if not isinstance(self.seed_offset, int) or self.seed_offset < 0:
+            raise ValueError(f"seed_offset must be a non-negative int, got {self.seed_offset!r}")
 
         if not isinstance(self.top_only, bool):
             raise ValueError("top_only must be a bool")
@@ -426,7 +437,8 @@ fi
         lines.extend([
             f"MODEL: {self.model_name}",
             f"LOOPS: {self.num_loops} | SAMPLING STEPS: {self.num_sampling_steps}",
-            f"DIFFUSION SAMPLES: {self.num_diffusion_samples} | SEEDS: {self.num_seeds}",
+            f"DIFFUSION SAMPLES: {self.num_diffusion_samples} | SEEDS: {self.num_seeds}"
+            + (f" (from {self.seed_offset})" if self.seed_offset else ""),
             f"MSA RECYCLING: {'on' if self.msas is not None else 'off (single-sequence)'}",
             f"INCLUDE PAE: {self.include_pae}",
             f"TOP ONLY: {self.top_only}",
@@ -487,6 +499,7 @@ fi
     --num-sampling-steps {self.num_sampling_steps} \\
     --num-diffusion-samples {self.num_diffusion_samples} \\
     --num-seeds {self.num_seeds} \\
+    --seed-offset {self.seed_offset} \\
     --msa-max-depth {self.msa_max_depth}{pae_flag}{top_flag}{msa_flag}{constraints_flag}
 
 if [ $? -ne 0 ]; then

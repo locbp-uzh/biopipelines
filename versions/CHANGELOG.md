@@ -25,6 +25,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **ESMFold2** 2.4 → 2.5. Adds `seed_offset`, the first seed value, so repeated runs of a large complex draw new samples instead of reproducing seed 0.
+
 - **Aggrescan3D** 2.1 → 2.2. An id an upstream step filtered away is excused instead of flagged. The wrapper owned no `missing` table and declared every id it received, so a gated input left legitimate absences counted as lost outputs: on a 2,799-design campaign 118 structures the geometric gate had rejected were reported as failures and the step wrote a `_FAILED` marker, stranding every job behind it although all 2,682 real outputs were on disk. It now propagates its input's manifest into its own `tables/missing.csv`, which required keeping the input source whole — only the structures stream was retained before.
 
 - **Load** 1.5 → 1.6. A producer's `missing.csv` is honoured whenever it exists, not only when the step carried a completion marker at configuration time. The exclusion sat behind `elif not self.pending`, so a pipeline generated while its producer was still running declared every id the producer had promised, including the ones it went on to drop. One sequence out of 801 that legitimately got no MSA was declared downstream, the consumer counted 800 of 801 expected outputs and wrote a `_FAILED` marker, and 132 queued jobs stranded on `DependencyNeverSatisfied`. A genuinely pending step, which has no `missing.csv` yet, no longer reports the absent file as a warning.
