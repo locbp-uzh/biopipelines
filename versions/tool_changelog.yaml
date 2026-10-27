@@ -2230,3 +2230,27 @@ RFD4Proteina:
     date: '2026-10-27'
     note: >-
       New tool: sequence-structure co-design with RFD4-Proteina (Baker Lab x NVIDIA, BSD-3-Clause code and weights) driven by its YAML condition spec. Implements protein binders (the upstream PPI recipe: target backbone as one internal-coordinate group, full target sequence, hotspots), small-molecule binders (ligand kept by a preserved contig segment) and indexed motif scaffolding; further conditions go through `conditions`, further Hydra options through forwarded keywords.
+
+LigandDdG:
+  files:
+  - biopipelines/ligand_ddg.py
+  - pipe_scripts/pipe_ligand_ddg.py
+  - biopipelines/rosetta_scoring.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      Initial release. Protein-ligand binding energy with PyRosetta, one tool with a scoring choice between Chaperone's two blocks: "soft" (ligand_ddg_soft; repack the interface with beta_nov16, score with beta_nov16_soft, trimmed mean over replicates) and "hard" (ligand_ddg; the active steps of ddg_protocol.xml run through PyRosetta's RosettaScripts parser, Ddg filter with repack=0). The ligand is parameterized per structure from the compounds stream's SMILES (RDKit bond orders, Dimorphite-DL protonation at ph, unique element-first atom names) with Rosetta's molfile_to_params.py, which the install fetches because the PyRosetta wheel does not ship it; params_file supplies pre-made parameters instead. Rosetta energy units. One row per input structure, NaN on failure.
+
+PPIDdG:
+  files:
+  - biopipelines/ppi_ddg.py
+  - pipe_scripts/pipe_ppi_ddg.py
+  - biopipelines/rosetta_scoring.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      Initial release. Protein-protein binding energy with PyRosetta, mirroring the ppi_ddg block of Chaperone: FastRelax with optional coordinate constraints to the input, then ddG = score(complex) - score(binder chain translated 10 000 A away) with beta_nov16 and no repacking, mean and population standard deviation over independent replicates. Rosetta energy units. One row per input structure, NaN on failure. Runs in the new PyRosetta environment shared with LigandDdG; PyRosetta needs a commercial license outside academic use.

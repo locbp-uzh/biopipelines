@@ -1666,6 +1666,113 @@ good_poses = Panda(
 
 ---
 
+### LigandDdG
+
+Protein-ligand binding energy with PyRosetta, with the ligand parameterized on the fly. ddG is the Rosetta score of the complex minus the score with the protein chain translated 10 000 Å away from the ligand; more negative means stronger predicted binding. Two scoring schemes, both ported from [Chaperone](https://github.com/RosettaCommons/chaperone) blocks, selected by `scoring`:
+
+- `"soft"` (`ligand_ddg_soft`, the default): the interface within 10 Å of the ligand is repacked with beta_nov16, then the complex is scored with the soft-repulsive beta_nov16_soft against the separated state. This is repeated `replicates` times on the same pose; with at least three values the best and worst are dropped and the rest averaged. The soft score forgives the small clashes of predicted structures that would otherwise dominate the hard one.
+- `"hard"` (`ligand_ddg`): backbone-constrained soft-then-hard minimization of the interface, then Rosetta's Ddg filter (beta_nov16, `repack=0`) across the ligand's jump. A single run. The protocol is the active part of Chaperone's `ddg_protocol.xml`, run through PyRosetta's RosettaScripts parser.
+
+The numbers are Rosetta energy units, not kcal/mol and not measured affinities, and a hard value must not be compared with a soft one.
+
+**Tags**: measure, complex, protein, small-molecule, binding, energy
+
+**References**: https://github.com/RosettaCommons/chaperone, https://doi.org/10.1093/bioinformatics/btq007
+
+**License**: PyRosetta is free for academic and non-profit use and needs a paid commercial license from the University of Washington (license@uw.edu). Installing it accepts the PyRosetta license; the Rosetta scripts fetched at install time fall under the Rosetta license.
+
+**Environment**: `PyRosetta`, shared with [PPIDdG](#ppiddg) (see there for what the install builds); CPU only, no Daint entry.
+
+**Ligand parameters.** Rosetta needs a `.params` file for a non-standard residue, and the PyRosetta wheel does not ship the tool that writes it. For each structure the ligand is cut out of the complex and rebuilt: bond orders and charges come from the SMILES of the `ligand` compounds stream, hydrogens are added at `ph` with Dimorphite-DL when the structure carries none (a ligand that already has hydrogens is used as written), atoms are renamed to unique element-first names, and Rosetta's `molfile_to_params.py` writes the params. Parameters are generated per structure, so atom names never have to agree across structures. If that cannot work for a ligand (no SMILES, or `molfile_to_params.py` cannot type it), the structure is recorded as a failure with the message, and `params_file` supplies pre-made parameters instead. Only the protein chain and the ligand are kept; other chains, waters and other hetero residues are dropped, and hydrogens on the protein chain are discarded for Rosetta to rebuild.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) — PDB complexes; mmCIF is not read.
+- `ligand`: str | DataStream | StandardizedOutput (required) — Compounds stream naming the ligand (`Ligand(smiles=..., codes="LIG")` or any compounds-producing tool); a bare string is shorthand for `Ligand(codes=...)`. The residue code is read from the stream's `code` column and must be the residue name of the ligand in the structures, at most 3 characters in a PDB. Unless `params_file` is given, the stream must carry a single SMILES; a code-only ligand cannot be parameterized.
+- `scoring`: str = "soft" — `"soft"` or `"hard"`, as above.
+- `binder_chain`: str = "A" — The protein chain, translated away to give the unbound state.
+- `ligand_chain`: str = "B" — The chain carrying the ligand. Exactly one residue named like the ligand code must sit on it, so a structure with several copies of the ligand on that chain fails.
+- `replicates`: int = None — Pack + score cycles for `scoring="soft"`, default 5. Refused with `scoring="hard"`, which runs once.
+- `ph`: float = 7.4 — pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for. Ignored with `params_file` and for a ligand that already has hydrogens.
+- `params_file`: str = None — Path to a pre-made Rosetta `.params` file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and nothing is generated.
+
+**Tables**:
+- `ligand_ddg`: the columns follow `scoring`.
+
+  | id | ddg_norepack |
+  |----|--------------|
+
+  `scoring="hard"`: the Ddg filter value.
+
+  | id | ddg_soft | ddg_soft_std | n_replicates_used |
+  |----|----------|--------------|-------------------|
+
+  `scoring="soft"`: the trimmed mean of the replicate ddG values, the population standard deviation of the retained ones, and how many were retained (`replicates`, minus two when there are at least three). One row per input structure; a structure that fails keeps its row with NaN values, and the reason is in `missing`. No threshold is applied; filter downstream with `Panda.filter`.
+
+- `missing`: | id | removed_by | kind | cause |
+
+**Example**:
+```python
+from biopipelines.ligand_ddg import LigandDdG
+
+# Rank co-folded designs by how favorably Rosetta scores the bound ligand.
+ligand = Ligand(smiles="CC(=O)Nc1ccc(O)cc1", codes="LIG")
+folded = Boltz2(proteins=designs, ligands=ligand)
+ddg = LigandDdG(structures=folded, ligand=ligand, scoring="soft", replicates=5)
+
+best = Panda(tables=ddg.tables.ligand_ddg, operations=[Panda.sort("ddg_soft"), Panda.head(10)])
+```
+
+---
+
+### PPIDdG
+
+Protein-protein binding energy with PyRosetta. Each complex is relaxed with FastRelax (optionally constrained to the input coordinates), then ddG = score(relaxed complex) - score(`binder_chain` translated 10 000 Å away) is computed with beta_nov16 and no repacking of the separated state. Mirrors the `ppi_ddg` block of [Chaperone](https://github.com/RosettaCommons/chaperone).
+
+The numbers are Rosetta energy units, not kcal/mol and not measured affinities; more negative means stronger predicted binding. They compare only across runs with identical chains, relaxation settings and score function, and the cheap setting (`relax_rounds=1`, `replicates=1`) is noisy: FastRelax is stochastic, so raise `replicates` before ranking close designs.
+
+**Tags**: measure, complex, protein, binding, energy
+
+**References**: https://github.com/RosettaCommons/chaperone, https://doi.org/10.1093/bioinformatics/btq007
+
+**License**: PyRosetta is free for academic and non-profit use and needs a paid commercial license from the University of Washington (license@uw.edu). Installing it accepts the PyRosetta license.
+
+**Environment**: `PyRosetta` (shared with [LigandDdG](#ligandddg)); CPU only, x86-64 Linux or Colab. PyRosetta has no aarch64 Linux wheel, so there is no Daint entry.
+
+**Installation**: `PPIDdG.install()` (or `LigandDdG.install()`) creates the `PyRosetta` environment (Python 3.10, which `molfile_to_params.py` needs because it opens files in a mode Python 3.11 removed) from `environments/PyRosetta.yaml` and `PyRosetta.pip.txt`: `pyrosetta` from the RosettaCommons index, unpinned, plus RDKit and Dimorphite-DL. It then sparse-clones `source/scripts/python/public` of [RosettaCommons/rosetta](https://github.com/RosettaCommons/rosetta) into `<env prefix>/share/rosetta_public`, because the PyRosetta wheel does not ship `molfile_to_params.py`, which LigandDdG needs.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) — PDB complexes; mmCIF is not read. Intended for the 20 standard amino acids: a ligand or other hetero residue makes Rosetta fail on that structure.
+- `binder_chain`: str = "A" — The chain translated away to give the unbound state.
+- `target_chain`: str = "B" — The partner that stays in place. It must exist in the structure. As in Chaperone's block, every chain other than `binder_chain` stays in place, so extra chains count as part of the target.
+- `relax_rounds`: int = 1 — FastRelax repeats per replicate. One round takes roughly 1-3 minutes per structure on a CPU core; 3-5 gives lower, more converged energies.
+- `replicates`: int = 1 — Independent relax + ddG cycles, each starting from the input. Each adds one full relax run; with 1 the standard deviation is 0.
+- `constrain_to_start_coords`: bool = True — Harmonic coordinate constraints to the input during FastRelax, keeping the backbone near the supplied geometry. The reported scores use plain beta_nov16, so the constraint weight never enters them.
+- `constraint_weight`: float = 1.0 — Weight of those constraints; higher stays closer to the input.
+
+**Tables**:
+- `ppi_ddg`:
+
+  | id | ddg | ddg_std | n_replicates | relax_score |
+  |----|-----|---------|--------------|-------------|
+
+  `ddg` is the mean over replicates, `ddg_std` their population standard deviation, `relax_score` the total beta_nov16 score of the relaxed complex from the last replicate. One row per input structure: a structure that fails keeps its row with NaN values, and the reason is in `missing`. No threshold is applied; filter downstream with `Panda.filter`.
+
+- `missing`: | id | removed_by | kind | cause |
+
+**Example**:
+```python
+from biopipelines.ppi_ddg import PPIDdG
+
+# Chain A of each predicted complex is the designed binder, chain B the target.
+folded = Boltz2(proteins=designs)
+ddg = PPIDdG(structures=folded, binder_chain="A", target_chain="B", relax_rounds=3, replicates=3)
+
+# Most favorable first, with the replicate spread alongside for judging whether two scores differ.
+best = Panda(tables=ddg.tables.ppi_ddg, operations=[Panda.sort("ddg"), Panda.head(10)])
+```
+
+---
+
 ### Prodigy
 
 Binding-affinity prediction for **protein–protein** complexes. For each complex PDB, reports the predicted dissociation constant Kd and binding free energy ΔG between two chain groups, from interfacial contacts.

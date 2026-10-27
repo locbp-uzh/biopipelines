@@ -1,0 +1,10 @@
+# PyRosetta environment shared by PPIDdG and LigandDdG.
+# PyRosetta is free for academic use and needs a paid commercial license; installing it accepts the PyRosetta license.
+# Python stays at 3.10: molfile_to_params.py (LigandDdG) opens its input with mode 'rU', which Python 3.11 removed.
+# The conda layer is only Python + pip; the wheel (x86-64 Linux and macOS only, hence no daint entry) and the chemistry stack come from the pip layer (PyRosetta.pip.txt).
+name: PyRosetta
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip

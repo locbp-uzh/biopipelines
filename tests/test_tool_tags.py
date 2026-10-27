@@ -142,9 +142,9 @@ class TestFiltering:
         assert tool_tags.matches(["protein"], [])
         assert not tool_tags.matches(["fetch"], [], exclude=["fetch"])
 
-    def test_the_documented_negative_query_returns_prodigy(self):
+    def test_the_documented_negative_query_returns_the_protein_protein_binding_tools(self):
         found = tool_tags.select(tool_docs.collect(), ["protein", "binding"], ["small-molecule"])
-        assert [e["name"] for e in found] == ["Prodigy"]
+        assert sorted(e["name"] for e in found) == ["PPIDdG", "Prodigy"]
 
     def test_excluding_fetch_answers_what_runs_offline(self):
         offline = {e["name"] for e in tool_tags.select(tool_docs.collect(), [], ["fetch"])}

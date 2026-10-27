@@ -12,7 +12,7 @@ Tags are a *closed* vocabulary of 38 terms in four facets. Closed on purpose: an
 
 ```
 bp_tools(tags=["dock", "covalent"])                      # tools that do both
-bp_tools(tags=["protein", "binding"], exclude=["small-molecule"])   # → Prodigy
+bp_tools(tags=["protein", "binding"], exclude=["small-molecule"])   # → PPIDdG, Prodigy
 ```
 
 Within a facet the terms are **OR**-ed; across facets they are **AND**-ed. So `tags=["dock", "predict-structure", "covalent"]` means *(docking or structure prediction) and covalent*, which is almost always what you meant. `exclude=` removes any tool carrying any excluded tag, and it is what makes the near-universal tags useful: `protein` alone matches three quarters of the catalog, but `protein` minus `small-molecule` is a sharp question.

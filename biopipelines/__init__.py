@@ -111,6 +111,8 @@ from .thermompnn import ThermoMPNN
 from .vespag import VespaG
 from .aggrescan3d import Aggrescan3D
 from .plm_sol import PLM_Sol
+from .ppi_ddg import PPIDdG
+from .ligand_ddg import LigandDdG
 from .converters import *
 from .entities import *
 
@@ -260,6 +262,8 @@ __all__ = [
     'VespaG',
     'Aggrescan3D',
     'PLM_Sol',
+    'PPIDdG',
+    'LigandDdG',
 
     # Utility functions
     'pdb_to_jsonl',

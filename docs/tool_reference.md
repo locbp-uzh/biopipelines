@@ -80,6 +80,7 @@ Analyze structures, interactions, stability, and fitness.
 - [Distance](tool/analysis.md#distance) — Distance measurements
 - [DistanceSelector](tool/analysis.md#distanceselector) — Proximity-based selection
 - [LigandAtomSelector](tool/analysis.md#ligandatomselector) — Proximity selection around named ligand atoms
+- [LigandDdG](tool/analysis.md#ligandddg) — Rosetta protein–ligand binding energy (PyRosetta), hard or soft-repulsive scoring
 - [DSSP](tool/analysis.md#dssp) — Secondary-structure assignment
 - [EnsembleAnalysis](tool/analysis.md#ensembleanalysis) — Per-residue RMSF from any ensemble
 - [StructureCluster](tool/analysis.md#structurecluster) — Cluster designs by fold and rank the families by mean metrics
@@ -95,6 +96,7 @@ Analyze structures, interactions, stability, and fitness.
 - [SequenceIdentityGate](tool/analysis.md#sequenceidentitygate) — Global identity of designs to natural references
 - [PoseBusters](tool/analysis.md#posebusters) — Pose validation
 - [PoseChange](tool/analysis.md#posechange) — Ligand pose comparison
+- [PPIDdG](tool/analysis.md#ppiddg) — Rosetta protein–protein binding energy after FastRelax (PyRosetta)
 - [Prodigy](tool/analysis.md#prodigy) — Protein–protein affinity
 - [ProLIF](tool/analysis.md#prolif) — Interaction fingerprints
 - [Reduce](tool/analysis.md#reduce) — Add explicit hydrogens

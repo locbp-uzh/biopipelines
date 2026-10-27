@@ -1,0 +1,9 @@
+# PyRosetta pip layer: the wheel comes from the RosettaCommons index, which carries the PyRosetta license text.
+# rdkit builds the ligand SDF, dimorphite-dl protonates it at the requested pH; pandas and pyyaml are what the pipe scripts import.
+--find-links https://west.rosettacommons.org/pyrosetta/quarterly/release.cxx11thread.serialization
+pyrosetta
+rdkit
+dimorphite-dl
+numpy
+pandas
+pyyaml
