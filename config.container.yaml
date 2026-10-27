@@ -127,6 +127,7 @@ environments:
   ESMFold: "esmfold"
   ESMFold2: "esmfold2"
   ExtractMetrics: "biopipelines"
+  Foldseek: "foldseek"
   FPocket: "fpocket"
   Frame2Seq: "frame2seq"
   Fuse: "biopipelines"

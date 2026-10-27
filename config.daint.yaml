@@ -193,6 +193,7 @@ environments:
   ReMap: "biopipelines"
   Scripting: "biopipelines"
   Sequence: "biopipelines"
+  SequenceIdentityGate: "biopipelines"
   StitchSequences: "biopipelines"
   StructureCluster: "biopipelines"
   Table: "biopipelines"

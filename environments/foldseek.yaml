@@ -1,0 +1,12 @@
+# Foldseek environment - structural clustering (bioconda binary).
+name: foldseek
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - foldseek
+  - pandas
+  - numpy
+  - pyyaml

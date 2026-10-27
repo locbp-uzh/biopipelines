@@ -82,6 +82,7 @@ Analyze structures, interactions, stability, and fitness.
 - [DSSP](tool/analysis.md#dssp) — Secondary-structure assignment
 - [EnsembleAnalysis](tool/analysis.md#ensembleanalysis) — Per-residue RMSF from any ensemble
 - [StructureCluster](tool/analysis.md#structurecluster) — Cluster designs by fold and rank the families by mean metrics
+- [Foldseek](tool/analysis.md#foldseek) — Structural clustering at TM-score thresholds
 - [FPocket](tool/analysis.md#fpocket) — Alpha-sphere pocket detection
 - [GEMS](tool/analysis.md#gems) — Protein–ligand affinity (GNN)
 - [IPSAE](tool/analysis.md#ipsae) — Interface confidence (ipSAE) from a predictor's PAE matrix
@@ -89,6 +90,7 @@ Analyze structures, interactions, stability, and fitness.
 - [P2Rank](tool/analysis.md#p2rank) — Ligand binding-site prediction
 - [PLIP](tool/analysis.md#plip) — Interaction profiling
 - [PLM_Sol](tool/analysis.md#plm_sol) — Sequence-based solubility prediction
+- [SequenceIdentityGate](tool/analysis.md#sequenceidentitygate) — Global identity of designs to natural references
 - [PoseBusters](tool/analysis.md#posebusters) — Pose validation
 - [PoseChange](tool/analysis.md#posechange) — Ligand pose comparison
 - [Prodigy](tool/analysis.md#prodigy) — Protein–protein affinity

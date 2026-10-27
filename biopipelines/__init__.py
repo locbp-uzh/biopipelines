@@ -87,6 +87,8 @@ from .bioemu2 import BioEmu2
 from .cabsflex import CABSflex
 from .ensemble_analysis import EnsembleAnalysis
 from .structure_cluster import StructureCluster
+from .foldseek import Foldseek
+from .sequence_identity_gate import SequenceIdentityGate
 from .scripting import Scripting
 from .mutagenesis import Mutagenesis
 from .selection import Selection
@@ -229,6 +231,8 @@ __all__ = [
     'CABSflex',
     'EnsembleAnalysis',
     'StructureCluster',
+    'Foldseek',
+    'SequenceIdentityGate',
     'Scripting',
     'Mutagenesis',
     'Selection',

@@ -14,5 +14,6 @@ DiffDock: docker://rbgcsail/diffdock:v1.1.3  # entrypoint runs `micromamba activ
 
 # BioContainers
 FPocket: docker://quay.io/biocontainers/fpocket:4.0.0
+Foldseek: docker://quay.io/biocontainers/foldseek:10.941cd33--h5021889_1
 XTB: docker://quay.io/biocontainers/xtb:6.7.1
 Reduce: docker://quay.io/biocontainers/reduce:4.15--py312hf731ba3_4

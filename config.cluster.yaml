@@ -181,6 +181,7 @@ environments:
   ESMFold: "esmfold"
   ESMFold2: "esmfold2"
   ExtractMetrics: "biopipelines"
+  Foldseek: "foldseek"
   FPocket: "fpocket"
   Frame2Seq: "frame2seq"
   Fuse: "biopipelines"
@@ -253,6 +254,7 @@ containers:
   # ProteinMPNN: "<containers>/proteinmpnn.sif"
   # LigandMPNN: "<containers>/ligandmpnn.sif"
   # DiffDock: "<containers>/diffdock.sif"
+  # Foldseek: "<containers>/foldseek.sif"
 tool_overrides:
   gnina:
     modules:

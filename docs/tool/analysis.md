@@ -558,6 +558,8 @@ This is a proxy for TM-score, not TM-align. dRMSD on a resampled trace is cheape
 
 Clustering is sphere exclusion (leader / Taylor-Butina) in *ranking* order: structures are visited best-first, and each unassigned structure becomes a representative that absorbs everything within `threshold` of it. Two consequences worth knowing — each cluster's representative is its best-scoring member (the model you actually want to open), and a structure joins the *first* representative that captures it rather than its nearest one. Cost is O(N·n_clusters), not O(N²).
 
+For clustering with the real TM-align aligner at fixed TM-score thresholds, or of whole complexes, use [Foldseek](#foldseek); it counts folds but does not rank them.
+
 **Tags**: data, protein, ensemble
 
 **Environment**: `biopipelines` (numpy + pandas + the shared PDB parser, which already reads mmCIF; no external tool, no dedicated env)
@@ -606,6 +608,54 @@ reps = Panda(tables=families.tables.assignments,
                          Panda.sort("cluster_rank")],
              pool=folds)
 ```
+
+---
+
+### Foldseek
+
+Clusters structures at fixed TM-score thresholds with Foldseek and reports each structure's cluster and the cluster count of the set. It answers "how many distinct folds came out, and which designs share one" under a protocol you can quote: `foldseek easy-cluster` for single chains, `foldseek easy-multimercluster` for complexes, run once per threshold in `tm_thresholds`. Cluster counts describe diversity under that protocol; they are not a per-design quality score.
+
+**Not StructureCluster.** [StructureCluster](#structurecluster) is a base-environment triage tool: a superposition-free distance-matrix proxy for TM-score, built for thousands of models, that ranks the families it finds on metrics you hand it. Foldseek runs the real aligner (TM-align by default) at published TM-score cutoffs, can cluster whole complexes, and ranks nothing. Use StructureCluster to decide which families to open; use Foldseek to report diversity.
+
+**Tags**: measure, protein, complex
+
+**Environment**: `foldseek` (bioconda binary; `Foldseek.install()` builds it from `environments/foldseek.yaml`). A BioContainers image is registered in `environments/_containers.yaml` and used when a `containers:` destination is set.
+
+**TM-score threshold.** Foldseek keeps an alignment when its TM-score exceeds the threshold (`--tmscore-threshold`). Foldseek's default normalizes that TM-score by the aligned region, and no coverage requirement is set, so a short well-aligned segment can join two structures; counts therefore tend to understate diversity. Each threshold is a separate Foldseek run, so the cost grows with the number of thresholds.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) — PDB or mmCIF structures.
+- `tm_thresholds`: list[float] = [0.5, 0.6, 0.7, 0.8] — TM-score thresholds, each in (0, 1) with at most two decimals.
+- `multimer`: bool = False — cluster complexes with `easy-multimercluster` instead of single chains with `easy-cluster`. In this mode `tm_thresholds` sets `--chain-tm-threshold` (every chain must align above it), and the whole complex must also exceed `multimer_tm_threshold` with an interface above `interface_lddt_threshold`. Chain names must not contain underscores. Without it every structure must hold one protein chain; a file with several chains is recorded as a failure instead of being assigned to one of them by guess.
+- `alignment_type`: int = 1 — Foldseek `--alignment-type`: 1 is TM-align, 2 is the 3Di+AA local alignment followed by the TM-score filter.
+- `min_seq_id`: float = 0.0 — Foldseek `--min-seq-id`, the minimum sequence identity to cluster. Single-chain mode only.
+- `multimer_tm_threshold`: float = 0.65 — Foldseek `--multimer-tm-threshold`. `multimer=True` only.
+- `interface_lddt_threshold`: float = 0.65 — Foldseek `--interface-lddt-threshold`. `multimer=True` only.
+- `threads`: int = 1 — CPU threads Foldseek uses (`--threads`); match the CPUs requested with `Resources(cpus=...)`.
+
+**Tables**:
+- `tm_clusters`: `id | cluster_<t> | representative_<t> | n_clusters_<t>` for every threshold, where `<t>` is the percent form of the threshold (`tm50`, `tm60`, `tm70`, `tm80` by default). `cluster_<t>` is the cluster number (1 is the largest), `representative_<t>` the id of the cluster's representative structure, and `n_clusters_<t>` the number of clusters the whole set splits into (the same value on every row). One row per structure that entered; a structure Foldseek did not report carries NaN.
+- `missing`: `id | removed_by | kind | cause`
+
+The raw Foldseek cluster TSV of every threshold stays under the step's `_execution/foldseek_tm<NN>/` folder.
+
+**Example**:
+```python
+from biopipelines import ESMFold2, Foldseek, Panda
+
+folds = ESMFold2(proteins=seqs)
+diversity = Foldseek(structures=folds, threads=8)
+
+# one structure per cluster at TM 0.5
+reps = Panda(tables=diversity.tables.tm_clusters,
+             operations=[Panda.filter("id == representative_tm50")],
+             pool=folds)
+
+# complexes: every chain above TM 0.6, whole complex above 0.65
+complexes = Foldseek(structures=folds, tm_thresholds=[0.6], multimer=True)
+```
+
+**Reference**: van Kempen et al. Fast and accurate protein structure search with Foldseek. *Nature Biotechnology*, doi:10.1038/s41587-023-01773-0; Barrio-Hernandez et al. Clustering predicted structures at the scale of the known protein universe. *Nature*, doi:10.1038/s41586-023-06510-w; Kim et al. Rapid and sensitive protein complex alignment with Foldseek-Multimer. *Nature Methods*, doi:10.1038/s41592-025-02593-7. https://github.com/steineggerlab/foldseek
 
 ---
 
@@ -1319,6 +1369,43 @@ sol.tables.solubility        # probability per sequence, most soluble first
 ```
 
 **Reference**: Zhang et al. (2024) PLM_Sol: predicting protein solubility by benchmarking multiple protein language models with the updated *Escherichia coli* protein solubility dataset. *Briefings in Bioinformatics* 25, bbae404. https://github.com/Violet969/PLM_Sol
+
+---
+
+### SequenceIdentityGate
+
+Novelty gate: the highest global sequence identity of each designed sequence to a set of natural references, with the nearest reference. A design that copies a natural protein can score well on every structural metric because the predictor may have memorized it too; this table says how close each design sits to the nearest natural sequence. The tool never filters: `passed` states whether `max_identity` is strictly below `threshold`, and every design keeps its row, so the gate is applied downstream with `Panda.filter`.
+
+Identity comes from a global (Needleman-Wunsch) alignment of the design against every reference: identical aligned positions divided by the alignment length, gaps included, so a design that shares a long stretch with a longer natural protein is not scored as if it were that protein. The alignment uses BLOSUM62 with gap-open -10 and gap-extend -0.5 (the EMBOSS Needle defaults) and penalizes end gaps; among alignments tied on score Biopython's first one decides. The whole sequence is scored, so a motif copied unchanged from a natural protein counts toward the identity: set `threshold` for each campaign rather than reusing another campaign's value. Excluding the motif is not offered, because it needs the motif residues mapped from structure numbering onto sequence positions and no stream in the framework carries that mapping.
+
+**Tags**: measure, protein
+
+**Environment**: `biopipelines` (Biopython, already a base dependency; nothing to install).
+
+**Parameters**:
+- `sequences`: Union[DataStream, StandardizedOutput] (required) — protein sequences to score. One row is one polymer chain, so a multi-chain design is scored chain by chain.
+- `references`: Union[DataStream, StandardizedOutput] (required) — natural protein sequences as a `sequences` stream; `Sequence("references.fasta")` turns a FASTA file into one. A reference that cannot be scored (empty, or a letter outside the BLOSUM62 alphabet such as `U`) stops the step instead of silently weakening the gate.
+- `threshold`: float = 0.4 — maximum identity, as a fraction in [0, 1], a design may have and still pass. Set it per campaign.
+
+**Tables**:
+- `identity_gate`: `id | max_identity | nearest_reference | passed`. `max_identity` is a fraction in [0, 1], `nearest_reference` the id of the reference that gave it (the first one on a tie), `passed` is `max_identity < threshold`. A design that could not be scored carries NaN in all three.
+- `missing`: `id | removed_by | kind | cause`
+
+Cost is one alignment per design and unique reference, so thousands of designs against hundreds of references take minutes to hours on one CPU.
+
+**Example**:
+```python
+from biopipelines import ProteinMPNN, Sequence, SequenceIdentityGate, Panda
+
+designs = ProteinMPNN(structures=rfd, num_sequences=8)
+naturals = Sequence("naturals.fasta")
+gate = SequenceIdentityGate(sequences=designs, references=naturals, threshold=0.4)
+
+# keep the designs that are not close to any natural sequence
+novel = Panda(tables=gate.tables.identity_gate,
+              operations=[Panda.filter("passed == True")],
+              pool=designs)
+```
 
 ---
 

@@ -27,6 +27,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Foldseek** 1.0 (new). Clusters a structures stream with `foldseek easy-cluster` (single chains) or `easy-multimercluster` (complexes) at each TM-score threshold in `tm_thresholds`, and reports every structure's cluster number, representative and the cluster count of the whole set. Installs from bioconda into its own `foldseek` env, with a BioContainers image registered for container runs. It runs the real aligner, where StructureCluster is a superposition-free proxy that ranks families.
+
+- **SequenceIdentityGate** 1.0 (new). Novelty gate for designed sequences: the maximum global (Needleman-Wunsch, BLOSUM62) identity of each design to a references stream, the nearest reference and a `passed` flag against `threshold`. Runs in the base env on Biopython and never filters; the table is emitted complete for a downstream `Panda.filter`.
+
 - **IPSAE** 1.0 (new). Scores the interface of a predicted complex with ipSAE by running Dunbrack's upstream `ipsae.py`, so the formulas stay upstream's. Takes `structures` and a per-id `pae` stream (`npz` in Boltz layout, or `json` in ColabFold or AlphaFold3 layout) and emits `ipsae`, one row per id for `binder_chain` against the best-scoring of `target_chains` (default every other chain), and `ipsae_pairs`, every chain-pair row upstream printed. `pdockq`, `pdockq2` and `iptm_af` are NaN when the PAE file carries no pLDDT or ipTM, where upstream would print a number computed from zeros. `IPSAE.install()` downloads `ipsae.py` unpinned into `folders.repositories.IPSAE`, which is a new key in every shipped config.
 
 - **ESMFold2** 2.5 → 2.6. New `pae` stream with the full predicted aligned error matrix of each structure, declared only with `include_pae=True`. Each kept sample's token x token matrix is written to `pae/<id>.npz` (array key `pae`, float32, Angstrom, the layout Boltz writes), under the same ids as `structures`, with a map_table listing only the ids whose file exists. The matrix used to be reduced to `max_pae` and discarded. Existing outputs, the confidence table and the default run are unchanged.

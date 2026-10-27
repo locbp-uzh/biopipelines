@@ -699,6 +699,17 @@ ExtractMetrics:
     note: >-
       Its local `load_table` is renamed `read_metric_csv`. It is a `pd.read_csv` wrapper returning None on error, while the framework helper of that name resolves a TABLE_REFERENCE and returns (frame, column) -- the same name for a different contract, on a script that never imported the framework one. No behaviour change; the call site moved with it.
 
+Foldseek:
+  files:
+  - biopipelines/foldseek.py
+  - pipe_scripts/pipe_foldseek.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      Initial release. Clusters a structures stream with `foldseek easy-cluster` (single chains) or `foldseek easy-multimercluster` (complexes) once per TM-score threshold, and reports each structure's cluster number, representative and the cluster count of the whole set per threshold. Distinct from StructureCluster, which is a superposition-free proxy with per-family ranking.
+
 FPocket:
   files:
   - biopipelines/fpocket.py
@@ -2002,6 +2013,17 @@ Scripting:
     date: '2026-09-02'
     note: >-
       Declares `USER_STREAM_NAMES = True`. A Scripting `configuration()` returns stream names chosen by the user's script, so the stream-name registry check cannot know them in advance. The format checks still apply. One declarative line; no change to generated scripts or outputs.
+SequenceIdentityGate:
+  files:
+  - biopipelines/sequence_identity_gate.py
+  - pipe_scripts/pipe_sequence_identity_gate.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      Initial release. Global (Needleman-Wunsch, BLOSUM62) identity of each designed sequence against a references stream, reporting the maximum identity, the nearest reference and a `passed` flag against `threshold`. The table is emitted complete; selection is left to a downstream Panda filter.
+
 SequenceMetricCorrelation:
   files:
   - biopipelines/sequence_metric_correlation.py
