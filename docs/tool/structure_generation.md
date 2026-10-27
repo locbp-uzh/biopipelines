@@ -182,6 +182,120 @@ pg = PocketGen(structures=scaffold, ligand=lig)
 
 ---
 
+### RFD4Proteina
+
+Sequence-structure co-design with RFD4-Proteina (Baker Lab and NVIDIA GenAIR), an all-atom flow-matching model driven by a YAML condition spec. Each input structure becomes one design problem: a contig keeps residues of the input and inserts designed segments of variable length, and conditions say what is fixed, what is a hotspot and what is free. The model returns the designed structure and its sequence in one pass.
+
+**Tags**: generate-backbone, design-sequence, protein, small-molecule, complex, pocket, motif-scaffolding, binder-design, all-atom
+
+**References**:
+- Code: https://github.com/RosettaCommons/RFD4-Proteina
+- Docs: https://rfd4-proteina.org/latest/
+- Condition spec reference: https://rfd4-proteina.org/latest/reference/yaml-json.html
+- Weights: https://huggingface.co/nvidia/RFD4-Proteina
+
+**License**: the code is BSD-3-Clause. The weights are covered by the same license, verbatim from the Hugging Face model card (`license: bsd-3-clause`): "The RFD4-Proteína model and weights are released under the BSD 3-Clause License, Copyright (c) 2026, Institute for Protein Design, University of Washington. Optional third-party assets distributed alongside the model — the AlphaFold2 and OpenFold3/AlphaFold3 refolding images and the OpenFold3 payload — carry their own upstream terms; see the note under *Other repository files* and their provenance files. The training data has its own source terms, described on the dataset card." The repository's GitHub page states the code license only; the model card is the source for the weights.
+
+**Requirements**: Linux x86-64, Python 3.12, an NVIDIA GPU of Ampere generation or newer (upstream lists A100, H100, H200, L40S, RTX 6000 Ada and Blackwell parts) and a CUDA 13-compatible driver. aarch64 (Daint) is not supported.
+
+**Installation**:
+
+```python
+RFD4Proteina.install()
+```
+
+creates the `RFD4Proteina` env (Python 3.12, `pip install "rfd4-proteina[all-cuda13]"` with the CUDA 13 build of PyTorch) and downloads the weights bundle (`config.json` and `model.safetensors`, about 1.7 GB) of `nvidia/RFD4-Proteina` into `folders.repositories.RFD4Proteina` (`<data>/rfd4_proteina` by default). The bundle is pinned to the Hub commit that the installed package's own `configs/inference.yaml` names (`hf_ckpt_revision`), resolved to a commit hash and written to `REVISION` next to the files. Runs load that directory with `hf_ckpt_path=<dir>`, so they are offline and a later move of the Hub's `main` cannot change them; the step log prints the revision.
+
+**Tasks** (`task=`):
+
+| Task | Status | What the wrapper writes |
+|------|--------|-------------------------|
+| `protein_binder` | implemented | Upstream's recommended PPI recipe: backbone of every preserved chain as one internal-coordinate group (`C_CRDGRP`), its full sequence (`C_SEQ`), and `hotspots` as `C_HOT`. Every preserved chain is taken to be a protein target. |
+| `small_molecule_binder` | implemented | Nothing of its own. The ligand is part of the input structure and is kept by a preserved segment of the contig (`150, /0, B386`); upstream sequence-conditions ligands itself and the pose is left to the model unless `conditions` fix it. |
+| `motif_scaffold` | implemented, indexed motifs | Every preserved segment is fixed in coordinates and identity (`C_CRD` and `C_SEQ`); the model designs the scaffold around it. |
+
+Not implemented as a recipe, reachable only through `conditions` or forwarded overrides and untested: unindexed motifs and enzyme active sites with catalytic tip atoms (`C_IDX`), DNA binders, antibody and nanobody design, partial diffusion and inverse folding, reward-guided search, and the refolding metrics.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput - Input structures (target, motif or ligand complex). A CIF is used as it is; any other file (PDB) is converted to CIF with AtomWorks first, because upstream refuses PDB (it does not encode the bonds and charges the model consumes). The converted bonds and charges are not audited here: for a ligand that is not a CCD component, supply a CIF. A `Ligand(structures=..., codes=...)` output is accepted. Residue numbers in `contig` and `hotspots` are those of the input structure.
+- `contig`: str - Upstream contig string, one for all inputs, e.g. `"50-120, /0, A17-131"`. `/0` breaks the chain, `A17-131` keeps a range of the input chain A, `50-120` is a designed segment of variable length, `E1:2-20` a named one (a trailing `P`, `R` or `D` sets the chain type). At least one preserved segment is required. Checked at construction against the rules upstream enforces. `contigs` is a synonym.
+- `task`: str = "protein_binder" - "protein_binder", "small_molecule_binder" or "motif_scaffold".
+- `hotspots`: str | dict = None - Interface atoms as `C_HOT`: `"A56:CG,OH;A115:CG,SD"` (atoms), `"A67,A89"` (whole residues) or `{"A56": "CG,OH"}`. Same spellings as `RFdiffusion3(select_hotspots=...)`.
+- `conditions`: dict = None - Raw upstream conditions appended after the recipe, `{annotation: {value: [{"select": "sel('A/*/[10-20]')"}]}}`, for example `{"C_RAS": {"BURIED": [{"select": "sel('B')"}]}}`. Where selections overlap, later entries win. Annotations and selection syntax: the condition spec reference above.
+- `num_designs`: int = 1 - Designs per input structure (upstream `num_replicates`, accepted as a synonym).
+- `thinking`: str = "medium" - Trunk-evaluation budget over 60 denoising steps: "low", "medium" or "high". For `protein_binder` 120, 180 or 300 evaluations (`<budget>/front_loaded`); for `small_molecule_binder` and `motif_scaffold` 120, 150 or 180 (`<budget>/midpeak`), following upstream's task table and cookbook.
+- `batch_size`: int = 1 - Designs generated in parallel on the GPU. Raise it only after the longest input fits at 1.
+- `seed`: int = None - Random seed; a fresh one each run when unset.
+- `metrics_tags`: list[str] = None - Upstream inline-metric tags that need no refolding oracle, e.g. `["design", "hotspot_conditioning"]`. Unset runs with `'~metrics'` (no scoring, the documented smoke-test path). Tags that run an AlphaFold 2/3 or OpenFold3 oracle (`*_refolding`, `antibody`) are refused because the install does not set those up; refold designs with Boltz2 or AlphaFold.
+- `checkpoint`: str = None - Directory of a model bundle to load instead of the installed one.
+- Further keyword arguments are forwarded as Hydra overrides, e.g. `**{"generation.args.nsteps": 80}`, or `compile_lengths="null"` to skip the minutes-long `torch.compile` warm-up on a first run. The keys the wrapper manages (`inputs`, `out_dir`, `num_replicates`, `batch_size`, `seed`, `recycle_strategy`, `hf_ckpt_path`, `hf_ckpt_revision`, `metrics_tags`, `compress_outputs`, `global_prefix`, `job_id`, `gen_njobs`, `subset_to_examples`, `hydra.run.dir`) are refused.
+
+**Streams**: `structures` (one PDB per design, ids `<input id>_<1..num_designs>`; upstream numbers replicates from 0, the wrapper from 1), `sequences` (value-based, one row per polymer chain; a contig with a chain break declares the lazy `<structure>[_<?>]`, as RFdiffusion3 does).
+
+**Tables**:
+- `structures`:
+
+  | id | source_id | design | cif | pdb | n_chains | n_residues |
+  |----|-----------|--------|-----|-----|----------|------------|
+
+  `cif` is the annotated CIF `rfd4-generate` wrote (kept under `_execution/rfd4/inference_samples/`).
+
+- `sequences`:
+
+  | id | source_id | source_pdb | chain | sequence | length |
+  |----|-----------|------------|-------|----------|--------|
+
+- `metrics` (upstream inline metrics, one row per design):
+
+  | id | source_id |
+  |----|-----------|
+
+  Plus one column per upstream metric when `metrics_tags` is set, prefixed by the metric key (e.g. `clash_metrics.frac_atoms_clashing_1p5A`; see the upstream metrics reference). The run record (`seed`, `ckpt_path`, `ckpt_name`) is kept; the `generation.*` configuration dump and the path columns are dropped. A design that scoring did not reach has NaN.
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  A design that was expected and not written, or whose conversion failed, is a `failure` row. The tool never filters on a metric.
+
+**Example**:
+```python
+from biopipelines.rfd4proteina import RFD4Proteina
+
+# Binder to PD-L1: keep chain A 17-131 of the target, design a 50-120 residue binder
+binder = RFD4Proteina(
+    structures=target,
+    contig="50-120, /0, A17-131",
+    hotspots="A56:CG,OH;A115:CG,SD;A123:CD2,OH",
+    num_designs=8, batch_size=8,
+    metrics_tags=["design", "hotspot_conditioning"],
+)
+
+# Small-molecule binder: the ligand is residue 386 of chain B of the input complex
+pocket = RFD4Proteina(
+    structures=complex_with_ligand,
+    contig="150, /0, B386",
+    task="small_molecule_binder", thinking="medium", num_designs=8,
+)
+
+# Indexed motif scaffolding: keep A10-25 and A60-70 and design around them
+scaffold = RFD4Proteina(
+    structures=motif,
+    contig="A10-25, 20-40, A60-70, 20-40",
+    task="motif_scaffold", num_designs=8,
+)
+
+# A condition outside the recipes, written in upstream's own spelling
+fixed_pose = RFD4Proteina(
+    structures=complex_with_ligand,
+    contig="150, /0, B386", task="small_molecule_binder",
+    conditions={"C_CRD": {True: [{"select": "is_ligand"}]}},   # fix the ligand pose
+)
+```
+
+---
+
 ### RFdiffusion
 
 Generates novel protein backbone structures using diffusion models. Designs de novo proteins or scaffolds functional motifs into new contexts.

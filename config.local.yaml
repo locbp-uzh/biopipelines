@@ -64,6 +64,7 @@ folders:
     PLACER: "<data>/PLACER"
     PocketGen: "<data>/PocketGen"
     ProteinMPNN: "<data>/ProteinMPNN"
+    RFD4Proteina: "<data>/rfd4_proteina"
     RFdiffusion: "<data>/RFdiffusion"
     RFdiffusion2: "<data>/RFdiffusion2"
     RFdiffusion3: "<data>/rfdiffusion3"

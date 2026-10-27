@@ -2217,3 +2217,16 @@ Peppr:
     date: '2026-10-27'
     note: >-
       Initial release. Scores predicted structures against reference structures with the peppr package: backbone RMSD, TM-score, lDDT, lDDT-PLI, fnat, iRMSD, LRMSD and DockQ, one column each in a `peppr` table with one row per prediction. A single reference scores every prediction; several are matched by id, and a sibling id is not a match. A metric peppr cannot compute is NaN, and a prediction that cannot be evaluated at all is NaN throughout and recorded in `missing`. Runs in its own env, with biotite kept below 2.0.
+
+RFD4Proteina:
+  files:
+  - biopipelines/rfd4proteina.py
+  - pipe_scripts/pipe_rfd4proteina_inputs.py
+  - pipe_scripts/pipe_rfd4proteina_postprocess.py
+  - pipe_scripts/pipe_rfd4proteina_weights.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-27'
+    note: >-
+      New tool: sequence-structure co-design with RFD4-Proteina (Baker Lab x NVIDIA, BSD-3-Clause code and weights) driven by its YAML condition spec. Implements protein binders (the upstream PPI recipe: target backbone as one internal-coordinate group, full target sequence, hotspots), small-molecule binders (ligand kept by a preserved contig segment) and indexed motif scaffolding; further conditions go through `conditions`, further Hydra options through forwarded keywords.
