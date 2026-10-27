@@ -107,8 +107,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.12"
+  current: "1.13"
   history:
+  - version: '1.13'
+    date: '2026-10-27'
+    note: >-
+      Reading the confidence scores no longer breaks when the run folder or a sequence id contains `_relaxed_` or `.pdb`. The scores file name was derived by replacing those fragments anywhere in the full path, so such a path pointed at a file that does not exist and the id lost its confidence row. Only the basename is rewritten now.
   - version: '1.12'
     date: '2026-10-27'
     note: >-

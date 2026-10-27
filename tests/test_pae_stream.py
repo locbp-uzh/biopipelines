@@ -201,8 +201,15 @@ class TestAlphaFoldScores:
         assert list(pae.columns) == ["id", "file"]
         assert list(pae["id"]) == ["c1"] and os.path.exists(pae["file"][0])
 
+    def test_relaxed_in_the_folder_or_the_id_does_not_break_the_scores_lookup(self, tmp_path):
+        root = tmp_path / "run_relaxed_1"
+        _colabfold(root / "execution", "my_relaxed_design")
+        _af_confidence(root)
+        confidence = pd.read_csv(root / "tables" / "confidence.csv")
+        assert list(confidence["id"]) == ["my_relaxed_design"]
+        assert list(pd.read_csv(root / "pae" / "pae_map.csv")["id"]) == ["my_relaxed_design"]
+
     def test_two_variants_of_the_best_model_make_one_entry(self, tmp_path):
-        """The script rewrites `_relaxed_` anywhere in the path, so the test name must not carry it."""
         _colabfold(tmp_path / "execution", "c1", relaxed=True)
         _colabfold(tmp_path / "execution", "c1", relaxed=False, write_scores=False)
         _af_confidence(tmp_path)
