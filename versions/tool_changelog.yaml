@@ -39,8 +39,12 @@ AiZynthFinder:
   files:
   - biopipelines/aizynthfinder.py
   - pipe_scripts/pipe_aizynthfinder.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-27'
+    note: >-
+      Brought up to AiZynthFinder 4.x (4.4.1 checked). New optional parameters, all defaulting to what the config says: `search_algorithm` (`mcts`, `retrostar`, `breadth_first`, `dfpn`), `max_transforms`, `route_scorer` and `scorers` (four more scorers, each adding a `routes` column), `filter_cutoff`, `frozen_substructures` (the `frozen_substructure` filter) and `stock_stop_criteria`; existing parameters, defaults and table columns are unchanged. A target `aizynthcli` cannot set up (an unsanitizable SMILES) used to make it return fewer rows than targets, which aborted the step on the row count after the whole search had run; such targets are now screened with RDKit first, kept as empty `targets` rows and reported in `missing` as failures, and rows are matched to targets by the reported `target` SMILES when counts differ. The install keeps an existing env so a failed `download_public_data` can be retried, and verifies that `aizynthcli` starts rather than that the package imports.
   - version: '2.1'
     date: '2026-09-04'
     note: >-

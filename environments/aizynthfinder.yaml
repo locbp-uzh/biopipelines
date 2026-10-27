@@ -2,5 +2,6 @@ name: aizynthfinder
 channels:
   - conda-forge
 dependencies:
+  # aizynthfinder 4.x supports python >=3.10,<3.13.
   - python=3.11
   - pip

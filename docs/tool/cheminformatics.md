@@ -140,27 +140,42 @@ kept = Panda(
 
 Retrosynthetic route planning. Runs a Monte-Carlo tree search that recursively applies reaction templates to break each target molecule apart, stopping when every branch ends in a purchasable building block. Use it to ask whether a designed compound is actually *makeable*, and out of what — a synthetic-accessibility filter with the routes and starting materials attached, rather than a single opaque score.
 
-The output is nested, and the tool exposes all three levels: a **target** is searched, producing several ranked **routes**, each of which ends in several **precursors**. Routes are ranked best-first by the state score (a combination of stock availability and route length); precursors carry only an `in_stock` boolean, so they are molecules rather than scored objects.
+The output is nested, and the tool exposes all three levels: a **target** is searched, producing several ranked **routes**, each of which ends in several **precursors**. Routes are ranked best-first by the state score (a combination of stock availability and route length) unless `route_scorer` picks another; precursors carry only an `in_stock` boolean, so they are molecules rather than scored objects.
 
 The `precursors` stream is a **compounds** stream with the canonical `id | format | smiles | ccd` schema, so the building blocks feed directly into any compounds consumer (`ADMETAI`, `RDKit`, `OpenBabel`, a docking run). Its map_table *is* the `precursors` table, so filtering it with `Panda` and passing `pool=` carries the stream along.
 
 **Tags**: predict-property, small-molecule
 
-**References**: https://github.com/MolecularAI/aizynthfinder — Genheden et al. (2020) *J. Cheminform.* 12, 70.
+**References**: https://github.com/MolecularAI/aizynthfinder — Genheden et al. (2020) *J. Cheminform.* 12, 70; Saigiridharan et al. (2024) *J. Cheminform.* 16, 57 (AiZynthFinder 4.0).
 
-**Environment**: `aizynthfinder` (dedicated). `AiZynthFinder.install()` creates the env and runs `download_public_data` to fetch the expansion policy, reaction templates and stock from figshare, writing the `config.yml` the CLI reads.
+**Environment**: `aizynthfinder` (dedicated, Python 3.11; upstream 4.x supports 3.10 to 3.12). `AiZynthFinder.install()` creates the env from the unpinned `aizynthfinder` package and runs `download_public_data`, which fetches the expansion policies (`uspto`, `ringbreaker`), reaction templates and quick-filter model from Zenodo and the ZINC stock from figshare, then writes the `config.yml` the CLI reads. An existing env is kept, so a download that failed halfway is retried by calling `install()` again; `force_reinstall=True` rebuilds both. The install is verified by starting `aizynthcli`, which imports the whole package, and by the presence of `config.yml`.
 
 **Parameters**:
 - `compounds`: DataStream | StandardizedOutput — Target molecules. SMILES are read from the `smiles` column of the compounds map_table.
-- `config`: str = None — Path to an aizynthfinder `config.yml`, overriding the downloaded one. Use this to point at your own trained policy or an in-house stock file.
+- `config`: str = None — Path to an aizynthfinder `config.yml`, overriding the downloaded one. This is how your own expansion model, filter model or stock enters: define it in the file's `expansion:`, `filter:` or `stock:` section (see the upstream configuration guide), then select it by name with the parameters below.
 - `stocks`: List[str] = None — Stock names to search against (default: all in the config).
-- `expansion_policy`: List[str] = None — Expansion policy names (default: the first in the config).
+- `expansion_policy`: List[str] = None — Expansion policy names (default: the first in the config, `uspto` in the public data; `ringbreaker` is the other one it defines).
 - `filter_policy`: List[str] = None — Filter policy names (default: all in the config).
 - `max_routes`: int = 25 — Most routes kept per target.
 - `min_routes`: int = 5 — Fewest routes kept per target.
 - `time_limit`: int = None — Per-target search cutoff in seconds.
 - `iteration_limit`: int = None — Per-target cap on tree-search iterations.
-- `nproc`: int = None — Targets searched in parallel.
+- `nproc`: int = None — Targets searched in parallel. Upstream then writes one `aizynthcli<N>.log` per process into the working directory, which is where a skipped target's reason is printed.
+- `search_algorithm`: str = None — `"mcts"` (Monte Carlo tree search, the upstream default), `"retrostar"`, `"breadth_first"` or `"dfpn"`. Left unset, the config decides.
+- `max_transforms`: int = None — Deepest route searched, in reaction steps (upstream default 6).
+- `route_scorer`: str = None — Scorer that ranks the routes and defines `targets.top_score` (default `"state score"`). One of the names under *Scorers* below, or one your own `config` defines.
+- `scorers`: List[str] = None — Further scorers computed for every returned route, each adding a column to `routes`. Any of `"fraction in stock"`, `"average template occurrence"`, `"sum of prices"`, `"route cost"`.
+- `filter_cutoff`: float = None — Feasibility threshold of the quick-filter, in (0, 1]: a reaction the filter scores below it is rejected (upstream default 0.05). Applied to every quick-filter in the config.
+- `frozen_substructures`: List[str] = None — SMARTS patterns that must survive every reaction; a reaction that splits one of them is rejected. A pattern that does not occur in the molecule being expanded is ignored for that molecule. Not supported by `"dfpn"`.
+- `stock_stop_criteria`: dict = None — Extra conditions a stock molecule must meet to count as purchasable: `{"weight": <max exact mass, g/mol>, "price": <max price>, "counts": {"C": <max atoms of that element>}}`.
+
+**Search algorithms**. `mcts` is the original search. `retrostar` is a best-first AND/OR search guided by the policy priors; with the default zero molecule cost it does not weigh the starting materials, and a learned Retro* cost model needs a config file. `breadth_first` expands every open molecule one level at a time and so is exhaustive but grows quickly with depth. `dfpn` is a depth-first proof-number search and does not apply a filter policy. Each reports the same `targets` columns, but `number_of_routes` counts what that algorithm found, which is not comparable across algorithms.
+
+**Scorers**. Every route is always scored by `state score`, `number of reactions`, `number of pre-cursors` and `number of pre-cursors in stock`; these fill `score`, `number_of_steps`, `number_of_precursors` and `number_of_precursors_in_stock`. `route_scorer` may be any of them or of the four extra scorers, and the direction is upstream's: lowest first for `number of reactions`, `number of pre-cursors`, `sum of prices` and `route cost`, highest first for the rest. The extra scorers are `fraction in stock` (share of the precursors that are purchasable), `average template occurrence` (mean frequency of the templates used, higher means better-precedented chemistry), `sum of prices` and `route cost` (Badowski et al. 2019: reaction cost and yield on top of the precursor prices). Prices come from the stock, and the public ZINC stock carries none, so the two price scorers fall back to a default cost per precursor; give a `config` whose stock entry sets `price_col` for meaningful values. A scorer that does not look at whether the route is solved (`number of reactions`, `number of pre-cursors`) can rank an unsolved route first, so filter `routes` on `is_solved` when ranking by one. Each extra scorer adds a `routes` column named after it with spaces as underscores (`route cost` becomes `route_cost`); `score` is always the state score, so ranking by another scorer reorders the `route` ranks but leaves `score` as is. The scorers that need extra model or data files (route similarity, expert-augmented, reaction class rank) and the search rewards of `mcts` (single, weighted or multi-objective) are only reachable through your own `config`.
+
+**Filters and stock**. The quick-filter is the one in the public data (`uspto`); `filter_policy` selects among the filters the config defines, and `frozen_substructures` adds one more, named `frozen_substructure`, that is always active even when `filter_policy` lists others. `stock_stop_criteria` is upstream's `stop_criteria` stock setting: a molecule found in a stock only counts as purchasable if it also passes every criterion (`weight` at most, `counts` at most per element, `price` at most; `price` needs a stock with prices). It changes which molecules end a branch, so it changes `in_stock` in `precursors` too.
+
+**Expansion policies and your own model**. `expansion_policy` selects which policies drive the search, and several may be listed. A user-supplied template-based model is a `config` entry with its model and template files; any other upstream expansion strategy, including combining policies with weights, is the same route through the `expansion:` section. The Chemformer and ModelZoo strategies ship in the upstream repository's `plugins/` folder rather than in the pip package and need their own service or packages, so they are not set up by `install()`. Not exposed at all: atom-index based `break_bonds` / `freeze_bonds` (the indices are per molecule, which a batched run cannot give), route clustering (it needs upstream's `all` extra, which pulls in torch) and aizynthcli's checkpoint restart.
 
 **Streams**:
 - `routes` — one JSON per route holding its reaction tree. ids are `<compound>_<route>`.
@@ -168,9 +183,10 @@ The `precursors` stream is a **compounds** stream with the canonical `id | forma
 
 **Tables**:
 - `targets` — `id | smiles | is_solved | top_score | number_of_routes | number_of_returned_routes | number_of_solved_routes | number_of_nodes | search_time | first_solution_time | first_solution_iteration`. One row per input compound; a target with no route is kept with `is_solved=False`. `number_of_routes` is how many routes the search found, `number_of_returned_routes` how many `max_routes` let through — the latter is how many route ids exist.
-- `routes` — `id | compounds.id | route | score | is_solved | number_of_steps | number_of_precursors | number_of_precursors_in_stock`.
+  `top_score` is the `route_scorer` score of the best route. `first_solution_time` and `first_solution_iteration` are 0 when the search never flagged a solution, as upstream reports them; `breadth_first` flags one only when every branch it expanded ends in stock, so it can report 0 for a target it does solve. A SMILES RDKit cannot sanitize is never searched but keeps its row, with everything but `id` and `smiles` empty.
+- `routes` — `id | compounds.id | route | score | is_solved | number_of_steps | number_of_precursors | number_of_precursors_in_stock`, then one column per extra scorer (`scorers`, plus `route_scorer` when it is not one of the four always-computed ones). `score` is the state score.
 - `precursors` — `id | format | smiles | ccd | compounds.id | route | precursor | in_stock`.
-- `missing` — `id | removed_by | kind | cause`. Targets with no route (and compounds with no SMILES) land here as `kind="filter"`.
+- `missing` — `id | removed_by | kind | cause`. Targets with no route (and compounds with no SMILES) land here as `kind="filter"`; a SMILES that cannot be sanitized, or a target `aizynthcli` returned no row for, as `kind="failure"`.
 
 **Example**:
 ```python
@@ -202,6 +218,27 @@ Shortest-route-first selection uses the `routes` table, whose `route` column is 
 best_routes = Panda(
     tables=azf.tables.routes,
     operations=[Panda.filter("route == 1 and number_of_steps <= 3")],
+    pool=azf,
+)
+```
+
+Choosing the search, the ranking and the constraints (all optional; every one left out keeps the config's value):
+
+```python
+azf = AiZynthFinder(
+    compounds=library,
+    search_algorithm="retrostar",
+    max_transforms=5,
+    route_scorer="route cost",                  # rank by the cheapest route; adds a route_cost column
+    scorers=["fraction in stock"],              # adds a fraction_in_stock column
+    filter_cutoff=0.02,                         # accept reactions the quick-filter scores low
+    frozen_substructures=["O=c1ccc2ccccc2o1"],  # no route may break the coumarin
+    stock_stop_criteria={"weight": 300},        # purchasable only up to 300 g/mol
+)
+
+cheapest = Panda(
+    tables=azf.tables.routes,
+    operations=[Panda.filter("route == 1"), Panda.sort("route_cost")],
     pool=azf,
 )
 ```

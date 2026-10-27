@@ -1,3 +1,4 @@
-# Not aizynthfinder[all]: the extras add torch + pytorch-lightning (route
-# clustering) and the jupyter GUI, neither of which this wrapper exposes.
+# Not aizynthfinder[all]: that extra adds route-distances (torch + pytorch-lightning,
+# used only for route clustering) and the Mongo and molbloom stock backends, none of
+# which this wrapper exposes. The ONNX models need no tensorflow either.
 aizynthfinder

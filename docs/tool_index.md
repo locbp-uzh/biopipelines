@@ -80,7 +80,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 68 | VespaG | Analysis                       | 2.0 | `biopipelines/vespag.py` |
 | 69 | XTB | Analysis                       | 2.1 | `biopipelines/xtb.py` |
 | 70 | BFactor                   | Analysis                       | 1.2 | `biopipelines/bfactor.py` |
-| 71 | AiZynthFinder | Cheminformatics                | 2.1 | `biopipelines/aizynthfinder.py` |
+| 71 | AiZynthFinder | Cheminformatics                | 2.2 | `biopipelines/aizynthfinder.py` |
 | 72 | OpenBabel                 | Cheminformatics                | 1.1 | `biopipelines/openbabel.py` |
 | 73 | RDKit                     | Cheminformatics                | 1.2 | `biopipelines/rdkit_descriptors.py` |
 | 74 | BayesianAdjuster          | Sequence Statistics            | 1.0 | `biopipelines/bayesian_adjuster.py` |
