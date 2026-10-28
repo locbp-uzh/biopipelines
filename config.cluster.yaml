@@ -112,7 +112,6 @@ folders:
     LASErMPNN: "<data>/LASErMPNN"
     LigandMPNN: "<data>/LigandMPNN"
     MMseqs2: "<data>/mmseqs"
-    ModelForge: "<data>/modelforge"
     NeuralPLexer: "<data>/NeuralPLexer"
     P2Rank: "<data>/p2rank"
     PLACER: "<data>/PLACER"

@@ -72,7 +72,6 @@ folders:
     Gnina: "<root>/gnina"
     LigandMPNN: "<data>/LigandMPNN"
     MMseqs2: "<data>/mmseqs"
-    ModelForge: "<data>/modelforge"
     NeuralPLexer: "<data>/NeuralPLexer"
     P2Rank: "<root>/p2rank"
     PLACER: "<data>/PLACER"
