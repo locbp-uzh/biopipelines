@@ -2344,8 +2344,12 @@ Protenix:
   - pipe_scripts/pipe_protenix_weights.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-28'
+    note: >-
+      The install fetched the CCD files through upstream's `runner.inference`, which imports the whole model stack and JIT-compiles a CUDA extension, so it failed on a node with no `CUDA_HOME`. The files are downloaded with the standard library now, from upstream's own URL table.
   - version: '1.0'
     date: '2026-10-28'
     note: >-

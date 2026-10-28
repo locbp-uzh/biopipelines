@@ -820,3 +820,28 @@ class TestThroughAPipeline:
         """There is no affinity head; a parameter named for one would be accepted and ignored."""
         import inspect
         assert "affinity" not in set(inspect.signature(Protenix.__init__).parameters)
+
+
+class TestStandaloneDownloader:
+    """The install fetches files without importing upstream's model stack, which compiles CUDA code and fails with no CUDA_HOME."""
+
+    def test_the_script_imports_nothing_that_loads_the_model(self):
+        source = open(os.path.join(REPO_ROOT, "pipe_scripts", "pipe_protenix_weights.py"), encoding="utf-8").read()
+        assert "runner.inference" not in source.replace("`runner.inference`", "")
+
+    def test_a_file_is_streamed_to_the_path(self, tmp_path):
+        source = tmp_path / "source.bin"
+        source.write_bytes(b"x" * 5000)
+        target = tmp_path / "out.part"
+        pipe_protenix_weights.download_from_url(source.as_uri(), str(target), True)
+        assert target.read_bytes() == source.read_bytes()
+
+    def test_an_empty_checkpoint_is_refused(self, tmp_path):
+        source = tmp_path / "empty.bin"
+        source.write_bytes(b"")
+        with pytest.raises(RuntimeError, match="empty"):
+            pipe_protenix_weights.download_from_url(source.as_uri(), str(tmp_path / "o.part"), True)
+
+    def test_a_missing_url_is_an_oserror_the_caller_handles(self, tmp_path):
+        with pytest.raises(OSError):
+            pipe_protenix_weights.download_from_url((tmp_path / "absent").as_uri(), str(tmp_path / "o.part"), False)

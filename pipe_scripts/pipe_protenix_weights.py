@@ -6,7 +6,7 @@
 """Download the Protenix checkpoint and the CCD files that `protenix pred` fetches on its first run.
 
 Runs at install time, inside the Protenix env, so the first prediction needs no network.
-It uses upstream's own URL table, path configuration and downloader, so every file lands where `protenix pred` looks for it.
+It uses upstream's own URL table and path configuration, so every file lands where `protenix pred` looks for it, and downloads with the standard library: upstream's `runner.inference` imports the whole model stack, which JIT-compiles a CUDA extension and fails on a node without `CUDA_HOME`.
 That is under PROTENIX_ROOT_DIR, or the home directory when it is unset.
 
 Exit status 0 means everything is in place, 1 means a CCD file could not be fetched, and 3 means only the checkpoint could not be.
@@ -15,7 +15,9 @@ The checkpoint of `protenix-v2` is a case of its own: upstream calls those weigh
 
 import argparse
 import os
+import shutil
 import sys
+import urllib.request
 
 COMMON_FILES = ("ccd_components_file", "ccd_components_rdkit_mol_file",
                 "pdb_cluster_file", "obsolete_release_data_csv")
@@ -29,10 +31,18 @@ def targets_for(model_name, data_configs, inference_configs):
     return targets
 
 
+def download_from_url(url, path, check_weight):
+    """Stream `url` to `path`. An HTTP refusal raises URLError, an OSError; an empty checkpoint raises RuntimeError."""
+    with urllib.request.urlopen(url, timeout=120) as response, open(path, "wb") as out:
+        shutil.copyfileobj(response, out, 1 << 20)
+    if check_weight and os.path.getsize(path) == 0:
+        raise RuntimeError("the downloaded checkpoint is empty")
+
+
 def fetch_missing(model_name, targets, urls, download):
     """Download whatever is absent. Returns why the checkpoint could not be fetched, or None; a CCD file that fails raises.
 
-    `download(url, path, check_weight)` is upstream's `download_from_url`; it is passed in so this runs without the model stack.
+    `download(url, path, check_weight)` is `download_from_url` below, passed in so tests can replace it.
     """
     unavailable = None
     for name, path in targets.items():
@@ -65,7 +75,6 @@ def main():
     from configs.configs_data import data_configs
     from configs.configs_inference import inference_configs
     from protenix.web_service.dependency_url import URL
-    from runner.inference import download_from_url
 
     targets = targets_for(args.model_name, data_configs, inference_configs)
     try:
