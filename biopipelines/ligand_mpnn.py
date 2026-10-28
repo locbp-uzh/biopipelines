@@ -40,7 +40,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "3.1"
+    TOOL_VERSION = "3.2"
     # `chain` and `chains` were one letter apart and meant different things, which is the
     # Ligand code/codes mistake again. `chains` now answers both.
     PARAMETER_ALIASES = {"chain": "chains"}
@@ -440,18 +440,15 @@ python {self.runtime_positions_py} "{self.positions_args_json}"
             options += ["--pack_side_chains", "1",
                         "--number_of_packs_per_design", str(self.packs_per_design),
                         "--pack_with_ligand_context", "1" if self.pack_with_ligand_context else "0"]
+        # Upstream takes an int, not a store_true, and creates out_folder/stats itself when it is non-zero.
+        if self.save_stats:
+            options += ["--save_stats", "1"]
+        # Upstream defaults this to 1, so emit it only to turn the context OFF.
+        if not self.use_atom_context:
+            options += ["--ligand_mpnn_use_atom_context", "0"]
         options += self.extra_args_tokens()
 
         option_array = " ".join('"' + token.replace('"', '\\"') + '"' for token in options)
-
-        # Upstream takes an int, not a store_true, and creates out_folder/stats
-        # itself when it is non-zero.
-        if self.save_stats:
-            base_options += ' --save_stats 1'
-
-        # Upstream defaults this to 1, so emit it only to turn the context OFF.
-        if not self.use_atom_context:
-            base_options += ' --ligand_mpnn_use_atom_context 0'
 
         return f"""echo "Executing LigandMPNN commands..."
 cd {self.lmpnn_folder}

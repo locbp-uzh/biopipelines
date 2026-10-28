@@ -509,6 +509,26 @@ def test_ligandmpnn_does_not_eval_its_command(local_config, isolated_cwd, new_pi
     assert 'python run.py "${LMPNN_ARGS[@]}"' in body
 
 
+def test_ligandmpnn_save_stats_and_atom_context_reach_the_command(local_config, isolated_cwd, new_pipeline):
+    """Both options used to append to a variable the argv-array rewrite had removed, so setting either raised NameError."""
+    import glob
+
+    from biopipelines.ligand import Ligand
+    from biopipelines.ligand_mpnn import LigandMPNN
+    from biopipelines.mock import Mock
+
+    pipeline = new_pipeline("lmpnn_stats")
+    with pipeline:
+        seeds = Mock(ids=["s1"], streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
+        ligand = Ligand(codes="STI")
+        LigandMPNN(structures=seeds.streams.structures, ligand=ligand.streams.compounds,
+                   save_stats=True, use_atom_context=False)
+
+    body = open(glob.glob(pipeline.folders["runtime"] + "/*LigandMPNN*.sh")[0], encoding="utf-8").read()
+    assert '"--save_stats" "1"' in body
+    assert '"--ligand_mpnn_use_atom_context" "0"' in body
+
+
 def test_a_hostile_path_stays_one_argument_for_ligandmpnn():
     """Replays the emitted shape: a path that closes its own quoting used to reach a second parse."""
     import subprocess

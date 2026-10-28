@@ -31,6 +31,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **LigandMPNN** 3.1 → 3.2. `save_stats=True` or `use_atom_context=False` raised `NameError` at script generation, because both appended to a string variable the argv-array command no longer has. They are argv tokens now.
+
 - **`RF3` 1.0** (new) - New tool: RoseTTAFold3 co-folding through Foundry's `rf3 fold`, taking the same input axes as Boltz2 and OpenFold3 (proteins, ssDNA, dsDNA, ssRNA, dsRNA, ligands, optional per-protein msas). One `rf3 fold` call predicts every complex, so the model loads once. Streams `structures` (cif) and `pae` (upstream's confidences JSON, which carries the full PAE matrix), tables `confidence` (plddt, ptm, iptm, pae, pde, has_clash, ranking_score, early_stopped, seed, sample) and `missing`. An input stopped by `early_stopping_plddt_threshold` (default 0.5, upstream's) is a `filter` row, not a failure. Runs in the `foundry` environment RFdiffusion3 builds, with its own weights folder.
 
 - **`FoundryMPNN` 1.0** (new) - New tool: ProteinMPNN / LigandMPNN sequence design through Foundry's `mpnn` command, one call per structure so a bad backbone fails one id. Streams `sequences` and `designs` with ids `<structure>_<n>` and the `chains` contract of ProteinMPNN and LigandMPNN (upstream writes all chains of a design unseparated, so the chains are recovered from the written structure and a length disagreement is a failure, not a guess). Exposes model_type, num_sequences, num_batches, temperature, seed, structure_noise, designed/fixed residues and chains, omit and bias. Runs in the `foundry` environment RFdiffusion3 builds, with its own weights folder.

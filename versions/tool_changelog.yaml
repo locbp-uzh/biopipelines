@@ -960,8 +960,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "3.1"
+  current: "3.2"
   history:
+  - version: '3.2'
+    date: '2026-10-28'
+    note: >-
+      `save_stats=True` or `use_atom_context=False` raised `NameError` while the script was generated: both appended to a string variable that the argv-array command no longer has. They are now argv tokens, so the options reach `run.py` as written.
   - version: '3.1'
     date: '2026-10-27'
     note: >-
