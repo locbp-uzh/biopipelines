@@ -6,11 +6,12 @@
 
 The inference script keeps one sample per complex (best by pLDDT or ipTM), so the property worth
 pinning is that the matrix on disk belongs to the structure on disk, not to some other sample. The
-model is replaced by fakes (torch, esm and transformers are stubbed in sys.modules), so none of
+model is replaced by fakes (torch and esm are stubbed in sys.modules), so none of
 this needs a GPU or the weights.
 
-Not covered: the shape of the real `res.pae` tensor, which upstream does not document. The script
-treats anything but a square 2-D matrix as unwritable and says so rather than guessing.
+Not covered: a real `res.pae` tensor. esm 3.4.2 builds it as `output["pae"][i]`, a (tokens x tokens) tensor
+in Angstrom (read from source, not run). The script treats anything but a square 2-D matrix as unwritable
+and says so rather than guessing.
 """
 
 import contextlib
@@ -71,11 +72,8 @@ def fold_with(monkeypatch):
 
     class FakeModel:
         @classmethod
-        def from_pretrained(cls, name):
+        def from_pretrained(cls, name, **kwargs):
             return cls()
-
-        def cuda(self):
-            return self
 
         def eval(self):
             return self
@@ -98,16 +96,11 @@ def fold_with(monkeypatch):
         "esm.utils.msa": types.ModuleType("esm.utils.msa"),
         "esm.models": types.ModuleType("esm.models"),
         "esm.models.esmfold2": types.ModuleType("esm.models.esmfold2"),
-        "transformers": types.ModuleType("transformers"),
-        "transformers.models": types.ModuleType("transformers.models"),
-        "transformers.models.esmfold2": types.ModuleType("transformers.models.esmfold2"),
-        "transformers.models.esmfold2.modeling_esmfold2":
-            types.ModuleType("transformers.models.esmfold2.modeling_esmfold2"),
     }
     modules["esm.utils.structure"].input_builder = builder
     modules["esm.utils.msa"].MSA = _Stub
     modules["esm.models.esmfold2"].ESMFold2InputBuilder = FakeBuilder
-    modules["transformers.models.esmfold2.modeling_esmfold2"].ESMFold2Model = FakeModel
+    modules["esm.models.esmfold2"].EsmFold2Model = FakeModel
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
 

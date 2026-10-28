@@ -646,8 +646,12 @@ ESMFold2:
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.6"
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-10-28'
+    note: >-
+      Runs on esm >= 3.4 and no longer works on 3.3.0. The model class moved from the Biohub transformers fork (`transformers.models.esmfold2.modeling_esmfold2.ESMFold2Model`, repository now 404) into the package (`esm.models.esmfold2.EsmFold2Model`), and the fork cannot read the current `biohub/ESMFold2` checkpoint (`DiffusionStructureHeadConfig.__init__() got an unexpected keyword argument 'architectures'`). The install check imports the new class, the inference script loads it with `from_pretrained(name, device="cuda")`, and an environment built from esm 3.3.0 stops at once with the reinstall advice instead of failing inside the load. The fold call, the result fields and every output keep their format. The ESMC backbone now loads at esm's default precision (fp8, the fork's default was bf16), and `msa_max_depth` is also passed to `fold`, where it used to only truncate the a3m at load. The `pocket` refusal message now says esm 3.4 raises NotImplementedError.
   - version: '2.6'
     date: '2026-10-27'
     note: >-

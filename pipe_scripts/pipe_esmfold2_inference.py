@@ -465,8 +465,12 @@ def main():
     import torch
     from esm.utils.structure import input_builder
     from esm.utils.msa import MSA
-    from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model
-    from esm.models.esmfold2 import ESMFold2InputBuilder
+    try:
+        from esm.models.esmfold2 import ESMFold2InputBuilder, EsmFold2Model
+    except ImportError as e:
+        sys.exit(f"ERROR: cannot import esm.models.esmfold2.EsmFold2Model ({e}). "
+                 "ESMFold2 needs esm >= 3.4; if this environment predates it, "
+                 "reinstall with ESMFold2.install(force_reinstall=True).")
 
     with open(args.combinatorics_config) as f:
         config = json.load(f)
@@ -474,7 +478,7 @@ def main():
     constraints = load_constraints(args.constraints)
 
     print(f"Loading ESMFold2 model: {args.model_name}", flush=True)
-    model = ESMFold2Model.from_pretrained(args.model_name).cuda().eval()
+    model = EsmFold2Model.from_pretrained(args.model_name, device="cuda").eval()
     folder = ESMFold2InputBuilder()
 
     complexes = list(build_complexes(config, msa_by_seq,
@@ -499,6 +503,7 @@ def main():
                         num_loops=args.num_loops,
                         num_sampling_steps=args.num_sampling_steps,
                         num_diffusion_samples=args.num_diffusion_samples,
+                        msa_max_depth=args.msa_max_depth,
                         seed=seed,
                     )
                 results = out if isinstance(out, (list, tuple)) else [out]

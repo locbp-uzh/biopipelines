@@ -398,7 +398,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 
 **Environment**: `esmfold2`
 
-**Installation**: `ESMFold2.install()` creates the env and pip-installs the `esm` package (which pulls the transformers fork carrying the ESMFold2 model). Verifies by importing `ESMFold2Model`.
+**Installation**: `ESMFold2.install()` creates the env and pip-installs the `esm` package from its `main` branch (esm >= 3.4 is required: it carries the model as `esm.models.esmfold2.EsmFold2Model`). Verifies by importing `EsmFold2Model`. An environment built from esm 3.3.0 cannot load the current `biohub/ESMFold2` checkpoint; rebuild it with `ESMFold2.install(force_reinstall=True)`. The Daint environment pins esm to a 3.3.0 commit (`environments/esmfold2.pip.daint.txt`), which this version cannot use.
 
 **Parameters**:
 - `proteins`: DataStream | StandardizedOutput = None — Protein sequences.
@@ -450,7 +450,7 @@ pair = ESMFold2(
 
 Chain ids in `modifications` and `covalent_bonds` are assigned in axis order — proteins, then ssDNA/dsDNA/ssRNA/dsRNA, then ligands — starting at `A`, with a double-stranded axis taking two consecutive letters. They name a position in the complex rather than a sequence id, so when an axis iterates, the same constraint applies to every item of that axis.
 
-There is no `pocket` parameter. Upstream defines `PocketConditioning` and stores it on `StructurePredictionInput`, but as of esm 3.3.0 `build_feature_tensors` sets `pocket_feature` to zeros unconditionally and never reads it, so the constraint would be accepted and discarded rather than applied. Verify that path before adding one.
+There is no `pocket` parameter. Upstream defines `PocketConditioning` and stores it on `StructurePredictionInput`, but no released checkpoint consumes it: esm 3.3.0 zeroed `pocket_feature` and discarded the constraint, and esm 3.4 raises `NotImplementedError`. Verify that path before adding one.
 
 ---
 

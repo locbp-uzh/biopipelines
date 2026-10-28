@@ -17,6 +17,10 @@ recurrent folding loops, diffusion samples, or independent seeds raises
 prediction quality, with best-of-N selection by ipTM (complexes) or pLDDT
 (monomers).
 
+Requires esm >= 3.4, whose `esm.models.esmfold2.EsmFold2Model` loads the current `biohub/ESMFold2` checkpoint.
+esm 3.3.0 kept the model in a transformers fork (`transformers.models.esmfold2`), so there is no fallback to it.
+That fork cannot read the current checkpoint config (`DiffusionStructureHeadConfig.__init__() got an unexpected keyword argument 'architectures'`) and its repository now returns 404.
+
 Reference:
     Candido, Hayes, Derry, Rao, Lin et al. "Language Modeling Materializes a
     World Model of Protein Biology" (bioRxiv 2026).
@@ -184,10 +188,10 @@ class ESMFold2(BaseConfig):
     constraint applies to every item of that axis.
 
     There is deliberately no `pocket` parameter. Upstream defines
-    PocketConditioning and stores it on StructurePredictionInput, but
-    build_feature_tensors sets pocket_feature to zeros unconditionally and never
-    reads it (esm 3.3.0), so the constraint would be accepted and discarded. Do
-    not add one back without checking that path first.
+    PocketConditioning and stores it on StructurePredictionInput, but no released
+    checkpoint consumes it: esm 3.3.0 zeroed pocket_feature and discarded the
+    constraint, and esm 3.4 raises NotImplementedError. Do not add one back
+    without checking that path first.
 
     Outputs:
         Streams:
@@ -217,13 +221,13 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.6"
+    TOOL_VERSION = "2.7"
     ENV_NAME = "esmfold2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         """Create the esmfold2 env (picks esmfold2.<variant>.yaml automatically) and
-        verify by importing the transformers ESMFold2 model class."""
+        verify by importing the esm ESMFold2 model class (esm >= 3.4)."""
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
@@ -245,11 +249,11 @@ if [ $? -ne 0 ]; then
 fi
 
 # Verify installation
-if {cls._env_run(env, env_manager)}python -c "from transformers.models.esmfold2.modeling_esmfold2 import ESMFold2Model" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "from esm.models.esmfold2 import EsmFold2Model, ESMFold2InputBuilder" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESMFold2 installation complete ==="
 else
-    echo "ERROR: ESMFold2 verification failed (cannot import ESMFold2Model)"
+    echo "ERROR: ESMFold2 verification failed (cannot import EsmFold2Model; needs esm >= 3.4)"
     exit 1
 fi
 """
@@ -324,10 +328,10 @@ fi
         # failure mode the parameter was removed to avoid.
         if "pocket" in kwargs:
             raise ValueError(
-                "ESMFold2 has no pocket parameter. Upstream accepts "
-                "PocketConditioning and then discards it: as of esm 3.3.0, "
-                "build_feature_tensors zeroes pocket_feature unconditionally and "
-                "never reads input.pocket, so the constraint would change nothing.")
+                "ESMFold2 has no pocket parameter. Upstream defines "
+                "PocketConditioning but no released checkpoint consumes it: "
+                "esm 3.3.0 discarded it silently and esm 3.4 raises "
+                "NotImplementedError.")
 
         self.modifications = modifications
         self.covalent_bonds = covalent_bonds
