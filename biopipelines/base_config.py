@@ -804,7 +804,12 @@ class BaseConfig(ABC):
             NotImplementedError: If the tool hasn't defined _install_script()
         """
         # Probed with the configured manager, not a fixed "mamba", because _install_env resolves per manager.
-        if cls._install_script({}, ConfigManager().get_env_manager()) is None:
+        try:
+            undefined = cls._install_script({}, ConfigManager().get_env_manager()) is None
+        except ValueError:
+            # Defined, but it names a folder the empty probe dict does not carry; generate_script reports it for real.
+            undefined = False
+        if undefined:
             raise NotImplementedError(
                 f"{cls.__name__} does not define installation steps. "
                 f"Override _install_script() to provide bash commands."
