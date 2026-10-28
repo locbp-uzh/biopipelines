@@ -813,6 +813,30 @@ RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `
 `structures` holds one `<id>.cif` per complex. The B-factor column carries per-atom pLDDT on a 0 to 1 scale (upstream's `annotate_b_factor_with_plddt`, which its config turns on).
 
 `pae` holds one `<id>.json` per structure, under the same ids as `structures`. It is upstream's full confidence file for that sample (`*_confidences.json`), copied unchanged: a JSON object with the keys `atom_chain_ids`, `atom_plddts` (N_atom floats, 0 to 1), `pae` (N_token x N_token nested lists, so `np.array(json.load(f)["pae"])` is the matrix, in Å from 0 to 32), `token_chain_ids` and `token_res_ids`. Rows and columns are RF3's tokens over all chains, one per standard residue and one per atom for ligands and modified residues. `token_res_ids` is a running token index in upstream's source, not a residue number. The stream's map_table lists only the ids whose file exists.
+
+**Tables**:
+- `confidence`:
+
+  | id | plddt | ptm | iptm | pae | pde | has_clash | ranking_score | early_stopped | seed | sample |
+  |----|-------|-----|------|-----|-----|-----------|---------------|---------------|------|--------|
+
+  One row per id that entered, with blanks where RF3 reported nothing. `plddt`, `pae` and `pde` are upstream's `overall_*` means; `ptm`, `iptm`, `has_clash` and `ranking_score` are its own. Upstream reports an `iptm` of 0 for a single chain. `seed` and `sample` name which of the generated samples the row is, so a `top_only` result says which one was chosen. An input stopped early has `early_stopped` True and blanks elsewhere.
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  An input stopped by the early-stopping threshold is a `filter` row: you set the threshold, so its absence is expected. An input for which `rf3 fold` wrote no structure for another reason is a `failure` row.
+
+With `top_only=True` (the default) the sample with the highest `ranking_score` is kept as `<id>`. Newer upstream releases record an early stop as a row in `<id>_ranking_scores.csv`, older ones as a `score.csv`; both are read.
+
+```python
+complexes = RF3(proteins=binders, ligands=Ligand("HEM"), msas=binder_msas)
+```
+
+---
+
 ### Protenix
 
 All-atom co-folding of proteins, nucleic acids and ligands with ByteDance's Protenix, a trainable reproduction of AlphaFold3, run as `protenix-v2` (about 464 M parameters) unless another checkpoint is named. It takes the same input axes as `Boltz2` and `OpenFold3`, so a prediction can be cross-checked against another model by changing the tool name.
@@ -857,10 +881,6 @@ It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is n
 **Tables**:
 - `confidence`:
 
-  | id | plddt | ptm | iptm | pae | pde | has_clash | ranking_score | early_stopped | seed | sample |
-  |----|-------|-----|------|-----|-----|-----------|---------------|---------------|------|--------|
-
-  One row per id that entered, with blanks where RF3 reported nothing. `plddt`, `pae` and `pde` are upstream's `overall_*` means; `ptm`, `iptm`, `has_clash` and `ranking_score` are its own. Upstream reports an `iptm` of 0 for a single chain. `seed` and `sample` name which of the generated samples the row is, so a `top_only` result says which one was chosen. An input stopped early has `early_stopped` True and blanks elsewhere.
   | id | plddt | ptm | iptm | gpde | has_clash | disorder | ranking_score | seed | sample |
   |----|-------|-----|------|------|-----------|----------|---------------|------|--------|
 
@@ -871,12 +891,6 @@ It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is n
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
 
-  An input stopped by the early-stopping threshold is a `filter` row: you set the threshold, so its absence is expected. An input for which `rf3 fold` wrote no structure for another reason is a `failure` row.
-
-With `top_only=True` (the default) the sample with the highest `ranking_score` is kept as `<id>`. Newer upstream releases record an early stop as a row in `<id>_ranking_scores.csv`, older ones as a `score.csv`; both are read.
-
-```python
-complexes = RF3(proteins=binders, ligands=Ligand("HEM"), msas=binder_msas)
 With `top_only=True` (the default) the structure with the highest `ranking_score` over all seeds and samples is kept as `<id>`. With `top_only=False` every structure is surfaced as `<id>_1..N`.
 
 **Example**:
@@ -892,5 +906,4 @@ fold = Protenix(proteins=protein, msas=msa, seeds=[1, 2, 3, 4, 5], ligands=Ligan
 # The pae stream has the Boltz2 layout, which IPSAE reads
 iface = IPSAE(structures=fold, pae=fold)
 ```
-
 ---
