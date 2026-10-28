@@ -73,7 +73,7 @@ def main():
     """Computation, failure-reporting and selection are separate operations, and each output answers exactly one of them.
     - RESULT TABLE (counts.csv): one row per id that entered. An unavailable measurement is NaN; the id is never dropped. A table is a matrix of results, not a filter.
     - STREAM MAP (annotated_map.csv): only ids whose FILE was actually produced. This one IS selective.
-    - MISSING (local_missing.csv): why an id has no stream entity - kind="failure" (raised) or kind="filter" (deliberately dropped).
+    - MISSING (local_missing.csv): why an id has no stream entity - kind="failure" (raised), kind="unmatched" (a lookup found no partner; flagged like a failure) or kind="filter" (deliberately dropped).
     """
     annotated_rows, counts_rows, local_missing_rows = [], [], []
     attempted = 0   # ids this tool tried to process

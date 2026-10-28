@@ -28,12 +28,25 @@ Identical original ids across runs (the typical case — same tool, same
 parameters) no longer collide. The ``pool.path`` column in every emitted
 map_table records the same pool index for downstream queries.
 
+The suffix is applied to every id, whether or not two runs share it, so
+pooled ids are NOT the ids the upstream tool produced. A step that matches
+pooled ids by string prefix (``sid.startswith(parent_id)``) is unsafe: the
+pooled parent ``P_1`` is a prefix of the pooled design ``P_12_1`` (design
+12) but not of ``P_7_1`` (design 7). Match on the ``original.id`` column
+instead, which every pooled map_table and table carries and which holds the
+id before this Pool renamed it.
+
 Pass ``recount_prefix="name"`` to switch to a flat 1-based renumber across
 the combined rows: ids become ``name_1``, ``name_2``, ..., ``name_N``,
-the original ids are kept in an ``original.id`` column, and ``pool.path``
+the original ids are kept in the ``original.id`` column, and ``pool.path``
 still records the source run. Counted at config time when every input run
 has fully-resolved ids; otherwise the framework emits a lazy
 ``name_[<#>]`` pattern that pipe_pool resolves at runtime.
+
+Pass ``keep_ids=True`` to leave every id exactly as the upstream tool wrote
+it. Nothing is suffixed, so two runs that share an id are an error: Pool
+raises a ``ValueError`` naming the colliding ids, at configuration time
+when the ids are known and in the pipe otherwise.
 """
 
 import os
@@ -52,17 +65,47 @@ except ImportError:
     from datastream import DataStream
 
 
+def raise_on_id_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
+    """Raise a ValueError naming every id that more than one run carries.
+
+    ``ids_by_run`` maps a 1-based run number to that run's ids; an id repeated
+    inside one run is not a collision. Shared by the configuration-time check
+    and ``pipe_pool.py``.
+    """
+    owners: Dict[str, List[int]] = {}
+    for run_number, ids in ids_by_run.items():
+        for oid in dict.fromkeys(str(i) for i in ids):
+            owners.setdefault(oid, []).append(run_number)
+    clashing = {oid: runs for oid, runs in owners.items() if len(runs) > 1}
+    if not clashing:
+        return
+    shown = [f"{oid} (runs {', '.join(map(str, runs))})" for oid, runs in list(clashing.items())[:10]]
+    more = f" and {len(clashing) - 10} more" if len(clashing) > 10 else ""
+    raise ValueError(
+        f"Pool keep_ids=True: {label} has {len(clashing)} id(s) carried by more than one run: "
+        f"{', '.join(shown)}{more}. Without a suffix these ids would overwrite each other. "
+        "Make the ids distinct upstream, or drop keep_ids so Pool suffixes each id with its run index."
+    )
+
+
 class Pool(BaseConfig):
     """
     Pool tool for gathering N parallel-run StandardizedOutputs into one.
 
     Concatenates every shared stream and table across the inputs with
-    composite ids ``<orig_id>_<pool_idx>`` (1-based) and a ``pool.path``
-    provenance column tracking each id's source run.
+    composite ids ``<orig_id>_<pool_idx>`` (1-based) and two provenance
+    columns: ``pool.path`` (the source run) and ``original.id`` (the id before
+    this Pool renamed it).
+
+    The suffix renames EVERY id, even when no two runs share one, so a
+    pooled id is not the id the upstream tool produced. Matching pooled ids by
+    string prefix is unsafe: the pooled parent ``P_1`` is a prefix of the
+    pooled design ``P_12_1`` but not of ``P_7_1``. Match on ``original.id``, or
+    pass ``keep_ids=True`` to leave the ids untouched.
     """
 
     TOOL_NAME = "Pool"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -78,6 +121,7 @@ echo "=== Pool ready ==="
     def __init__(self, runs: List[StandardizedOutput],
                  recount_prefix: Optional[str] = None,
                  streams: Optional[List[str]] = None,
+                 keep_ids: bool = False,
                  **kwargs):
         """
         Args:
@@ -93,12 +137,30 @@ echo "=== Pool ready ==="
                 `<recount_prefix>_2`, ..., `<recount_prefix>_N`. Counted at
                 config time when every input run has fully-resolved ids;
                 otherwise the framework emits a lazy `<recount_prefix>_[<#>]`
-                pattern that pipe_pool resolves at runtime.
+                pattern that pipe_pool resolves at runtime. Mutually exclusive
+                with ``keep_ids``.
             streams: Stream names to pool. ``None`` (default) is strict: every
                 input must expose the same stream set. A list keeps exactly
                 those streams (each must exist in every input, with matching
                 format/shape) and drops the rest. Tables are always pooled as
                 the intersection across inputs, regardless of this setting.
+            keep_ids: If True, ids are NOT suffixed: every pooled id is the id
+                the upstream tool wrote. A collision (two runs sharing an id)
+                raises a ``ValueError`` naming the colliding ids, at
+                configuration time when the ids are known and in the pipe
+                otherwise. Mutually exclusive with ``recount_prefix``. The
+                default suffixes every id with ``_<pool_idx>``, which renames
+                ids even when no two runs share one; find an id's pre-pool
+                name in ``original.id``, never by prefix matching.
+
+        Output:
+            Streams: every shared stream, concatenated across the runs.
+            Tables: every shared table, concatenated. Pooled tables and
+                map_tables gain ``pool.path`` (1-based source-run index) and
+                ``original.id`` (the id before renaming; equal to ``id`` under
+                ``keep_ids``). An input table that already has an
+                ``original.id`` column keeps it, except under
+                ``recount_prefix``, which replaces it.
         """
         if not isinstance(runs, (list, tuple)):
             raise ValueError(
@@ -120,7 +182,16 @@ echo "=== Pool ready ==="
                     "tool calls (e.g., the value returned by RFdiffusion(...))."
                 )
 
+        if not isinstance(keep_ids, bool):
+            raise ValueError(f"Pool 'keep_ids' must be a bool, got {type(keep_ids).__name__}.")
+        if keep_ids and recount_prefix is not None:
+            raise ValueError(
+                "Pool 'keep_ids=True' and 'recount_prefix' are mutually exclusive: keep_ids leaves "
+                "every id as the upstream tool wrote it, recount_prefix replaces every id."
+            )
+
         self.recount_prefix = recount_prefix
+        self.keep_ids = keep_ids
         self.runs = list(runs)
 
         run_streams = [self._stream_names(r) for r in self.runs]
@@ -223,6 +294,9 @@ echo "=== Pool ready ==="
         self._shared_tables = sorted(first_tables)
         self._stream_format_map = first_formats
 
+        if self.keep_ids:
+            self._check_keep_ids_collisions()
+
         super().__init__(**kwargs)
 
     # ── helpers: enumerate streams / tables of an upstream output ────────────
@@ -264,6 +338,21 @@ echo "=== Pool ready ==="
             return False
         table = run.tables._tables.get(name)
         return table is not None and table.info.path == mt
+
+    def _check_keep_ids_collisions(self) -> None:
+        """Raise on a cross-run id collision in every stream whose ids are known now.
+
+        A stream with lazy ids cannot be checked here; ``pipe_pool.py`` checks
+        every stream and table again against the real ids.
+        """
+        for name in self._shared_streams:
+            streams = [r.streams.get(name) for r in self.runs]
+            if any(ds.is_lazy for ds in streams):
+                continue
+            raise_on_id_collision(
+                f"stream '{name}'",
+                {i: list(ds.ids_expanded) for i, ds in enumerate(streams, start=1)},
+            )
 
     def _content_file_col(self, stream_name: str) -> Optional[str]:
         """Name of the file column in a content stream's table, or None when
@@ -361,6 +450,7 @@ echo "=== Pool ready ==="
             "content_file_cols": content_file_cols,
             "output_folder": self.output_folder,
             "recount_prefix": self.recount_prefix,
+            "keep_ids": self.keep_ids,
         }
 
         with open(self.pool_config_json, 'w') as f:
@@ -380,9 +470,10 @@ echo "=== Pool ready ==="
         """Build the combined StandardizedOutput shape.
 
         Each shared stream gathers ids of the form ``<orig_id>_<pool_idx>``
-        across runs (1-based pool index). Each shared table is emitted
-        with the matching renumbered ids. The pool.path column is
-        materialised at runtime by pipe_pool.py.
+        across runs (1-based pool index), or the unchanged ``<orig_id>`` under
+        ``keep_ids``. Each shared table is emitted with the matching ids. The
+        pool.path and original.id columns are materialised at runtime by
+        pipe_pool.py.
         """
         output: Dict[str, Any] = {}
 
@@ -423,6 +514,8 @@ echo "=== Pool ready ==="
                 for oid in orig_ids:
                     if recount and not any_lazy:
                         composite = f"{self.recount_prefix}_{len(new_ids) + 1}"
+                    elif self.keep_ids:
+                        composite = oid
                     else:
                         composite = f"{oid}_{pool_idx}"
                     new_ids.append(composite)
@@ -480,11 +573,12 @@ echo "=== Pool ready ==="
         tables: Dict[str, TableInfo] = {}
         for name in self._shared_tables:
             # Carry forward the column schema from input #1; pipe_pool.py
-            # appends "pool.path" to the actual rows at runtime.
+            # appends "pool.path" and "original.id" to the actual rows at runtime.
             first_t = self.runs[0].tables._tables[name]
             cols = list(first_t.info.columns) if first_t.info.columns else []
-            if "pool.path" not in cols:
-                cols.append("pool.path")
+            for extra in ("pool.path", "original.id"):
+                if extra not in cols:
+                    cols.append(extra)
             # Content tables (name matches a content-bearing stream) share the
             # one file with that stream; others get tables/<name>.csv.
             if name in self._content_streams:
@@ -511,6 +605,7 @@ echo "=== Pool ready ==="
                 "n_runs": len(self.runs),
                 "shared_streams": self._shared_streams,
                 "shared_tables": self._shared_tables,
+                "keep_ids": self.keep_ids,
             }
         })
         return base_dict

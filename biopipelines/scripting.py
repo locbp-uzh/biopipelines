@@ -52,13 +52,14 @@ class Scripting(BaseConfig):
         script: A .py file defining ``configuration(inputs)`` and ``execution(inputs, outputs)``. Keep it in the scripts folder (``folders.infrastructure.scripts``, default ``my_scripts/``) and pass the bare filename; an existing absolute or cwd-relative path is used as given. The resolved file is copied to ``<step>/_configuration/`` and that copy is what runs, so the run keeps the code that produced it and a later edit cannot change a queued step; the original folder stays on ``sys.path`` for sibling imports.
         inputs: Dict mapping a name to a StandardizedOutput, DataStream, a whole table (``tool.tables.x`` / a TableInfo), or a table-column reference (``tool.tables.x.col`` or ``(TableInfo, "col")``). A StandardizedOutput prefers an exact key match (``{"structures": tool}`` → ``tool.streams.structures``), else falls back to its single non-empty stream; pass ``tool.streams.<name>`` to disambiguate.
         env: Conda env the execution phase runs in. Defaults to the biopipelines env. The tool does not create it. The script's ``execution`` may import biopipelines when that env carries biopipelines' deps — the default env does, and a custom env does after ``pip install -e ".[scripting]"``.
+        max_dropped: A fraction in (0, 1], or None (default, no cap). After ``execution`` ends, the step fails when the number of distinct ids recorded through ``outputs.drop`` exceeds ``max_dropped`` times the number of distinct ids that entered (across all inputs, as resolved at runtime); the message gives both counts. The outputs and the ``missing`` table are written first, so the dropped ids can be inspected. It is the cap that stops a lookup which silently fails for most ids from passing as a filter.
 
     Output:
-        Streams/tables are whatever the script's ``configuration`` declares.
+        Streams/tables are whatever the script's ``configuration`` declares, plus ``missing`` (``id | removed_by | kind | cause``): the ids recorded through ``outputs.drop(id, cause="", kind="filter")``, merged with the upstream manifests. ``kind="filter"`` is a deliberate drop and the completion check excuses its absent outputs; ``kind="unmatched"`` is a lookup that found no partner and is NOT excused, so the step is flagged like a failure. Any other ``kind`` raises.
     """
 
     TOOL_NAME = "Scripting"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     # The user script's configuration() names its own streams.
     USER_STREAM_NAMES = True
@@ -83,10 +84,12 @@ echo "=== Scripting ready ==="
                  script: str,
                  inputs: Dict[str, Any],
                  env: Optional[str] = None,
+                 max_dropped: Optional[float] = None,
                  **kwargs):
         self.script = script
         self.inputs_raw = inputs
         self.env = env
+        self.max_dropped = max_dropped
         self._user_module = None
         self._declared = None
         super().__init__(**kwargs)
@@ -108,6 +111,13 @@ echo "=== Scripting ready ==="
                 raise ValueError(f"input name must be a non-empty string, got {name!r}")
         if self.env is not None:
             _validate_freeform_string("env", self.env)
+        if self.max_dropped is not None and (
+                isinstance(self.max_dropped, bool)
+                or not isinstance(self.max_dropped, (int, float))
+                or not 0 < self.max_dropped <= 1):
+            raise ValueError(
+                f"max_dropped must be a fraction in (0, 1] or None, got {self.max_dropped!r}"
+            )
         self._load_user_module()
         for fn in ("configuration", "execution"):
             if not hasattr(self._user_module, fn):
@@ -284,7 +294,8 @@ python "{self.runner_py}" \\
         from .scripting_api import Stream as _Stream, Table as _Table
         streams = {}
         tables = {}
-        manifest_meta = {"tool_name": self.TOOL_NAME, "missing_csv": self.dropped_csv}
+        manifest_meta = {"tool_name": self.TOOL_NAME, "missing_csv": self.dropped_csv,
+                         "max_dropped": self.max_dropped}
         for key, val in declared.items():
             if isinstance(val, _Stream):
                 streams[key] = {

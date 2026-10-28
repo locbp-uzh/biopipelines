@@ -88,7 +88,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 76 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
 | 77 | ExtractMetrics            | Data Management                | 1.1 | `biopipelines/extract_metrics.py` |
 | 78 | Panda                     | Data Management                | 1.5 | `biopipelines/panda.py` |
-| 79 | Pool                      | Data Management                | 1.2 | `biopipelines/pool.py` |
+| 79 | Pool                      | Data Management                | 1.3 | `biopipelines/pool.py` |
 | 80 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
 | 81 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
 | 82 | SelectionTransfer | Data Management | 1.0 | `biopipelines/selection_transfer.py` |
@@ -101,7 +101,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 89 | PDB | Inputs & I/O                   | 1.6 | `biopipelines/pdb.py` |
 | 90 | Plot                      | Inputs & I/O                   | 1.0 | `biopipelines/plot.py` |
 | 91 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |
-| 92 | Scripting | Inputs & I/O                   | 1.3 | `biopipelines/scripting.py` |
+| 92 | Scripting | Inputs & I/O                   | 1.4 | `biopipelines/scripting.py` |
 | 93 | RCSB                      | Inputs & I/O                   | 1.5 | `biopipelines/rcsb.py` |
 | 94 | Sequence                  | Inputs & I/O                   | 1.0 | `biopipelines/sequence.py` |
 | 95 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |

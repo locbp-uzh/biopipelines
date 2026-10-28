@@ -32,7 +32,7 @@ Outputs are handles reached by ``outputs[name]``, where ``name`` is a key the ``
 
 ``file()`` is file-stream-only; ``row``/``add``/``dataframe`` fill value-based streams and standalone tables alike (both are id-keyed CSVs).
 
-When ``execution`` intentionally drops an input id (a data-dependent filter), report it with ``outputs.drop(id, cause="...")`` so the completion check excuses that id's absent outputs instead of flagging the step as failed.
+When ``execution`` intentionally drops an input id (a data-dependent filter), report it with ``outputs.drop(id, cause="...")`` so the completion check excuses that id's absent outputs instead of flagging the step as failed. When a lookup finds no partner for an id, report it with ``outputs.drop(id, cause="...", kind="unmatched")`` instead: that is not excused, so the completion check flags the step like a failure. ``kind`` is ``"filter"`` (default) or ``"unmatched"``; anything else raises. ``Scripting(max_dropped=...)`` additionally fails the step when too large a share of the ids that entered was dropped.
 """
 
 from typing import List, Optional

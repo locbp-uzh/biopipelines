@@ -144,10 +144,13 @@ class _OutputHandle:
         df.to_csv(self._target, index=False)
 
 
+DROP_KINDS = ("filter", "unmatched")
+
+
 class _Outputs:
     """Mapping of output name -> ``_OutputHandle``, reached via ``outputs[name]``.
 
-    Assigning ``outputs[name] = "path.csv"`` adopts that CSV wholesale (copied to the managed target on close) instead of accumulating rows. ``drop(id)`` records an intentionally-filtered id so the completion check excuses it.
+    Assigning ``outputs[name] = "path.csv"`` adopts that CSV wholesale (copied to the managed target on close) instead of accumulating rows. ``drop(id)`` records an id the step does not carry forward, as ``kind="filter"`` (deliberate, excused by the completion check) or ``kind="unmatched"`` (a lookup found no partner, flagged like a failure).
     """
 
     def __init__(self, manifest):
@@ -162,6 +165,7 @@ class _Outputs:
         self._table_columns = {n: i["columns"] for n, i in manifest["tables"].items()}
         self._removed_by = manifest.get("tool_name", "Scripting")
         self._missing_csv = manifest.get("missing_csv")
+        self.max_dropped = manifest.get("max_dropped")
         self._dropped = []
 
     def __getitem__(self, name):
@@ -179,14 +183,23 @@ class _Outputs:
             )
         self._handles[name]._adopted = csv_path
 
-    def drop(self, id, cause=""):
-        """Record ``id`` as intentionally filtered out.
+    def drop(self, id, cause="", kind="filter"):
+        """Record ``id`` as not carried into the outputs.
 
-        Its absent outputs are then excused by the completion check instead of being flagged as a failure. ``cause`` is a free-text reason.
+        ``kind="filter"`` (default) is a deliberate drop: its absent outputs are excused by the completion check. ``kind="unmatched"`` is a lookup that found no partner for ``id``: NOT excused, so the completion check flags the step like a failure. ``cause`` is a free-text reason.
         """
+        if kind not in DROP_KINDS:
+            raise ValueError(
+                f"drop({id!r}): kind must be one of {DROP_KINDS}, got {kind!r}. "
+                f"'filter' excuses the id, 'unmatched' flags the step."
+            )
         self._dropped.append(
-            {"id": id, "removed_by": self._removed_by, "kind": "filter", "cause": cause}
+            {"id": id, "removed_by": self._removed_by, "kind": kind, "cause": cause}
         )
+
+    def dropped(self):
+        """``{id: kind}`` over the distinct ids recorded by ``drop``; a later call for an id wins, as in the merged missing table."""
+        return {str(row["id"]): row["kind"] for row in self._dropped}
 
     def _write_missing(self):
         if not self._missing_csv:
@@ -231,6 +244,27 @@ def _build_inputs(inputs_manifest):
     return inputs
 
 
+def _check_max_dropped(inputs, outputs):
+    """Fail the step when the script dropped more ids than ``max_dropped`` allows.
+
+    The ids that entered are the distinct ids across every input, as resolved at runtime (so ids an upstream step already filtered do not count). The outputs and the missing table are already written, so the dropped ids stay inspectable.
+    """
+    dropped = outputs.dropped()
+    n_entered = len({str(i) for item in inputs.values() for i in item.ids})
+    by_kind = {k: sum(1 for v in dropped.values() if v == k) for k in DROP_KINDS}
+    if dropped:
+        print(f"Scripting: {len(dropped)} of {n_entered} ids dropped "
+              f"({', '.join(f'{k}: {n}' for k, n in by_kind.items())})")
+    limit = None if outputs.max_dropped is None else outputs.max_dropped * n_entered
+    if limit is not None and len(dropped) - limit > 1e-9:
+        sys.exit(
+            f"Scripting: max_dropped={outputs.max_dropped:g} exceeded. {len(dropped)} of "
+            f"{n_entered} ids that entered were dropped through outputs.drop "
+            f"({', '.join(f'{k}: {n}' for k, n in by_kind.items())}); at most "
+            f"{int(limit + 1e-9)} are allowed. The dropped ids and causes are in {outputs._missing_csv}."
+        )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", required=True)
@@ -252,6 +286,7 @@ def main():
     module.execution(inputs, outputs)
     outputs._write_all()
     outputs._write_missing()
+    _check_max_dropped(inputs, outputs)
 
 
 if __name__ == "__main__":

@@ -773,11 +773,12 @@ Runs a user-authored script as a typed, two-phase pipeline step — an escape ha
 **The step keeps the script it ran.** At configuration time the resolved file is copied to `<step>/_configuration/<name>.py` and the runner executes that copy, with the original folder added to `sys.path` so a helper importing a sibling module still works. The run therefore records the code that produced its outputs — which `my_scripts/` being gitignored would otherwise lose — and editing the helper after submission cannot change a step that has not started yet.
 - `inputs`: Dict[str, ...] (required) — Maps a name to a `StandardizedOutput`, a `DataStream`, a whole table (`tool.tables.x` / a `TableInfo`, giving `.row(id)`/`.rows()`/`.columns`), or a table-column reference (`tool.tables.x.col` or `(TableInfo, "col")`, giving `.value(id)`). A `StandardizedOutput` resolves by preferring an exact match on the input key (`inputs={"structures": tool}` → `tool.streams.structures`), falling back to its single non-empty stream when the key doesn't match a stream name (`inputs={"seqs": seq_tool}` → the lone `sequences` stream). It errors only on a genuine ambiguity — no name match and several non-empty streams — in which case pass an explicit stream (`tool.streams.structures`).
 - `env`: str = None — Conda env the execution phase runs in.
+- `max_dropped`: float = None — a fraction in (0, 1]. After `execution` ends, the step fails when the number of distinct ids recorded through `outputs.drop` exceeds `max_dropped` times the number of distinct ids that entered (across all inputs, as resolved at runtime, so ids an upstream step already filtered do not count). The message gives both counts. Outputs and the `missing` table are written first, so the dropped ids can be inspected. `None` (default) sets no cap. It is the guard against a lookup that fails silently for most ids and passes as a filter.
 
 **Streams**: whatever `configuration()` declares — `Stream(format, ids)` for each (file-based when format is `pdb`/`cif`/`sdf`/...; value-based when format is `csv` and rows carry no `file` column).
 
 **Tables**: whatever `configuration()` declares via `Table(columns=[...])`, plus one the tool always adds:
-- `missing`: | id | removed_by | kind | cause | — the ids `outputs.drop(id, cause=...)` filtered out, merged with any upstream manifest.
+- `missing`: | id | removed_by | kind | cause | — the ids recorded through `outputs.drop(id, cause=..., kind=...)`, merged with any upstream manifest. `kind` is `filter` (a deliberate drop, excused by the completion check) or `unmatched` (a lookup found no partner for the id; not excused, so the step is flagged like a failure).
 
 **Script API** (`from biopipelines.scripting_api import Stream, Table`). `execution()` returns nothing; every output is filled through its `outputs[name]` handle, where `name` is a key the `configuration` dict declared:
 
@@ -793,7 +794,7 @@ Runs a user-authored script as a typed, two-phase pipeline step — an escape ha
 | `outputs["t"].add(id=, file=, value=, **cols)` | — | append a row with any of file/value/extra columns |
 | `outputs["t"].dataframe(df)` | — | hand over a whole DataFrame as the output's rows |
 | `outputs["t"] = "path.csv"` | — | adopt an existing CSV as the output (copied into place) |
-| `outputs.drop(id, cause="")` | — | mark an id intentionally filtered out (its absent outputs are then excused, not failed) |
+| `outputs.drop(id, cause="", kind="filter")` | — | record an id the step does not carry forward. `kind="filter"` (default): intentionally filtered out, its absent outputs are excused, not failed. `kind="unmatched"`: a lookup found no partner for it, NOT excused, so the completion check flags the step like a failure. Any other `kind` raises |
 
 `file()` is file-stream-only; `row`/`add`/`dataframe` fill value-based streams and standalone tables alike (both are id-keyed CSVs).
 
@@ -829,6 +830,8 @@ def execution(inputs, outputs):
         ...                                                     # write `out`
         outputs["scores"].row({"id": sid, "rmsd": ...})         # a table row
 ```
+
+**`filter` versus `unmatched`.** A drop that the script chose on the data (a threshold, a duplicate) is `kind="filter"`. An id for which a lookup against another input found no partner is a different event: the script did not decide to drop it, the join failed. Record that as `outputs.drop(sid, cause="no parent row", kind="unmatched")`, so the completion check flags the step instead of excusing the loss, and set `max_dropped` to stop a lookup that fails for most ids from passing as a filter.
 
 **Environment requirements.** The runner (`pipe_scripting.py`) resolves the input streams through the framework before handing them to `execution`, so it imports `pandas` and `biopipelines` itself. Any `env` you name must therefore carry biopipelines' runtime deps — even a script that only touches the `inputs`/`outputs` proxies. The default `biopipelines` env has them. For a custom `env`, install them once into it (this is also what lets `execution` call framework helpers like `get_mapped_ids` / `DataStream` directly):
 

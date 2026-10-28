@@ -155,8 +155,10 @@ def _load_expected_missing_ids(expected_outputs: Dict[str, Any],
         absent.
 
     A row whose ``removed_by`` IS this step (step id or bare tool name) and
-    whose ``kind == "failure"`` is NOT excused — its missing files indicate
-    a real failure and should trigger a FAILED status.
+    whose ``kind`` is anything but ``"filter"`` is NOT excused: ``"failure"``
+    (the tool tried and raised) and ``"unmatched"`` (a lookup found no
+    partner) both mean the missing files indicate a real problem and should
+    trigger a FAILED status.
 
     The primary discriminator is the *step* identifier (``<order>_<Tool>``,
     e.g. ``005_XTB``), not the bare tool name. In a chain of the same tool
@@ -349,9 +351,9 @@ def check_expected_outputs(expected_outputs: Dict[str, Any],
     Missing-aware: files corresponding to IDs flagged in ``tables.missing``
     as either propagated upstream (``removed_by != tool_name``) or locally
     filtered (``kind == "filter"``) are *expected* to be absent and do not
-    count as failures. Local failure rows (``removed_by == tool_name`` and
-    ``kind == "failure"``) are NOT excused — their missing files still
-    trigger a FAILED status.
+    count as failures. Local ``kind == "failure"`` and ``kind == "unmatched"``
+    rows (``removed_by == tool_name``) are NOT excused — their missing files
+    still trigger a FAILED status.
 
     Args:
         expected_outputs: Dictionary with standardized output format

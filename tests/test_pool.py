@@ -451,3 +451,247 @@ def test_pool_id_format_is_orig_underscore_pool_idx(
         pipeline.save()
 
     assert list(pooled.streams.sequences.ids) == ["design_1", "design_2", "design_3"]
+
+
+# ── original.id and keep_ids ─────────────────────────────────────────────────
+#
+# The default suffix renames EVERY id. A step that maps a design to its parent
+# with a raw ``sid.startswith(parent_id)`` then matches by accident: the pooled
+# parent ``P_1`` is a prefix of the pooled design ``P_12_1`` but not of ``P_7_1``.
+
+N_DESIGNS = 100
+GROUPS = (1, 2, 3)
+
+
+def _write_run_tables(tmp_path, name, ids_by_run):
+    """One CSV per run, the shape a pooled upstream table has before Pool."""
+    import pandas as pd
+
+    runs = []
+    for i, ids in enumerate(ids_by_run, start=1):
+        d = tmp_path / f"{name}_run{i}"
+        d.mkdir(parents=True)
+        csv = d / f"{name}.csv"
+        pd.DataFrame({"id": ids, "value": range(len(ids))}).to_csv(csv, index=False)
+        runs.append([{"name": name, "path": str(csv), "columns": ["id", "value"]}])
+    return runs
+
+
+def _pool_table(tmp_path, name, ids_by_run, **options):
+    """Pool the tables through pipe_pool's real table logic; return the result."""
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    out = tmp_path / f"{name}_pooled.csv"
+    pipe_pool._gather_table(name, _write_run_tables(tmp_path, name, ids_by_run), str(out), **options)
+    return pd.read_csv(out)
+
+
+def test_prefix_matching_loses_pooled_designs_and_original_id_recovers_them(tmp_path):
+    """Three parents pooled as P_1..P_3, 100 designs per group pooled as P_<n>_<group>.
+
+    A prefix lookup finds only the designs whose number starts with the group's
+    digit: 12, 11 and 11 of 100 (design 1, 10-19 and 100; 2 and 20-29; 3 and
+    30-39). Looking up through ``original.id`` finds all of them.
+    """
+    parents = _pool_table(tmp_path, "parents", [["P"] for _ in GROUPS])
+    designs = _pool_table(tmp_path, "designs",
+                          [[f"P_{n}" for n in range(1, N_DESIGNS + 1)] for _ in GROUPS])
+
+    assert list(parents["id"]) == ["P_1", "P_2", "P_3"]
+    assert designs["id"].iloc[11] == "P_12_1"
+
+    by_prefix, by_original = [], []
+    for g in GROUPS:
+        parent = parents[parents["pool.path"] == g].iloc[0]
+        group = designs[designs["pool.path"] == g]
+        by_prefix.append(int(group["id"].str.startswith(parent["id"]).sum()))
+        # the design's own id minus its design number is the parent's pre-pool id
+        by_original.append(int((group["original.id"].str.rsplit("_", n=1).str[0]
+                                == parent["original.id"]).sum()))
+
+    assert by_prefix == [12, 11, 11]
+    assert by_original == [N_DESIGNS] * len(GROUPS)
+
+
+def test_keep_ids_never_adds_a_group_suffix(tmp_path):
+    """With distinct ids per run, keep_ids leaves every id exactly as written."""
+    ids_by_run = [[f"P{g}_{n}" for n in range(1, N_DESIGNS + 1)] for g in GROUPS]
+    designs = _pool_table(tmp_path, "designs", ids_by_run, keep_ids=True)
+
+    assert list(designs["id"]) == [i for ids in ids_by_run for i in ids]
+    assert list(designs["original.id"]) == list(designs["id"])
+    assert list(designs["pool.path"][::N_DESIGNS]) == list(GROUPS)
+    # the raw prefix lookup that failed for the suffixed ids now matches every design
+    for g in GROUPS:
+        group = designs[designs["pool.path"] == g]
+        assert group["id"].str.startswith(f"P{g}").all()
+
+
+def test_keep_ids_collision_in_a_table_names_the_ids(tmp_path):
+    with pytest.raises(ValueError, match=r"table 'designs'.*dup_a \(runs 1, 2\).*dup_b \(runs 1, 2\)"):
+        _pool_table(tmp_path, "designs", [["dup_a", "dup_b", "only_1"], ["dup_a", "dup_b"]],
+                    keep_ids=True)
+
+
+def test_keep_ids_collision_in_a_stream_map_is_raised_before_any_copy(tmp_path):
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    runs = []
+    for i in (1, 2):
+        run_dir = tmp_path / f"run{i}"
+        run_dir.mkdir()
+        runs.append([{"name": "structures", "stream_key": "structures", "format": "pdb",
+                      "ids": ["same"], "files": [], "map_table": "", "is_shared_file": False}])
+    out_dir = tmp_path / "out"
+    spec = {"stream_dir": str(out_dir), "map_table": str(out_dir / "structures_map.csv"),
+            "format": "pdb"}
+    with pytest.raises(ValueError, match=r"stream 'structures'.*same \(runs 1, 2\)"):
+        pipe_pool._gather_stream("structures", runs, spec, keep_ids=True)
+    assert not (out_dir / "structures_map.csv").exists()
+
+
+def test_same_ids_are_fine_without_keep_ids(tmp_path):
+    pooled = _pool_table(tmp_path, "designs", [["same"], ["same"]])
+    assert list(pooled["id"]) == ["same_1", "same_2"]
+    assert list(pooled["original.id"]) == ["same", "same"]
+
+
+def test_original_id_is_emitted_on_every_stream_map_row_in_default_mode(tmp_path):
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    runs = []
+    for i in (1, 2):
+        run_dir = tmp_path / f"run{i}"
+        run_dir.mkdir()
+        pdb = run_dir / "p.pdb"
+        pdb.write_text("ATOM\n")
+        runs.append([{"name": "structures", "stream_key": "structures", "format": "pdb",
+                      "ids": ["p"], "files": [str(pdb)], "map_table": "", "is_shared_file": False}])
+    out_dir = tmp_path / "out"
+    spec = {"stream_dir": str(out_dir), "map_table": str(out_dir / "structures_map.csv"),
+            "format": "pdb"}
+    pipe_pool._gather_stream("structures", runs, spec)
+
+    df = pd.read_csv(out_dir / "structures_map.csv")
+    assert list(df["id"]) == ["p_1", "p_2"]
+    assert list(df["original.id"]) == ["p", "p"]
+    assert list(df["pool.path"]) == [1, 2]
+
+
+def test_renumber_ids_default_mode_keeps_an_upstream_original_id_and_suffixes_axis_ids():
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    plain = pd.DataFrame({"id": ["a"], "sequences.id": ["s"]})
+    out = pipe_pool._renumber_ids(plain, 2)
+    assert out.iloc[0].to_dict() == {"id": "a_2", "sequences.id": "s_2", "original.id": "a"}
+
+    carried = pd.DataFrame({"id": ["m"], "original.id": ["parent"]})
+    out = pipe_pool._renumber_ids(carried, 2)
+    assert out.iloc[0].to_dict() == {"id": "m_2", "original.id": "parent_2"}
+
+
+def test_renumber_ids_recount_mode_is_unchanged():
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    df = pd.DataFrame({"id": ["a", "b"], "sequences.id": ["s", "t"]})
+    out = pipe_pool._renumber_ids(df, 2, recount_prefix="r", recount_start=5)
+    assert list(out["id"]) == ["r_5", "r_6"]
+    assert list(out["original.id"]) == ["a", "b"]
+    assert list(out["sequences.id"]) == ["s", "t"]
+
+
+def test_pool_declares_the_original_id_column(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.sequence import Sequence
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_original_id_column")
+    with pipeline:
+        pooled = Pool(runs=[Sequence(seq="MK", ids="a", type="protein"),
+                            Sequence(seq="AY", ids="b", type="protein")])
+        pipeline.save()
+
+    cols = list(pooled.tables.sequences.info.columns)
+    assert "original.id" in cols and "pool.path" in cols
+
+
+def test_keep_ids_at_configuration_time_leaves_ids_untouched(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.sequence import Sequence
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_keep_ids")
+    with pipeline:
+        pooled = Pool(runs=[Sequence(seq="MK", ids="a", type="protein"),
+                            Sequence(seq="AY", ids="b", type="protein")],
+                      keep_ids=True)
+        pipeline.save()
+
+    assert list(pooled.streams.sequences.ids) == ["a", "b"]
+
+
+def test_keep_ids_collision_at_configuration_time_names_the_ids(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.sequence import Sequence
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_keep_ids_collision")
+    with pytest.raises(ValueError, match=r"keep_ids.*s1 \(runs 1, 2\).*s2 \(runs 1, 2\)"):
+        with pipeline:
+            Pool(runs=[Sequence(seq=["MK", "AY"], ids=["s1", "s2"], type="protein"),
+                       Sequence(seq=["GF", "CD"], ids=["s1", "s2"], type="protein")],
+                 keep_ids=True)
+
+
+def test_keep_ids_and_recount_prefix_are_mutually_exclusive(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.sequence import Sequence
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_keep_ids_recount")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        with pipeline:
+            Pool(runs=[Sequence(seq="MK", ids="a", type="protein"),
+                       Sequence(seq="AY", ids="b", type="protein")],
+                 keep_ids=True, recount_prefix="r")
+
+
+def test_keep_ids_runs_end_to_end_through_pipe_pool_main(tmp_path):
+    """The config Pool writes carries keep_ids; main() honors it for streams and tables."""
+    import json
+    import sys
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    cols = ["id", "code", "smiles"]
+    up = []
+    for i, ids in enumerate((["a", "b"], ["c"]), start=1):
+        d = tmp_path / f"run{i}"
+        d.mkdir()
+        csv = d / "compounds.csv"
+        pd.DataFrame({"id": ids, "code": "LIG", "smiles": "C"}, columns=cols).to_csv(csv, index=False)
+        up.append((ids, str(csv)))
+    out = tmp_path / "out" / "compounds"
+    out.mkdir(parents=True)
+    combined = str(out / "compounds.csv")
+    config = {
+        "runs": [{"streams": [{"name": "compounds", "stream_key": "compounds", "format": "csv",
+                               "ids": ids, "files": [], "map_table": csv, "is_shared_file": False}],
+                  "tables": [{"name": "compounds", "path": csv, "columns": cols}]}
+                 for ids, csv in up],
+        "shared_streams": ["compounds"], "shared_tables": ["compounds"],
+        "out_streams": {"compounds": {"stream_dir": str(out), "map_table": combined, "format": "csv"}},
+        "out_tables": {"compounds": combined},
+        "content_bearing_streams": ["compounds"], "content_file_cols": {"compounds": "file_path"},
+        "output_folder": str(tmp_path / "out"), "recount_prefix": None, "keep_ids": True,
+    }
+    config_json = tmp_path / "pool_config.json"
+    config_json.write_text(json.dumps(config))
+
+    sys.argv = ["pipe_pool.py", str(config_json)]
+    pipe_pool.main()
+
+    df = pd.read_csv(combined)
+    assert list(df["id"]) == ["a", "b", "c"]
+    assert list(df["original.id"]) == ["a", "b", "c"]
+    assert list(df["pool.path"]) == [1, 1, 2]

@@ -62,7 +62,7 @@ Each line ends with the tool's tags — a closed 38-term vocabulary in four face
 
 - **ExtractMetrics** v1.1 · CPU · x86-64, aarch64, Colab — Creates separate CSV files per metric for statistical software (GraphPad Prism). `docs/tool/data_management.md#extractmetrics` · tags: data
 - **Panda** v1.5 · CPU · x86-64, aarch64, Colab — Unified pandas-style table transformations. `docs/tool/data_management.md#panda` · tags: data
-- **Pool** v1.2 · CPU · x86-64, aarch64, Colab — Gathers N StandardizedOutputs from parallel runs of the same upstream tool into one combined StandardizedOutput. `docs/tool/data_management.md#pool` · tags: data
+- **Pool** v1.3 · CPU · x86-64, aarch64, Colab — Gathers N StandardizedOutputs from parallel runs of the same upstream tool into one combined StandardizedOutput. `docs/tool/data_management.md#pool` · tags: data
 - **ReMap** v1.2 · CPU · x86-64, aarch64, Colab — Renames IDs across all streams and tables from a source tool output. `docs/tool/data_management.md#remap` · tags: data
 - **Selection** v1.2 · CPU · x86-64, aarch64, Colab — Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right. `docs/tool/data_management.md#selection` · tags: data, residues
 - **SelectionTransfer** v1.0 · CPU · x86-64, aarch64, Colab — Carries a residue selection from the structures it is numbered on onto structures from a later stage of the pipeline — after trimming, extending, shif `docs/tool/data_management.md#selectiontransfer` · tags: data, residues, protein
@@ -77,7 +77,7 @@ Each line ends with the tool's tags — a closed 38-term vocabulary in four face
 - **Plot** v1.0 · CPU · x86-64, aarch64, Colab — Creates plots from CSV data. `docs/tool/inputs_io.md#plot` · tags: visualize
 - **PyMOL** v2.1 · GPU · x86-64, Colab — Creates PyMOL sessions using a declarative operation-based API. `docs/tool/inputs_io.md#pymol` [repo](https://github.com/schrodinger/pymol-open-source) · tags: visualize, protein, small-molecule, residues
 - **RCSB** v1.5 · CPU · x86-64, Colab — Searches the RCSB PDB Search API v2 and downloads matching structures. `docs/tool/inputs_io.md#rcsb` [paper](https://doi.org/10.1093/nar/gkac1077) · tags: fetch, protein, small-molecule
-- **Scripting** v1.3 · CPU · x86-64, aarch64, Colab — Runs a user-authored script as a typed, two-phase pipeline step — an escape hatch for one-off glue logic that doesn't justify a full tool wrapper. `docs/tool/inputs_io.md#scripting`
+- **Scripting** v1.4 · CPU · x86-64, aarch64, Colab — Runs a user-authored script as a typed, two-phase pipeline step — an escape hatch for one-off glue logic that doesn't justify a full tool wrapper. `docs/tool/inputs_io.md#scripting`
 - **Sequence** v1.0 · CPU · x86-64, aarch64, Colab — Creates sequences from strings with auto-detection (protein/DNA/RNA). `docs/tool/inputs_io.md#sequence` · tags: data, protein, nucleic-acid
 - **Table** v1.1 · CPU · x86-64, aarch64, Colab — Direct table construction from an existing CSV or Excel file. `docs/tool/inputs_io.md#table` · tags: data
 - **UniProt** v1.1 · CPU · x86-64, Colab — Fetches sequences and annotations from the UniProt REST API. `docs/tool/inputs_io.md#uniprot` [repo](https://www.uniprot.org/) [paper](https://doi.org/10.1093/nar/gkac1052) · tags: fetch, protein

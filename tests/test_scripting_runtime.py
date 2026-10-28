@@ -1,6 +1,6 @@
 """End-to-end runtime test for the Scripting runner (pipe_scripting.py).
 
-Drives the runner against a real script + manifests and asserts the handle API materializes each output kind: file stream (``file``), standalone table (``row``), value stream (``add``), ``dataframe``, adopt-CSV (``outputs[name] = path``), and ``drop`` → scripting_dropped.csv with the framework-canonical ``kind='filter'``.
+Drives the runner against a real script + manifests and asserts the handle API materializes each output kind: file stream (``file``), standalone table (``row``), value stream (``add``), ``dataframe``, adopt-CSV (``outputs[name] = path``), and ``drop`` → scripting_dropped.csv with the framework-canonical ``kind='filter'`` (or ``'unmatched'``, which the completion check does not excuse). ``max_dropped`` fails the step when too many ids were dropped.
 """
 
 import json
@@ -214,3 +214,178 @@ def test_adopt_existing_csv(tmp_path):
     out = pd.read_csv(target)
     assert list(out["id"]) == ["a"]
     assert int(out.loc[0, "n_atoms"]) == 9
+
+
+# ── drop(kind=...) ───────────────────────────────────────────────────────────
+#
+# Every drop used to be recorded as kind="filter", which the completion check
+# excuses, so a lookup that found no partner for most ids passed as a filter.
+
+DROP_CALL = 'outputs.drop(sid, cause=f"n {n} < 2")'
+
+
+def _use_script(scenario, source):
+    scenario["script"].write_text(source)
+
+
+def _set_manifest(scenario, **extra):
+    manifest = json.loads(scenario["outputs"].read_text())
+    manifest.update(extra)
+    scenario["outputs"].write_text(json.dumps(manifest))
+
+
+def _run_raw(scenario):
+    return subprocess.run(
+        [sys.executable, RUNNER,
+         "--script", str(scenario["script"]),
+         "--inputs", str(scenario["inputs"]),
+         "--outputs", str(scenario["outputs"])],
+        cwd=REPO, capture_output=True, text=True,
+    )
+
+
+def test_drop_unmatched_is_recorded_with_its_kind(scenario):
+    assert DROP_CALL in SCRIPT
+    _use_script(scenario, SCRIPT.replace(DROP_CALL, DROP_CALL[:-1] + ', kind="unmatched")'))
+    _run(scenario)
+    dropped = pd.read_csv(scenario["dropped"])
+    assert list(dropped["id"]) == ["p2"]
+    assert list(dropped["kind"]) == ["unmatched"]
+    assert list(dropped["removed_by"]) == ["Scripting"]
+
+
+@pytest.mark.parametrize("kind", ["failure", "filtered", "", None])
+def test_drop_rejects_a_kind_outside_the_controlled_set(scenario, kind):
+    _use_script(scenario, SCRIPT.replace(DROP_CALL, DROP_CALL[:-1] + f", kind={kind!r})"))
+    proc = _run_raw(scenario)
+    assert proc.returncode != 0
+    assert "kind must be one of" in proc.stderr
+
+
+def _completion(scenario, tmp_path, kind):
+    """Run the step with drops of ``kind``, merge its missing rows, run the completion check."""
+    import pipe_scripts.pipe_check_completion as completion
+    import pipe_scripts.pipe_propagate_missing as propagate
+
+    _use_script(scenario, SCRIPT.replace(DROP_CALL, DROP_CALL[:-1] + f', kind="{kind}")'))
+    _run(scenario)
+    sf = scenario["sf"]
+    step = tmp_path / "007_Scripting"
+    missing = tmp_path / "tables" / "missing.csv"
+    propagate.propagate_missing_table([], str(step), str(missing), str(scenario["dropped"]))
+    expected = {
+        "output_folder": str(step),
+        "kept": {"name": "kept", "format": "pdb", "ids": ["p1", "p2"],
+                 "files": [str(sf / "kept" / "<id>.pdb")],
+                 "map_table": str(sf / "kept_map.csv")},
+        "tables": {"missing": {"path": str(missing)}},
+    }
+    return completion.check_expected_outputs(expected, "Scripting", str(step))
+
+
+def test_a_filter_drop_is_excused_by_the_completion_check(scenario, tmp_path):
+    ok, missing = _completion(scenario, tmp_path, "filter")
+    assert ok, missing
+
+
+def test_an_unmatched_drop_is_flagged_by_the_completion_check(scenario, tmp_path):
+    ok, missing = _completion(scenario, tmp_path, "unmatched")
+    assert not ok
+    assert [os.path.basename(p) for p in missing["kept"]] == ["p2.pdb"]
+
+
+# ── max_dropped ──────────────────────────────────────────────────────────────
+
+def test_max_dropped_exceeded_fails_the_step_with_both_counts(scenario):
+    _set_manifest(scenario, max_dropped=0.4)   # 1 of 2 ids is dropped: 50% > 40%
+    proc = _run_raw(scenario)
+    assert proc.returncode != 0
+    assert "max_dropped=0.4 exceeded" in proc.stderr
+    assert "1 of 2 ids" in proc.stderr
+    # outputs and the dropped ids are written before the check, so they stay inspectable
+    assert list(pd.read_csv(scenario["dropped"])["id"]) == ["p2"]
+    assert list(pd.read_csv(scenario["sf"] / "kept_map.csv")["id"]) == ["p1"]
+
+
+def test_max_dropped_at_the_share_passes(scenario):
+    _set_manifest(scenario, max_dropped=0.5)   # exactly 1 of 2: not "exceeds"
+    assert _run_raw(scenario).returncode == 0
+
+
+def test_max_dropped_of_one_never_fails(scenario):
+    _set_manifest(scenario, max_dropped=1)
+    assert _run_raw(scenario).returncode == 0
+
+
+def test_no_max_dropped_keeps_todays_behavior(scenario):
+    _set_manifest(scenario, max_dropped=None)
+    assert _run_raw(scenario).returncode == 0
+
+
+def test_max_dropped_counts_distinct_ids_not_calls(scenario):
+    twice = DROP_CALL + "\n            " + DROP_CALL
+    _use_script(scenario, SCRIPT.replace(DROP_CALL, twice))
+    _set_manifest(scenario, max_dropped=0.5)   # p2 dropped twice is still 1 of 2
+    assert _run_raw(scenario).returncode == 0
+    assert len(pd.read_csv(scenario["dropped"])) == 2   # both calls stay on record
+
+
+def test_max_dropped_entered_ids_are_the_union_across_inputs(scenario, tmp_path):
+    """A table input adds ids to those that entered: 1 dropped of {p1, p2, t1, t2} is 25%."""
+    table = tmp_path / "extra.csv"
+    pd.DataFrame({"id": ["t1", "t2"], "x": [1, 2]}).to_csv(table, index=False)
+    manifest = json.loads(scenario["inputs"].read_text())
+    manifest["extra"] = {"kind": "table_full", "payload": str(table)}
+    scenario["inputs"].write_text(json.dumps(manifest))
+
+    _set_manifest(scenario, max_dropped=0.2)
+    proc = _run_raw(scenario)
+    assert proc.returncode != 0 and "1 of 4 ids" in proc.stderr
+
+    _set_manifest(scenario, max_dropped=0.25)
+    assert _run_raw(scenario).returncode == 0
+
+
+# ── wrapper: max_dropped validation and manifest ─────────────────────────────
+
+HELPER = '''
+def configuration(inputs):
+    from biopipelines.scripting_api import Table
+    return {"out": Table(columns=["id", "n"])}
+
+def execution(inputs, outputs):
+    pass
+'''
+
+
+def _scripting(tmp_path, new_pipeline, **options):
+    from biopipelines.mock import Mock
+    from biopipelines.scripting import Scripting
+
+    helper = tmp_path / "helper.py"
+    helper.write_text(HELPER, encoding="utf-8")
+    pipeline = new_pipeline("scripting_max_dropped")
+    with pipeline:
+        m = Mock(ids=["a", "b"], streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
+        Scripting(script=str(helper), inputs={"structures": m}, **options)
+        return pipeline.save()
+
+
+@pytest.mark.parametrize("bad", [0, 0.0, -0.1, 1.5, True, "0.5", float("nan")])
+def test_max_dropped_must_be_a_fraction_in_zero_one(tmp_path, local_config, isolated_cwd,
+                                                    new_pipeline, bad):
+    with pytest.raises(ValueError, match="max_dropped"):
+        _scripting(tmp_path, new_pipeline, max_dropped=bad)
+
+
+@pytest.mark.parametrize("value", [None, 0.25, 1, 1.0])
+def test_max_dropped_reaches_the_runner_through_the_output_manifest(tmp_path, local_config,
+                                                                    isolated_cwd, new_pipeline,
+                                                                    value):
+    import glob
+
+    script_path = _scripting(tmp_path, new_pipeline, max_dropped=value)
+    run_root = os.path.dirname(os.path.dirname(script_path))
+    manifests = glob.glob(os.path.join(run_root, "**", "scripting_outputs.json"), recursive=True)
+    assert manifests, f"no scripting_outputs.json under {run_root}"
+    assert json.load(open(manifests[0], encoding="utf-8"))["max_dropped"] == value

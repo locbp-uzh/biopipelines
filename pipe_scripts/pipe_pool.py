@@ -12,10 +12,13 @@ stream + table schema and produces:
 * For each shared stream: copies (or symlinks where possible) the per-run
   files into the gather folder under composite ids ``<orig_id>_<pool_idx>``
   (1-based pool index). Writes a single map_table CSV per stream carrying
-  the composite ids, file paths, and a ``pool.path`` column.
+  the composite ids, file paths, a ``pool.path`` column and an ``original.id``
+  column holding the id before renaming.
 * For each shared table: vertically concatenates the per-run CSVs after
   renumbering the ``id`` column the same way and appending the
-  ``pool.path`` column.
+  ``pool.path`` and ``original.id`` columns.
+* With ``keep_ids`` no id is suffixed, and an id carried by more than one run
+  raises a ValueError instead of overwriting.
 
 Usage:
     python pipe_pool.py <pool_config.json>
@@ -30,6 +33,14 @@ import tempfile
 from typing import Dict, List, Optional
 
 import pandas as pd
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+
+def _raise_on_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
+    """keep_ids: raise a ValueError naming ids that more than one run carries."""
+    from biopipelines.pool import raise_on_id_collision
+    raise_on_id_collision(label, ids_by_run)
 
 
 def _link_or_copy(source_path: str, dest_path: str) -> None:
@@ -57,41 +68,51 @@ def _link_or_copy(source_path: str, dest_path: str) -> None:
 
 def _renumber_ids(df: pd.DataFrame, pool_idx: int,
                   recount_prefix: Optional[str] = None,
-                  recount_start: int = 1) -> pd.DataFrame:
+                  recount_start: int = 1,
+                  keep_ids: bool = False) -> pd.DataFrame:
     """Renumber the 'id' column.
 
-    Two modes:
+    Three modes, all of which record the id before renaming in ``original.id``:
 
     - Default (``recount_prefix=None``): append ``_<pool_idx>`` to every
       entry in the 'id' column. ``<axis>.id`` provenance columns get the
       same suffix so cross-stream lineage stays consistent within the
-      gather output. Other columns are left untouched.
+      gather output. Other columns are left untouched, and an ``original.id``
+      the input already carried is kept as it was.
+
+    - Keep (``keep_ids``): no id changes; ``original.id`` equals 'id'.
 
     - Recount (``recount_prefix`` set): replace 'id' with a flat 1-based
       sequence ``<recount_prefix>_<recount_start + i>`` (i = 0..N-1) and
-      preserve the original ids in a new ``original.id`` column. ``<axis>.id``
-      provenance columns are NOT touched in this mode — they refer to
-      upstream entities whose ids stay meaningful only in their own
+      store the original ids in ``original.id``, replacing any such column.
+      ``<axis>.id`` provenance columns are NOT touched in this mode — they
+      refer to upstream entities whose ids stay meaningful only in their own
       namespace, so renaming them to a pool-level counter would break
       downstream joins against the upstream tables.
     """
     if "id" not in df.columns:
         return df
     df = df.copy()
-    if recount_prefix is None:
-        df["id"] = df["id"].astype(str) + f"_{pool_idx}"
+    original = df["id"].astype(str)
+    if recount_prefix is not None:
+        df["original.id"] = original
+        df["id"] = [f"{recount_prefix}_{recount_start + i}" for i in range(len(df))]
+        return df
+    carried = "original.id" in df.columns
+    if not keep_ids:
+        df["id"] = original + f"_{pool_idx}"
         for col in df.columns:
             if col == "id" or not col.endswith(".id"):
                 continue
             df[col] = df[col].astype(str) + f"_{pool_idx}"
-    else:
-        df["original.id"] = df["id"].astype(str)
-        df["id"] = [f"{recount_prefix}_{recount_start + i}" for i in range(len(df))]
+    if not carried:
+        df["original.id"] = original
     return df
 
 
 def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
-                          recount_prefix: Optional[str] = None) -> None:
+                          recount_prefix: Optional[str] = None,
+                          keep_ids: bool = False) -> None:
     """Slice each run's shared artifact (renaming to composite ids) and
     merge the parts into one combined artifact. Writes the consolidated
     map_table with one row per composite id, all pointing at the merged
@@ -106,6 +127,13 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
     stream_dir = out_spec["stream_dir"]
     out_map = out_spec["map_table"]
     fmt = out_spec.get("format", "")
+
+    if keep_ids:
+        _raise_on_collision(f"stream '{stream_key}'", {
+            pool_idx: list(s["ids"])
+            for pool_idx, run_streams in enumerate(runs_streams, start=1)
+            for s in run_streams if s["stream_key"] == stream_key
+        })
 
     parts = []
     rows = []
@@ -138,6 +166,8 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
             if recount_prefix is not None:
                 counter += 1
                 composite = f"{recount_prefix}_{counter}"
+            elif keep_ids:
+                composite = oid
             else:
                 composite = f"{oid}_{pool_idx}"
             rename[oid] = composite
@@ -150,10 +180,8 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
 
         # Map rows: one per composite id, file = merged dest (set after merge)
         for oid, composite in zip(ids, run_composites):
-            row = {"id": composite, "value": "", "pool.path": pool_idx}
-            if recount_prefix is not None:
-                row["original.id"] = oid
-            rows.append(row)
+            rows.append({"id": composite, "value": "", "pool.path": pool_idx,
+                         "original.id": oid})
 
     # Merge all parts into the canonical dest under stream folder.
     if parts:
@@ -193,9 +221,40 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
     print(f"  Wrote shared stream '{stream_key}' map: {out_map} ({len(out_df)} rows -> {dest})")
 
 
+def _load_run_stream(match: dict):
+    """(ids, files, run_df) of one run's stream, preferring the run's own
+    map_table for the up-to-date id list (covers tools whose map is rewritten
+    at runtime, e.g. PDB). ``run_df`` is None when no readable map exists."""
+    ids = list(match["ids"])
+    files = list(match["files"])
+
+    run_map = match.get("map_table") or ""
+    if run_map and os.path.exists(run_map):
+        try:
+            run_df = pd.read_csv(run_map)
+        except Exception:
+            run_df = None
+    else:
+        run_df = None
+
+    file_col = None
+    if run_df is not None and "file" in run_df.columns:
+        file_col = "file"
+
+    if run_df is not None and "id" in run_df.columns:
+        ids = [str(v) for v in run_df["id"].tolist()]
+        if file_col is not None:
+            files = [str(v) if pd.notna(v) else "" for v in run_df[file_col].tolist()]
+        elif files and len(files) == 1 and "<id>" in files[0]:
+            tmpl = files[0]
+            files = [tmpl.replace("<id>", oid) for oid in ids]
+    return ids, files, run_df
+
+
 def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
                    recount_prefix: Optional[str] = None,
-                   content_file_col: Optional[str] = None) -> None:
+                   content_file_col: Optional[str] = None,
+                   keep_ids: bool = False) -> None:
     """Copy / symlink per-run files into the gather folder and write the
     consolidated map_table for one shared stream.
 
@@ -204,6 +263,11 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
     original id is preserved in an ``original.id`` column, and ``<axis>.id``
     provenance columns are NOT renumbered (their values still refer to
     upstream entities in their own namespace).
+
+    If ``keep_ids`` is set, ids and ``<axis>.id`` columns are left as the runs
+    wrote them, and an id carried by more than one run raises before any file
+    is copied. Without either option every id gets ``_<pool_idx>``, and every
+    row records the id before that in ``original.id``.
 
     Shared-file streams (each run owns one artifact, e.g. a multi-record
     FASTA) take a different path: each run is sliced with its per-run
@@ -229,46 +293,30 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
         for run_streams in runs_streams for s in run_streams
     )
     if any_shared:
-        _gather_shared_stream(stream_key, runs_streams, out_spec, recount_prefix)
+        _gather_shared_stream(stream_key, runs_streams, out_spec, recount_prefix, keep_ids)
         return
+
+    # Find this stream in each run's payload (by stream_key).
+    loaded = []
+    for pool_idx, run_streams in enumerate(runs_streams, start=1):
+        match = next((s for s in run_streams if s["stream_key"] == stream_key), None)
+        if match is not None:
+            loaded.append((pool_idx, *_load_run_stream(match)))
+    if keep_ids:
+        _raise_on_collision(f"stream '{stream_key}'",
+                            {pool_idx: ids for pool_idx, ids, _files, _df in loaded})
 
     rows = []
     counter = 0  # only used when recount_prefix is set
-    for pool_idx, run_streams in enumerate(runs_streams, start=1):
-        # Find this stream in this run's payload (by stream_key).
-        match = next((s for s in run_streams if s["stream_key"] == stream_key), None)
-        if match is None:
-            continue
-        ids = list(match["ids"])
-        files = list(match["files"])
-
-        # Prefer the run's existing map_table for the up-to-date id list
-        # (covers tools whose map is rewritten at runtime, e.g. PDB).
-        run_map = match.get("map_table") or ""
-        if run_map and os.path.exists(run_map):
-            try:
-                run_df = pd.read_csv(run_map)
-            except Exception:
-                run_df = None
-        else:
-            run_df = None
-
-        file_col = None
-        if run_df is not None and "file" in run_df.columns:
-            file_col = "file"
-
-        if run_df is not None and "id" in run_df.columns:
-            ids = [str(v) for v in run_df["id"].tolist()]
-            if file_col is not None:
-                files = [str(v) if pd.notna(v) else "" for v in run_df[file_col].tolist()]
-            elif files and len(files) == 1 and "<id>" in files[0]:
-                tmpl = files[0]
-                files = [tmpl.replace("<id>", oid) for oid in ids]
-
+    for pool_idx, ids, files, run_df in loaded:
+        # An upstream original.id means something else (e.g. a parent id): keep it.
+        upstream_original = run_df is not None and "original.id" in run_df.columns
         for j, oid in enumerate(ids):
             if recount_prefix is not None:
                 counter += 1
                 composite = f"{recount_prefix}_{counter}"
+            elif keep_ids:
+                composite = oid
             else:
                 composite = f"{oid}_{pool_idx}"
             src_file = files[j] if j < len(files) else ""
@@ -299,21 +347,20 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
             else:
                 row = {"id": composite, "file": dest_file, "value": "",
                        "pool.path": pool_idx}
-            if recount_prefix is not None:
+            if recount_prefix is not None or not upstream_original:
                 row["original.id"] = oid
 
             # Carry over any extra provenance / value columns from the input
             # map_table that aren't already covered. Renumber `<axis>.id`
             # columns for consistency with the new composite id — but only
-            # in the default (non-recount) path. Under recount the upstream
-            # axis ids stay verbatim because they refer to entities in
-            # their own namespace.
+            # in the default path. Under recount or keep_ids the upstream
+            # axis ids stay verbatim because they still name the same entities.
             if run_df is not None and j < len(run_df):
                 run_row = run_df.iloc[j].to_dict()
                 for col, val in run_row.items():
                     if col in ("id", "file") or col in row:
                         continue
-                    if (recount_prefix is None and col.endswith(".id")
+                    if (recount_prefix is None and not keep_ids and col.endswith(".id")
                             and pd.notna(val) and str(val) != ""):
                         row[col] = f"{val}_{pool_idx}"
                     elif col not in row:
@@ -327,12 +374,15 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
 
 
 def _gather_table(table_name: str, runs_tables: list, out_path: str,
-                  recount_prefix: Optional[str] = None) -> None:
+                  recount_prefix: Optional[str] = None,
+                  keep_ids: bool = False) -> None:
     """Vertically concatenate per-run CSVs after renumbering the id column
     and appending pool.path. If ``recount_prefix`` is set, ids become a
     flat 1-based counter ``<recount_prefix>_<n>`` across the combined
-    rows; the original id is kept in ``original.id``."""
+    rows; the original id is kept in ``original.id``. If ``keep_ids`` is
+    set, ids stay as written and an id carried by more than one run raises."""
     frames = []
+    ids_by_run = {}
     counter = 0
     for pool_idx, run_tables in enumerate(runs_tables, start=1):
         match = next((t for t in run_tables if t["name"] == table_name), None)
@@ -347,18 +397,24 @@ def _gather_table(table_name: str, runs_tables: list, out_path: str,
         except Exception as exc:
             print(f"  Skip table '{table_name}' run #{pool_idx}: read failed ({exc})")
             continue
+        if "id" in df.columns:
+            ids_by_run[pool_idx] = df["id"].astype(str).tolist()
         df = _renumber_ids(df, pool_idx,
                            recount_prefix=recount_prefix,
-                           recount_start=counter + 1)
+                           recount_start=counter + 1,
+                           keep_ids=keep_ids)
         df["pool.path"] = pool_idx
         if recount_prefix is not None:
             counter += len(df)
         frames.append(df)
 
+    if keep_ids:
+        _raise_on_collision(f"table '{table_name}'", ids_by_run)
+
     if not frames:
-        # Emit an empty DataFrame with at least the pool.path column so
-        # downstream consumers see the file exists.
-        out_df = pd.DataFrame(columns=["id", "pool.path"])
+        # Emit an empty DataFrame with the provenance columns so downstream
+        # consumers see the file exists.
+        out_df = pd.DataFrame(columns=["id", "pool.path", "original.id"])
     else:
         out_df = pd.concat(frames, ignore_index=True, sort=False)
 
@@ -381,6 +437,7 @@ def main():
     out_streams = config["out_streams"]
     out_tables = config["out_tables"]
     recount_prefix = config.get("recount_prefix")
+    keep_ids = bool(config.get("keep_ids", False))
     # Content streams: _gather_stream writes the combined file (preserving
     # the upstream domain schema + copying any per-id files); the table of the
     # same name points at that file, so skip the redundant table concat.
@@ -388,7 +445,8 @@ def main():
     content_file_cols = config.get("content_file_cols", {})
 
     print(f"Pool: {len(runs_cfg)} input runs"
-          + (f" (recount_prefix={recount_prefix!r})" if recount_prefix else ""))
+          + (f" (recount_prefix={recount_prefix!r})" if recount_prefix else "")
+          + (" (keep_ids)" if keep_ids else ""))
 
     runs_streams = [r["streams"] for r in runs_cfg]
     runs_tables = [r["tables"] for r in runs_cfg]
@@ -397,7 +455,8 @@ def main():
         _gather_stream(stream_key, runs_streams, out_streams[stream_key],
                        recount_prefix=recount_prefix,
                        content_file_col=content_file_cols.get(stream_key)
-                       if stream_key in content_bearing_streams else None)
+                       if stream_key in content_bearing_streams else None,
+                       keep_ids=keep_ids)
 
     # A content table shares its file with the stream of the same name (already
     # written by _gather_stream above); don't overwrite it with the table concat.
@@ -405,7 +464,7 @@ def main():
         if table_name in content_bearing_streams:
             continue
         _gather_table(table_name, runs_tables, out_tables[table_name],
-                      recount_prefix=recount_prefix)
+                      recount_prefix=recount_prefix, keep_ids=keep_ids)
 
     print("Pool: done")
 

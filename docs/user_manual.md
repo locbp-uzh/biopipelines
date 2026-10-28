@@ -1024,7 +1024,7 @@ The mechanism is a standard table called `missing`, written to `<tool folder>/ta
 |---|---|
 | `id` | The id that was removed |
 | `removed_by` | The step that removed it, as `<NNN>_<Tool>` (e.g. `005_Panda`) |
-| `kind` | `filter` if the tool dropped it on purpose, `failure` if the tool tried and failed |
+| `kind` | `filter` if the tool dropped it on purpose, `failure` if the tool tried and failed, `unmatched` if a lookup found no partner for it (recorded by a `Scripting` step through `outputs.drop(id, kind="unmatched")`) |
 | `cause` | A short human-readable reason |
 
 Two things follow from this being a real table rather than a log message.
@@ -1037,10 +1037,10 @@ import pandas as pd
 if "missing" in final_step.tables:                       # not declared when nothing upstream lost an id
     lost = pd.read_csv(final_step.tables.missing.info.path)
     print(lost.groupby(["removed_by", "kind"]).size())   # who dropped how many, and why
-    print(lost[lost["kind"] == "failure"])               # the ones that are actually errors
+    print(lost[lost["kind"].isin(["failure", "unmatched"])])   # the ones that are actually errors
 ```
 
-**It is what keeps the completion check honest.** Without it, a tool that declared 300 outputs and wrote 260 files would be reported FAILED. The check reads `missing.csv` and excuses exactly the ids it accounts for: rows propagated from an upstream step, and rows this step marked `kind="filter"`. A row this step itself wrote with `kind="failure"` is **not** excused — that is a genuine failure and the step is still reported FAILED. So a green run with a populated `missing.csv` means "these ids were deliberately dropped", not "these ids broke silently".
+**It is what keeps the completion check honest.** Without it, a tool that declared 300 outputs and wrote 260 files would be reported FAILED. The check reads `missing.csv` and excuses exactly the ids it accounts for: rows propagated from an upstream step, and rows this step marked `kind="filter"`. A row this step itself wrote with `kind="failure"` or `kind="unmatched"` is **not** excused — that is a genuine failure and the step is still reported FAILED. So a green run with a populated `missing.csv` means "these ids were deliberately dropped", not "these ids broke silently".
 
 When you want to know where your ids went, read `missing.csv` first and the logs second.
 
