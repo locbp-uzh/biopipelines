@@ -101,6 +101,8 @@ folders:
     RFdiffusion: "<data>/RFdiffusion"
     RFdiffusion2: "<data>/RFdiffusion2"
     RFdiffusion3: "<data>/rfdiffusion3"
+    RF3: "<data>/rf3"
+    FoundryMPNN: "<data>/foundry_mpnn"
     RFdiffusionAllAtom: "<data>/rf_diffusion_all_atom"
     RTMScore: "<data>/RTMScore"
 

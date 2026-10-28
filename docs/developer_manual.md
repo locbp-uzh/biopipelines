@@ -1062,7 +1062,7 @@ environments:
   DSSP: MyDSSPEnv      # then environments/MyDSSPEnv.yaml must exist, or be built elsewhere
 ```
 
-Across `config.cluster.yaml`'s 77 entries there are 42 distinct environment names and 45 spec files, and 41 of the 42 have a spec. **The exception is deliberate and worth knowing:** `RF3: modelforge` names an environment that the upstream installer builds, so no biopipelines spec exists for it on cluster, colab or container. So a missing spec is *not* an error — the emitted script tries the variant spec, then the shared one, and otherwise says it is assuming the environment already exists instead of running `env create -f` on a file that is not there. That keeps a hand-built or vendor-built env usable.
+Every environment name in `config.cluster.yaml` has a spec file today, but that is not required: an environment may be built by an upstream installer instead (RF3 once named `modelforge` for that reason), so no biopipelines spec exists for it. A missing spec is therefore *not* an error — the emitted script tries the variant spec, then the shared one, and otherwise says it is assuming the environment already exists instead of running `env create -f` on a file that is not there. That keeps a hand-built or vendor-built env usable.
 
 That test lives in the generated bash rather than in Python, and it has to: the install script is generated on your machine and executed on the cluster, so the repo path it names is remote and no config-time `os.path.isfile` can see it.
 

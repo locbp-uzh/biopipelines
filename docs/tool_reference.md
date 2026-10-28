@@ -30,6 +30,7 @@ Generate novel protein structures and pockets.
 Design and manipulate sequences.
 
 - [DNAEncoder](tool/sequence_design.md#dnaencoder) — Codon optimization
+- [FoundryMPNN](tool/sequence_design.md#foundrympnn) — ProteinMPNN / LigandMPNN from Foundry, on AtomWorks
 - [Frame2Seq](tool/sequence_design.md#frame2seq) — Fast inverse folding
 - [Fuse](tool/sequence_design.md#fuse) — Fusion proteins with linkers
 - [LASErMPNN](tool/sequence_design.md#lasermpnn) — Ligand-conditioned inverse folding + sidechain packing
@@ -57,6 +58,7 @@ Predict protein and complex structures, and dock ligands.
 - [NeuralPLexer](tool/structure_prediction.md#neuralplexer) — Protein–ligand complex prediction
 - [OpenFold3](tool/structure_prediction.md#openfold3) — Open-source co-folding of proteins, nucleic acids and ligands
 - [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket
+- [RF3](tool/structure_prediction.md#rf3) — RoseTTAFold3 co-folding of proteins, nucleic acids and ligands
 
 ---
 

@@ -346,6 +346,7 @@ FORWARDING_INPUTS = {
     "RFD4Proteina": lambda: dict(structures=_structures(), contig="50-120, /0, A17-131",
                                  checkpoint="/w/rfd4"),
     "RFdiffusion3": lambda: dict(contig="100-100", num_designs=1),
+    "RF3": lambda: dict(proteins=_protein()),
     "RFdiffusionAllAtom": lambda: dict(ligand=_ligand(), contigs="100-200", num_designs=1),
 }
 

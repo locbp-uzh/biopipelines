@@ -44,6 +44,8 @@ folders:
     RFdiffusionAllAtom: "<biopipelines>/_stub_repos/rf_diffusion_all_atom"
     RFdiffusion2: "<biopipelines>/_stub_repos/RFdiffusion2"
     RFdiffusion3: "<biopipelines>/_stub_repos/RFdiffusion3"
+    RF3: "<biopipelines>/_stub_repos/RF3"
+    FoundryMPNN: "<biopipelines>/_stub_repos/FoundryMPNN"
     AlphaFold: "<biopipelines>/_stub_repos/AlphaFold"
     BoltzGen: "<biopipelines>/_stub_repos/boltzgen"
     Gnina: "<biopipelines>/_stub_repos/gnina"

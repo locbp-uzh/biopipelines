@@ -182,6 +182,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
+  <td><sub><b>FoundryMPNN</b><br>ProteinMPNN and LigandMPNN sequence design as re-implemented in RosettaCommons Foundry, in the environment RFdiffusion3 and RF3 share.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/foundry"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1038/s41592-025-02626-1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+</tr>
+<tr>
   <td><sub><b>Mutagenesis</b><br>Generate systematic single- or multi-point mutant variants of a sequence.</sub></td>
   <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
@@ -271,6 +277,12 @@ Each tool lists its references, the compute resources it uses, and the platforms
 <tr>
   <td><sub><b>OpenFold3</b><br>Open-source co-folding of proteins, nucleic acids and ligands; the Apache-2.0 AlphaFold3 reimplementation.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/aqlaboratory/openfold-3"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.nature.com/articles/s41586-024-07487-w"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+</tr>
+<tr>
+  <td><sub><b>RF3</b><br>All-atom co-folding of proteins, nucleic acids and ligands with RoseTTAFold3, from RosettaCommons Foundry.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/foundry"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1101/2025.08.14.670328"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>

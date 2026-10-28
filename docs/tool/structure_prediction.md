@@ -776,3 +776,63 @@ repacked = PLACER(structures=apo, target_res="A-149", exclude_sm=True,
 ```
 
 ---
+
+### RF3
+
+All-atom co-folding of proteins, nucleic acids and ligands with RoseTTAFold3, the structure-prediction network of RosettaCommons Foundry. It is run through its `rf3 fold` command and takes the same input axes as `Boltz2` and `OpenFold3`, so the three are interchangeable in a pipeline and a prediction can be cross-checked against another model.
+
+It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is no affinity head. Upstream also supports covalent bonds, templates, cyclic chains and ground-truth conformers; none of those is a named parameter here (see the forwarding note below).
+
+The whole batch folds in one process: `rf3 fold` takes a single JSON list holding every complex, so a campaign pays one model load rather than one per complex. A single input that makes upstream raise stops the process, and the inputs after it are not predicted; they appear in `missing` as failures.
+
+RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `RF3.install()` creates the environment if it is absent and downloads the RF3 weights into the `RF3` folder of `repositories:`, which `RFdiffusion3.install()` does not do (it fetches only the rfd3 weights, and skips itself once those are present).
+
+**Tags**: predict-structure, protein, small-molecule, nucleic-acid, complex, all-atom
+
+**References**: https://github.com/RosettaCommons/foundry (`models/rf3`) · paper: Accelerating Biomolecular Modeling with AtomWorks and RF3, https://doi.org/10.1101/2025.08.14.670328
+
+**Resources**: GPU. The weights are downloaded by `RF3.install()` (`foundry install rf3`) into `repositories.RF3`; `rf3 fold` is pointed at that folder through `FOUNDRY_CHECKPOINT_DIRS`. Not verified: GPU memory needs, and aarch64 or Colab operation (the wrapper is registered for cluster, Colab and container configs but only the x86-64 cluster is claimed).
+
+**Parameters**
+
+- `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
+- `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement. The chain type is passed to upstream explicitly, because a string such as "ACGT" is also a valid protein sequence
+- `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them. Upstream's own guidance is that a CCD code folds better than a SMILES string
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`). Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence, and then the default early-stopping threshold often abandons them. Upstream pairs alignments across chains on the fly and does not accept pre-paired ones
+- `n_recycles`: Optional[int] = None - trunk recycles (upstream default 10)
+- `diffusion_batch_size`: int = 5 - structures sampled per input from one forward pass of the trunk (upstream default 5). Always passed, so the ids declared for `top_only=False` are exact
+- `num_steps`: Optional[int] = None - diffusion sampling steps. Upstream's config default is 50; its README states 200 and says 50 performs similarly and is more than twice as fast. Left to upstream unless given
+- `seed`: Optional[int] = None - model seed; left to upstream when None
+- `early_stopping_plddt_threshold`: float = 0.5 - an input whose mean all-atom pLDDT after the first recycle falls below this (0 to 1) is abandoned: no structure is written. 0.5 is upstream's default; 0 turns it off
+- `top_only`: bool = True - keep only the best sample of each input as `<id>` (upstream's ranking score, 0.8 * ipTM + 0.2 * pTM minus a penalty for clashing chains). False surfaces every sample as `<id>_1..N`, N being `diffusion_batch_size`
+- `checkpoint_path`: Optional[str] = None - an explicit checkpoint file (upstream `ckpt_path`), for a model other than the one `RF3.install()` fetched
+- any other keyword is forwarded to `rf3 fold` as a Hydra `key=value` override, for example `template_selection`, `cyclic_chains` or `residue_renaming_dict`. Only the parameters above are validated or reflected in the declared outputs
+
+**Streams**: `structures`, `pae`
+
+`structures` holds one `<id>.cif` per complex. The B-factor column carries per-atom pLDDT on a 0 to 1 scale (upstream's `annotate_b_factor_with_plddt`, which its config turns on).
+
+`pae` holds one `<id>.json` per structure, under the same ids as `structures`. It is upstream's full confidence file for that sample (`*_confidences.json`), copied unchanged: a JSON object with the keys `atom_chain_ids`, `atom_plddts` (N_atom floats, 0 to 1), `pae` (N_token x N_token nested lists, so `np.array(json.load(f)["pae"])` is the matrix, in Å from 0 to 32), `token_chain_ids` and `token_res_ids`. Rows and columns are RF3's tokens over all chains, one per standard residue and one per atom for ligands and modified residues. `token_res_ids` is a running token index in upstream's source, not a residue number. The stream's map_table lists only the ids whose file exists.
+
+**Tables**:
+- `confidence`:
+
+  | id | plddt | ptm | iptm | pae | pde | has_clash | ranking_score | early_stopped | seed | sample |
+  |----|-------|-----|------|-----|-----|-----------|---------------|---------------|------|--------|
+
+  One row per id that entered, with blanks where RF3 reported nothing. `plddt`, `pae` and `pde` are upstream's `overall_*` means; `ptm`, `iptm`, `has_clash` and `ranking_score` are its own. Upstream reports an `iptm` of 0 for a single chain. `seed` and `sample` name which of the generated samples the row is, so a `top_only` result says which one was chosen. An input stopped early has `early_stopped` True and blanks elsewhere.
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  An input stopped by the early-stopping threshold is a `filter` row: you set the threshold, so its absence is expected. An input for which `rf3 fold` wrote no structure for another reason is a `failure` row.
+
+With `top_only=True` (the default) the sample with the highest `ranking_score` is kept as `<id>`. Newer upstream releases record an early stop as a row in `<id>_ranking_scores.csv`, older ones as a `score.csv`; both are read.
+
+```python
+complexes = RF3(proteins=binders, ligands=Ligand("HEM"), msas=binder_msas)
+```
+
+---

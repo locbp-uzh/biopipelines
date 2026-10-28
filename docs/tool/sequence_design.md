@@ -56,6 +56,73 @@ dna = DNAEncoder(
 
 ---
 
+### FoundryMPNN
+
+ProteinMPNN and LigandMPNN sequence design as re-implemented in RosettaCommons Foundry on AtomWorks, run with its `mpnn` command. It loads the original ProteinMPNN and LigandMPNN weights, which `FoundryMPNN.install()` downloads, and shares the `foundry` environment with `RFdiffusion3` and `RF3` (the environment is shared, the install is not: it fetches its own weights into the `FoundryMPNN` folder of `repositories:`).
+
+**Which MPNN wrapper to use.** This is the same model family as `ProteinMPNN` and `LigandMPNN`, not a new model, so the choice is about the code:
+
+- Upstream's README asks that the original repositories be used for benchmarking and comparison until its re-implementation is validated, and calls its inference API unstable. `ProteinMPNN` and `LigandMPNN` wrap those original repositories, so they are the ones to cite or compare against.
+- Those two also offer what this one does not: per-position `fixed` / `redesigned` selections as PyMOL strings or per-structure table columns, a bound ligand named by a compounds stream with a `design_within` radius, side-chain packing, duplicate removal and a bias file.
+- This one takes the non-protein context of a CIF or PDB (ligands, ions, nucleic acids) from the file itself, with no `ligand=` stream, scopes a design by `<chain><number>` ids as upstream spells them, and needs no environment beyond the one `RFdiffusion3` and `RF3` already use.
+
+Choose `model_type="ligand_mpnn"` when that non-protein context should condition the design and `"protein_mpnn"` for a bare backbone.
+
+One `mpnn` call is made per structure, so a backbone upstream cannot parse fails that id and not the step.
+
+**Tags**: inverse-folding, design-sequence, protein, small-molecule
+
+**References**: https://github.com/RosettaCommons/foundry (`models/mpnn`) · ProteinMPNN: https://doi.org/10.1126/science.add2187 · LigandMPNN: https://doi.org/10.1038/s41592-025-02626-1
+
+**Resources**: GPU recommended. The weights are downloaded by `FoundryMPNN.install()` (`foundry install proteinmpnn ligandmpnn`) into `repositories.FoundryMPNN`; `mpnn` is pointed at that folder through `FOUNDRY_CHECKPOINT_DIRS`. Not verified: aarch64 or Colab operation.
+
+**Parameters**
+
+- `structures`: Union[DataStream, StandardizedOutput] - backbones, PDB or mmCIF
+- `model_type`: str = "protein_mpnn" - "protein_mpnn" or "ligand_mpnn"
+- `num_sequences`: int = 1 - sequences sampled per batch (upstream `batch_size`)
+- `num_batches`: int = 1 - batches per structure (upstream `number_of_batches`), so a structure yields `num_sequences * num_batches` designs
+- `temperature`: float = 0.1 - sampling temperature (upstream's default is 0.1 too)
+- `seed`: Optional[int] = None - random seed, set per structure; unseeded when None
+- `structure_noise`: Optional[float] = None - Gaussian noise in Å added to the backbone before design (upstream default 0)
+- `designed_residues` / `fixed_residues`: Union[str, List[str], None] = None - residue ids to redesign or to keep, as a list or "A35,B40,C52"
+- `designed_chains` / `fixed_chains`: Union[str, List[str], None] = None - chain ids to redesign or to keep, as a list or "A,B". Upstream accepts one of the four per structure and refuses a mix, and so does this. Every structure receives the same selection, so a residue a structure lacks fails that structure (in `missing`), not the step
+- `omit`: Optional[List[str]] = None - residue tokens never sampled, e.g. `["UNK", "CYS"]`. Replaces upstream's default `["UNK"]`
+- `bias`: Optional[Dict[str, float]] = None - `{token: logit bias}` applied at every designed position, e.g. `{"ALA": -1.0}`
+- `chains`: Union[str, List[str], None] = None - which chains of the backbone become `sequences` rows, with the same meaning as for `ProteinMPNN` and `LigandMPNN`. Upstream writes every chain of a design into one unseparated record, so the chains are told apart from the written structure; the record and the structure must agree in length, or the design is a failure rather than a guess. None expects a single-chain backbone and keeps ids as `<structure>_<n>`; "A" or ["A"] emits only that chain with the same ids; ["A", "B"] emits `<structure>_<n>_<chain>`; "all" emits every chain with lazy `[_<?>]` ids. A multi-chain backbone under the default is a failure in `missing`. Only chains of standard amino acids count; nucleic-acid and ligand chains are context
+- `checkpoint_path`: Optional[str] = None - an explicit weights file, for weights other than the ones `FoundryMPNN.install()` fetched
+- `is_legacy_weights`: bool = True - whether the checkpoint uses the original repositories' parameter ordering; True for the downloaded weights, as upstream's README prescribes
+
+**Streams**: `sequences`, `designs`
+
+`sequences` is one row per designed chain, with ids `<structure>_<n>` for n from 1 to `num_sequences * num_batches` (batch-major) and a `_<chain>` suffix when `chains` selects several. `designs` is one row per design, before the chain split, the key the chain rows are grouped by.
+
+**Tables**:
+- `sequences`:
+
+  | id | design | structures.id | source_pdb | chain | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | ligand_seq_rec |
+  |----|--------|---------------|------------|-------|----------|--------|---|------|--------------------|-------------------|---------|----------------|
+
+  `overall_confidence` and `ligand_confidence` are upstream's `confidence` and `ligand_interface_confidence` (exp of the negative log-likelihood of the sampled sequence); `seq_rec` and `ligand_seq_rec` are its `sequence_recovery` and `ligand_interface_sequence_recovery`. A value the installed release does not write is blank; the confidences are absent from the 0.2.0 release. `chain` is blank for the single-chain default.
+
+- `designs`:
+
+  | id | structures.id | source_pdb | n_chains | overall_confidence | ligand_confidence | seq_rec | ligand_seq_rec |
+  |----|---------------|------------|----------|--------------------|-------------------|---------|----------------|
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  A structure `mpnn` failed on appears once per design it should have produced, with upstream's last error line as the cause.
+
+```python
+designed = FoundryMPNN(backbones, model_type="ligand_mpnn", num_sequences=8, temperature=0.1)
+```
+
+---
+
 ### Frame2Seq
 
 Fast structure-conditioned inverse folding. Frame2Seq is a non-autoregressive masked-language model that generates multiple sequences per backbone in a single forward pass — same role as ProteinMPNN (structure → sequence), but materially faster, with slightly higher native-sequence recovery on CATH 4.2. Output IDs follow the ProteinMPNN multiplier convention `<structure_id>_<n>`.

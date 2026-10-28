@@ -61,6 +61,7 @@ from .placer import PLACER
 from .dynamicbind import DynamicBind
 from .neuralplexer import NeuralPLexer
 from .openfold3 import OpenFold3
+from .rf3 import RF3
 from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
 from .aizynthfinder import AiZynthFinder
@@ -90,6 +91,7 @@ from .cabsflex import CABSflex
 from .ensemble_analysis import EnsembleAnalysis
 from .structure_cluster import StructureCluster
 from .foldseek import Foldseek
+from .foundry_mpnn import FoundryMPNN
 from .sequence_identity_gate import SequenceIdentityGate
 from .scripting import Scripting
 from .mutagenesis import Mutagenesis
@@ -210,6 +212,7 @@ __all__ = [
     'DynamicBind',
     'NeuralPLexer',
     'OpenFold3',
+    'RF3',
     'PoseBusters',
     'ADMETAI',
     'AiZynthFinder',
@@ -239,6 +242,7 @@ __all__ = [
     'EnsembleAnalysis',
     'StructureCluster',
     'Foldseek',
+    'FoundryMPNN',
     'SequenceIdentityGate',
     'Scripting',
     'Mutagenesis',

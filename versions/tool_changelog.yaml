@@ -2286,3 +2286,29 @@ ESM2:
       summed and averaged) and an embeddings stream (one npy per id, mean-pooled over the residue positions of the last hidden state).
       compute_pll and compute_embeddings switch each off. install(models=[...]) downloads each checkpoint at the Hub commit current at
       install time and records it in REVISION; runs load that local folder. Verified on the 8M checkpoint on CPU; larger sizes and GPU are untested.
+
+RF3:
+  files:
+  - biopipelines/rf3.py
+  - pipe_scripts/pipe_rf3_config.py
+  - pipe_scripts/pipe_rf3_postprocess.py
+  - biopipelines/nucleic_acids.py
+  - pipe_scripts/pipe_axis_data.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-28'
+    note: >-
+      New tool: RoseTTAFold3 co-folding through Foundry's `rf3 fold`, taking the same input axes as Boltz2 and OpenFold3 (proteins, ssDNA, dsDNA, ssRNA, dsRNA, ligands, optional per-protein msas). One `rf3 fold` call predicts every complex, so the model loads once. Streams `structures` (cif) and `pae` (upstream's confidences JSON, which carries the full PAE matrix), tables `confidence` (plddt, ptm, iptm, pae, pde, has_clash, ranking_score, early_stopped, seed, sample) and `missing`. An input stopped by `early_stopping_plddt_threshold` (default 0.5, upstream's) is a `filter` row, not a failure. Runs in the `foundry` environment RFdiffusion3 builds, with its own weights folder.
+
+FoundryMPNN:
+  files:
+  - biopipelines/foundry_mpnn.py
+  - biopipelines/chain_rows.py
+  - pipe_scripts/pipe_foundry_mpnn.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-28'
+    note: >-
+      New tool: ProteinMPNN / LigandMPNN sequence design through Foundry's `mpnn` command, one call per structure so a bad backbone fails one id. Streams `sequences` and `designs` with ids `<structure>_<n>` and the `chains` contract of ProteinMPNN and LigandMPNN (upstream writes all chains of a design unseparated, so the chains are recovered from the written structure and a length disagreement is a failure, not a guess). Exposes model_type, num_sequences, num_batches, temperature, seed, structure_noise, designed/fixed residues and chains, omit and bias. Runs in the `foundry` environment RFdiffusion3 builds, with its own weights folder.
