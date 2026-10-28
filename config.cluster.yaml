@@ -106,7 +106,6 @@ folders:
     FLOWR: "<data>/FLOWR"
     Frame2Seq: "<data>/Frame2Seq"
     GEMS: "<data>/GEMS"
-    GhostFold: "<data>/ghostfold"
     Gnina: "<data>/gnina"
     HBDesigner: "<data>/HBDesigner"
     IPSAE: "<data>/ipsae"

@@ -56,7 +56,6 @@ folders:
     ESM2: "<data>/esm2"
     FLOWR: "<data>/FLOWR"
     GEMS: "<data>/GEMS"
-    GhostFold: "<data>/ghostfold"
     HBDesigner: "<data>/HBDesigner"
     IPSAE: "<data>/ipsae"
     LASErMPNN: "<data>/LASErMPNN"
