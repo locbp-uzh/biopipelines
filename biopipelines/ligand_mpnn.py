@@ -40,7 +40,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "3.2"
+    TOOL_VERSION = "3.3"
     # `chain` and `chains` were one letter apart and meant different things, which is the
     # Ligand code/codes mistake again. `chains` now answers both.
     PARAMETER_ALIASES = {"chain": "chains"}
@@ -161,7 +161,7 @@ fi
                     the design around. A bare string ("LIG") is shorthand for
                     Ligand(codes="LIG") and creates an internal code-only Ligand.
                     The residue `code` is read from the stream's `code` column
-                    at runtime.
+                    at runtime. Required: construction raises without it.
             num_sequences: Number of sequences per batch (maps to --batch_size in LigandMPNN)
             fixed: Fixed positions. Accepts:
                    - PyMOL selection string: "10-20+30-40"
@@ -205,8 +205,8 @@ fi
                        (upstream --save_stats). Off by default, so no existing
                        pipeline changes behaviour. One torch .pt per input
                        structure lands in `execution/stats/<id>.pt` holding
-                       `log_probs` and `sampling_probs` of shape [B, L, 21]
-                       alongside `generated_sequences`, `native_sequence`,
+                       `log_probs` of shape [B, L, 21] and `sampling_probs` of
+                       shape [B, L, 20], alongside `generated_sequences`, `native_sequence`,
                        `decoding_order`, `seed` and `temperature`.
 
                        These are NOT added to the output streams: the file is a
@@ -269,7 +269,7 @@ fi
         else:
             raise ValueError(f"structures must be DataStream or StandardizedOutput, got {type(structures)}")
 
-        # Ligand binding-site focus — optional compounds stream; the residue
+        # Ligand binding-site focus — compounds stream, required by validate_params; the residue
         # code is resolved from its `code` column at runtime. A bare string is
         # promoted to an internal code-only Ligand.
         self.ligand_stream: Optional[DataStream] = resolve_basic_input(

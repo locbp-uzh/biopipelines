@@ -452,6 +452,35 @@ def test_a_pdb_is_parsed_without_the_annotations_atomworks_refuses_for_it(monkey
     assert written == {"path": str(tmp_path / "out.cif"), "atoms": "atoms"}
 
 
+def test_an_input_the_contig_does_not_fit_fails_alone_with_upstreams_message(monkeypatch, tmp_path):
+    """rfd4-generate stops at the first example that raises, so a contig one input cannot hold must not reach it."""
+    import types
+
+    message = "Preserved segment 'A1-40' runs outside chain A, whose residues are 1-20."
+
+    def build(spec, *, spec_dir, example_id):
+        if example_id == "short":
+            raise ValueError(message)
+
+    for name in ("rfproteina", "rfproteina.inference_utils", "rfproteina.inference_utils.condition_spec"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    sys.modules["rfproteina.inference_utils.condition_spec"].build_annotated_atom_array_from_condition_spec = build
+
+    for sid in ("short", "ubq"):
+        (tmp_path / f"{sid}.cif").write_text("data_x\n")
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"num_designs": 1, "spec": {"contig": "50-70, /0, A1-40"}}))
+    structures = _datastream_json(tmp_path, [str(tmp_path / "short.cif"), str(tmp_path / "ubq.cif")], ["short", "ubq"])
+    monkeypatch.setattr(sys, "argv", [
+        "inputs", "--config-yaml", str(tmp_path / "config.yaml"), "--structures-json", str(structures),
+        "--inputs-dir", str(tmp_path / "inputs"), "--spec-yaml", str(tmp_path / "spec.yaml"),
+        "--manifest-json", str(tmp_path / "manifest.json")])
+    _load_script("pipe_rfd4proteina_inputs").main()
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert manifest["built"] == ["ubq"] and manifest["failed"] == {"short": message}
+    assert list(yaml.safe_load((tmp_path / "spec.yaml").read_text())) == ["ubq"]
+
+
 def test_an_empty_input_stream_is_a_step_failure(tmp_path):
     result = _run_inputs(tmp_path, ["gone"], [str(tmp_path / "gone.cif")])
     assert result.returncode == 1 and "no input structures" in result.stderr

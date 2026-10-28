@@ -972,8 +972,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "3.2"
+  current: "3.3"
   history:
+  - version: '3.3'
+    date: '2026-10-28'
+    note: >-
+      Documentation only. `sampling_probs` in the `save_stats` file has shape [B, L, 20] and `log_probs` [B, L, 21], not 21 for both; `ligand` is documented as required, which `validate_params` already enforced.
   - version: '3.2'
     date: '2026-10-28'
     note: >-
@@ -2256,8 +2260,12 @@ RFD4Proteina:
   - pipe_scripts/pipe_rfd4proteina_inputs.py
   - pipe_scripts/pipe_rfd4proteina_postprocess.py
   - pipe_scripts/pipe_rfd4proteina_weights.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-28'
+    note: >-
+      One input the contig did not fit (a residue range its chain lacks) stopped `rfd4-generate` at that example and lost every design after it, with the same generic cause recorded for all of them. Each prepared input is now built once through upstream's own `build_annotated_atom_array_from_condition_spec` before the run, so that input alone is a failure row carrying upstream's message (for example `Preserved segment 'A1-40' runs outside chain A, whose residues are 1-20.`) and the others are designed. The docstring also says which chain id a designed segment receives.
   - version: '1.1'
     date: '2026-10-28'
     note: >-

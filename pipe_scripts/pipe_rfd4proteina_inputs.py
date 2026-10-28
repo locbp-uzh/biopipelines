@@ -8,6 +8,8 @@ Build the RFD4-Proteina condition spec at execution time.
 
 `rfd4-generate` reads one YAML whose top-level keys are design names and whose values hold `input` (a CIF), `contig` and `conditions`. The input paths are only known at run time, so this script writes the final spec from the config-time design entry and the input structures stream: one entry per input id, each pointing at a CIF. A CIF is used as it is; any other format (PDB) is converted with AtomWorks first, because upstream rejects PDB input.
 
+Each prepared input is also built once, the way upstream builds it, so a contig that does not fit that input (a residue range the chain does not have) is recorded as a failure of that id with upstream's own message, instead of stopping the run at that example and losing every design after it.
+
 It writes a manifest of which input ids were attempted, built and failed, which the post-processing step reads.
 
 Usage:
@@ -20,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Dict
 
 import yaml
@@ -58,6 +61,23 @@ def convert_to_cif(structure_path: str, out_path: str) -> None:
     to_cif_file(result["asym_unit"][0], out_path)
 
 
+def validate_example(sid: str, entry: Dict, spec_dir: str) -> None:
+    """Build one design problem the way upstream does, so a contig that does not fit this input fails here, named, and not in the middle of the whole run.
+
+    `rfd4-generate` builds its examples inside a data loader and stops at the first one that raises, which loses every design after it. The entry goes through YAML first so it carries the types upstream reads back.
+    """
+    try:
+        from rfproteina.inference_utils.condition_spec import build_annotated_atom_array_from_condition_spec
+    except ImportError:
+        print("WARNING: rfproteina is not importable here, so the inputs are not checked before the run", file=sys.stderr)
+        return
+    try:
+        build_annotated_atom_array_from_condition_spec(
+            yaml.safe_load(yaml.safe_dump(entry)), spec_dir=Path(spec_dir), example_id=sid)
+    except Exception as e:
+        raise ValueError(" ".join(str(e).split())) from e
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build the RFD4-Proteina condition spec")
     ap.add_argument("--config-yaml", required=True, help="Config-time design entry (spec) and num_designs")
@@ -81,11 +101,12 @@ def main():
             if not valid_design_id(sid):
                 raise ValueError(f"{sid!r} cannot name an output directory")
             if is_cif_like(path):
-                inputs[sid] = os.path.abspath(path)
+                prepared = os.path.abspath(path)
             else:
-                target = os.path.join(args.inputs_dir, f"{sid}.cif")
-                convert_to_cif(path, target)
-                inputs[sid] = target
+                prepared = os.path.join(args.inputs_dir, f"{sid}.cif")
+                convert_to_cif(path, prepared)
+            validate_example(sid, {"input": prepared, **template}, os.path.dirname(os.path.abspath(args.spec_yaml)))
+            inputs[sid] = prepared
         except Exception as e:
             print(f"WARNING: {sid} could not be prepared: {e}", file=sys.stderr)
             failed[sid] = str(e)[:200]

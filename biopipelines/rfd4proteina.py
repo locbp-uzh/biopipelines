@@ -320,6 +320,7 @@ class RFD4Proteina(BaseConfig):
         Streams:
             structures: designed structures, one PDB per design, ids <input id>_<1..num_designs>.
             sequences: value-based, one row per polymer chain of each design.
+        Chain ids: a run of the contig that holds a preserved segment keeps that segment's chain id, and a run that is only designed gets the first letter no preserved segment holds. In `50-120, /0, A17-131` the binder is chain B and the target stays A; in `150, /0, B386` the designed protein is chain A and the ligand B.
         Tables:
             structures: id | source_id | design | cif | pdb | n_chains | n_residues
             sequences:  id | source_id | source_pdb | chain | sequence | length
@@ -356,7 +357,7 @@ class RFD4Proteina(BaseConfig):
     """
 
     TOOL_NAME = "RFD4Proteina"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     # Hydra application: untyped keyword arguments become extra `key=value` overrides.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # `num_replicates` is upstream's own name; forwarded it would collide with the managed override.
