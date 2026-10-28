@@ -83,7 +83,7 @@ SEVERITY: Dict[str, str] = {
 KNOWN_STREAM_NAMES: Set[str] = {
     "structures", "sequences", "compounds", "msas",
     "accessibility", "aggregation", "annotated", "binding", "distances",
-    "designs", "dssp", "fasta", "final_ranked_designs", "grids", "images",
+    "designs", "dssp", "embeddings", "fasta", "final_ranked_designs", "grids", "images",
     "intermediate_designs_inverse_folded", "movies", "pae", "plots",
     "precursors", "renders", "residues", "rmsf", "routes", "sessions",
     "ss", "trajectories",

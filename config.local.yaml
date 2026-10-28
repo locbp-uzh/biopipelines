@@ -55,6 +55,7 @@ folders:
     AlphaFold: "<data>/localcolabfold"
     DiffDock: "<data>/DiffDock"
     DynamicBind: "<data>/DynamicBind"
+    ESM2: "<data>/esm2"
     GEMS: "<data>/GEMS"
     Gnina: "<data>/gnina"
     IPSAE: "<data>/ipsae"

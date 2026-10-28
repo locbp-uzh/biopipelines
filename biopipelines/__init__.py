@@ -65,6 +65,7 @@ from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
 from .aizynthfinder import AiZynthFinder
 from .binding_data import BindingData
+from .esm2 import ESM2
 from .esmfold import ESMFold
 from .esmfold2 import ESMFold2
 from .uniprot import UniProt
@@ -213,6 +214,7 @@ __all__ = [
     'ADMETAI',
     'AiZynthFinder',
     'BindingData',
+    'ESM2',
     'ESMFold',
     'ESMFold2',
     'UniProt',

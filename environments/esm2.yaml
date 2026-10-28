@@ -1,0 +1,7 @@
+# ESM2 - shared by every variant. Python + pip only; torch and transformers come from esm2.pip.txt.
+name: esm2
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip

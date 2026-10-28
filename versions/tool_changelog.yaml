@@ -2270,3 +2270,19 @@ PPIDdG:
     date: '2026-10-27'
     note: >-
       Initial release. Protein-protein binding energy with PyRosetta, mirroring the ppi_ddg block of Chaperone: FastRelax with optional coordinate constraints to the input, then ddG = score(complex) - score(binder chain translated 10 000 A away) with beta_nov16 and no repacking, mean and population standard deviation over independent replicates. Rosetta energy units. One row per input structure, NaN on failure. Runs in the new PyRosetta environment shared with LigandDdG; PyRosetta needs a commercial license outside academic use.
+
+ESM2:
+  files:
+  - biopipelines/esm2.py
+  - pipe_scripts/pipe_esm2.py
+  - pipe_scripts/pipe_esm2_weights.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-28'
+    note: >-
+      Initial release. Runs the ESM-2 protein language model (Hugging Face transformers, facebook/esm2_t*_UR50D, 8M to 3B) on a
+      sequences stream. Emits scores (id, length, pll, pll_per_residue: the pseudo-log-likelihood with every residue masked on its own,
+      summed and averaged) and an embeddings stream (one npy per id, mean-pooled over the residue positions of the last hidden state).
+      compute_pll and compute_embeddings switch each off. install(models=[...]) downloads each checkpoint at the Hub commit current at
+      install time and records it in REVISION; runs load that local folder. Verified on the 8M checkpoint on CPU; larger sizes and GPU are untested.

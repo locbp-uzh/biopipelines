@@ -1,0 +1,9 @@
+# ESM2 pip dependencies (unpinned). transformers supplies EsmForMaskedLM and pulls huggingface_hub, which downloads the weights.
+# The 3B checkpoint is distributed as pytorch_model*.bin only, which recent transformers loads only with torch >= 2.6.
+torch
+transformers
+numpy
+
+# BioPipelines interop (pipe script reads/writes CSVs, DataStream JSON and the config yaml)
+pandas
+pyyaml

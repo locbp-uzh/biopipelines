@@ -1046,6 +1046,65 @@ Note that `parse error at line 1: This file does not seem to be an mmCIF file` a
 
 ---
 
+### ESM2
+
+Pseudo-log-likelihood and mean-pooled embeddings of protein sequences from the ESM-2 language model. It runs through Hugging Face `transformers` on the released `facebook/esm2_t*_UR50D` checkpoints (MIT license). Per sequence the tool writes how probable the model finds it (`pll`, `pll_per_residue`) and a mean-pooled embedding vector, so a pipeline can rank designs by naturalness or feed the vectors to its own downstream analysis. VespaG and PLM_Sol already use ESM-2 and ProtT5 internally but expose neither; this tool exposes the model itself. It sits with them in Analysis rather than in Sequence Statistics, whose tools work on frequency and correlation tables of mutations, not on sequences.
+
+**Tags**: predict-property, protein, sequence-only
+
+**Environment**: `esm2` (Python 3.12, `torch`, `transformers`, unpinned). GPU is optional: small checkpoints on short sequences are practical on CPU, while the 3B checkpoint and long sequences want a GPU (the cost of `pll` grows with the square of the length times the model size). Only the 8M checkpoint has been run, on CPU.
+
+**Installation**: `ESM2.install()` creates the env and downloads the default checkpoint; `ESM2.install(models=["esm2_t6_8M_UR50D", "esm2_t36_3B_UR50D"])` downloads the ones named. Weights go to `folders.repositories.ESM2`, one subfolder per checkpoint. A Hub id follows its `main` branch, which can change between submitting and running, so each checkpoint is resolved to a commit hash at install time, downloaded as that commit, and `<repo>@<commit>` is written to `REVISION` beside the files. Runs load that local folder only (offline), print the revision in the step log, and a checkpoint that already has a `REVISION` is not downloaded again; delete its folder to take a newer commit. The 8M to 650M repositories ship safetensors; the 3B one ships two pickle shards (about 11 GB), whose loading needs torch >= 2.6 (transformers refuses `torch.load` below it). `force_reinstall=True` rebuilds the env and keeps the weights.
+
+**Parameters**:
+- `sequences`: DataStream | StandardizedOutput (required) - protein sequences, one chain per id. Upper-case letters of the ESM-2 alphabet only (the 20 standard amino acids and `X`, `B`, `U`, `Z`, `O`); any other character fails that id and names the characters. Sequences are never truncated.
+- `model`: str = `"esm2_t33_650M_UR50D"` - one of `esm2_t6_8M_UR50D`, `esm2_t12_35M_UR50D`, `esm2_t30_150M_UR50D`, `esm2_t33_650M_UR50D`, `esm2_t36_3B_UR50D` (hidden sizes 320, 480, 640, 1280, 2560). The default is the size of the model card's own example: 2.6 GB of weights, which fits any current GPU, and the largest checkpoint published as safetensors. `esm2_t48_15B_UR50D` is not offered: its 60 GB of fp32 weights do not fit one GPU, and this tool does not shard or run in half precision.
+- `compute_pll`: bool = True - write the `scores` table. One forward pass per residue, so on a large library turn it off when only embeddings are wanted.
+- `compute_embeddings`: bool = True - write the `embeddings` stream. One forward pass per sequence. At least one of the two must be on.
+- `batch_size`: int = 16 - masked copies of one sequence scored per forward pass. Changes memory and speed, not the values.
+- `device`: str = `"auto"` - `"auto"` uses a GPU when one is visible, otherwise the CPU; `"cpu"`; `"cuda"`, which fails the step when no GPU is visible instead of falling back.
+
+**Streams**:
+- `embeddings` - `<id>.npy` per sequence (format `npy`), the mean-pooled vector described below. Empty when `compute_embeddings=False`.
+
+**Tables**:
+- `scores` (absent when `compute_pll=False`):
+
+  | id | length | pll | pll_per_residue |
+  |----|--------|-----|-----------------|
+
+  Exactly one row per id that entered; `length`, `pll` and `pll_per_residue` are NaN for an id that failed.
+
+- `missing`: | id | removed_by | kind | cause |
+
+**Pseudo-log-likelihood.** For a sequence x_1..x_L tokenized as `<cls> x_1 .. x_L <eos>`, residue i is replaced by `<mask>` while every other token stays, the model runs once per i, and log p(x_i | all other tokens) is read from the log-softmax over the model's full 33-token output vocabulary at that position, at the true token. `pll` is the sum over the L residues and `pll_per_residue` their mean; both are at most 0, and values closer to 0 mean the model finds the sequence more probable. The sum grows with length, so compare sequences of different lengths on `pll_per_residue`, which still depends on composition (a low-complexity repeat can score well). This is the pseudo-log-likelihood of Salazar et al. (2020), and the same sum the `pseudo-ppl` strategy of upstream's `examples/variant-prediction/predict.py` returns (it is named for a perplexity but sums log-probabilities and does not normalize by length). Computed in fp32 with the model in eval mode, so it is deterministic.
+
+**Embeddings.** One forward pass on the unmasked sequence; the encoder's last hidden state (after its final layer norm) at the L residue positions, `<cls>` and `<eos>` excluded, averaged over positions into one float32 vector of the hidden size. fair-esm's `esm-extract --include mean` for the last layer computes the same average, except that it truncates at 1022 residues by default and this tool never truncates.
+
+**Not offered: variant-effect scores.** Wild-type and masked marginals (Meier et al. 2021) score a substitution against a reference sequence, which a single input sequence does not carry, so there is nothing for them to be computed against. VespaG scores the single-substitution landscape of a sequence.
+
+**Example**:
+```python
+from biopipelines.esm2 import ESM2
+
+with Pipeline("Project", "Naturalness", description="ESM-2 scoring of designs"):
+    Resources(gpu="1", memory="16GB", time="1:00:00")
+    designs = ProteinMPNN(structures=backbones, num_sequences=8)
+    esm = ESM2(sequences=designs)
+
+    # Most natural-looking designs first
+    ranked = Panda(tables=esm.tables.scores, operations=[Panda.sort("pll_per_residue", ascending=False)])
+
+# Embeddings only, from a small checkpoint on CPU
+vectors = ESM2(sequences=designs, model="esm2_t12_35M_UR50D", compute_pll=False, device="cpu")
+```
+
+**Verified and not verified.** Checked against the real `esm2_t6_8M_UR50D` checkpoint on CPU (Windows, torch 2.11, transformers 5.14): the batched pseudo-log-likelihood equals a naive loop of single-masked forward passes to 1e-6, the result does not depend on `batch_size`, and the pooled vector matches the encoder's last hidden state. Not yet run: the larger checkpoints, GPU, the 3B sharded pickle load, and the install on a cluster, Colab or container.
+
+**Reference**: Lin et al. (2023) Evolutionary-scale prediction of atomic-level protein structure with a language model. *Science* 379, 1123-1130. https://www.science.org/doi/10.1126/science.ade2574 - code: https://github.com/facebookresearch/esm - weights: https://huggingface.co/facebook/esm2_t33_650M_UR50D. Salazar et al. (2020) Masked Language Model Scoring. *ACL*, 2699-2712. Meier et al. (2021) Language models enable zero-shot prediction of the effects of mutations on protein function. *NeurIPS*.
+
+---
+
 ### FPocket
 
 Geometry-based binding-pocket detection. For each input PDB, runs the `fpocket` binary and reports detected pockets with their alpha-sphere count, volume, druggability score, and constituent residues. No ligand or model inference required.

@@ -60,6 +60,7 @@ folders:
     DNAEncoder: "<biopipelines>/_stub_repos/DNAEncoder"
     DiffDock: "<biopipelines>/_stub_repos/DiffDock"
     DynamicBind: "<biopipelines>/_stub_repos/DynamicBind"
+    ESM2: "<biopipelines>/_stub_repos/ESM2"
     PocketGen: "<biopipelines>/_stub_repos/PocketGen"
     PLACER: "<biopipelines>/_stub_repos/PLACER"
     GEMS: "<biopipelines>/_stub_repos/GEMS"
