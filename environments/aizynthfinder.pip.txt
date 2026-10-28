@@ -2,3 +2,6 @@
 # used only for route clustering) and the Mongo and molbloom stock backends, none of
 # which this wrapper exposes. The ONNX models need no tensorflow either.
 aizynthfinder
+# aizynthfinder needs numpy<2 and dask pulls the newest pyarrow, whose 24.x releases refuse numpy 1:
+# `aizynthcli` died on import with "pyarrow requires NumPy 2.0 or newer". 23.0.1 was checked to import with numpy 1.26.
+pyarrow<24

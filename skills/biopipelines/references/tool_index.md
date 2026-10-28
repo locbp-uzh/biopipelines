@@ -55,7 +55,7 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 
 ## Cheminformatics
 
-- **AiZynthFinder** v2.2 · CPU · x86-64, Colab — Retrosynthetic route planning. `docs/tool/cheminformatics.md#aizynthfinder` [repo](https://github.com/MolecularAI/aizynthfinder) [paper](https://doi.org/10.1186/s13321-020-00472-1) · tags: predict-property, small-molecule
+- **AiZynthFinder** v2.3 · CPU · x86-64, Colab — Retrosynthetic route planning. `docs/tool/cheminformatics.md#aizynthfinder` [repo](https://github.com/MolecularAI/aizynthfinder) [paper](https://doi.org/10.1186/s13321-020-00472-1) · tags: predict-property, small-molecule
 - **OpenBabel** v1.1 · CPU · x86-64, Colab — Converts a molecule stream between chemical file formats, optionally adding hydrogens (pH-aware) and generating 3-D coordinates. `docs/tool/cheminformatics.md#openbabel` [repo](https://github.com/openbabel/openbabel) [paper](https://doi.org/10.1186/1758-2946-3-33) · tags: data, refine-structure, small-molecule
 - **RDKit** v1.2 · CPU · x86-64, aarch64, Colab — Two independent jobs, selected by which inputs are given. `docs/tool/cheminformatics.md#rdkit` [repo](https://github.com/rdkit/rdkit) · tags: measure, small-molecule, energy
 - **REINVENT4** v1.0 · GPU/CPU · x86-64 — Generative design of small molecules with the pretrained priors of REINVENT 4. `docs/tool/cheminformatics.md#reinvent4` [repo](https://github.com/MolecularAI/REINVENT4) [paper](https://doi.org/10.1186/s13321-024-00812-5) · tags: generate-molecule, small-molecule

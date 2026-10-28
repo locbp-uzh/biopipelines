@@ -169,7 +169,7 @@ class AiZynthFinder(BaseConfig):
     """
 
     TOOL_NAME = "AiZynthFinder"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "aizynthfinder"
 
     @classmethod

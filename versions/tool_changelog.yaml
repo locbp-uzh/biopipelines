@@ -39,8 +39,12 @@ AiZynthFinder:
   files:
   - biopipelines/aizynthfinder.py
   - pipe_scripts/pipe_aizynthfinder.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-28'
+    note: >-
+      A fresh install built an environment in which `aizynthcli` died on import with `pyarrow requires NumPy 2.0 or newer`: aizynthfinder needs numpy below 2, dask pulls the newest pyarrow and pyarrow 24 and later refuse numpy 1. The pip layer now holds `pyarrow<24` (23.0.1 and 21.0.0 were checked to import with numpy 1.26 and to start `aizynthcli`).
   - version: '2.2'
     date: '2026-10-27'
     note: >-
