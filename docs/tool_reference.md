@@ -59,6 +59,7 @@ Predict protein and complex structures, and dock ligands.
 - [OpenFold3](tool/structure_prediction.md#openfold3) — Open-source co-folding of proteins, nucleic acids and ligands
 - [PLACER](tool/structure_prediction.md#placer) — Ligand-pose ensemble in a bound pocket
 - [RF3](tool/structure_prediction.md#rf3) — RoseTTAFold3 co-folding of proteins, nucleic acids and ligands
+- [Protenix](tool/structure_prediction.md#protenix) — All-atom co-folding of proteins, nucleic acids and ligands (default `protenix-v2`)
 
 ---
 

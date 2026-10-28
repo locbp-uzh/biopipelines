@@ -85,6 +85,7 @@ folders:
   cache:
     BoltzCache: "/content/cache/Boltz"
     BoltzGenCache: "<cache>/BoltzGen"
+    ProtenixCache: "<cache>/Protenix"
     ColabFoldDatabases: "<cache>/colabfold_databases"
     MMseqs2Databases: "<ColabFoldDatabases>"
     AlphaFoldParams: "<cache>/alphafold_params"
@@ -162,6 +163,7 @@ environments:
   Prodigy: "prodigy"
   ProLIF: "prolif"
   ProteinMPNN: "SE3nv"
+  Protenix: "protenix"
   PyMOL: "ProteinEnv"
   RBSDesigner: "rbs_designer"
   RDKit: "biopipelines"

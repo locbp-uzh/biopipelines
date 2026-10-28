@@ -134,6 +134,7 @@ folders:
   cache:
     BoltzCache: "<cache>/Boltz"
     BoltzGenCache: "<cache>/BoltzGen"
+    ProtenixCache: "<cache>/Protenix"
     # Root of the ColabFold MSA database set. Shared downloads (tarballs, pdb/
     # mmCIF, DOWNLOADS_READY/PDB_MMCIF_READY markers) live at this root; the built
     # per-mode indexes live in gpu/ (padded, for mmseqs --gpu / colabfold_search
@@ -224,6 +225,7 @@ environments:
   Prodigy: "prodigy"
   ProLIF: "prolif"
   ProteinMPNN: "SE3nv"
+  Protenix: "protenix"
   PyMOL: "ProteinEnv"
   RBSDesigner: "rbs_designer"
   RDKit: "biopipelines"

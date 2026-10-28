@@ -76,6 +76,7 @@ from .openbabel import OpenBabel
 from .plip import PLIP
 from .prodigy import Prodigy
 from .prolif import ProLIF
+from .protenix import Protenix
 from .fpocket import FPocket
 from .p2rank import P2Rank
 from .af2bind import AF2BIND
@@ -228,6 +229,7 @@ __all__ = [
     'PLIP',
     'Prodigy',
     'ProLIF',
+    'Protenix',
     'FPocket',
     'P2Rank',
     'AF2BIND',

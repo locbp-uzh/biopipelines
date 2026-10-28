@@ -2327,3 +2327,18 @@ REINVENT4:
     date: '2026-10-28'
     note: >-
       Initial release. Samples molecules from a pretrained REINVENT 4 prior (its `sampling` run mode) with four generators: `reinvent` (de novo), `libinvent` (scaffold decoration; input scaffolds with `[*:0]` attachment points), `linkinvent` (linker design; input warhead pairs joined by `|`) and `mol2mol` (optimization; `similarity` picks one of the six ChEMBL priors or the PubChem prior). Emits a `compounds` stream (ids `<input id>_<n>`, input provenance in `compounds.id`), a `samples` table (NLL plus the columns REINVENT reports for the generator) and, for the generators with input, an `inputs` table with the yield per input. REINVENT runs once per input compound, because its output keeps the input only in the form given to the model and one unreadable input aborts a whole run. Not wrapped: transfer learning, staged learning, scoring, PepInvent, the transformer variants of LibInvent and LinkInvent. Installs into the dedicated `REINVENT4` env from a shallow clone with upstream's `install.py` and fetches ten priors from Zenodo record 15641297, md5-checked.
+
+Protenix:
+  files:
+  - biopipelines/protenix.py
+  - pipe_scripts/pipe_protenix_config.py
+  - pipe_scripts/pipe_protenix_postprocess.py
+  - pipe_scripts/pipe_protenix_weights.py
+  - biopipelines/nucleic_acids.py
+  - pipe_scripts/pipe_axis_data.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-28'
+    note: >-
+      Initial release. All-atom co-folding of proteins, nucleic acids and ligands with ByteDance's Protenix, default checkpoint protenix-v2 (about 464 M parameters). Takes the six input axes of Boltz2 and OpenFold3 with the same Each/Bundle semantics and the same CCD-versus-SMILES decision, an optional a3m msas stream passed as unpairedMsaPath (a chain without an alignment skips its query, since a missing path would make upstream search the server and overwrite the others), covalent_bonds as upstream's own list, and seeds and num_diffusion_samples with the structures counted as seeds times samples. Streams structures (cif) and pae (npz, key pae, Boltz layout, read from upstream's full-data JSON, which the wrapper then deletes), tables confidence (plddt, ptm, iptm, gpde, has_clash, disorder, ranking_score, seed, sample) and missing. One JSON per query in one folder, so one model load and a failure stays in its own file; upstream records a failed query in ERR/<id>.txt and exits 0, so that text becomes the cause in missing. The install downloads the CCD files and the checkpoint into ProtenixCache. The weights of protenix-v2 are described upstream as proprietary and non-redistributable, and upstream's download URL for them answered HTTP 403 on 2026-10-28 while the other checkpoints downloaded, so the install warns instead of failing when the checkpoint is refused. Contact and pocket constraints (only the older constraint checkpoint) and templates are not wired. x86-64 only: upstream pins triton==3.3.1, which has no aarch64 wheel.

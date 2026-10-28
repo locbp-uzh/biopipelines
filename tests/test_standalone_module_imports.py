@@ -76,7 +76,7 @@ def test_the_entry_points_are_still_the_ones_pipe_scripts_import():
     missed = bare - set(REACHABLE)
     # Names that are really the external tool, not our wrapper of the same name.
     missed -= {"pymol", "openmm", "prolif", "plip", "posebusters", "admet_ai",
-               "frame2seq", "bioemu", "openbabel", "utils"}
+               "frame2seq", "bioemu", "openbabel", "protenix", "utils"}
     assert not missed, f"pipe scripts import these package modules by bare name but they are unchecked: {sorted(missed)}"
 
 

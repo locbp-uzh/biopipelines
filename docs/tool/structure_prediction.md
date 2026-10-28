@@ -813,6 +813,46 @@ RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `
 `structures` holds one `<id>.cif` per complex. The B-factor column carries per-atom pLDDT on a 0 to 1 scale (upstream's `annotate_b_factor_with_plddt`, which its config turns on).
 
 `pae` holds one `<id>.json` per structure, under the same ids as `structures`. It is upstream's full confidence file for that sample (`*_confidences.json`), copied unchanged: a JSON object with the keys `atom_chain_ids`, `atom_plddts` (N_atom floats, 0 to 1), `pae` (N_token x N_token nested lists, so `np.array(json.load(f)["pae"])` is the matrix, in Å from 0 to 32), `token_chain_ids` and `token_res_ids`. Rows and columns are RF3's tokens over all chains, one per standard residue and one per atom for ligands and modified residues. `token_res_ids` is a running token index in upstream's source, not a residue number. The stream's map_table lists only the ids whose file exists.
+### Protenix
+
+All-atom co-folding of proteins, nucleic acids and ligands with ByteDance's Protenix, a trainable reproduction of AlphaFold3, run as `protenix-v2` (about 464 M parameters) unless another checkpoint is named. It takes the same input axes as `Boltz2` and `OpenFold3`, so a prediction can be cross-checked against another model by changing the tool name.
+
+**License.** The upstream code and the other checkpoints are Apache-2.0. The upstream README states that the weights of `protenix-v2` are proprietary and confidential, are not released under an open-source license, and may not be reproduced, distributed, sublicensed or transferred to a third party without the rights holder's prior written consent. Upstream's own download URL for `protenix-v2.pt` answered HTTP 403 when checked on 2026-10-28, while the checkpoints of the other models downloaded; whether it is reachable from the cluster has not been checked. Obtain the weights from the rights holder and put them at `<ProtenixCache>/checkpoint/protenix-v2.pt`. The wrapper does not fetch from third-party mirrors. Do not copy or share the checkpoint, and read the README before publishing anything built on it.
+
+It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is no affinity head, and covalent bonds are the explicit atom pairs of `covalent_bonds`, not a selection resolved against the sequence. Two upstream features are deliberately not wired. Contact and pocket constraints exist only for the older `protenix_base_constraint_v0.5.0` checkpoint (upstream's model table lists the constraint column as unsupported for `protenix-v2`). Templates need kalign plus per-chain search results or a sequence database.
+
+**Alignments.** Three modes. With `msas`, each protein chain gets its alignment as an unpaired `.a3m`. Upstream's ColabFold note says Protenix pairs chains through species information that ColabFold-style alignments lack, so such a complex is predicted without cross-chain pairing. By default upstream's MSA service at protenix-server.com searches every protein chain, which means the sequences leave the cluster; supply `msas` for anything unpublished. With `use_msa_server=False` and no `msas`, every chain is folded from its single sequence, which upstream warns can degrade accuracy.
+
+**Failures.** `protenix pred` records a failed query in `ERR/<id>.txt` and still exits 0, so the wrapper reads those files: a query with no structure gets a `failure` row in `missing` carrying the first line of upstream's error. The best-known case is `protenix-v2` refusing a complex of more than 2560 tokens. A query the wrapper cannot even write (a residue letter upstream does not accept, a protein chain with no alignment in `msas`, a covalent bond naming an entity the query does not have) is skipped the same way, with the reason.
+
+**Tags**: predict-structure, protein, small-molecule, nucleic-acid, complex, all-atom, covalent, sequence-only
+
+**References**: https://github.com/bytedance/Protenix · Protenix-v2: Zhang et al., bioRxiv 2026, https://doi.org/10.64898/2026.04.10.717613 · reproduces AlphaFold3 (Abramson et al. 2024, https://www.nature.com/articles/s41586-024-07487-w)
+
+**Resources**: GPU. Upstream's cost table lists peak memory of about 6 GB at 500 tokens, 18 GB at 1000 and 67 GB at 2000; request `gpu="A100"` or larger for complexes beyond a few hundred tokens. x86-64 only: upstream pins `triton==3.3.1`, which PyPI ships for x86-64 only, so it is not set up on Daint (aarch64).
+
+**Environment**: `protenix` (dedicated env, Python 3.11, `pip install protenix` from the official PyPI index).
+
+**Installation**: `Protenix.install()` builds the env and downloads upstream's CCD files and the `protenix-v2` checkpoint into `ProtenixCache` (`$PROTENIX_ROOT_DIR`, the home directory when the config sets no cache), so the first prediction needs no network. When the checkpoint cannot be downloaded the install still succeeds, with a warning that names where the file goes; any other `model_name` runs, and upstream downloads that checkpoint on its first use.
+
+**Parameters**
+
+- `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences. Letters other than the 20 standard residues and `X` fail that query
+- `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences in upper case (A/C/G/T/N for DNA, A/C/G/U/N for RNA). A double-stranded axis becomes two chains, the second the reverse complement
+- `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them, so both models receive the same chemistry for the same input. A single-atom ion is a ligand with its CCD code (`MG`), which upstream builds the same way as its `ion` entity
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed `.a3m` alignments, from `MMseqs2(output_format="a3m")` or `MSA`. Every protein chain of a query needs one; a query with a chain that has none is skipped and listed in `missing`. A csv stream is refused at configuration. `use_msa_server=True` together with `msas` is refused, since upstream then searches every chain of the query and overwrites the supplied alignments
+- `use_msa_server`: Optional[bool] = None - search alignments through upstream's service; unset means on, unless `msas` is given. False without `msas` folds every chain single-sequence
+- `model_name`: str = "protenix-v2" - one of `protenix-v2`, `protenix_base_default_v1.0.0`, `protenix_base_20250630_v1.0.0`, `protenix_base_default_v0.5.0`, `protenix_mini_default_v0.5.0`, `protenix_tiny_default_v0.5.0`. Upstream's `--use_default_params` is always on, so cycles and diffusion steps follow the model (10 and 200; 4 and 5 for mini and tiny). The constraint and ESM checkpoints are not offered
+- `num_diffusion_samples`: Optional[int] = None - structures sampled per seed (upstream default 5)
+- `seeds`: Optional[List[int]] = None - random seeds (upstream default 101). A query yields seeds times samples structures
+- `top_only`: bool = True - keep only the structure with the best `ranking_score` as `<id>`. False surfaces every structure as `<id>_1..N`, ordered by seed and then by upstream's sample index
+- `covalent_bonds`: Optional[List[Dict]] = None - upstream's covalent bonds, each a dict with `entity1`, `position1`, `atom1`, `entity2`, `position2`, `atom2` and optionally `copy1` and `copy2` (both or neither). Entities are numbered from 1 in the order of the query: proteins, ssDNA, dsDNA (strand, then reverse complement), ssRNA, dsRNA, ligands, each axis in the order of its records. The same bonds apply to every query. For a ligand given as SMILES, `atom` is an index into the SMILES or an element with its occurrence (`C3`); for a CCD ligand it is the CCD atom name. Polymer-polymer bonds are not reliably handled upstream
+- `include_pae`: bool = True - write the PAE matrix of every kept structure to the `pae` stream. This makes upstream dump a full-data JSON per sample (`--need_atom_confidence`), which is large; the wrapper reads the matrix out of it and deletes the JSONs
+- `no_kernels`: bool = False - run the triangle operations with plain PyTorch (`--trimul_kernel torch --triatt_kernel torch`) instead of the cuEquivariance kernels, for a GPU those do not support
+
+**Streams**: `structures`, `pae`
+
+`structures` holds one `<id>.cif` per predicted complex. `pae` holds one `<id>.npz` per structure under the same ids, with the full N_token x N_token predicted aligned error under the array key `pae` (float32, Å), the layout Boltz2 writes, which `IPSAE` and other readers of a `pae` stream accept. That Protenix's token order lines up with the residues of its CIF, as Boltz2's does, rests on both tokenizing like AlphaFold3 and has not been run. Rows and columns are Protenix's tokens over all chains: one per standard residue, one per atom for ligands and modified residues. The stream's map_table lists only the ids whose matrix could be read, and it is not declared with `include_pae=False`.
 
 **Tables**:
 - `confidence`:
@@ -821,6 +861,10 @@ RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `
   |----|-------|-----|------|-----|-----|-----------|---------------|---------------|------|--------|
 
   One row per id that entered, with blanks where RF3 reported nothing. `plddt`, `pae` and `pde` are upstream's `overall_*` means; `ptm`, `iptm`, `has_clash` and `ranking_score` are its own. Upstream reports an `iptm` of 0 for a single chain. `seed` and `sample` name which of the generated samples the row is, so a `top_only` result says which one was chosen. An input stopped early has `early_stopped` True and blanks elsewhere.
+  | id | plddt | ptm | iptm | gpde | has_clash | disorder | ranking_score | seed | sample |
+  |----|-------|-----|------|------|-----------|----------|---------------|------|--------|
+
+  One row per query that entered, with blanks where a score is unavailable: a query that produced no structure keeps its row, and `missing` says why. The scores are those of upstream's `summary_confidence` JSON; `plddt` is on a 0 to 100 scale, `ptm` and `iptm` from 0 to 1, and `ranking_score` is upstream's `0.8 iptm + 0.2 ptm + 0.5 disorder - 100 has_clash`, so a structure with a clash scores below -99. `disorder` is a constant 0 in upstream's current code. `seed` and `sample` name the structure the row describes, `sample` being upstream's index within the seed (0 is the best of that seed).
 
 - `missing`:
 
@@ -833,6 +877,20 @@ With `top_only=True` (the default) the sample with the highest `ranking_score` i
 
 ```python
 complexes = RF3(proteins=binders, ligands=Ligand("HEM"), msas=binder_msas)
+With `top_only=True` (the default) the structure with the highest `ranking_score` over all seeds and samples is kept as `<id>`. With `top_only=False` every structure is surfaced as `<id>_1..N`.
+
+**Example**:
+```python
+from biopipelines import Protenix, MMseqs2, IPSAE
+
+protein = Sequence("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", ids="Hb")
+msa = MMseqs2(sequences=protein, output_format="a3m")
+
+# Supplied alignments, five seeds of five samples each, best structure kept
+fold = Protenix(proteins=protein, msas=msa, seeds=[1, 2, 3, 4, 5], ligands=Ligand("ATP"))
+
+# The pae stream has the Boltz2 layout, which IPSAE reads
+iface = IPSAE(structures=fold, pae=fold)
 ```
 
 ---

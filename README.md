@@ -293,6 +293,13 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 
+<tr>
+  <td><sub><b>Protenix</b><br>All-atom co-folding of proteins, nucleic acids and ligands; ByteDance's AlphaFold3 reproduction, default <code>protenix-v2</code>.</sub></td>
+  <td width="100" align="center"><sub><a href="https://github.com/bytedance/Protenix"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.64898/2026.04.10.717613"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
+  <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+</tr>
+
 <tr><td colspan="4"><h3>📐 Analysis</h3></td></tr>
 
 <tr>
