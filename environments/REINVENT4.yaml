@@ -5,3 +5,5 @@ dependencies:
   # REINVENT 4 needs Python >= 3.11; the install script then runs upstream's install.py, which pip-installs the package with a PyTorch build matching the processor.
   - python=3.11
   - pip
+  # upstream imports scipy.stats at start-up, but install.py -d none leaves it out with the optional scoring dependencies
+  - scipy
