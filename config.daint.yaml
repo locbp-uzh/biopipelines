@@ -128,8 +128,8 @@ environments:
   # Empty + an edf: entry means the image supplies the interpreter, so there
   # is no env to activate. Our venv cannot carry BioEmu — see skills/biopipelines/references/daint_backend.md.
   BioEmu: ""
-  # bioemu2 on Daint: a dedicated micromamba env built via a container EDF.
-  # Verified on a GH200 2026-10-24 end-to-end on the AcCoA campaign pilot.
+  # bioemu2 on Daint: a dedicated env, with the container EDF supplying the interpreter.
+  # Reported to run end to end on a GH200 on 2026-10-24; the spec has changed since (Python 3.12, bioemu2[cuda]) and is not re-verified here.
   BioEmu2: "bioemu2"
   Boltz2: "Boltz2Env"
   BoltzGen: "boltzgen"

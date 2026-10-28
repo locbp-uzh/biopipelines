@@ -5,14 +5,13 @@
 """BioEmu2 tool: ligand-capable equilibrium-ensemble emulation.
 
 bioemu2 is the ligand-capable successor of bioemu. Each run samples
-``num_samples`` conformers of a system described by a system YAML with
-protein and (optionally) ligand entities, plus optional contact / covalent
-constraints. The wrapper writes one YAML per input entity set, calls
-``bioemu2 sample-equilibrium``, splits the sampled trajectory into
-per-conformer PDBs and keeps the compact trajectory + physicality report.
+``num_samples`` conformers of a system that holds protein chains and
+(optionally) ligands, plus optional contact and covalent-bond constraints.
+The wrapper writes one system YAML per run, calls ``bioemu2
+sample-equilibrium``, splits the sampled trajectory into per-conformer PDBs
+and keeps the compact trajectory and the physicality report.
 
-Reference: Lewis et al. (2024) BioEmu, and the ligand-aware extension at
-https://github.com/microsoft/bioemu2
+Reference: https://github.com/microsoft/bioemu2
 """
 
 import os
@@ -22,124 +21,150 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_multiplied_ids_pattern
+    from .combinatorics import (generate_combinatorics_config, generate_multiplied_ids_pattern,
+                                predict_output_ids_with_provenance)
+    from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_multiplied_ids_pattern
+    from combinatorics import (generate_combinatorics_config, generate_multiplied_ids_pattern,
+                               predict_output_ids_with_provenance)
+    from datastream_resolver import resolve_input_to_datastream
 
 
+# The values `bioemu2 sample-equilibrium --sampler` and `--physicality-filter` accept.
 SAMPLERS = ("edm", "edm_gd", "edm_fk", "edm_fkc")
-PHYSICALITY_MODES = ("high_quality", "medium_quality", "low_quality", "no_filter")
+PHYSICALITY_MODES = ("high_quality", "high_quality_per_residue", "no_violations", "no_filter")
+MSA_FORMATS = ("a3m", "csv")
+COVALENT_LINKAGE_KEYS = ("chain", "position", "protein_atom", "ligand_atom")
+CONTACT_TOKEN_KEYS = ("asym_id", "res_id", "atom_name")
+# bioemu2 declares requires-python >=3.12; the env spec, the install check and the tests all read this.
+MIN_PYTHON = (3, 12)
+PYTHON_CHECK = f"import sys; sys.exit(0 if sys.version_info >= {MIN_PYTHON} else 1)"
 
 
 class BioEmu2(BaseConfig):
     """
     BioEmu2: ligand-capable equilibrium-ensemble emulation.
 
-    Each (sequence, ligand set, constraints) combination is one BioEmu2 run.
-    Ligands are passed by SMILES and placed by bioemu2 itself from scratch —
-    no 3D template is seeded. A precomputed MSA may be supplied per sequence
-    to skip bioemu2's own ColabFold cold-start.
+    Each combination of a sequence and a ligand is one run, and one system for bioemu2.
+    The protein chains are A, B, ... in the order the sequences are given, and the ligands take the next chain letters.
+    A ligand is passed to bioemu2 by CCD code when its compounds row has one and by SMILES otherwise, and bioemu2 places it from scratch: no 3D template is seeded.
+    A compounds row with neither (a `Ligand(codes=...)` that only names a residue) fails its run.
 
     Inputs:
-        sequences: amino-acid sequences (sequences stream or StandardizedOutput).
-                   Each id's sequence is read from the stream's ``sequence``
-                   column.
-        ligands:   optional ligand stream. For each (sequence, ligand) pair the
-                   wrapper builds one system with the protein as chain A and
-                   each ligand entity after it. Pass ``None`` for a plain apo
-                   ensemble. SMILES are read from the ligand stream.
+        sequences: protein sequences, as a sequences stream or a StandardizedOutput. Each row is one chain.
+                   `Each` (the default) makes one run per sequence; `Bundle` puts several sequences in one system.
+        ligands: optional compounds stream or StandardizedOutput. Without it the ensemble is apo.
+                   `Each` makes one run per ligand and sequence; `Bundle` puts several ligands in one system.
         num_samples: conformers per run (default 100).
-        batch_size: samples denoised together per forward pass (default 16).
-                   Caps GPU memory at long sequence × large batch.
-        seed:      optional RNG seed. If ``None``, each run is reseeded.
-        sampler:   one of ``edm`` (default), ``edm_gd``, ``edm_fk``, ``edm_fkc``.
-                   The three steered variants need a ``potentials`` YAML.
-        contacts:  optional list of contact-constraint dicts (bioemu2 YAML
-                   schema); each dict is forwarded verbatim into the system
-                   YAML's ``contacts`` list.
-        covalent_linkage: optional covalent-bond dict (bioemu2 YAML schema);
-                   forwarded verbatim into the system YAML.
-        precomputed_msa: optional path (or stream) to a precomputed .a3m file.
-                   When provided, the wrapper pre-populates bioemu2's
-                   per-sequence cache so no ColabFold query is made.
-        physicality_filter: ``high_quality`` (default), ``medium_quality``,
-                   ``low_quality`` or ``no_filter``. Checked frames stay in the
-                   trajectory; the mode only affects the physicality report.
+        batch_size: samples denoised together per forward pass (default 16). It caps GPU memory at long sequence times large batch.
+        seed: RNG seed (default None: every run draws its own).
+        sampler: `edm` (default, unsteered), `edm_gd` (gradient guidance), `edm_fk` (Feynman-Kac resampling) or `edm_fkc` (Feynman-Kac corrector).
+                   The steered samplers use upstream's default physicality potentials.
+        contacts: optional list of upstream contact dicts, `{"token1": {"asym_id": "A", "res_id": 3}, "token2": {"asym_id": "B", "atom_name": "C1"}, "max_distance": 6.0}`.
+                   A token is a chain with a 1-based residue index, or a chain with a ligand atom name. They go into the system YAML unchanged.
+        covalent_linkage: optional dict `{"chain": "A", "position": 3, "protein_atom": "SG", "ligand_atom": "C1"}` bonding a protein atom to an atom of the first ligand.
+                   It becomes an upstream `bonds` entry, with the residue name read from the sequence. The ligand must be given by CCD code, because the bond names the ligand's residue and atoms.
+                   Requires `ligands`.
+        msas: optional precomputed alignments (msas stream, `.a3m` or Boltz-style `.csv`), matched to a sequence by its id (the `sequences.id` column, else the row id).
+                   The alignment is written into bioemu2's ColabFold cache for this step, so no search is made for that sequence. A sequence with no alignment is searched through ColabFold as usual.
+                   Only a system with one protein chain can use it. Formerly `precomputed_msa`.
+        physicality_filter: `high_quality` (default), `high_quality_per_residue`, `no_violations` or `no_filter`.
+                   Frames that fail stay in the trajectory and the structures; the mode only decides what the physicality table reports.
 
     Install:
-        BioEmu2.install()
+        BioEmu2.install()   # Python 3.12 env, bioemu2[cuda], and the bioemu2-preview checkpoint from Hugging Face
 
     Outputs:
         Streams:
-            structures:  per-conformer PDB, ids ``<run>_<1..num_samples>``.
-            trajectories: one ``<run>.xtc`` + ``<run>_topology.cif`` per run.
+            structures:   one `<run>_<1..num_samples>.pdb` per sampled conformer.
+            trajectories: one `<run>.xtc` per run, with its `<run>_topology.cif` named in the map's `topology` column.
         Tables:
-            summary:  id | sequence.id | ligand.id | n_samples | n_residues
-            physicality: id | frame | invalid_bond | clash | chirality | chain_break
-            missing:  id | removed_by | kind | cause
+            summary:     id | sequences.id | ligands.id | n_samples | n_residues
+                         One row per run, with n_samples and n_residues empty when the run failed. n_residues counts every residue of the sampled system, ligands included.
+            physicality: id | run.id | frame | status | reason
+                         One row per conformer, with `id` the structure id and `frame` its zero-based index in the trajectory.
+                         `status` is `passed`, `rejected` or `not_checked`, and `reason` the first failed check (empty when none).
+            missing:     id | removed_by | kind | cause
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "bioemu2"
+
+    PARAMETER_ALIASES = {"precomputed_msa": "msas"}
+    DEPRECATED_ALIASES = ("precomputed_msa",)
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        """Install the bioemu2 env. bioemu2 is a pure-pip package; no conda-only
-        dependencies, no AF2 params to wire (bioemu2 uses ColabFold MMseqs2
-        with its own on-disk cache under ``~/.cache/bioemu2``)."""
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
-        import_check = (
-            f'{cls._env_run(env, env_manager)}'
-            f'python -c "import bioemu2" >/dev/null 2>&1'
-        )
-        cli_check = (
-            f'{cls._env_run(env, env_manager)}'
-            f'bioemu2 --help >/dev/null 2>&1'
-        )
+        run = cls._env_run(env, env_manager)
+        env_check = cls._env_exists_check(env, env_manager)
+        pipe_scripts = folders.get("pipe_scripts") or f"{biopipelines}/pipe_scripts"
+        weights_py = f"{pipe_scripts}/pipe_bioemu2_weights.py"
+        requirements = f"{biopipelines}/environments/{env}.pip.txt"
 
-        skip = "" if force_reinstall else f"""# Check if already installed
-if {import_check} && {cli_check}; then
+        python_ok = f'{run}python -c "{PYTHON_CHECK}" >/dev/null 2>&1'
+        installed = (f'{python_ok} && {run}python -c "import bioemu2, mdtraj, torch" >/dev/null 2>&1'
+                     f' && {run}bioemu2 sample-equilibrium --help >/dev/null 2>&1')
+        weights_cached = f'{run}python "{weights_py}" --check-only >/dev/null 2>&1'
+
+        skip = "" if force_reinstall else f"""# Check if already installed (env and checkpoint)
+if {installed} && {weights_cached}; then
     echo "BioEmu2 already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
 fi
 """
         remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
+        stale_block = f"""# An env built from an earlier spec ran an older Python, which bioemu2 does not install on
+if {env_check} && ! {python_ok}; then
+    echo "The {env} environment runs Python older than {MIN_PYTHON[0]}.{MIN_PYTHON[1]}, which bioemu2 does not support; rebuilding it."
+{cls._env_remove_block(env, env_manager)}
+fi
+"""
         env_block = cls._env_install_block(env, env_manager, biopipelines)
-        env_install_block = f"""if ! {import_check}; then
-{env_block}
-else
-    echo "{env} environment already present, skipping creation."
-fi"""
         return f"""echo "=== Installing BioEmu2 ==="
 {skip}{remove_block}
-{env_install_block}
+{stale_block}
+if {env_check}; then
+    echo "{env} environment present, installing its requirements into it"
+    {run}pip install -r "{requirements}"
+else
+{env_block}
+fi
+
+echo "Fetching the BioEmu2 checkpoint from Hugging Face"
+if ! {run}python "{weights_py}"; then
+    echo "WARNING: the BioEmu2 checkpoint could not be fetched; the first sampling run downloads it instead"
+fi
 
 # Verify installation
-if {import_check} && {cli_check}; then
+if {installed}; then
     touch "$INSTALL_SUCCESS"
     echo "=== BioEmu2 installation complete ==="
 else
-    echo "ERROR: BioEmu2 verification failed (cannot import bioemu2 or run its CLI)"
+    echo "ERROR: BioEmu2 verification failed (needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer, importable bioemu2, mdtraj and torch, and a working bioemu2 CLI)"
     exit 1
 fi
 """
 
-    sequences_json = Path(lambda self: self.configuration_path("sequences.json"))
-    ligands_json = Path(lambda self: self.configuration_path("ligands.json"))
-    runs_json = Path(lambda self: self.configuration_path("runs.json"))
+    combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
+    config_yaml = Path(lambda self: self.configuration_path("config.yaml"))
+    msas_json = Path(lambda self: self.configuration_path("msas.json"))
+    runs_folder = Path(lambda self: self.execution_path("runs"))
+    msa_cache_folder = Path(lambda self: self.execution_path("msa_cache"))
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     trajectories_map = Path(lambda self: self.stream_map_path("trajectories"))
     summary_csv = Path(lambda self: self.table_path("summary"))
     physicality_csv = Path(lambda self: self.table_path("physicality"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     helper_py = Path(lambda self: self.pipe_script_path("pipe_bioemu2.py"))
 
     def __init__(self,
@@ -151,179 +176,170 @@ fi
                  sampler: str = "edm",
                  contacts: Optional[List[Dict[str, Any]]] = None,
                  covalent_linkage: Optional[Dict[str, Any]] = None,
-                 precomputed_msa: Optional[Union[DataStream, StandardizedOutput]] = None,
+                 msas: Optional[Union[DataStream, StandardizedOutput]] = None,
                  physicality_filter: str = "high_quality",
                  **kwargs):
+        # Raw handles for missing-propagation and the combinatorics config, resolved streams for validation.
         self.sequences = sequences
-        if isinstance(sequences, StandardizedOutput):
-            self.sequences_stream: DataStream = sequences.streams.sequences
-        elif isinstance(sequences, DataStream):
-            self.sequences_stream = sequences
-        else:
-            raise ValueError(
-                f"sequences must be DataStream or StandardizedOutput, got {type(sequences).__name__}"
-            )
-
         self.ligands = ligands
-        if ligands is None:
-            self.ligands_stream: Optional[DataStream] = None
-        elif isinstance(ligands, StandardizedOutput):
-            # Prefer the compounds stream (SMILES-bearing) when present,
-            # otherwise fall back to a stream named "ligands".
-            try:
-                self.ligands_stream = ligands.streams.compounds
-            except AttributeError:
-                self.ligands_stream = ligands.streams.ligands
-        elif isinstance(ligands, DataStream):
-            self.ligands_stream = ligands
-        else:
-            raise ValueError(
-                f"ligands must be DataStream, StandardizedOutput or None, got {type(ligands).__name__}"
-            )
+        self.msas = msas
+        self.sequences_stream = resolve_input_to_datastream(sequences, fallback_stream="sequences")
+        self.ligands_stream = resolve_input_to_datastream(ligands, fallback_stream="compounds")
+        self.msas_stream = resolve_input_to_datastream(msas, fallback_stream="msas")
 
-        self.precomputed_msa = precomputed_msa
-        if precomputed_msa is None:
-            self.precomputed_msa_stream: Optional[DataStream] = None
-        elif isinstance(precomputed_msa, StandardizedOutput):
-            self.precomputed_msa_stream = precomputed_msa.streams.msas
-        elif isinstance(precomputed_msa, DataStream):
-            self.precomputed_msa_stream = precomputed_msa
-        else:
-            raise ValueError(
-                f"precomputed_msa must be DataStream, StandardizedOutput or None, "
-                f"got {type(precomputed_msa).__name__}"
-            )
-
-        self.num_samples = int(num_samples)
-        self.batch_size = int(batch_size)
-        self.seed = int(seed) if seed is not None else None
-        self.sampler = str(sampler)
-        self.contacts = list(contacts) if contacts else []
-        self.covalent_linkage = dict(covalent_linkage) if covalent_linkage else None
-        self.physicality_filter = str(physicality_filter)
+        self.num_samples = num_samples
+        self.batch_size = batch_size
+        self.seed = seed
+        self.sampler = sampler
+        self.contacts = contacts
+        self.covalent_linkage = covalent_linkage
+        self.physicality_filter = physicality_filter
         super().__init__(**kwargs)
 
     def validate_params(self):
-        if not self.sequences_stream or len(self.sequences_stream) == 0:
+        if self.sequences_stream is None or not self.sequences_stream or len(self.sequences_stream) == 0:
             raise ValueError("sequences parameter is required and must not be empty")
-        if self.num_samples < 1:
-            raise ValueError("num_samples must be >= 1")
-        if self.batch_size < 1:
-            raise ValueError("batch_size must be >= 1")
+        if self.ligands is not None and (not self.ligands_stream or len(self.ligands_stream) == 0):
+            raise ValueError("ligands must not be empty; pass None for an apo ensemble")
+
+        for name, minimum in (("num_samples", 1), ("batch_size", 1)):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                raise ValueError(f"{name} must be an integer >= {minimum}, got {value!r}")
+        if self.seed is not None and (not isinstance(self.seed, int) or isinstance(self.seed, bool)):
+            raise ValueError(f"seed must be an integer or None, got {self.seed!r}")
         if self.sampler not in SAMPLERS:
             raise ValueError(f"sampler must be one of {SAMPLERS}, got {self.sampler!r}")
         if self.physicality_filter not in PHYSICALITY_MODES:
             raise ValueError(
-                f"physicality_filter must be one of {PHYSICALITY_MODES}, "
-                f"got {self.physicality_filter!r}"
-            )
+                f"physicality_filter must be one of {PHYSICALITY_MODES}, got {self.physicality_filter!r}")
+
+        if self.msas is not None:
+            fmt = getattr(self.msas_stream, "format", None)
+            if fmt is not None and str(fmt).lower() not in MSA_FORMATS:
+                raise ValueError(f"msas must be {' or '.join(MSA_FORMATS)} alignments; this stream is {fmt}. "
+                                 "Use MMseqs2(output_format=\"a3m\") or MSA(..., convert=\"a3m\")")
+
+        if self.contacts is not None:
+            self._validate_contacts(self.contacts)
         if self.covalent_linkage is not None:
-            required = {"chain", "position", "protein_atom", "ligand_atom"}
-            missing = required - set(self.covalent_linkage)
-            if missing:
-                raise ValueError(
-                    f"covalent_linkage missing required keys: {sorted(missing)}"
-                )
-            if self.ligands_stream is None or len(self.ligands_stream) == 0:
-                raise ValueError("covalent_linkage requires a ligands stream")
-        for i, c in enumerate(self.contacts):
-            if not isinstance(c, dict) or "token1" not in c or "token2" not in c:
-                raise ValueError(
-                    f"contacts[{i}] must be a dict with token1 and token2 keys"
-                )
+            self._validate_covalent_linkage(self.covalent_linkage)
+            if self.ligands is None:
+                raise ValueError("covalent_linkage bonds a protein atom to a ligand atom and requires ligands")
+
+    @staticmethod
+    def _validate_contacts(contacts):
+        if not isinstance(contacts, (list, tuple)) or not contacts:
+            raise ValueError("contacts must be a non-empty list of dicts")
+        for index, contact in enumerate(contacts):
+            label = f"contacts[{index}]"
+            if not isinstance(contact, dict):
+                raise ValueError(f"{label} must be a dict, got {type(contact).__name__}")
+            for key in ("token1", "token2"):
+                token = contact.get(key)
+                if not isinstance(token, dict):
+                    raise ValueError(f"{label} needs {key} as a dict with asym_id and res_id or atom_name")
+                unknown = sorted(set(token) - set(CONTACT_TOKEN_KEYS))
+                if unknown:
+                    raise ValueError(f"{label}.{key}: unknown key(s) {unknown}; expected {list(CONTACT_TOKEN_KEYS)}")
+                if not token.get("asym_id") or not (token.get("res_id") is not None or token.get("atom_name")):
+                    raise ValueError(f"{label}.{key} needs an asym_id and a res_id or an atom_name")
+            distance = contact.get("max_distance")
+            if distance is not None and (isinstance(distance, bool) or not isinstance(distance, (int, float)) or distance <= 0):
+                raise ValueError(f"{label}.max_distance must be a positive number of Angstrom, got {distance!r}")
+
+    @staticmethod
+    def _validate_covalent_linkage(link):
+        if not isinstance(link, dict):
+            raise ValueError(f"covalent_linkage must be a dict, got {type(link).__name__}")
+        missing = [key for key in COVALENT_LINKAGE_KEYS if link.get(key) in (None, "")]
+        if missing:
+            raise ValueError(f"covalent_linkage missing required keys: {missing}")
+        unknown = sorted(set(link) - set(COVALENT_LINKAGE_KEYS))
+        if unknown:
+            raise ValueError(f"covalent_linkage: unknown key(s) {unknown}; expected {list(COVALENT_LINKAGE_KEYS)}")
+        position = link["position"]
+        if not isinstance(position, int) or isinstance(position, bool) or position < 1:
+            raise ValueError(f"covalent_linkage.position counts residues from 1, got {position!r}")
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         self.folders = pipeline_folders
 
     def get_config_display(self) -> List[str]:
         lines = super().get_config_display()
-        lines.append(f"SEQUENCES: {len(self.sequences_stream)}")
-        if self.ligands_stream is not None:
-            lines.append(f"LIGANDS: {len(self.ligands_stream)}")
-            lines.append(f"RUNS (seq × lig): {self._n_runs()}")
-        else:
-            lines.append("LIGANDS: none (apo)")
-            lines.append(f"RUNS: {len(self.sequences_stream)}")
+        lines.append("LIGANDS: none (apo)" if self.ligands is None else "LIGANDS: given")
         lines.append(f"NUM SAMPLES PER RUN: {self.num_samples}")
         lines.append(f"BATCH SIZE: {self.batch_size}")
         lines.append(f"SAMPLER: {self.sampler}")
+        lines.append(f"PHYSICALITY FILTER: {self.physicality_filter}")
+        lines.append("MSA: precomputed" if self.msas is not None else "MSA: ColabFold (upstream)")
         if self.contacts:
             lines.append(f"CONTACTS: {len(self.contacts)}")
         if self.covalent_linkage is not None:
-            lines.append(
-                "COVALENT LINKAGE: "
-                f"chain {self.covalent_linkage['chain']} pos "
-                f"{self.covalent_linkage['position']}.{self.covalent_linkage['protein_atom']} — "
-                f"ligand {self.covalent_linkage['ligand_atom']}"
-            )
+            link = self.covalent_linkage
+            lines.append(f"COVALENT LINKAGE: chain {link['chain']} residue {link['position']} "
+                         f"{link['protein_atom']} to ligand {link['ligand_atom']}")
         return lines
 
-    def _n_runs(self) -> int:
-        if self.ligands_stream is None:
-            return len(self.sequences_stream)
-        return len(self.sequences_stream) * len(self.ligands_stream)
+    def _axis_kwargs(self) -> Dict[str, Any]:
+        axes = {"sequences": (self.sequences, "sequences", "protein")}
+        if self.ligands is not None:
+            axes["ligands"] = (self.ligands, "compounds", "ligand")
+        return axes
 
-    def _run_ids(self) -> List[str]:
-        if self.ligands_stream is None:
-            return list(self.sequences_stream.ids)
-        return [f"{s}+{l}" for s in self.sequences_stream.ids
-                for l in self.ligands_stream.ids]
+    def _input_sources(self):
+        return tuple(axis for axis in (self.sequences, self.ligands) if axis is not None)
+
+    def _write_config_yaml(self):
+        """Dump the run parameters for the pipe to read."""
+        import yaml
+        config = {
+            "num_samples": self.num_samples,
+            "batch_size": self.batch_size,
+            "seed": self.seed,
+            "sampler": self.sampler,
+            "physicality_filter": self.physicality_filter,
+            "contacts": [dict(contact) for contact in self.contacts] if self.contacts else None,
+            "covalent_linkage": dict(self.covalent_linkage) if self.covalent_linkage else None,
+        }
+        with open(self.config_yaml, "w") as handle:
+            yaml.safe_dump(config, handle, sort_keys=False)
 
     def generate_script(self, script_path: str) -> str:
-        self.sequences_stream.save_json(self.sequences_json)
-        ligands_arg = ""
-        if self.ligands_stream is not None:
-            self.ligands_stream.save_json(self.ligands_json)
-            ligands_arg = f' --ligands-json "{self.ligands_json}"'
-        msa_arg = ""
-        if self.precomputed_msa_stream is not None:
-            self.precomputed_msa_stream.save_json(self.runs_json)
-            msa_arg = f' --precomputed-msa-json "{self.runs_json}"'
-        seed_arg = f" --seed {self.seed}" if self.seed is not None else ""
-        import json as _json
-        contacts_arg = ""
-        if self.contacts:
-            contacts_arg = f" --contacts-json '{_json.dumps(self.contacts)}'"
-        covalent_arg = ""
-        if self.covalent_linkage is not None:
-            covalent_arg = (
-                f" --covalent-linkage-json '{_json.dumps(self.covalent_linkage)}'"
-            )
-        upstream_missing_path = self._get_upstream_missing_table_path(self.sequences)
-        upstream_missing_flag = (
-            f' --upstream-missing "{upstream_missing_path}"' if upstream_missing_path else ""
-        )
+        generate_combinatorics_config(self.combinatorics_config_file, **self._axis_kwargs())
+        self._write_config_yaml()
+        msas_flag = ""
+        if self.msas_stream is not None:
+            self.msas_stream.save_json(self.msas_json)
+            msas_flag = f' \\\n    --msas-json "{self.msas_json}" \\\n    --msa-cache-dir "{self.msa_cache_folder}"'
 
         script = "#!/bin/bash\n"
         script += "# BioEmu2 ligand-capable equilibrium-ensemble sampling\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
-        script += self.warn_container_unsupported()
-        script += f"""echo "BioEmu2: sampling {self._n_runs()} run(s), {self.num_samples} conformers each"
+        # The helper imports biopipelines and stays on the host; only the bioemu2 CLI it calls takes the prefix.
+        script += f"""echo "BioEmu2: sampling {self.num_samples} conformers per run"
 python "{self.helper_py}" \\
-    --sequences-json "{self.sequences_json}"{ligands_arg} \\
-    --num-samples {self.num_samples} \\
-    --batch-size {self.batch_size} \\
-    --sampler "{self.sampler}" \\
-    --physicality-filter "{self.physicality_filter}" \\
+    --config-yaml "{self.config_yaml}" \\
+    --combinatorics-config "{self.combinatorics_config_file}" \\
+    --runs-dir "{self.runs_folder}" \\
     --structures-dir "{self.stream_folder('structures')}" \\
-    --structures-map "{self.structures_map}" \\
+    --structures-map-csv "{self.structures_map}" \\
     --trajectories-dir "{self.stream_folder('trajectories')}" \\
-    --trajectories-map "{self.trajectories_map}" \\
-    --scratch-dir "{self.extras_path()}" \\
+    --trajectories-map-csv "{self.trajectories_map}" \\
     --summary-csv "{self.summary_csv}" \\
     --physicality-csv "{self.physicality_csv}" \\
-    --missing-csv "{self.missing_csv}"{seed_arg}{contacts_arg}{covalent_arg}{msa_arg}{upstream_missing_flag}
+    --local-missing-csv "{self.local_missing_csv}" \\
+    --container-prefix "{self.container_prefix()}"{msas_flag}
 """
+        script += self.generate_missing_propagation(
+            *self._input_sources(), local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 
     def get_output_files(self) -> Dict[str, Any]:
-        run_ids = self._run_ids()
-        suffix_pattern = f"<1..{self.num_samples}>"
-        structure_ids = generate_multiplied_ids_pattern(
-            run_ids, suffix_pattern, input_stream_name="runs",
-        )
+        run_ids, _ = predict_output_ids_with_provenance(**self._axis_kwargs())
+        structure_ids = generate_multiplied_ids_pattern(run_ids, f"<1..{self.num_samples}>")
         structures = DataStream(
             name="structures",
             ids=structure_ids,
@@ -342,22 +358,16 @@ python "{self.helper_py}" \\
             "summary": TableInfo(
                 name="summary",
                 path=self.summary_csv,
-                columns=["id", "sequence.id", "ligand.id", "n_samples", "n_residues"],
+                columns=["id", "sequences.id", "ligands.id", "n_samples", "n_residues"],
                 description="BioEmu2 per-run ensemble summary",
             ),
             "physicality": TableInfo(
                 name="physicality",
                 path=self.physicality_csv,
-                columns=["id", "frame", "invalid_bond", "clash",
-                         "chirality", "chain_break"],
-                description="Per-frame physicality checks reported by bioemu2",
+                columns=["id", "run.id", "frame", "status", "reason"],
+                description="Per-conformer physicality report from bioemu2",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="IDs removed (upstream or local failure) with removal reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv),
         }
         return {
             "structures": structures,

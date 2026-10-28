@@ -367,48 +367,81 @@ ens = BioEmu(sequences=seqs, num_samples=10)
 
 ### BioEmu2
 
-Ligand-capable successor of BioEmu (microsoft/bioemu2). Each run is one (sequence, ligand set) system YAML with the protein as chain A and each ligand as a subsequent chain; apo runs omit the ligand entity. Forwards contact and covalent-linkage constraints verbatim into the bioemu2 YAML schema, so the same wrapper covers free-pose, soft-contact and covalent-anchor sampling.
+Ligand-capable successor of BioEmu (microsoft/bioemu2). Samples `num_samples` conformers of a system that holds protein chains and, optionally, ligands, by calling `bioemu2 sample-equilibrium`, and splits the sampled trajectory into one PDB per conformer. Optional contact and covalent-bond constraints go into the system, so the same wrapper covers free-pose, restrained and covalent-anchor sampling.
 
-A precomputed MSA (a3m file, or a Boltz2 MSA CSV from an earlier pipeline step) can be handed in via `precomputed_msa`; the wrapper pre-populates bioemu2's own sequence-hash cache under `~/.cache/bioemu2`, so the first run for a new sequence does not pay the ColabFold cold-start.
+**Runs and ids.** A run is one system. The `sequences` and `ligands` axes combine as in `Boltz2` and `Protenix`: by default every sequence is paired with every ligand (ids `<sequence>+<ligand>`), and `Bundle` puts several rows in one system (`Bundle(ligands)` is one system with all of the ligands, id `<ligand>+<ligand>+<sequence>`). Without `ligands` the ensemble is apo and the run takes the id of its sequence. Protein chains are A, B, ... in the order the sequences are given, and the ligands take the next letters, which is what `contacts` and `covalent_linkage` refer to. The conformers of a run are `<run>_1` to `<run>_<num_samples>`.
 
-**Tags**: sample-ensemble, protein, small-molecule, complex, ensemble, flexibility, all-atom, covalent
+**Ligands.** A ligand follows the Ligand Contract: its CCD code is passed to bioemu2 as `ccd_code` when the compounds row has one (a `Ligand("ATP")` fetched from RCSB does), and its SMILES otherwise, exactly as `Boltz2` and `Protenix` choose. bioemu2 places the ligand from scratch. A row with neither (a `Ligand(codes="LIG")` that only names a residue) fails its run and is listed in `missing`, instead of the protein being sampled alone.
+
+**Constraints.** `contacts` entries are upstream's own and are written into the system unchanged. `covalent_linkage` is the wrapper's short form of one upstream `bonds` entry: it names the protein atom by chain, residue and atom name and the atom of the first ligand, and the residue names come from the sequence and the ligand's CCD code. Because the bond names the ligand's residue, that ligand has to be given by CCD code.
+
+**Alignments.** By default bioemu2 queries the ColabFold server for each new sequence and caches the result. With `msas` the supplied `.a3m` or Boltz-style `.csv` is written, for that step only, into the cache directory bioemu2 reads (`BIOEMU2_MSA_CACHE`), so no search is made for that sequence. The alignment is matched to the sequence by its `sequences.id`, and its first record has to be the sequence; a sequence with no alignment is searched as usual. A system with several protein chains cannot use `msas`: bioemu2 keys the cache by the whole set of chains.
+
+**Physicality.** bioemu2 checks every sampled frame (bond lengths, clashes, chirality, chain breaks, for the protein only) and reports it, but never removes a frame. All conformers are therefore in `structures` and `trajectories`, and the `physicality` table says which ones failed and the first check they failed. Filter on it with `Panda` to drop them.
+
+**Failures.** A run that bioemu2 does not complete, or that the wrapper cannot build (an empty sequence, a ligand with no chemistry, a bond to a residue the chain does not have), keeps its row in `summary` with empty `n_samples` and `n_residues`, has no entry in the stream maps, and gets a `failure` row in `missing` with the reason. The step exits non-zero only when no run was attempted or every run failed.
+
+**Tags**: sample-ensemble, protein, small-molecule, complex, ensemble, flexibility, all-atom, covalent, msa
 
 **References**: https://github.com/microsoft/bioemu2
 
-**Resources**: GPU.
+**Resources**: GPU of compute capability 7.5 or newer with the default install, which is upstream's `cuda` extra (CUDA 13 kernels). A V100 needs upstream's `cuda12` extra instead; see its README.
 
-**Environment**: `bioemu2`
+**Environment**: `bioemu2` (dedicated env, Python 3.12, which upstream requires)
 
-**Installation**: `BioEmu2.install()` creates the env and pip-installs the `bioemu2` package. Weights (bioemu2-preview) download on first run from Hugging Face.
+**Installation**: `BioEmu2.install()` builds the env from `environments/bioemu2.yaml` and installs `bioemu2[cuda]>=0.1.0rc0` from `environments/bioemu2.pip.txt`; the specifier names a pre-release because the release candidate is the only version PyPI has, and it admits that for bioemu2 alone. It then downloads the `bioemu2-preview` checkpoint of the `microsoft/bioemu2` Hugging Face repository into the Hugging Face cache, so the first run needs no download on the compute node; if that fails the install still succeeds and the first run downloads it. The install is verified by the Python version, importing `bioemu2`, `mdtraj` and `torch`, and `bioemu2 sample-equilibrium --help`. An env left by an earlier spec that ran an older Python is rebuilt.
 
 **Parameters**:
-- `sequences`: DataStream | StandardizedOutput (required) — Input sequences.
-- `ligands`: DataStream | StandardizedOutput | None = None — Ligands (SMILES). None for an apo ensemble.
-- `num_samples`: int = 100 — Conformers per run.
-- `batch_size`: int = 16 — Samples denoised together per forward pass.
-- `seed`: int | None = None — RNG seed; `None` reseeds every run.
-- `sampler`: str = "edm" — One of `edm`, `edm_gd`, `edm_fk`, `edm_fkc`.
-- `contacts`: list[dict] | None = None — bioemu2 contact-constraint dicts, forwarded verbatim.
-- `covalent_linkage`: dict | None = None — bioemu2 covalent-bond dict (chain, position, protein_atom, ligand_atom).
-- `precomputed_msa`: DataStream | None = None — Optional precomputed MSA; a3m or Boltz2 MSA CSV.
-- `physicality_filter`: str = "high_quality" — One of `high_quality`, `medium_quality`, `low_quality`, `no_filter`.
+- `sequences`: DataStream | StandardizedOutput (required) - protein sequences, one chain per row. `Bundle` puts several in one system
+- `ligands`: DataStream | StandardizedOutput | None = None - compounds, by CCD code or SMILES. None for an apo ensemble. `Bundle` puts several in one system
+- `num_samples`: int = 100 - conformers per run
+- `batch_size`: int = 16 - samples denoised together per forward pass; it caps GPU memory at long sequence times large batch
+- `seed`: int | None = None - RNG seed; None gives every run its own
+- `sampler`: str = "edm" - `edm` (unsteered), `edm_gd` (gradient guidance), `edm_fk` (Feynman-Kac resampling) or `edm_fkc` (Feynman-Kac corrector). The steered samplers use upstream's default physicality potentials
+- `contacts`: list[dict] | None = None - upstream contact dicts, `{"token1": {"asym_id": "A", "res_id": 3}, "token2": {"asym_id": "B", "atom_name": "PG"}, "max_distance": 6.0}`. A token is a chain with a 1-based residue index or with a ligand atom name
+- `covalent_linkage`: dict | None = None - `{"chain": "A", "position": 3, "protein_atom": "SG", "ligand_atom": "C1"}`. Requires `ligands`, given by CCD code
+- `msas`: DataStream | StandardizedOutput | None = None - precomputed `.a3m` or Boltz-style `.csv` alignments, for single-chain systems. Formerly `precomputed_msa`, which still works and is deprecated
+- `physicality_filter`: str = "high_quality" - `high_quality`, `high_quality_per_residue` (violation counts per residue), `no_violations` or `no_filter` (no check, every frame `not_checked`). It only changes what the `physicality` table reports
 
-**Streams**:
-- `structures` — per-conformer PDBs, ids `<run>_<1..N>`.
-- `trajectories` — one `samples.xtc` + `topology.cif` per run.
+**Streams**: `structures`, `trajectories`
+
+`structures` holds one `<run>_<k>.pdb` per conformer. `trajectories` holds one `<run>.xtc` per run, and the `topology` column of its map names the `<run>_topology.cif` that goes with it.
 
 **Tables**:
-- `summary`: | id | sequence.id | ligand.id | n_samples | n_residues |
-- `physicality`: | id | frame | invalid_bond | clash | chirality | chain_break |
-- `missing`: | id | removed_by | kind | cause |
+- `summary`:
+
+  | id | sequences.id | ligands.id | n_samples | n_residues |
+  |----|--------------|------------|-----------|------------|
+
+  One row per run that entered, with `n_samples` and `n_residues` empty where the run failed. `n_residues` counts every residue of the sampled system, ligands included. `ligands.id` is empty for an apo run.
+
+- `physicality`:
+
+  | id | run.id | frame | status | reason |
+  |----|--------|-------|--------|--------|
+
+  One row per conformer, with `id` the structure id and `frame` its zero-based index in the trajectory. `status` is `passed`, `rejected` or `not_checked`, and `reason` is the first failed check, empty when none. Both are empty if bioemu2 wrote no report for the run.
+
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
 
 **Example**:
 ```python
-from biopipelines import BioEmu2, Sequence, Ligand
+from biopipelines import BioEmu2, Ligand, Sequence
 
-seqs = Sequence("MSKGEELFTGVV...", ids="design_6")
-coa  = Ligand(smiles="CC(C)(COP(=O)...)...NCCSC(=O)C", ids="acetyl_coa")
-ens  = BioEmu2(sequences=seqs, ligands=coa, num_samples=100)
+protein = Sequence("MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ", ids="design_1")
+atp = Ligand("ATP")
+
+# Apo and holo ensembles, 100 conformers each
+apo = BioEmu2(sequences=protein)
+holo = BioEmu2(sequences=protein, ligands=atp, seed=1)
+
+# A restraint between residue 3 of the protein and the gamma phosphorus of the ligand, under a steered sampler
+steered = BioEmu2(sequences=protein, ligands=atp, sampler="edm_gd",
+                  contacts=[{"token1": {"asym_id": "A", "res_id": 3},
+                             "token2": {"asym_id": "B", "atom_name": "PG"}, "max_distance": 6.0}])
 ```
 
 ---

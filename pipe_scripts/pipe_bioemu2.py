@@ -5,332 +5,450 @@
 
 """BioEmu2 runner.
 
-For each (sequence, ligand set) combination declared by the wrapper, this
-script writes a bioemu2 system YAML, invokes ``bioemu2 sample-equilibrium``,
-then splits the resulting trajectory into per-conformer PDBs and copies the
-compact .xtc + topology.cif into the trajectories stream.
+Each combination of the sequences and ligands axes is one run. For every run this writes a system YAML, calls `bioemu2 sample-equilibrium`, splits the sampled trajectory into one PDB per conformer and stages the compact `.xtc` and its topology.
 
-Writes:
-  structures_map   per-conformer PDB map
-  trajectories_map one xtc + topology per run
-  summary_csv      per-run summary (sequence.id, ligand.id, n_samples, n_residues)
-  physicality_csv  per-frame physicality checks (bioemu2 physicality.json)
-  missing_csv      failures / upstream-missing propagation (via wrapper's
-                   generate_missing_propagation; this file writes LOCAL rows
-                   into --local-missing-csv per the TEMPLATE contract)
+Three artifacts, kept separate on purpose.
+The summary table has a row for every run that ENTERED, with empty cells where a run failed.
+The stream maps have only what was really written.
+The local missing table says why a run has no entity; a failed run is in all three.
+The wrapper's propagation step merges that file with the upstream manifests into tables/missing.csv.
 """
 
 import argparse
+import copy
 import hashlib
+import itertools
 import json
 import os
 import shutil
+import string
 import subprocess
 import sys
+from typing import Dict, List, Optional, Tuple
 
-# bioemu2 brings matplotlib via a transitive import. Headless-safe default.
-os.environ.setdefault("MPLBACKEND", "Agg")
+_biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
+sys.path.insert(0, _biopipelines_dir)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
+import yaml
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from biopipelines.biopipelines_io import (  # noqa: E402
-    iterate_values, load_datastream, step_id_from_table_path,
-)
-
-import mdtraj as md  # noqa: E402
-
-
-SUM_COLS = ["id", "sequence.id", "ligand.id", "n_samples", "n_residues"]
-PHYS_COLS = ["id", "frame", "invalid_bond", "clash", "chirality", "chain_break"]
-MISS_COLS = ["id", "removed_by", "kind", "cause"]
+from combinatorics import CombinatoricsConfig, predict_single_output_id
+from ligand_utils import auth_ligand_field, ligand_chemistry
+from pipe_axis_data import load_axis_data
+from biopipelines.biopipelines_io import container_argv_prefix, step_id_from_table_path  # noqa: E402
 
 
-def _bioemu2_cache_key(sequence: str) -> str:
-    """Reproduce bioemu2's ColabFold cache key: sha256 of the sorted-keys
-    JSON of the request dict. Change only when upstream changes the schema."""
-    payload = {"sequences": [sequence], "use_pairing": False,
-               "pairing_strategy": "greedy", "use_env": True}
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+# Entity order is chain order: protein chains first, then ligands.
+AXIS_ORDER = ("sequences", "ligands")
+
+SUMMARY_COLUMNS = ["id", "sequences.id", "ligands.id", "n_samples", "n_residues"]
+PHYSICALITY_COLUMNS = ["id", "run.id", "frame", "status", "reason"]
+MISSING_COLUMNS = ["id", "removed_by", "kind", "cause"]
+
+CAUSE_LIMIT = 300
+
+# The name a bond names a residue by; X is upstream's letter for an unidentified residue.
+THREE_LETTER = {
+    "A": "ALA", "C": "CYS", "D": "ASP", "E": "GLU", "F": "PHE", "G": "GLY", "H": "HIS",
+    "I": "ILE", "K": "LYS", "L": "LEU", "M": "MET", "N": "ASN", "P": "PRO", "Q": "GLN",
+    "R": "ARG", "S": "SER", "T": "THR", "V": "VAL", "W": "TRP", "Y": "TYR", "X": "UNK",
+}
 
 
-def _a3m_from_file(path: str) -> str:
-    """Read an .a3m file and return its contents (bioemu2's cache stores a3m
-    text directly)."""
-    with open(path) as fh:
-        return fh.read()
+class RunError(ValueError):
+    """A run that cannot be completed; its message is the cause recorded in the missing table."""
 
 
-def _a3m_from_boltz_csv(path: str) -> str:
-    """Convert a Boltz2 MSA CSV (``key,sequence``) to an a3m string. First
-    row is the query (header ``>101``); subsequent rows are hits."""
-    df = pd.read_csv(path)
+def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
+    """Per axis: the elements it contributes, iterated and static."""
+    elements = {}
+    for name, axis in config.axes.items():
+        iterated, static, static_first = load_axis_data(axis.to_dict())
+        elements[name] = {"mode": axis.mode, "iterated": iterated, "static": static,
+                          "static_first": static_first}
+    return elements
+
+
+def plan_iteration(elements: Dict[str, Dict]) -> Tuple[List, List]:
+    """Split the axes into those that iterate and those that are bundled whole."""
+    iteration, static_only = [], []
+    for name in [n for n in AXIS_ORDER if n in elements]:
+        data = elements[name]
+        if data["mode"] == "each":
+            items = data["iterated"] or data["static"]
+            extra = data["static"] if data["iterated"] else []
+            iteration.append((name, items, extra, data["static_first"]))
+        elif data["iterated"]:
+            iteration.append((name, data["iterated"], data["static"], data["static_first"]))
+        else:
+            static_only.append((name, data["static"]))
+    return iteration, static_only
+
+
+def build_runs(elements: Dict[str, Dict]) -> List[Dict]:
+    """One dict per run: its id (the framework's own, as the wrapper predicted it), its records per axis and its provenance."""
+    iteration, static_only = plan_iteration(elements)
+    combinations = (list(itertools.product(*[list(enumerate(items)) for _, items, _, _ in iteration]))
+                    if iteration else [()])
+    runs = []
+    for combination in combinations:
+        records, selections = {}, {}
+        for index, (name, items, extra, static_first) in enumerate(iteration):
+            position, record = combination[index]
+            records[name] = (list(extra) if static_first else []) + [record] + ([] if static_first else list(extra))
+            selections[name] = ("each", [str(item.get("id", "?")) for item in items], position,
+                                [str(item.get("id", "?")) for item in extra], bool(static_first))
+        for name, static in static_only:
+            records[name] = list(static)
+            selections[name] = ("bundle", [str(item.get("id", "?")) for item in static], None, [], False)
+        if not selections:
+            continue
+        runs.append({
+            "id": predict_single_output_id(**selections),
+            "records": records,
+            "provenance": {name: "+".join(str(r.get("id", "?")) for r in recs) for name, recs in records.items()},
+        })
+    return runs
+
+
+def polymer_sequence(record: Dict) -> str:
+    """The residues of one protein record, refusing an empty one by its id (an empty cell arrives as the float nan)."""
+    sequence = record.get("sequence", "")
+    if not isinstance(sequence, str) or not sequence.strip():
+        raise RunError(f"{record.get('id', '?')}: empty sequence ({sequence!r})")
+    return sequence.strip()
+
+
+def ligand_entity(record: Dict, asym_id: str, prefer_ccd: bool) -> Dict:
+    """The upstream ligand entity: a CCD code or SMILES, chosen as Boltz2 and Protenix choose.
+
+    prefer_ccd serves a covalent bond, which names the ligand's residue and so needs its CCD code whenever the row has one.
+    """
+    try:
+        field, value = auth_ligand_field(record)
+        if prefer_ccd and ligand_chemistry(record)["ccd"]:
+            field, value = "ccd", ligand_chemistry(record)["ccd"]
+    except ValueError as exc:
+        raise RunError(str(exc))
+    return {"entity_type": "ligand", ("ccd_code" if field == "ccd" else "smiles"): value,
+            "asym_ids": [asym_id]}
+
+
+def covalent_bond(link: Dict, entities: List[Dict]) -> Dict:
+    """An upstream `bonds` entry from the wrapper's covalent_linkage dict."""
+    chain = str(link["chain"])
+    protein = next((e for e in entities if e["entity_type"] == "protein" and chain in e["asym_ids"]), None)
+    if protein is None:
+        raise RunError(f"covalent_linkage names chain {chain}, which is not a protein chain of this system")
+    position = int(link["position"])
+    sequence = protein["sequence"]
+    if not 1 <= position <= len(sequence):
+        raise RunError(f"covalent_linkage position {position} is outside chain {chain} ({len(sequence)} residues)")
+    residue = THREE_LETTER.get(sequence[position - 1].upper())
+    if residue is None:
+        raise RunError(f"covalent_linkage: residue {position} of chain {chain} is {sequence[position - 1]!r}, "
+                       "which has no three-letter name here")
+    ligand = next((e for e in entities if e["entity_type"] == "ligand"), None)
+    if ligand is None:
+        raise RunError("covalent_linkage needs a ligand in the system")
+    if "ccd_code" not in ligand:
+        raise RunError("covalent_linkage needs the ligand as a CCD code, and this ligand has only a SMILES")
+    return {
+        "atom1": {"name": link["protein_atom"], "res_name": residue, "res_id": position, "asym_id": chain},
+        "atom2": {"name": link["ligand_atom"], "res_name": ligand["ccd_code"], "res_id": 1,
+                  "asym_id": ligand["asym_ids"][0]},
+    }
+
+
+def build_system(records: Dict[str, List[Dict]], contacts: Optional[List[Dict]],
+                 covalent: Optional[Dict]) -> Tuple[Dict, List[Tuple[Dict, str]]]:
+    """(system dict, [(entity, record id)]) for one run; chains are A, B, ... in axis order."""
+    chains = iter(string.ascii_uppercase)
+    entities, sources = [], []
+    for axis in AXIS_ORDER:
+        for record in records.get(axis, []):
+            for member in record.get("__members__", [record]):
+                asym_id = next(chains, None)
+                if asym_id is None:
+                    raise RunError(f"a system holds at most {len(string.ascii_uppercase)} chains")
+                if axis == "sequences":
+                    entity = {"entity_type": "protein", "sequence": polymer_sequence(member),
+                              "asym_ids": [asym_id]}
+                else:
+                    entity = ligand_entity(member, asym_id, prefer_ccd=bool(covalent))
+                entities.append(entity)
+                sources.append((entity, str(member.get("id", "?"))))
+    system = {"entities": entities}
+    if contacts:
+        system["contacts"] = copy.deepcopy(contacts)
+    if covalent:
+        system["bonds"] = [covalent_bond(covalent, entities)]
+    return system, sources
+
+
+def write_system_yaml(path: str, system: Dict) -> None:
+    with open(path, "w") as handle:
+        yaml.safe_dump(system, handle, sort_keys=False)
+
+
+def build_command(prefix: str, system_yaml: str, out_dir: str, config: Dict) -> List[str]:
+    command = container_argv_prefix(prefix) + [
+        "bioemu2", "sample-equilibrium",
+        "--system", system_yaml,
+        "--out", out_dir,
+        "--num-samples", str(config["num_samples"]),
+        "--batch-size", str(config["batch_size"]),
+        "--sampler", str(config["sampler"]),
+        "--physicality-filter", str(config["physicality_filter"]),
+    ]
+    if config.get("seed") is not None:
+        command += ["--seed", str(config["seed"])]
+    return command
+
+
+def msa_cache_entry(sequence: str, a3m: str) -> Tuple[str, Dict]:
+    """(file name, JSON content) of the cache entry bioemu2's ColabFold client reads for one protein chain.
+
+    The key is the sha256 of the sorted-keys JSON of the request, the checksum is that of the JSON list of alignments, and a hit is refused when the first record of the alignment is not the sequence.
+    """
+    request = {"sequences": [sequence], "use_pairing": False, "pairing_strategy": "greedy", "use_env": True}
+    key = hashlib.sha256(json.dumps(request, sort_keys=True).encode("utf-8")).hexdigest()
+    entry = {"request": request, "a3ms": [a3m],
+             "sha256": hashlib.sha256(json.dumps([a3m]).encode("utf-8")).hexdigest()}
+    return f"{key}.json", entry
+
+
+def a3m_query(a3m: str) -> str:
+    """The first record of an alignment with insertions (lower case) and gaps removed."""
+    residues = []
+    for line in a3m.splitlines():
+        if line.startswith(">"):
+            if residues:
+                break
+            continue
+        residues.append(line.strip())
+    return "".join(c for c in "".join(residues) if c.isupper())
+
+
+def a3m_from_boltz_csv(path: str) -> str:
+    """A Boltz MSA csv (`key,sequence`, the query first) as a3m text."""
+    frame = pd.read_csv(path, dtype=str)
     lines = []
-    for i, row in enumerate(df.itertuples(index=False)):
-        header = ">101" if i == 0 else f">hit_{i}"
-        lines.append(header)
-        lines.append(row.sequence)
+    for index, sequence in enumerate(frame["sequence"].tolist()):
+        lines += [">101" if index == 0 else f">hit_{index}", str(sequence)]
     return "\n".join(lines) + "\n"
 
 
-def _populate_bioemu2_msa_cache(sequence: str, msa_path: str) -> None:
-    """Pre-populate ``~/.cache/bioemu2/colabfold_msa/<hash>.json`` for this
-    sequence so bioemu2 skips the ColabFold search. Idempotent: a present
-    cache entry is left alone."""
-    cache_dir = os.path.join(os.path.expanduser("~"), ".cache",
-                             "bioemu2", "colabfold_msa")
+def load_alignment(path: str) -> str:
+    if not os.path.isfile(path):
+        raise RunError(f"the alignment {path} does not exist")
+    extension = os.path.splitext(path)[1].lower()
+    if extension == ".a3m":
+        with open(path) as handle:
+            return handle.read()
+    if extension == ".csv":
+        return a3m_from_boltz_csv(path)
+    raise RunError(f"the alignment {path} is neither .a3m nor .csv")
+
+
+def load_msa_lookup(msas_json: str) -> Dict[str, str]:
+    """{sequence id: absolute alignment path} from the msas stream; a row answers to its `sequences.id` and to its own id."""
+    with open(msas_json) as handle:
+        table = json.load(handle).get("map_table")
+    if not table or not os.path.exists(table):
+        return {}
+    frame = pd.read_csv(table, dtype=str)
+    column = next((c for c in ("file", "path") if c in frame.columns), None)
+    if column is None:
+        return {}
+    lookup = {}
+    for row in frame.to_dict("records"):
+        path = row.get(column)
+        if not isinstance(path, str) or not path.strip():
+            continue
+        for key in (row.get("sequences.id"), row.get("id")):
+            if isinstance(key, str) and key:
+                lookup.setdefault(key, os.path.abspath(path))
+    return lookup
+
+
+def stage_msa(sources: List[Tuple[Dict, str]], msa_lookup: Dict[str, str], cache_dir: str) -> List[str]:
+    """Write the supplied alignment of a one-protein system into the step's MSA cache; returns the ids that got one."""
+    proteins = [(entity, rid) for entity, rid in sources if entity["entity_type"] == "protein"]
+    supplied = [(entity, rid) for entity, rid in proteins if rid in msa_lookup]
+    if not supplied:
+        return []
+    if len(proteins) > 1:
+        raise RunError(f"msas serves a system with one protein chain, and this one has {len(proteins)}")
+    (entity, rid), = supplied
+    a3m = load_alignment(msa_lookup[rid])
+    if a3m_query(a3m) != entity["sequence"].upper():
+        raise RunError(f"the first record of the alignment for {rid} is not its sequence")
+    name, entry = msa_cache_entry(entity["sequence"], a3m)
     os.makedirs(cache_dir, exist_ok=True)
-    key = _bioemu2_cache_key(sequence)
-    out = os.path.join(cache_dir, f"{key}.json")
-    if os.path.exists(out):
-        print(f"  cache hit for {key[:12]}... (left in place)")
-        return
-    if msa_path.endswith(".a3m"):
-        a3m = _a3m_from_file(msa_path)
-    elif msa_path.endswith(".csv"):
-        a3m = _a3m_from_boltz_csv(msa_path)
-    else:
-        print(f"WARNING: unknown MSA format for {msa_path}; skipping cache populate",
-              file=sys.stderr)
-        return
-    entry = {
-        "request": {
-            "sequences": [sequence],
-            "use_pairing": False,
-            "pairing_strategy": "greedy",
-            "use_env": True,
-        },
-        "a3ms": [a3m],
-        "sha256": hashlib.sha256(a3m.encode()).hexdigest(),
-    }
-    with open(out, "w") as fh:
-        json.dump(entry, fh)
-    hits = a3m.count(">") - 1
-    print(f"  wrote cache entry for {key[:12]}... (hits={hits})")
+    with open(os.path.join(cache_dir, name), "w") as handle:
+        json.dump(entry, handle)
+    return [rid]
 
 
-def _write_system_yaml(path: str, sequence: str, ligand_smiles: str,
-                       contacts: list, covalent: dict) -> None:
-    """Write a bioemu2 system YAML with one protein chain A, optional ligand
-    chain B, and optional contacts / covalent linkage."""
-    lines = ["entities:",
-             "  - entity_type: protein",
-             f"    sequence: {sequence}",
-             "    asym_ids: [A]"]
-    if ligand_smiles:
-        lines += ["  - entity_type: ligand",
-                  f'    smiles: "{ligand_smiles}"',
-                  "    asym_ids: [B]"]
-    if contacts:
-        lines.append("contacts:")
-        for c in contacts:
-            lines.append(f"  - {json.dumps(c)}")
-    if covalent:
-        lines.append("covalent_linkage:")
-        for k, v in covalent.items():
-            lines.append(f"  {k}: {json.dumps(v)}")
-    with open(path, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
+def sample(command: List[str], env: Dict[str, str]) -> None:
+    print(f"  running: {' '.join(command)}")
+    result = subprocess.run(command, env=env)
+    if result.returncode != 0:
+        raise RunError(f"bioemu2 sample-equilibrium exited with status {result.returncode}; see the step log")
 
 
-def _sample_once(system_yaml: str, out_dir: str, num_samples: int,
-                 batch_size: int, sampler: str, physicality_filter: str,
-                 seed=None) -> None:
-    """Invoke ``bioemu2 sample-equilibrium`` as a subprocess. Running it
-    out-of-process keeps bioemu2's lightning context from leaking across
-    sequential runs (one call = one checkpoint load, released on exit)."""
-    cmd = ["bioemu2", "sample-equilibrium",
-           "--system", system_yaml,
-           "--out", out_dir,
-           "--num-samples", str(num_samples),
-           "--batch-size", str(batch_size),
-           "--sampler", sampler,
-           "--physicality-filter", physicality_filter]
-    if seed is not None:
-        cmd += ["--seed", str(seed)]
-    print(f"  running: {' '.join(cmd)}")
-    subprocess.run(cmd, check=True)
+def split_trajectory(topology_cif: str, samples_xtc: str, run_id: str,
+                     structures_dir: str) -> Tuple[List[Tuple[str, str]], int]:
+    """One PDB per sampled frame as `<run>_<k>.pdb`; returns ([(structure id, path)], residues in the system)."""
+    import mdtraj as md
 
-
-def _split_trajectory(topology_cif: str, samples_xtc: str, run_id: str,
-                      structures_dir: str) -> list:
-    """Write one PDB per sampled frame; returns [(frame_id, pdb_path), ...]."""
+    trajectory = md.load(samples_xtc, top=topology_cif)
     os.makedirs(structures_dir, exist_ok=True)
-    traj = md.load(samples_xtc, top=topology_cif)
-    out = []
-    for i in range(traj.n_frames):
-        frame_id = f"{run_id}_{i+1}"
-        pdb_path = os.path.join(structures_dir, f"{frame_id}.pdb")
-        traj[i].save_pdb(pdb_path)
-        out.append((frame_id, pdb_path))
-    return out
+    frames = []
+    for index in range(trajectory.n_frames):
+        frame_id = f"{run_id}_{index + 1}"
+        path = os.path.join(structures_dir, f"{frame_id}.pdb")
+        trajectory[index].save_pdb(path)
+        frames.append((frame_id, path))
+    return frames, int(trajectory.n_residues)
 
 
-def _parse_physicality(run_id: str, physicality_json: str) -> list:
-    """Flatten bioemu2's physicality.json into per-frame rows."""
-    if not os.path.isfile(physicality_json):
-        return []
+def read_physicality(path: str) -> Dict[int, Dict]:
+    """{frame: {status, reason}} from bioemu2's physicality.json, empty when the file is absent or unreadable."""
+    if not os.path.isfile(path):
+        return {}
     try:
-        data = json.load(open(physicality_json))
-    except Exception as e:
-        print(f"WARNING: cannot parse {physicality_json}: {e}", file=sys.stderr)
-        return []
-    rows = []
-    frames = data if isinstance(data, list) else data.get("frames", [])
-    for i, f in enumerate(frames):
-        rows.append({
-            "id": run_id,
-            "frame": i + 1,
-            "invalid_bond": f.get("invalid_bond"),
-            "clash": f.get("clash"),
-            "chirality": f.get("chirality"),
-            "chain_break": f.get("chain_break"),
-        })
-    return rows
+        with open(path) as handle:
+            records = json.load(handle)
+        return {int(record["frame"]): record for record in records}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"WARNING: cannot read {path}: {exc}", file=sys.stderr)
+        return {}
+
+
+def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
+                msa_lookup: Optional[Dict[str, str]]) -> Dict:
+    """Sample one run and stage its outputs; the rows each output gets are in the returned dict."""
+    run_id = run["id"]
+    system, sources = build_system(run["records"], config.get("contacts"), config.get("covalent_linkage"))
+
+    env = dict(os.environ)
+    if msa_lookup is not None:
+        staged = stage_msa(sources, msa_lookup, paths.msa_cache_dir)
+        if staged:
+            env["BIOEMU2_MSA_CACHE"] = paths.msa_cache_dir
+            print(f"  alignment supplied for {', '.join(staged)}")
+
+    work = os.path.join(paths.runs_dir, run_id)
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work)
+    system_yaml = os.path.join(work, "system.yaml")
+    write_system_yaml(system_yaml, system)
+    sample(build_command(paths.container_prefix, system_yaml, work, config), env)
+
+    topology_cif = os.path.join(work, "topology.cif")
+    samples_xtc = os.path.join(work, "samples.xtc")
+    if not (os.path.isfile(topology_cif) and os.path.isfile(samples_xtc)):
+        raise RunError("bioemu2 wrote no samples.xtc and topology.cif")
+
+    frames, n_residues = split_trajectory(topology_cif, samples_xtc, run_id, paths.structures_dir)
+    if len(frames) != config["num_samples"]:
+        print(f"WARNING: {run_id}: {len(frames)} conformers written, {config['num_samples']} requested",
+              file=sys.stderr)
+
+    os.makedirs(paths.trajectories_dir, exist_ok=True)
+    destination_xtc = os.path.join(paths.trajectories_dir, f"{run_id}.xtc")
+    destination_top = os.path.join(paths.trajectories_dir, f"{run_id}_topology.cif")
+    shutil.copyfile(samples_xtc, destination_xtc)
+    shutil.copyfile(topology_cif, destination_top)
+
+    report = read_physicality(os.path.join(work, "physicality.json"))
+    provenance = {"sequences.id": run["provenance"].get("sequences", ""),
+                  "ligands.id": run["provenance"].get("ligands", "")}
+    return {
+        "structures": [{"id": fid, "file": path, "run.id": run_id, **provenance} for fid, path in frames],
+        "trajectory": {"id": run_id, "file": destination_xtc, "topology": destination_top},
+        "physicality": [{"id": fid, "run.id": run_id, "frame": index,
+                         "status": report.get(index, {}).get("status"),
+                         "reason": report.get(index, {}).get("reason")}
+                        for index, (fid, _) in enumerate(frames)],
+        "summary": {"id": run_id, **provenance, "n_samples": len(frames), "n_residues": n_residues},
+    }
+
+
+def write_table(path: str, columns: List[str], rows: List[Dict]) -> None:
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    pd.DataFrame(rows, columns=columns).to_csv(path, index=False)
 
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--sequences-json", required=True)
-    p.add_argument("--ligands-json", default=None,
-                   help="JSON serialization of the ligands DataStream (omit for apo)")
-    p.add_argument("--num-samples", type=int, default=100)
-    p.add_argument("--batch-size", type=int, default=16)
-    p.add_argument("--sampler", default="edm")
-    p.add_argument("--physicality-filter", default="high_quality")
-    p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--contacts-json", default=None)
-    p.add_argument("--covalent-linkage-json", default=None)
-    p.add_argument("--precomputed-msa-json", default=None,
-                   help="DataStream JSON mapping sequence id -> .a3m / Boltz-MSA .csv path")
-    p.add_argument("--structures-dir", required=True)
-    p.add_argument("--structures-map", required=True)
-    p.add_argument("--trajectories-dir", required=True)
-    p.add_argument("--trajectories-map", required=True)
-    p.add_argument("--scratch-dir", required=True)
-    p.add_argument("--summary-csv", required=True)
-    p.add_argument("--physicality-csv", required=True)
-    p.add_argument("--missing-csv", required=True)
-    p.add_argument("--upstream-missing", default=None)
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description="Sample BioEmu2 equilibrium ensembles")
+    parser.add_argument("--config-yaml", required=True)
+    parser.add_argument("--combinatorics-config", required=True)
+    parser.add_argument("--runs-dir", required=True)
+    parser.add_argument("--structures-dir", required=True)
+    parser.add_argument("--structures-map-csv", required=True)
+    parser.add_argument("--trajectories-dir", required=True)
+    parser.add_argument("--trajectories-map-csv", required=True)
+    parser.add_argument("--summary-csv", required=True)
+    parser.add_argument("--physicality-csv", required=True)
+    parser.add_argument("--local-missing-csv", required=True)
+    parser.add_argument("--container-prefix", default="")
+    parser.add_argument("--msas-json", default=None)
+    parser.add_argument("--msa-cache-dir", default=None)
+    args = parser.parse_args()
 
-    for d in (args.structures_dir, args.trajectories_dir, args.scratch_dir):
-        os.makedirs(d, exist_ok=True)
+    with open(args.config_yaml) as handle:
+        config = yaml.safe_load(handle) or {}
 
-    seqs = load_datastream(args.sequences_json)
-    sequences = {sid: str(v.get("sequence", "")).strip()
-                 for sid, v in iterate_values(seqs, columns=["sequence"])}
+    runs = build_runs(axis_elements(CombinatoricsConfig.load(args.combinatorics_config)))
+    msa_lookup = load_msa_lookup(args.msas_json) if args.msas_json else None
+    if msa_lookup is not None and not args.msa_cache_dir:
+        parser.error("--msas-json needs --msa-cache-dir")
+    step_id = step_id_from_table_path(args.local_missing_csv)
 
-    if args.ligands_json:
-        ligs_ds = load_datastream(args.ligands_json)
-        ligands = {lid: str(v.get("smiles", "")).strip()
-                   for lid, v in iterate_values(ligs_ds, columns=["smiles"])}
-    else:
-        ligands = {None: ""}
-
-    contacts = json.loads(args.contacts_json) if args.contacts_json else []
-    covalent = json.loads(args.covalent_linkage_json) if args.covalent_linkage_json else None
-
-    if args.precomputed_msa_json:
-        msa_ds = load_datastream(args.precomputed_msa_json)
-        msa_paths = {mid: str(v.get("file", "")).strip()
-                     for mid, v in iterate_values(msa_ds, columns=["file"])}
-        for sid, seq in sequences.items():
-            path = msa_paths.get(sid)
-            if path:
-                try:
-                    _populate_bioemu2_msa_cache(seq, path)
-                except Exception as e:
-                    print(f"WARNING: precomputed MSA for {sid} failed to install: {e}",
-                          file=sys.stderr)
-
-    step_id = step_id_from_table_path(args.missing_csv)
-    struct_rows, traj_rows, sum_rows, phys_rows, missing = [], [], [], [], []
-
-    for sid, seq in sequences.items():
-        if not seq:
-            missing.append({"id": sid, "removed_by": step_id, "kind": "failure",
-                            "cause": "empty sequence"})
-            continue
-        for lid, lsmi in ligands.items():
-            run_id = sid if lid is None else f"{sid}+{lid}"
-            work = os.path.join(args.scratch_dir, run_id)
-            os.makedirs(work, exist_ok=True)
-            system_yaml = os.path.join(work, "system.yaml")
-            _write_system_yaml(system_yaml, seq, lsmi, contacts, covalent)
-            try:
-                _sample_once(system_yaml, work, args.num_samples, args.batch_size,
-                             args.sampler, args.physicality_filter, args.seed)
-            except subprocess.CalledProcessError as e:
-                print(f"WARNING: {run_id} bioemu2 sampling failed: {e}",
-                      file=sys.stderr)
-                missing.append({"id": run_id, "removed_by": step_id,
-                                "kind": "failure", "cause": str(e)[:200]})
-                continue
-
-            topology_cif = os.path.join(work, "topology.cif")
-            samples_xtc = os.path.join(work, "samples.xtc")
-            if not (os.path.isfile(topology_cif) and os.path.isfile(samples_xtc)):
-                missing.append({"id": run_id, "removed_by": step_id,
-                                "kind": "failure",
-                                "cause": "bioemu2 produced no topology/samples"})
-                continue
-
-            try:
-                frames = _split_trajectory(topology_cif, samples_xtc, run_id,
-                                           args.structures_dir)
-            except Exception as e:
-                print(f"WARNING: {run_id} trajectory split failed: {e}",
-                      file=sys.stderr)
-                missing.append({"id": run_id, "removed_by": step_id,
-                                "kind": "failure",
-                                "cause": f"split: {e}"[:200]})
-                continue
-
-            for fid, p_pdb in frames:
-                struct_rows.append({"id": fid, "file": p_pdb, "run.id": run_id})
-
-            dst_xtc = os.path.join(args.trajectories_dir, f"{run_id}.xtc")
-            dst_top = os.path.join(args.trajectories_dir, f"{run_id}_topology.cif")
-            shutil.copyfile(samples_xtc, dst_xtc)
-            shutil.copyfile(topology_cif, dst_top)
-            traj_rows.append({"id": run_id, "file": dst_xtc, "topology": dst_top})
-
-            n_res = int(md.load(topology_cif).n_residues)
-            sum_rows.append({"id": run_id, "sequence.id": sid,
-                             "ligand.id": lid if lid is not None else "",
-                             "n_samples": len(frames), "n_residues": n_res})
-            phys_rows += _parse_physicality(run_id,
-                                            os.path.join(work, "physicality.json"))
-            print(f"  {run_id}: {len(frames)} conformers, {n_res} residues")
-
-    upstream_rows = []
-    if args.upstream_missing and os.path.exists(args.upstream_missing):
+    structure_rows, trajectory_rows, physicality_rows, summary_rows, missing_rows = [], [], [], [], []
+    attempted = failures = 0
+    for run in runs:
+        attempted += 1
+        print(f"Run {run['id']}")
         try:
-            up_df = pd.read_csv(args.upstream_missing)
-            if not up_df.empty:
-                upstream_rows = up_df.to_dict("records")
-        except Exception as e:
-            print(f"Warning: could not read upstream missing.csv: {e}", file=sys.stderr)
+            outcome = process_run(run, config, args, msa_lookup)
+        except Exception as exc:
+            cause = str(exc) if isinstance(exc, RunError) else f"{type(exc).__name__}: {exc}"
+            print(f"WARNING: {run['id']} failed: {cause}", file=sys.stderr)
+            failures += 1
+            summary_rows.append({"id": run["id"], "sequences.id": run["provenance"].get("sequences", ""),
+                                 "ligands.id": run["provenance"].get("ligands", "")})
+            missing_rows.append({"id": run["id"], "removed_by": step_id, "kind": "failure",
+                                 "cause": cause[:CAUSE_LIMIT]})
+            continue
+        structure_rows += outcome["structures"]
+        trajectory_rows.append(outcome["trajectory"])
+        physicality_rows += outcome["physicality"]
+        summary_rows.append(outcome["summary"])
+        print(f"  {run['id']}: {outcome['summary']['n_samples']} conformers, "
+              f"{outcome['summary']['n_residues']} residues")
 
-    for d in (args.structures_map, args.trajectories_map,
-              args.summary_csv, args.physicality_csv, args.missing_csv):
-        os.makedirs(os.path.dirname(d), exist_ok=True)
-    pd.DataFrame(struct_rows, columns=["id", "file", "run.id"]).to_csv(
-        args.structures_map, index=False)
-    pd.DataFrame(traj_rows, columns=["id", "file", "topology"]).to_csv(
-        args.trajectories_map, index=False)
-    pd.DataFrame(sum_rows, columns=SUM_COLS).to_csv(args.summary_csv, index=False)
-    pd.DataFrame(phys_rows, columns=PHYS_COLS).to_csv(args.physicality_csv, index=False)
-    pd.DataFrame(upstream_rows + missing, columns=MISS_COLS).to_csv(
-        args.missing_csv, index=False)
-    print(f"Structures map: {args.structures_map} ({len(struct_rows)} rows)")
-    print(f"Trajectories map: {args.trajectories_map} ({len(traj_rows)} rows)")
-    print(f"Summary: {args.summary_csv} ({len(sum_rows)} rows)")
-    print(f"Physicality: {args.physicality_csv} ({len(phys_rows)} rows)")
-    print(f"Missing: {args.missing_csv} ({len(upstream_rows) + len(missing)} rows)")
+    write_table(args.structures_map_csv, ["id", "file", "run.id", "sequences.id", "ligands.id"], structure_rows)
+    write_table(args.trajectories_map_csv, ["id", "file", "topology"], trajectory_rows)
+    write_table(args.summary_csv, SUMMARY_COLUMNS, summary_rows)
+    write_table(args.physicality_csv, PHYSICALITY_COLUMNS, physicality_rows)
+    write_table(args.local_missing_csv, MISSING_COLUMNS, missing_rows)
+    print(f"Structures map: {args.structures_map_csv} ({len(structure_rows)} rows)")
+    print(f"Trajectories map: {args.trajectories_map_csv} ({len(trajectory_rows)} rows)")
+    print(f"Summary: {args.summary_csv} ({len(summary_rows)} rows)")
+    print(f"Physicality: {args.physicality_csv} ({len(physicality_rows)} rows)")
+    print(f"Local failures: {failures}")
 
-    if not struct_rows:
+    # Nothing attempted means the upstream stream was empty; every run failing means the step did not work.
+    if not attempted:
+        print("ERROR: no runs to sample (an input axis resolved to zero records)", file=sys.stderr)
+        sys.exit(1)
+    if failures == attempted:
+        print(f"ERROR: all {attempted} attempted run(s) failed", file=sys.stderr)
         sys.exit(1)
 
 

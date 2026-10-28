@@ -2,10 +2,5 @@ name: bioemu2
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
-  - mdtraj>=1.9
-  - pandas
-  - numpy
-  - pip:
-      - bioemu2

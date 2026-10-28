@@ -230,8 +230,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-28'
+    note: >-
+      Standardized to the framework conventions. The install built Python 3.11, where pip finds no bioemu2 (0.1.0rc0 is the only release, a pre-release, and requires Python 3.12): the env is now Python 3.12 with the requirements in `bioemu2.pip.txt` (`bioemu2[cuda]>=0.1.0rc0`, which admits the release candidate for that package alone), an env left by the old spec is rebuilt, the `bioemu2-preview` checkpoint is fetched into the Hugging Face cache at install, and the verification checks the Python version, the imports and the CLI. Runs follow the Each/Bundle combinatorics of Boltz2 and Protenix, so `Bundle(ligands)` puts several ligands in one system and the ids are the predicted ones. Ligands follow the Ligand Contract: a CCD code is passed as `ccd_code`, otherwise SMILES, and a compounds row with neither fails its run instead of silently sampling the apo protein. The system YAML is written with a YAML writer (a SMILES with a backslash broke the hand-built text). `covalent_linkage` is written as upstream's `bonds` entry, not as a `covalent_linkage` key upstream does not have. The physicality modes are upstream's (`high_quality`, `high_quality_per_residue`, `no_violations`, `no_filter`; `medium_quality` and `low_quality` never existed), and the physicality table is the per-conformer `status` and `reason` upstream reports, with ids that join to `structures`. A supplied alignment is written with the checksum upstream validates (the old one made bioemu2 reject the entry) into a cache directory of the step through `BIOEMU2_MSA_CACHE`, is checked against the sequence, and the parameter is renamed `msas` (`precomputed_msa` stays as an alias). Failures go to `local_missing.csv` and the wrapper merges them with the upstream manifests through the propagation step; the summary has a row for every run, empty where it failed; the step exits non-zero when nothing was attempted or every run failed. Parameters travel in `configuration/config.yaml`; the bioemu2 CLI takes the container prefix instead of warning that containers are unsupported. Summary provenance columns are `sequences.id` and `ligands.id` (were `sequence.id`, `ligand.id`).
   - version: '1.0'
     date: '2026-10-24'
     note: >-

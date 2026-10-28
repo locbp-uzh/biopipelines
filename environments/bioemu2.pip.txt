@@ -1,0 +1,4 @@
+# bioemu2 has published only a release candidate, so the specifier names a pre-release: that is what lets pip pick it, for this package alone and without --pre. A final release satisfies it too.
+# The cuda extra is upstream's default for compute capability 7.5 or newer (CUDA 13 kernels); a V100 needs upstream's cuda12 extra with the cu126 index instead, see its README.
+bioemu2[cuda]>=0.1.0rc0
+pandas
