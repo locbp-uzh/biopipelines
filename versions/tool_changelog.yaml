@@ -2342,3 +2342,14 @@ Protenix:
     date: '2026-10-28'
     note: >-
       Initial release. All-atom co-folding of proteins, nucleic acids and ligands with ByteDance's Protenix, default checkpoint protenix-v2 (about 464 M parameters). Takes the six input axes of Boltz2 and OpenFold3 with the same Each/Bundle semantics and the same CCD-versus-SMILES decision, an optional a3m msas stream passed as unpairedMsaPath (a chain without an alignment skips its query, since a missing path would make upstream search the server and overwrite the others), covalent_bonds as upstream's own list, and seeds and num_diffusion_samples with the structures counted as seeds times samples. Streams structures (cif) and pae (npz, key pae, Boltz layout, read from upstream's full-data JSON, which the wrapper then deletes), tables confidence (plddt, ptm, iptm, gpde, has_clash, disorder, ranking_score, seed, sample) and missing. One JSON per query in one folder, so one model load and a failure stays in its own file; upstream records a failed query in ERR/<id>.txt and exits 0, so that text becomes the cause in missing. The install downloads the CCD files and the checkpoint into ProtenixCache. The weights of protenix-v2 are described upstream as proprietary and non-redistributable, and upstream's download URL for them answered HTTP 403 on 2026-10-28 while the other checkpoints downloaded, so the install warns instead of failing when the checkpoint is refused. Contact and pocket constraints (only the older constraint checkpoint) and templates are not wired. x86-64 only: upstream pins triton==3.3.1, which has no aarch64 wheel.
+
+FLOWR:
+  files:
+  - biopipelines/flowr.py
+  - pipe_scripts/pipe_flowr.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-28'
+    note: >-
+      Initial release. Generates 3D ligands in a protein pocket with FLOWR (jule-c/flowr, Cremer et al.), one upstream `generate_from_pdb` run per input structure. The pocket is a ligand bound in the structure, given through the Ligand contract (`ligand`), or a chain-aware residue selection with a heavy-atom count (`pocket_residues`). `conditioning` holds atoms of the reference ligand fixed (interaction, functional_group, scaffold, linker or substructure); the checkpoint with explicit hydrogens, flexible pockets and the sampler options are not wired. Outputs a `compounds` stream, one SDF pose per molecule in a `structures` stream, a `pockets` table (molecules requested and returned) and `missing`; upstream writes no per-molecule score, so there is none. Runs in its own `FLOWR` env (torch 2.5.1, CUDA 11.8) and downloads `flowr_noHs.ckpt` from Zenodo record 15737419, verifying its md5.

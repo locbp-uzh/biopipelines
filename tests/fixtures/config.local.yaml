@@ -63,6 +63,7 @@ folders:
     DiffDock: "<biopipelines>/_stub_repos/DiffDock"
     DynamicBind: "<biopipelines>/_stub_repos/DynamicBind"
     ESM2: "<biopipelines>/_stub_repos/ESM2"
+    FLOWR: "<biopipelines>/_stub_repos/FLOWR"
     PocketGen: "<biopipelines>/_stub_repos/PocketGen"
     PLACER: "<biopipelines>/_stub_repos/PLACER"
     GEMS: "<biopipelines>/_stub_repos/GEMS"

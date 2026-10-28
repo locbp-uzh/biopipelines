@@ -182,6 +182,67 @@ pg = PocketGen(structures=scaffold, ligand=lig)
 
 ---
 
+### FLOWR
+
+Generates 3D ligands inside a protein pocket by flow matching, de novo or conditioned on part of a reference ligand. Each input structure is one pocket, and FLOWR samples `num_molecules` new molecules in it, written as a `compounds` stream (SMILES) and a `structures` stream (one SDF pose per molecule, in the coordinate frame of the input structure).
+
+The pocket is given in one of two ways. With `ligand`, a ligand bound in each structure (`Ligand("ZIT")` or the bare code `"ZIT"`; the first copy when a structure holds several; its `smiles`, when it has one, is the bond-order template) is the reference: FLOWR keeps the protein residues within `pocket_cutoff` of it, the reference sets the molecule size, and its atoms can be held fixed by `conditioning`. With `pocket_residues`, a chain-aware selection such as `"A10-25+B7"` is the pocket and `num_heavy_atoms` sets the size; there is no reference, so no conditioning. See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates).
+
+`conditioning` keeps atoms of the reference ligand fixed at the reference coordinates while the rest of the molecule is generated: `"interaction"` the atoms that interact with the pocket (ProLIF, so the complex needs hydrogens: supply a protonated structure or set `protonate_pocket=True`), `"functional_group"` the functional-group atoms, `"scaffold"` the Murcko scaffold, `"linker"` everything but the linker, which is regenerated, and `"substructure"` the atoms matching the SMILES in `substructure`. When the reference has no atom of the requested kind, nothing is fixed. One task runs at a time, always at the reference size.
+
+FLOWR does not score its molecules: upstream writes no per-molecule score, and the `pockets` table only counts what came back. Upstream keeps sampling until it has `num_molecules` valid molecules or reaches its round limit, then drops any molecule above 0.9 Tanimoto similarity (ECFP4) to an earlier one, so a pocket can return fewer than requested; each missing id is a `filter` row in `missing`.
+
+Not implemented: the checkpoint trained with explicit hydrogens, flexible (apo) pockets, interaction recovery and the other evaluation scripts, and the sampler options `coord_noise_std`, `categorical_strategy`, `ode_sampling_strategy` and `corrector_iters`. The upstream repository is no longer maintained; its authors continue the work in FLOWR.root.
+
+**Tags**: generate-backbone, small-molecule, protein, pocket
+
+**References**: https://github.com/jule-c/flowr · https://www.nature.com/articles/s43588-026-00998-8 · https://arxiv.org/abs/2504.10564
+
+**Resources**: GPU. Upstream recommends at least 40 GB of GPU memory; lower `batch_cost` on a smaller card.
+
+**Environment**: `FLOWR`
+
+**Installation**: `FLOWR.install()` clones the repository, builds the env (torch 2.5.1, CUDA 11.8) and downloads `flowr_noHs.ckpt` (630 MB) from Zenodo record 15737419, checking its md5. The code is MIT-licensed according to the README and the paper, but the repository ships no LICENSE file. The checkpoint is licensed Creative Commons Attribution 4.0 International (cc-by-4.0) on Zenodo.
+
+**Parameters**:
+- `structures`: DataStream | StandardizedOutput (required) — Protein or complex structures, PDB.
+- `ligand`: str | DataStream | StandardizedOutput — Reference ligand bound in each structure (residue code, or a compounds stream). Exactly one of `ligand` and `pocket_residues`.
+- `pocket_residues`: str — Chain-aware residue selection that is the pocket, e.g. `"A10-25+B7"`; a bare chain letter takes the whole chain.
+- `num_molecules`: int — Molecules requested per pocket (default 100).
+- `integration_steps`: int — Steps of the flow (default 100).
+- `conditioning`: str — None (de novo), `"interaction"`, `"functional_group"`, `"scaffold"`, `"linker"` or `"substructure"`. Needs `ligand`.
+- `substructure`: str — SMILES of the fragment kept fixed; required with `conditioning="substructure"`.
+- `sample_sizes`: bool — Draw each molecule's size within 10 % of the reference (default: on for de novo generation from a reference ligand, off otherwise). Refused with `conditioning`.
+- `num_heavy_atoms`: int — Molecule size from 5 to 80 heavy atoms; required with `pocket_residues`, not allowed with `ligand`.
+- `pocket_cutoff`: float — Distance in A from the reference ligand within which residues enter the pocket (default 6.0).
+- `protonate_pocket`: bool — Add hydrogens to the protein before the pocket is built (default False).
+- `protonate_ligands`: bool — Add hydrogens to the generated molecules and relax them in the pocket; the poses are then the protonated ones (default False).
+- `batch_cost`: int — Upstream's batch size knob (default 100).
+- `seed`: int — Random seed (default 42).
+
+**Streams**:
+- `compounds` — one row per generated molecule, ids `<structure id>_<k>`.
+- `structures` — one SDF pose per molecule, same ids.
+
+**Tables**:
+- `compounds`: | id | structures.id | sample | format | code | ccd | smiles |
+- `pockets`: | id | pocket | n_requested | n_generated |
+- `missing`: | id | removed_by | kind | cause |
+
+**Example**:
+```python
+from biopipelines.flowr import FLOWR
+from biopipelines.entities import PDB, Ligand
+
+complex_ = PDB("2p16", convert="pdb")           # ligand bound as HETATM
+gen = FLOWR(structures=complex_, ligand=Ligand("GG2", smiles="..."), num_molecules=50)
+
+# keep the Murcko scaffold of the bound ligand and regenerate the rest
+grown = FLOWR(structures=complex_, ligand=Ligand("GG2", smiles="..."), conditioning="scaffold")
+```
+
+---
+
 ### RFD4Proteina
 
 Sequence-structure co-design with RFD4-Proteina (Baker Lab and NVIDIA GenAIR), an all-atom flow-matching model driven by a YAML condition spec. Each input structure becomes one design problem: a contig keeps residues of the input and inserts designed segments of variable length, and conditions say what is fixed, what is a hotspot and what is free. The model returns the designed structure and its sequence in one pass.

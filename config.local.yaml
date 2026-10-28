@@ -56,6 +56,7 @@ folders:
     DiffDock: "<data>/DiffDock"
     DynamicBind: "<data>/DynamicBind"
     ESM2: "<data>/esm2"
+    FLOWR: "<data>/FLOWR"
     GEMS: "<data>/GEMS"
     Gnina: "<data>/gnina"
     IPSAE: "<data>/ipsae"

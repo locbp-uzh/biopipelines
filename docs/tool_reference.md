@@ -15,6 +15,7 @@ mapping), see [tool_index.md](tool_index.md). Every tool section carries a
 Generate novel protein structures and pockets.
 
 - [BoltzGen](tool/structure_generation.md#boltzgen) — Protein/peptide/nanobody binder design
+- [FLOWR](tool/structure_generation.md#flowr) — Pocket-conditioned 3D ligand generation by flow matching
 - [HBDesigner](tool/structure_generation.md#hbdesigner) — Hydrogen-bond network design
 - [PocketGen](tool/structure_generation.md#pocketgen) — Ligand-tailored pocket co-design
 - [RFD4Proteina](tool/structure_generation.md#rfd4proteina) — Sequence-structure co-design from a condition spec

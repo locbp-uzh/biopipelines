@@ -24,6 +24,7 @@ from .rfdiffusion_allatom import RFdiffusionAllAtom, RFDAA_PrepareLigand
 from .rfdiffusion2 import RFdiffusion2
 from .rfdiffusion3 import RFdiffusion3
 from .rfd4proteina import RFD4Proteina
+from .flowr import FLOWR
 from .hbdesigner import HBDesigner
 from .protein_mpnn import ProteinMPNN, SolubleMPNN
 from .frame2seq import Frame2Seq
@@ -172,6 +173,7 @@ __all__ = [
     'RFdiffusion2',
     'RFdiffusion3',
     'RFD4Proteina',
+    'FLOWR',
     'HBDesigner',
     'ProteinMPNN',
     'SolubleMPNN',
