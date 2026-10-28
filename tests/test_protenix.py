@@ -653,8 +653,10 @@ class TestTheInstall:
         shortcut = script().split("already installed, skipping")[1].split("exit 0")[0]
         assert "pipe_protenix_weights.py" in shortcut and "--model-name" in shortcut
 
-    def test_it_verifies_the_cli_not_just_an_import(self, script):
-        assert "protenix --version" in script()
+    def test_it_verifies_the_package_and_entry_point_without_importing_it(self, script):
+        text = script()
+        assert "protenix --version" not in text
+        assert "m.version('protenix')" in text and "shutil.which('protenix')" in text
 
     def test_the_fetch_script_runs_inside_the_env(self, script):
         fetch = os.path.join("/repo", "pipe_scripts", "pipe_protenix_weights.py")
