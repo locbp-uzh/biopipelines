@@ -40,7 +40,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 28 | NeuralPLexer | Structure Prediction & Docking | 2.1 | `biopipelines/neuralplexer.py` |
 | 29 | OpenFold3 | Structure Prediction & Docking | 1.5 | `biopipelines/openfold3.py` |
 | 30 | PLACER | Structure Prediction & Docking | 2.1 | `biopipelines/placer.py` |
-| 31 | Protenix | Structure Prediction & Docking | 1.1 | `biopipelines/protenix.py` |
+| 31 | Protenix | Structure Prediction & Docking | 1.2 | `biopipelines/protenix.py` |
 | 32 | ADMETAI | Analysis                       | 2.0 | `biopipelines/admet_ai.py` |
 | 33 | AF2BIND | Analysis                       | 2.0 | `biopipelines/af2bind.py` |
 | 34 | Aggrescan3D | Analysis                       | 2.2 | `biopipelines/aggrescan3d.py` |

@@ -845,3 +845,12 @@ class TestStandaloneDownloader:
     def test_a_missing_url_is_an_oserror_the_caller_handles(self, tmp_path):
         with pytest.raises(OSError):
             pipe_protenix_weights.download_from_url((tmp_path / "absent").as_uri(), str(tmp_path / "o.part"), False)
+
+
+class TestInstallCheckDoesNotImportTheModel:
+    """`protenix --version` imports the model, which compiles a CUDA extension and fails on a node without a toolkit."""
+
+    def test_the_install_script_never_runs_the_cli_to_verify(self):
+        script = Protenix._install_script({"biopipelines": "/repo", "pipe_scripts": "/repo/pipe_scripts"}, env_manager="mamba")
+        assert "protenix --version" not in script
+        assert "importlib.metadata" in script and "shutil.which" in script

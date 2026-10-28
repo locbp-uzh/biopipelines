@@ -97,10 +97,20 @@ class Protenix(BaseConfig):
     """
 
     TOOL_NAME = "Protenix"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "protenix"
 
     PREDICT_COMMAND = "protenix pred"
+
+    @staticmethod
+    def _import_free_check(run):
+        """Shell test that the package and its entry point are present without importing protenix.
+
+        Importing protenix JIT-compiles a CUDA extension and fails on a node with no CUDA toolkit, so even `protenix --version` cannot verify an install made on a CPU node.
+        """
+        metadata = "import importlib.metadata as m; m.version('protenix')"
+        entry_point = "import shutil, sys; sys.exit(0 if shutil.which('protenix') else 1)"
+        return f'{run}python -c "{metadata}" >/dev/null 2>&1 && {run}python -c "{entry_point}" >/dev/null 2>&1'
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -126,7 +136,7 @@ elif [ "$FETCH_RC" -ne 0 ]; then
     exit 1
 fi
 """
-        skip = "" if force_reinstall else f"""if {cls._env_exists_check(env, env_manager)} && {run}protenix --version >/dev/null 2>&1; then
+        skip = "" if force_reinstall else f"""if {cls._env_exists_check(env, env_manager)} && {cls._import_free_check(run)}; then
     echo "Protenix already installed, skipping the env. Use force_reinstall=True to rebuild it."
 {weights}
     touch "$INSTALL_SUCCESS"
@@ -137,7 +147,7 @@ fi
 {skip}{remove_block}
 {env_block}
 {weights}
-if {run}protenix --version >/dev/null 2>&1; then
+if {cls._import_free_check(run)}; then
     touch "$INSTALL_SUCCESS"
     echo "=== Protenix installation complete ==="
 else
