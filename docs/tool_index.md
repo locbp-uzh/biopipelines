@@ -4,7 +4,7 @@ Single-source-of-truth listing for every public-API tool. Generated from
 `TOOL_NAME` / `TOOL_VERSION` in `biopipelines/*.py` and grouped by the categories
 in [`tool_reference.md`](tool_reference.md).
 
-**Public-API count: 99** (listed below). Internal helpers — `BoltzGenMerge`,
+**Public-API count: 100** (listed below). Internal helpers — `BoltzGenMerge`,
 `BoltzGenImport`, `RFDAA_PrepareLigand`, `Mock` — the `TemplateTool` skeleton,
 and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 
@@ -84,31 +84,32 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 72 | AiZynthFinder | Cheminformatics                | 2.2 | `biopipelines/aizynthfinder.py` |
 | 73 | OpenBabel                 | Cheminformatics                | 1.1 | `biopipelines/openbabel.py` |
 | 74 | RDKit                     | Cheminformatics                | 1.2 | `biopipelines/rdkit_descriptors.py` |
-| 75 | BayesianAdjuster          | Sequence Statistics            | 1.0 | `biopipelines/bayesian_adjuster.py` |
-| 76 | MutationProfiler | Sequence Statistics            | 2.0 | `biopipelines/mutation_profiler.py` |
-| 77 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
-| 78 | ExtractMetrics            | Data Management                | 1.1 | `biopipelines/extract_metrics.py` |
-| 79 | Panda                     | Data Management                | 1.5 | `biopipelines/panda.py` |
-| 80 | Pool                      | Data Management                | 1.3 | `biopipelines/pool.py` |
-| 81 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
-| 82 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
-| 83 | SelectionTransfer | Data Management | 1.0 | `biopipelines/selection_transfer.py` |
-| 84 | MMseqs2                   | MSAs                           | 1.10 | `biopipelines/mmseqs2.py` |
-| 85 | MMseqs2Server             | MSAs                           | 1.9 | `biopipelines/mmseqs2.py` |
-| 86 | MSA                       | MSAs                           | 1.4 | `biopipelines/msa.py` |
-| 87 | CompoundLibrary           | Inputs & I/O                   | 1.0 | `biopipelines/compound_library.py` |
-| 88 | Ligand                    | Inputs & I/O                   | 1.5 | `biopipelines/ligand.py` |
-| 89 | Load | Inputs & I/O                   | 1.6 | `biopipelines/load.py` |
-| 90 | PDB | Inputs & I/O                   | 1.6 | `biopipelines/pdb.py` |
-| 91 | Plot                      | Inputs & I/O                   | 1.0 | `biopipelines/plot.py` |
-| 92 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |
-| 93 | Scripting | Inputs & I/O                   | 1.4 | `biopipelines/scripting.py` |
-| 94 | RCSB                      | Inputs & I/O                   | 1.5 | `biopipelines/rcsb.py` |
-| 95 | Sequence                  | Inputs & I/O                   | 1.0 | `biopipelines/sequence.py` |
-| 96 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |
-| 97 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
-| 98 | RF3 | Structure Prediction & Docking | 1.0 | `biopipelines/rf3.py` |
-| 99 | FoundryMPNN | Sequence Design                | 1.0 | `biopipelines/foundry_mpnn.py` |
+| 75 | REINVENT4                 | Cheminformatics                | 1.0 | `biopipelines/reinvent4.py` |
+| 76 | BayesianAdjuster          | Sequence Statistics            | 1.0 | `biopipelines/bayesian_adjuster.py` |
+| 77 | MutationProfiler | Sequence Statistics            | 2.0 | `biopipelines/mutation_profiler.py` |
+| 78 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
+| 79 | ExtractMetrics            | Data Management                | 1.1 | `biopipelines/extract_metrics.py` |
+| 80 | Panda                     | Data Management                | 1.5 | `biopipelines/panda.py` |
+| 81 | Pool                      | Data Management                | 1.3 | `biopipelines/pool.py` |
+| 82 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
+| 83 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
+| 84 | SelectionTransfer | Data Management | 1.0 | `biopipelines/selection_transfer.py` |
+| 85 | MMseqs2                   | MSAs                           | 1.10 | `biopipelines/mmseqs2.py` |
+| 86 | MMseqs2Server             | MSAs                           | 1.9 | `biopipelines/mmseqs2.py` |
+| 87 | MSA                       | MSAs                           | 1.4 | `biopipelines/msa.py` |
+| 88 | CompoundLibrary           | Inputs & I/O                   | 1.0 | `biopipelines/compound_library.py` |
+| 89 | Ligand                    | Inputs & I/O                   | 1.5 | `biopipelines/ligand.py` |
+| 90 | Load | Inputs & I/O                   | 1.6 | `biopipelines/load.py` |
+| 91 | PDB | Inputs & I/O                   | 1.6 | `biopipelines/pdb.py` |
+| 92 | Plot                      | Inputs & I/O                   | 1.0 | `biopipelines/plot.py` |
+| 93 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |
+| 94 | Scripting | Inputs & I/O                   | 1.4 | `biopipelines/scripting.py` |
+| 95 | RCSB                      | Inputs & I/O                   | 1.5 | `biopipelines/rcsb.py` |
+| 96 | Sequence                  | Inputs & I/O                   | 1.0 | `biopipelines/sequence.py` |
+| 97 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |
+| 98 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
+| 99 | RF3 | Structure Prediction & Docking | 1.0 | `biopipelines/rf3.py` |
+| 100 | FoundryMPNN | Sequence Design                | 1.0 | `biopipelines/foundry_mpnn.py` |
 
 ## Internal / auxiliary classes (not user-facing)
 

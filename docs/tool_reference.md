@@ -113,11 +113,12 @@ Analyze structures, interactions, stability, and fitness.
 
 ## [Cheminformatics](tool/cheminformatics.md)
 
-Convert molecules and compute chemical descriptors.
+Convert molecules, compute chemical descriptors, plan syntheses and generate new molecules.
 
 - [AiZynthFinder](tool/cheminformatics.md#aizynthfinder) — Retrosynthetic route planning, purchasable precursors
 - [OpenBabel](tool/cheminformatics.md#openbabel) — Format conversion, 3-D coordinates, protonation
 - [RDKit](tool/cheminformatics.md#rdkit) — Molecular descriptors
+- [REINVENT4](tool/cheminformatics.md#reinvent4) — Generative molecule design: de novo, scaffold decoration, linkers, optimization
 
 ---
 

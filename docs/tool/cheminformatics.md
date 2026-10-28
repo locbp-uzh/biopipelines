@@ -2,7 +2,7 @@
 
 [← Back to Tool Reference](../tool_reference.md)
 
-These tools work on the *chemistry* of small molecules: converting molecule files between formats, building 3-D coordinates, and computing descriptors. They read a **compounds** stream (the SMILES/codes a `Ligand` or `CompoundLibrary` carries) and may also read or write a **structures** stream (the actual coordinate files). See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates) for why chemistry and coordinates live in two separate streams.
+These tools work on the *chemistry* of small molecules: converting molecule files between formats, building 3-D coordinates, computing descriptors, planning syntheses, and generating new molecules. They read a **compounds** stream (the SMILES/codes a `Ligand` or `CompoundLibrary` carries) and may also read or write a **structures** stream (the actual coordinate files). See [The Ligand Contract](../developer_manual.md#the-ligand-contract-compounds--chemistry-structures--coordinates) for why chemistry and coordinates live in two separate streams.
 
 ---
 
@@ -241,4 +241,89 @@ cheapest = Panda(
     operations=[Panda.filter("route == 1"), Panda.sort("route_cost")],
     pool=azf,
 )
+```
+
+---
+
+### REINVENT4
+
+Generative design of small molecules with the pretrained priors of REINVENT 4. Four generators cover the usual design questions: invent molecules from scratch (`reinvent`), decorate a scaffold with R-groups (`libinvent`), find the linker between two fragments (`linkinvent`), or propose analogues of a molecule within a chosen kind of similarity (`mol2mol`). Only REINVENT's `sampling` run mode is wrapped, so the molecules come from the prior as it is and are not optimized against any score. Rank or filter them downstream, with `samples.nll`, `RDKit`, `ADMETAI` or `AiZynthFinder`.
+
+The output is a **compounds** stream with the canonical `id | format | code | smiles | ccd` schema, so it feeds any compounds consumer, and a `samples` table with REINVENT's negative log-likelihood for every molecule. The generators that start from input compounds run REINVENT once per input, so each molecule keeps the id of the compound it came from (`<input id>_<n>`, the input's id repeated in `compounds.id`) and an input that REINVENT rejects fails alone instead of aborting the others. The prior is loaded again for each input.
+
+**Tags**: generate-molecule, small-molecule
+
+**References**: https://github.com/MolecularAI/REINVENT4 (Apache-2.0) — Loeffler et al. (2024) *J. Cheminform.* 16, 20.
+
+**Environment**: `REINVENT4` (dedicated, Python 3.11). `REINVENT4.install()` clones MolecularAI/REINVENT4 (shallow, default branch, unpinned) into `folders.repositories.REINVENT4`, runs upstream's `install.py <processor> -d none` in the env (core dependencies only: no OpenEye, Chemprop, iSIM or PUMAS), and downloads ten priors into `<repo>/priors/`, checking the md5 of each. `install.py` does not check pip's exit status, so the install is verified by `reinvent --version`, which imports PyTorch. An existing env is kept, so a download that failed halfway is retried by calling `install()` again; `force_reinstall=True` rebuilds the env and reruns `install.py` on the existing clone (delete the repository folder to refresh the clone).
+- `processor`: str = `"cu126"` — install keyword: the PyTorch build tag upstream's `install.py` takes (`cu126`, `cu128`, `cpu`, `rocm6.4`, `xpu`, `mac`). `REINVENT4.install(processor="cpu")` for a machine without a GPU.
+
+The priors come from Zenodo record 15641297 (version 1 of the public priors, the one upstream's documentation links), pinned by record number: the concept DOI 10.5281/zenodo.15641296 follows the newest version, and the newest one (June 2026) holds different files (`reinvent_pubchem.prior` instead of `reinvent.prior`, and none of the `mol2mol_*` priors). A GPU is optional: REINVENT runs on `cuda:0` when the interpreter in the env reports CUDA available and on the CPU otherwise, so `Resources(gpu="none")` gives a CPU run. Upstream states that about 8 GiB of main and GPU memory is enough for many design tasks.
+
+**Parameters**:
+- `generator`: str = `"reinvent"` — `"reinvent"` (de novo, no input), `"libinvent"` (scaffold decoration), `"linkinvent"` (linker design) or `"mol2mol"` (molecule optimization).
+- `compounds`: DataStream | StandardizedOutput = None — The input compounds, read from the `smiles` column of the compounds map_table. Required for `libinvent`, `linkinvent` and `mol2mol`; refused for `reinvent`. What a SMILES has to look like depends on the generator:
+  - `libinvent`: a scaffold with its attachment points marked `[*:0]`, `[*:1]`, ..., e.g. `[*:0]Cc2ccc1cncc(C[*:1])c1c2`. The R-groups at the points are generated.
+  - `linkinvent`: a pair of warheads, each with one attachment point `*`, joined by `|`, e.g. `*c1ccc(F)cc1|*c1ccncc1` (REINVENT also reads `.` as the separator). The linker between them is generated.
+  - `mol2mol`: any molecule. REINVENT standardizes it (largest fragment, uncharged) before sampling.
+
+  These strings are not molecules RDKit can embed, so give them to the tool as written with `CompoundLibrary({"w1": "*c1ccc(F)cc1|*c1ccncc1"})` rather than building 3-D coordinates for them with `Ligand`. REINVENT validates the input against the vocabulary of the prior, and one it cannot read fails that input alone.
+- `num_compounds`: int = 100 — Molecules sampled per input compound, or in total for `reinvent` (upstream `num_smiles`). REINVENT removes invalid SMILES and duplicates, so fewer can come back. With `sample_strategy="beamsearch"` it is the beam size.
+- `similarity`: str = None — `mol2mol` only: which prior, that is which kind of similarity the analogues have to their input. Left unset it is `"medium_similarity"`, the one upstream's example configuration uses. Definitions are those of Table 4 of the REINVENT 4 paper:
+  - `"similarity"`: pairs with Tanimoto >= 0.5
+  - `"medium_similarity"`: 0.5 <= Tanimoto < 0.7
+  - `"high_similarity"`: Tanimoto >= 0.7
+  - `"scaffold"`: pairs sharing the same Murcko scaffold
+  - `"scaffold_generic"`: pairs sharing the same unlabelled Murcko scaffold
+  - `"mmp"`: matched molecular pairs, extracted with mmpdb
+  - `"pubchem"`: trained on PubChem pairs with Tanimoto >= 0.5 on ECFP4 count fingerprints, with a ranking loss that ties the NLL to the similarity
+
+  The first six are trained on ChEMBL.
+- `sample_strategy`: str = None — `mol2mol` only: `"multinomial"` (stochastic; upstream's default) or `"beamsearch"` (deterministic, always unique).
+- `temperature`: float = None — `mol2mol` only, multinomial sampling only: the factor the logits are divided by (upstream default 1.0). Below 1 is more conservative, above 1 more random. Refused together with `"beamsearch"`, which does not use it.
+- `seed`: int = None — Random seed passed to REINVENT (`--seed`) so a run can be repeated; an integer >= 1, because upstream treats 0 as no seed. Unset leaves it random.
+
+**Streams**:
+- `compounds` — the generated molecules, value-based. ids are `<input id>_<n>` for `libinvent`, `linkinvent` and `mol2mol`, and `<pipeline name>_<n>` for `reinvent`, with `n` counting from 1 in the order REINVENT wrote the molecules.
+
+**Tables**:
+- `compounds` — `id | format | code | smiles | ccd | compounds.id`. The stream's map_table: `format` is `smiles`, `code` is `LIG` (as `Ligand` does for a SMILES), `ccd` is empty, `compounds.id` is the input compound the molecule came from and is absent for `reinvent`.
+- `samples` — One row per generated molecule, with the columns REINVENT reports for the generator. `nll` is the negative log-likelihood of the molecule under the prior, rounded to two decimals by REINVENT: lower means the prior finds it more probable. The columns by generator:
+  - `reinvent`: `id | smiles | nll`
+  - `libinvent`: `id | compounds.id | smiles | nll | scaffold | r_groups`
+  - `linkinvent`: `id | compounds.id | smiles | nll | warheads | linker`
+  - `mol2mol`: `id | compounds.id | smiles | nll | input_smiles | tanimoto`
+
+  `scaffold` is the scaffold as given to the model and `r_groups` the R-groups generated for it; `warheads` and `linker` likewise for `linkinvent`; `input_smiles` is the input as given to the model and `tanimoto` REINVENT's Tanimoto similarity of the analogue to it. `compounds.id` is the input compound the molecule came from. REINVENT writes isomeric SMILES for `mol2mol` only: for the other generators `isomeric_smiles` is at its upstream default (false), so the molecules carry no stereochemistry.
+- `inputs` — `id | smiles | num_compounds`. `libinvent`, `linkinvent` and `mol2mol` only; one row per input compound, with the number of molecules it yielded (empty when its run failed or it had no SMILES).
+- `missing` — `id | removed_by | kind | cause`. An input with no SMILES, or that yielded no valid molecule, is `kind="filter"`; an input REINVENT could not run (its message is the `cause`) is `kind="failure"`.
+
+Every REINVENT run leaves its configuration, input file, raw CSV and log in the step's `execution/sampling/` folder, named after the input id (`denovo` for `reinvent`).
+
+**Not wrapped**: transfer learning, staged learning (reinforcement learning with scoring components), the `scoring` run mode, the PepInvent generator, the transformer variants of LibInvent and LinkInvent, and the optional sampling filters and checks (`filter.smarts`, `target_smiles_path`, `isomeric_smiles`, `randomize_smiles`, `tb_logdir`).
+
+**Example**:
+```python
+from biopipelines import REINVENT4, CompoundLibrary, Panda
+
+# De novo: 500 molecules from the prior
+novel = REINVENT4(generator="reinvent", num_compounds=500, seed=7)
+
+# Decorate a scaffold with R-groups at both attachment points
+scaffolds = CompoundLibrary({"quinoline": "[*:0]Cc2ccc1cncc(C[*:1])c1c2"})
+decorated = REINVENT4(generator="libinvent", compounds=scaffolds, num_compounds=200)
+
+# Link two warheads
+warheads = CompoundLibrary({"w1": "*c1ccc(F)cc1|*c1ccncc1"})
+linked = REINVENT4(generator="linkinvent", compounds=warheads, num_compounds=100)
+
+# Analogues of a molecule that stay above Tanimoto 0.7
+reference = CompoundLibrary({"celecoxib": "Cc1ccc(-c2cc(C(F)(F)F)nn2-c2ccc(S(N)(=O)=O)cc2)cc1"})
+analogues = REINVENT4(generator="mol2mol", compounds=reference, similarity="high_similarity",
+                      num_compounds=100)
+
+# The 50 decorated molecules the prior finds most probable, with the stream carried along
+likely = Panda(tables=decorated.tables.samples,
+               operations=[Panda.sort("nll"), Panda.head(50)],
+               pool=decorated)
 ```

@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `generate-molecule` joins the closed tag vocabulary, which is now 39 terms (`tool_tags.VOCABULARY`, `docs/tool_tags.md`, and the four places that quote the count). No existing action tag fits a tool that invents small molecules. It answers two questions the vocabulary could not: which tools produce compounds that were not looked up or enumerated, and, within `small-molecule`, which ones generate rather than predict a property or measure one.
+
 - `embeddings` is a registered stream name in `KNOWN_STREAM_NAMES`: one `.npy` vector per id, emitted by `ESM2`.
 
 - `BaseConfig.install()` no longer fails for a tool whose `_install_script` names a folder of its own and raises `ValueError` when it is missing (`IPSAE`, `RFD4Proteina`, `ESM2`). The existence probe passes an empty folders dict, so those tools raised at `install()` instead of at script generation, where the real folders are available and the message names the missing key.
@@ -30,6 +32,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 - `pae` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-id predicted aligned error matrix a structure predictor can emit for a downstream scorer to read.
 
 ### Tools
+
+- **`REINVENT4` 1.0 (new)** - generative design of small molecules with REINVENT 4 (MolecularAI/REINVENT4, Apache-2.0), wrapping its `sampling` run mode for four generators: `reinvent` (de novo), `libinvent` (scaffold decoration, scaffolds with `[*:0]` attachment points), `linkinvent` (linker design, warhead pairs joined by `|`) and `mol2mol` (optimization; `similarity` picks one of the six ChEMBL priors or the PubChem prior). Emits a `compounds` stream (ids `<input id>_<n>`, the input's id in `compounds.id`), a `samples` table (NLL plus the columns REINVENT reports per generator) and an `inputs` table with the yield per input compound. REINVENT runs once per input, so one input it cannot read fails alone. Installs from a shallow clone with upstream's `install.py` into a dedicated `REINVENT4` env and downloads ten priors from Zenodo record 15641297, checking each md5. Transfer learning, staged learning, scoring, PepInvent and the transformer variants of LibInvent and LinkInvent are not wrapped.
 
 - **LigandMPNN** 3.1 → 3.2. `save_stats=True` or `use_atom_context=False` raised `NameError` at script generation, because both appended to a string variable the argv-array command no longer has. They are argv tokens now.
 

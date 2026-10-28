@@ -145,7 +145,7 @@ def main():
         stuck = [f for f in git("diff", "--name-only", "--diff-filter=U").split() if f not in GENERATED]
         if stuck:
             sys.exit("conflicts to resolve by hand: " + ", ".join(stuck) + "\nthen: python versions/integrate_commit.py " + args.sha + " --continue")
-        git("checkout", "HEAD", "--", *GENERATED)
+    git("checkout", "HEAD", "--", *GENERATED)
 
     tools = detect_tools(args.sha)
     for spec in args.tool:

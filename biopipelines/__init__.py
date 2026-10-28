@@ -65,6 +65,7 @@ from .rf3 import RF3
 from .posebusters import PoseBusters
 from .admet_ai import ADMETAI
 from .aizynthfinder import AiZynthFinder
+from .reinvent4 import REINVENT4
 from .binding_data import BindingData
 from .esm2 import ESM2
 from .esmfold import ESMFold
@@ -216,6 +217,7 @@ __all__ = [
     'PoseBusters',
     'ADMETAI',
     'AiZynthFinder',
+    'REINVENT4',
     'BindingData',
     'ESM2',
     'ESMFold',

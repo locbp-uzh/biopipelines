@@ -2316,3 +2316,14 @@ FoundryMPNN:
     date: '2026-10-28'
     note: >-
       New tool: ProteinMPNN / LigandMPNN sequence design through Foundry's `mpnn` command, one call per structure so a bad backbone fails one id. Streams `sequences` and `designs` with ids `<structure>_<n>` and the `chains` contract of ProteinMPNN and LigandMPNN (upstream writes all chains of a design unseparated, so the chains are recovered from the written structure and a length disagreement is a failure, not a guess). Exposes model_type, num_sequences, num_batches, temperature, seed, structure_noise, designed/fixed residues and chains, omit and bias. Runs in the `foundry` environment RFdiffusion3 builds, with its own weights folder.
+
+REINVENT4:
+  files:
+  - biopipelines/reinvent4.py
+  - pipe_scripts/pipe_reinvent4.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-28'
+    note: >-
+      Initial release. Samples molecules from a pretrained REINVENT 4 prior (its `sampling` run mode) with four generators: `reinvent` (de novo), `libinvent` (scaffold decoration; input scaffolds with `[*:0]` attachment points), `linkinvent` (linker design; input warhead pairs joined by `|`) and `mol2mol` (optimization; `similarity` picks one of the six ChEMBL priors or the PubChem prior). Emits a `compounds` stream (ids `<input id>_<n>`, input provenance in `compounds.id`), a `samples` table (NLL plus the columns REINVENT reports for the generator) and, for the generators with input, an `inputs` table with the yield per input. REINVENT runs once per input compound, because its output keeps the input only in the form given to the model and one unreadable input aborts a whole run. Not wrapped: transfer learning, staged learning, scoring, PepInvent, the transformer variants of LibInvent and LinkInvent. Installs into the dedicated `REINVENT4` env from a shallow clone with upstream's `install.py` and fetches ten priors from Zenodo record 15641297, md5-checked.

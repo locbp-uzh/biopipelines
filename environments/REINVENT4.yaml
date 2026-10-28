@@ -1,0 +1,7 @@
+name: REINVENT4
+channels:
+  - conda-forge
+dependencies:
+  # REINVENT 4 needs Python >= 3.11; the install script then runs upstream's install.py, which pip-installs the package with a PyTorch build matching the processor.
+  - python=3.11
+  - pip

@@ -41,7 +41,7 @@ Do not run a script in this repo, or a shell command, to do what one of these do
 
 The loop is: **read the index → pick your tools → read only those sections.** Each entry ends with `docs/tool/<file>.md#<anchor>` — read that section for the real signature before you write the stage.
 
-Each index line ends with the tool's tags — a closed 38-term vocabulary in four facets, defined in `docs/tool_tags.md`. Grep them: `covalent`, `binder-design` and `motif-scaffolding` are the sort of capability the one-line summary never mentions.
+Each index line ends with the tool's tags — a closed 39-term vocabulary in four facets, defined in `docs/tool_tags.md`. Grep them: `covalent`, `binder-design` and `motif-scaffolding` are the sort of capability the one-line summary never mentions.
 
 Two rules, because both failure modes are silent:
 

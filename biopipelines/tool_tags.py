@@ -28,7 +28,8 @@ FACETS = ("action", "subject", "readout", "capability")
 # drifts into `dock` / `docking` / `ligand-docking` within a month.
 VOCABULARY = {
     "action": [
-        "generate-backbone", "inverse-folding", "design-sequence", "predict-structure",
+        "generate-backbone", "generate-molecule", "inverse-folding", "design-sequence",
+        "predict-structure",
         "dock", "sample-ensemble", "refine-structure", "predict-property", "measure",
         "validate", "detect", "build-msa", "fetch", "data", "visualize",
     ],

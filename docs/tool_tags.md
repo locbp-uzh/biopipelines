@@ -6,7 +6,7 @@
 
 Every tool section in `docs/tool/*.md` carries a `**Tags**:` line. Tags exist for one job: **finding a tool when you do not know its name.** A search for "covalent" over the tool index returns nothing without them, because a capability like covalent linkage lives in a parameter, never in the one-line summary.
 
-Tags are a *closed* vocabulary of 38 terms in four facets. Closed on purpose: an open list drifts into `dock` / `docking` / `ligand-docking` within a month, and then neither a person nor an agent can guess which spelling to search. A tag earns its place only if it changes the answer to at least two distinct questions.
+Tags are a *closed* vocabulary of 39 terms in four facets. Closed on purpose: an open list drifts into `dock` / `docking` / `ligand-docking` within a month, and then neither a person nor an agent can guess which spelling to search. A tag earns its place only if it changes the answer to at least two distinct questions.
 
 ## How to search
 
@@ -33,6 +33,7 @@ Every tool carries one or two.
 | Tag | Applies when | Not when |
 |---|---|---|
 | `generate-backbone` | Invents coordinates that did not exist | Predicting a structure for a known sequence |
+| `generate-molecule` | Invents small molecules that were not given: de novo, around a scaffold, between two fragments, or as analogues of a molecule | Looking a molecule up, enumerating a library you wrote, or scoring molecules that already exist |
 | `inverse-folding` | Structure in, sequence out | Constructing a sequence without a backbone |
 | `design-sequence` | Builds or enumerates sequences directly | Reading a sequence off a structure |
 | `predict-structure` | Sequence in, coordinates out — including co-folding a complex | Placing an existing ligand into an existing pocket |
