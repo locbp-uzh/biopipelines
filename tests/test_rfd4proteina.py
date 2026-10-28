@@ -421,6 +421,37 @@ def test_every_input_failing_is_a_step_failure(tmp_path):
     assert json.loads((tmp_path / "manifest.json").read_text())["built"] == []
 
 
+def test_a_pdb_is_parsed_without_the_annotations_atomworks_refuses_for_it(monkeypatch, tmp_path):
+    """AtomWorks raises on a PDB parsed with standard annotations, which upstream's DISTILLATION preset requests."""
+    import types
+
+    class Preset(dict):
+        def replace(self, **changes):
+            return Preset({**self, **changes})
+
+    def parse(path, config):
+        if config["load_standard_annotations"]:
+            raise ValueError("load_standard_annotations=True is not supported for PDB files. Use CIF format instead.")
+        return {"asym_unit": ["atoms"]}
+
+    written = {}
+    modules = {
+        "atomworks": types.ModuleType("atomworks"), "atomworks.io": types.ModuleType("atomworks.io"),
+        "atomworks.io.utils": types.ModuleType("atomworks.io.utils"),
+        "atomworks.io.utils.io_utils": types.ModuleType("atomworks.io.utils.io_utils"),
+        "rfproteina": types.ModuleType("rfproteina"), "rfproteina.utils": types.ModuleType("rfproteina.utils"),
+        "rfproteina.utils.parse_presets": types.ModuleType("rfproteina.utils.parse_presets"),
+    }
+    modules["atomworks.io"].parse = parse
+    modules["atomworks.io.utils.io_utils"].to_cif_file = lambda atoms, path: written.update(path=path, atoms=atoms)
+    modules["rfproteina.utils.parse_presets"].DISTILLATION = Preset(build_assembly="all", load_standard_annotations=True)
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    _load_script("pipe_rfd4proteina_inputs").convert_to_cif("in.pdb", str(tmp_path / "out.cif"))
+    assert written == {"path": str(tmp_path / "out.cif"), "atoms": "atoms"}
+
+
 def test_an_empty_input_stream_is_a_step_failure(tmp_path):
     result = _run_inputs(tmp_path, ["gone"], [str(tmp_path / "gone.cif")])
     assert result.returncode == 1 and "no input structures" in result.stderr
@@ -540,10 +571,10 @@ def _metrics_csv(run_dir, name, rows):
 def test_metrics_are_rekeyed_to_design_ids_and_keep_the_run_record(tmp_path):
     post = _load_script("pipe_rfd4proteina_postprocess")
     _metrics_csv(tmp_path, "per_example_metrics.csv", [
-        {"example_id": "t1_0", "designed_structure_path": "/x", "generation.args.nsteps": 60,
-         "seed": 7, "clash_metrics.frac_atoms_clashing_1p5A": 0.01, "ckpt_path": "/w"},
-        {"example_id": "t1_1", "designed_structure_path": "/y", "generation.args.nsteps": 60,
-         "seed": 7, "clash_metrics.frac_atoms_clashing_1p5A": 0.02, "ckpt_path": "/w"},
+        {"example_id": "t1_0", "designed_structure_path": "/x", "input_json_path": "/spec.yaml",
+         "generation.args.nsteps": 60, "seed": 7, "clash_metrics.frac_atoms_clashing_1p5A": 0.01, "ckpt_path": "/w"},
+        {"example_id": "t1_1", "designed_structure_path": "/y", "input_json_path": "/spec.yaml",
+         "generation.args.nsteps": 60, "seed": 7, "clash_metrics.frac_atoms_clashing_1p5A": 0.02, "ckpt_path": "/w"},
     ])
     table = post.build_metrics_table(["t1_1", "t1_2", "t1_3"], {"t1_1": "t1_0", "t1_2": "t1_1", "t1_3": "t1_2"},
                                      {"t1_1": "t1", "t1_2": "t1", "t1_3": "t1"},

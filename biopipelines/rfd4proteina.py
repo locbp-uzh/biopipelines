@@ -356,7 +356,7 @@ class RFD4Proteina(BaseConfig):
     """
 
     TOOL_NAME = "RFD4Proteina"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     # Hydra application: untyped keyword arguments become extra `key=value` overrides.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # `num_replicates` is upstream's own name; forwarded it would collide with the managed override.

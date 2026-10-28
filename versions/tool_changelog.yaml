@@ -2256,8 +2256,12 @@ RFD4Proteina:
   - pipe_scripts/pipe_rfd4proteina_inputs.py
   - pipe_scripts/pipe_rfd4proteina_postprocess.py
   - pipe_scripts/pipe_rfd4proteina_weights.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-28'
+    note: >-
+      A PDB input could not be converted: upstream's DISTILLATION preset loads standard annotations, which AtomWorks 3.0.4 refuses for a PDB (`load_standard_annotations=True is not supported for PDB files`), so every PDB failed at the input step. The converter turns that one flag off. The `metrics` table no longer carries the `input_json_path` column, a path to the condition spec that the documentation already counted among the dropped path columns.
   - version: '1.0'
     date: '2026-10-27'
     note: >-

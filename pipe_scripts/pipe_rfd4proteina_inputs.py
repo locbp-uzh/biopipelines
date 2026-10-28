@@ -48,13 +48,13 @@ def build_spec(template: Dict, inputs: Dict[str, str]) -> Dict[str, Dict]:
 def convert_to_cif(structure_path: str, out_path: str) -> None:
     """PDB to CIF with AtomWorks `parse` + `to_cif_file`, the conversion upstream's FAQ prescribes.
 
-    Uses the DISTILLATION preset, which upstream built for PDB-format inputs (it does not use the altloc mode a PDB cannot carry); the condition spec re-parses the CIF with its own preset afterwards.
+    Uses the DISTILLATION preset, which upstream built for PDB-format inputs (it does not use the altloc mode a PDB cannot carry); the condition spec re-parses the CIF with its own preset afterwards. The preset loads standard annotations, which AtomWorks refuses for a PDB (a PDB carries none), so that one flag is turned off.
     """
     from atomworks.io import parse
     from atomworks.io.utils.io_utils import to_cif_file
     from rfproteina.utils.parse_presets import DISTILLATION
 
-    result = parse(structure_path, config=DISTILLATION.replace(build_assembly=None))
+    result = parse(structure_path, config=DISTILLATION.replace(build_assembly=None, load_standard_annotations=False))
     to_cif_file(result["asym_unit"][0], out_path)
 
 

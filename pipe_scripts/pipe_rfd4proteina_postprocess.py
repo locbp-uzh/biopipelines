@@ -35,7 +35,7 @@ from pipe_rfdiffusion3_postprocess import convert_cif_to_pdb, extract_sequence_f
 
 # Columns of upstream's per-example metrics CSV that are paths or the configuration dump; seed, ckpt_path and ckpt_name stay as the run record.
 DROPPED_PREFIXES = ("generation.",)
-DROPPED_COLUMNS = ("designed_structure_path", "output_base_dir", "dataset_name", "metrics_tags")
+DROPPED_COLUMNS = ("designed_structure_path", "output_base_dir", "dataset_name", "input_json_path", "metrics_tags")
 
 
 def design_id(source_id: str, replicate: int) -> str:
