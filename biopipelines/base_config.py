@@ -2049,6 +2049,8 @@ class _Installer(BaseConfig):
         # subshell. The footer below always runs and writes COMPLETED or
         # FAILED based on whether $INSTALL_SUCCESS was touched.
         script += "(\n"
+        # pip counts a package in ~/.local as already installed and may uninstall it, so an install can leave a new env incomplete and strip an unrelated one.
+        script += "export PYTHONNOUSERSITE=1\n"
         script += install_commands + "\n"
         script += ")\n"
         script += self.generate_completion_check_footer()

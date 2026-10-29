@@ -51,3 +51,19 @@ def test_a_tool_without_an_install_script_still_reports_it(local_config, isolate
             StructureCluster.install()
     finally:
         pipeline.__exit__(None, None, None)
+
+
+def test_an_install_script_never_reads_or_modifies_the_user_site(local_config, isolated_cwd, new_pipeline):
+    """pip treats a package in ~/.local as installed and may uninstall it: an install left a new env incomplete and removed the numpy another env depended on."""
+    import glob
+
+    from biopipelines.ipsae import IPSAE
+
+    pipeline = add_a_step(new_pipeline, "install_hermetic")
+    IPSAE.install()
+    pipeline.__exit__(None, None, None)
+    scripts = glob.glob(pipeline.folders["runtime"] + "/*.sh")
+    body = "".join(open(path, encoding="utf-8").read() for path in scripts)
+    lines = body.splitlines()
+    assert "export PYTHONNOUSERSITE=1" in lines
+    assert lines[lines.index("export PYTHONNOUSERSITE=1") - 1] == "(", "the install body must start with the hermetic export"
