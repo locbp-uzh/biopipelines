@@ -326,6 +326,8 @@ pip3 install -r requirements.txt
 
 **Note**: `sample` starts at 1 — the ids are `<structures.id>_1` ... `<structures.id>_<num_sequences>`. The input sequence heads each raw `.fa` and is dropped by the converter, so no row describes it.
 
+**Failures**: upstream is called once per structure. A structure it cannot design (an empty or unparseable file, a call that exits non-zero, or one that writes no designed sequence) is listed in `missing` under the structure's own id with `kind` = `failure` and the last line of upstream's log as `cause` (the full log is in `_execution/per_structure/<id>.log`); the other structures are designed. The step exits non-zero only when nothing was attempted or every structure failed. With `pack_side_chains=True` the packed structures are declared per id, which the completion check does not excuse for a failed structure, so the step is marked FAILED although every other output is written.
+
 **Example**:
 ```python
 from biopipelines.ligand_mpnn import LigandMPNN

@@ -22,7 +22,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 10 | DNAEncoder                | Sequence Design                | 1.3 | `biopipelines/dna_encoder.py` |
 | 11 | Frame2Seq | Sequence Design                | 2.0 | `biopipelines/frame2seq.py` |
 | 12 | Fuse | Sequence Design                | 1.3 | `biopipelines/fuse.py` |
-| 13 | LigandMPNN | Sequence Design                | 3.3 | `biopipelines/ligand_mpnn.py` |
+| 13 | LigandMPNN | Sequence Design                | 3.4 | `biopipelines/ligand_mpnn.py` |
 | 14 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
 | 15 | Mutagenesis               | Sequence Design                | 1.3 | `biopipelines/mutagenesis.py` |
 | 16 | MutationComposer          | Sequence Design                | 1.0 | `biopipelines/mutation_composer.py` |

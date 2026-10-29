@@ -986,8 +986,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "3.3"
+  current: "3.4"
   history:
+  - version: '3.4'
+    date: '2026-10-29'
+    note: >-
+      One structure upstream could not design (an empty or unparseable PDB among good ones) ended the step FAILED with no row for it in `missing`. The loop now records a structure whose `run.py` call exits non-zero, or exits 0 without writing a designed sequence, under its own id (`kind="failure"`, the last line of upstream's log as the cause) and goes on to the next; a stale `.fa` from an earlier attempt is removed first so it cannot stand in for a failed one. A structure the position step cannot parse (a binary file raised UnicodeDecodeError, which stopped position setup for the whole batch and left every structure to run without its fixed and redesigned residues) is reported as that structure's failure instead. The step exits non-zero only when nothing was attempted or every structure failed. The `fasta` stream is one shared file of the designs, as the documentation already said and as ProteinMPNN declares it, instead of one raw `<id>.fa` per structure, which a failed structure never wrote and a local failure row does not excuse; its ids are therefore the design ids, not the structure ids.
   - version: '3.3'
     date: '2026-10-28'
     note: >-

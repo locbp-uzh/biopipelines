@@ -40,7 +40,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "3.3"
+    TOOL_VERSION = "3.4"
     # `chain` and `chains` were one letter apart and meant different things, which is the
     # Ligand code/codes mistake again. `chains` now answers both.
     PARAMETER_ALIASES = {"chain": "chains"}
@@ -114,6 +114,7 @@ fi
     seqs_folder = Path(lambda self: self.execution_path("seqs"))
     packed_folder = Path(lambda self: self.stream_folder("structures"))
     stats_folder = Path(lambda self: self.execution_path("stats"))
+    per_structure_folder = Path(lambda self: self.execution_path("per_structure"))
     queries_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     queries_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     designs_csv = Path(lambda self: self.stream_path("designs", "designs.csv"))
@@ -252,11 +253,14 @@ fi
                        so the two inputs differ in more than the one variable.
 
         Output:
-            Streams: sequences (.csv), fasta (.fasta), structures (.pdb, only when
-                     pack_side_chains is set)
+            Streams: sequences (.csv), designs (.csv), fasta (.fasta, one shared file),
+                     structures (.pdb, only when pack_side_chains is set)
             Tables:
-                sequences: id | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps
+                sequences: id | design | structures.id | chain | sequence | sample | T | seed | overall_confidence | ligand_confidence | seq_rec | gaps
+                designs: id | structures.id | source_pdb | n_chains | overall_confidence | ligand_confidence | seq_rec
                 missing: id | removed_by | kind | cause
+
+            A structure that cannot be designed (an empty or unparseable file, an upstream call that fails, or one that writes no sequence) is listed in `missing` under its own id with kind="failure", and the other structures are designed. The step exits non-zero only when nothing was attempted or every structure failed. With pack_side_chains the packed structures are declared per id, so one failed structure still leaves the step marked FAILED although every other output is written.
         """
         # Resolve input to DataStream. Keep the original object too: a DataStream carries
         # no `tables`, so the upstream missing manifest can only be found on the
@@ -370,6 +374,7 @@ fi
         script_content += self.extra_args_echo()
         script_content += self._generate_script_run_ligandmpnn()
         script_content += self._generate_script_convert_outputs()
+        script_content += self._generate_script_exit_status()
         script_content += self.generate_completion_check_footer()
         return script_content
 
@@ -449,20 +454,57 @@ python {self.runtime_positions_py} "{self.positions_args_json}"
         options += self.extra_args_tokens()
 
         option_array = " ".join('"' + token.replace('"', '\\"') + '"' for token in options)
+        step_tool_name = os.path.basename(self.output_folder)
+        missing_folder = os.path.dirname(self.missing_csv)
 
         return f"""echo "Executing LigandMPNN commands..."
 cd {self.lmpnn_folder}
+mkdir -p "{self.seqs_folder}" "{self.per_structure_folder}" "{missing_folder}"
+# Rewritten, so a rerun cannot inherit failure rows from an earlier attempt.
+echo "id,removed_by,kind,cause" > "{self.missing_csv}"
+LMPNN_ATTEMPTED=0
+LMPNN_FAILED=0
+
+# Records one structure as failed under its own id, with the last line of its log as the cause.
+lmpnn_record_failure() {{
+    local cause
+    cause="$2: $(grep -vE '^[[:space:]]*$' "$3" 2>/dev/null | tail -n1)"
+    cause=$(printf '%s' "$cause" | tr -d '"\\r' | tr ',\\n' '  ')
+    echo "  [fail] $1: $cause"
+    echo "$1,{step_tool_name},failure,\\"$cause\\"" >> "{self.missing_csv}"
+    LMPNN_FAILED=$((LMPNN_FAILED + 1))
+}}
+
 for struct_id in {Resolve.stream_ids(self.structures_json, valid_set=True)}; do
     echo "Processing structure: $struct_id"
+    LMPNN_ATTEMPTED=$((LMPNN_ATTEMPTED + 1))
+    STRUCT_LOG="{self.per_structure_folder}/${{struct_id}}.log"
+    POSITIONS_FILE="{self.per_structure_folder}/${{struct_id}}.positions"
     PDB_FILE=$(resolve_stream_item "{self.structures_json}" "$struct_id")
+    PDB_NAME=$(basename "$PDB_FILE")
+    # Upstream names its FASTA after the input file minus a trailing ".pdb".
+    FA_FILE="{self.seqs_folder}/${{PDB_NAME%.pdb}}.fa"
+    rm -f "$FA_FILE"
 
-    # NUL-separated tokens read into an array: a residue list with spaces stays one argument,
-    # and no `eval` re-parses the line the way it used to.
-    mapfile -d "" POSITION_OPTIONS < <(python "{self.resolve_positions_py}" "{self.positions_json}" "$struct_id")
+    if ! python "{self.resolve_positions_py}" "{self.positions_json}" "$struct_id" > "$POSITIONS_FILE" 2> "$STRUCT_LOG"; then
+        lmpnn_record_failure "$struct_id" "position options" "$STRUCT_LOG"
+        continue
+    fi
+    # NUL-separated tokens read into an array: a residue list with spaces stays one argument, and no `eval` re-parses the line.
+    mapfile -d "" POSITION_OPTIONS < "$POSITIONS_FILE"
 
     LMPNN_ARGS=({option_array} --pdb_path "$PDB_FILE" "${{POSITION_OPTIONS[@]}}")
-    {self.container_prefix()}python run.py "${{LMPNN_ARGS[@]}}"
+    {self.container_prefix()}python run.py "${{LMPNN_ARGS[@]}}" 2>&1 | tee "$STRUCT_LOG"
+    LMPNN_RC=${{PIPESTATUS[0]}}
+    FA_RECORDS=$(grep -c '^>' "$FA_FILE" 2>/dev/null)
+    if [ "$LMPNN_RC" -ne 0 ]; then
+        rm -f "$FA_FILE"
+        lmpnn_record_failure "$struct_id" "run.py exited $LMPNN_RC" "$STRUCT_LOG"
+    elif [ "${{FA_RECORDS:-0}}" -lt 2 ]; then
+        lmpnn_record_failure "$struct_id" "run.py wrote no designed sequences" "$STRUCT_LOG"
+    fi
 done
+echo "LigandMPNN designed $((LMPNN_ATTEMPTED - LMPNN_FAILED)) of $LMPNN_ATTEMPTED structure(s)"
 
 """
 
@@ -494,15 +536,25 @@ done
 
         return f"""echo "Converting FASTA outputs to CSV format"
 python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.queries_fasta}{duplicates_flag}{fill_gaps_flag}{chains_flag} --ds-json "{self.structures_json}" --designs-csv "{self.designs_csv}" --missing-csv "{self.missing_csv}" --step-tool-name "{step_tool_name}"{upstream_missing_flag}
+BP_MAIN_RC=$?
 {pack_block}
+"""
+
+    def _generate_script_exit_status(self) -> str:
+        """Fold the per-structure tally into the step's exit status.
+
+        Non-zero only when nothing was attempted or every attempted structure failed; a partial failure is reported through missing.csv, not the exit code.
+        """
+        return """
+if [ "$BP_MAIN_RC" -eq 0 ] && { [ "$LMPNN_ATTEMPTED" -eq 0 ] || [ "$LMPNN_FAILED" -ge "$LMPNN_ATTEMPTED" ]; }; then
+    echo "ERROR: LigandMPNN designed none of the $LMPNN_ATTEMPTED structure(s) it attempted"
+    BP_MAIN_RC=1
+fi
+
 """
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after LigandMPNN execution."""
-        # Expected FASTA files - one per input structure (keep compact/lazy patterns)
-        fasta_ids = self.structures_stream.ids
-        fasta_files = [os.path.join(self.seqs_folder, "<id>.fa")]
-
         # Predict sequence IDs (stream_id + sequence number)
         # Total sequences per structure = num_sequences (batch_size) * num_batches
         total_seqs = self.num_sequences * self.num_batches
@@ -531,15 +583,17 @@ python {self.fa_to_csv_fasta_py} {self.seqs_folder} {self.queries_csv} {self.que
             format="csv"
         )
 
-        # Fasta stream - file-based with structure IDs (one .fa file per structure)
+        # One shared FASTA of the designs, as ProteinMPNN declares it: a raw per-structure .fa that a failed structure never wrote would be a declared file a local failure row cannot excuse.
         fasta = DataStream(
             name="fasta",
-            ids=fasta_ids,
-            files=fasta_files,
+            ids=sequence_ids,
+            files=self.queries_fasta,
+            map_table=self.queries_csv,
             format="fasta",
             metadata={
                 "sequences_per_file": total_seqs,
                 "contains_original": False,
+                "source": "postprocessed_queries_fasta",
             }
         )
 

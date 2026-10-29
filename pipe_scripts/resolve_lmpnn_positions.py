@@ -8,7 +8,7 @@
 Usage:
     python resolve_lmpnn_positions.py <positions_json> <struct_id>
 
-Prints the argv tokens NUL-separated, so a value containing spaces stays one token and the caller reads them into a bash array with `mapfile -d ''` instead of `eval`.
+Prints the argv tokens NUL-separated, so a value containing spaces stays one token and the caller reads them into a bash array with `mapfile -d ''` instead of `eval`. A structure the position step could not read exits 1 with the reason on stderr, so the caller records that one id as failed.
 """
 
 import shlex
@@ -19,6 +19,9 @@ with open(sys.argv[1]) as f:
     data = json.load(f)
 
 entry = data.get(sys.argv[2], {})
+if "error" in entry:
+    print(entry["error"], file=sys.stderr)
+    sys.exit(1)
 tokens = []
 for key in ("fixed_option", "redesigned_option"):
     tokens.extend(shlex.split(entry.get(key, "") or ""))

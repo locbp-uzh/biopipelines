@@ -23,7 +23,7 @@ Usage:
     default_chain: Chain for chainless positions, or "auto" to read it off each structure
 
 Output:
-    JSON file mapping design_id -> {fixed_option, redesigned_option} for LigandMPNN
+    JSON file mapping design_id -> {fixed_option, redesigned_option} for LigandMPNN. A structure that cannot be parsed maps to {error} instead, so the step reports that one id rather than stopping the batch.
 """
 
 import sys
@@ -39,6 +39,19 @@ from biopipelines.biopipelines_io import load_datastream, iterate_files, load_ta
 from biopipelines.ligand_utils import resolve_ligand_code
 from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES
 from biopipelines.sele_utils import sele_to_list
+
+
+class UnreadableStructure(Exception):
+    """A structure file that cannot be parsed; reported against its own id, not the batch's."""
+
+
+def parse_structure(pdb_path):
+    """parse_pdb_file, with any failure to read the file named after it."""
+    try:
+        return parse_pdb_file(pdb_path)
+    except Exception as exc:
+        raise UnreadableStructure(
+            f"{os.path.basename(pdb_path)}: cannot be parsed ({type(exc).__name__}: {exc})") from exc
 
 
 def process_table_source(input_table, design_entries):
@@ -124,7 +137,7 @@ def resolve_table_reference(reference, design_ids, map_table_paths=None):
 
 def get_protein_residues_from_pdb(pdb_path):
     """Get all protein (chain, resnum) tuples from PDB file."""
-    atoms = parse_pdb_file(pdb_path)
+    atoms = parse_structure(pdb_path)
     residues = set()
     for atom in atoms:
         if atom.res_name in STANDARD_RESIDUES:
@@ -164,8 +177,11 @@ def process_selection_source(fixed_positions, designed_positions, design_entries
         # This handles the case where a table reference (e.g. DistanceSelector "within")
         # resolved to empty at runtime.
         if not designed and not fixed:
-            all_residues = get_protein_residues_from_pdb(pdb_file)
-            fixed = all_residues
+            try:
+                fixed = get_protein_residues_from_pdb(pdb_file)
+            except UnreadableStructure as exc:
+                positions_data[design_id] = {'error': str(exc)}
+                continue
             print(f"No positions to redesign for {design_id}, fixing all residues")
 
         positions_data[design_id] = {
@@ -204,7 +220,7 @@ def process_ligand_source(ligand, design_within, design_entries):
 
 def protein_chains_of(pdb_path):
     """Sorted protein chain ids present in a structure."""
-    return sorted({atom.chain for atom in parse_pdb_file(pdb_path)
+    return sorted({atom.chain for atom in parse_structure(pdb_path)
                    if atom.res_name in STANDARD_RESIDUES})
 
 
@@ -242,9 +258,16 @@ def write_positions_json(positions_data, output_file, default_chain="auto"):
     """
     result = {}
     for design_id, positions in positions_data.items():
+        if 'error' in positions:
+            result[design_id] = {"error": positions['error']}
+            continue
         all_positions = positions['fixed_positions'] + positions['designed_positions']
         has_chainless = any(not chain for chain, _ in all_positions)
-        chain_here = resolve_default_chain(default_chain, positions['pdb_file'], has_chainless)
+        try:
+            chain_here = resolve_default_chain(default_chain, positions['pdb_file'], has_chainless)
+        except UnreadableStructure as exc:
+            result[design_id] = {"error": str(exc)}
+            continue
 
         # Build fixed positions option for this design
         fixed_option = ""
