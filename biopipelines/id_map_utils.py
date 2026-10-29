@@ -61,7 +61,6 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 try:
     from .id_patterns import SEGMENT_REGEX, SUFFIX_DELIMITER
 except ImportError:
-    import os
     import sys
     sys.path.append(os.path.dirname(__file__))
     from id_patterns import SEGMENT_REGEX, SUFFIX_DELIMITER
