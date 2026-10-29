@@ -39,7 +39,7 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "2.10"
+    TOOL_VERSION = "2.11"
     # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Boltz2Env"
@@ -603,7 +603,7 @@ fi
             **kwargs: Additional parameters
 
         Output:
-            Streams: structures (.pdb/.mmcif), pae (.npz), sequences (.csv), compounds (.csv), msas (.csv/.a3m)
+            Streams: structures (.pdb/.cif), pae (.npz), sequences (.csv), compounds (.csv), msas (.csv/.a3m)
                 pae: one <id>.npz per structure id, the full tokens x tokens PAE matrix under the key "pae"
             Tables:
                 structures: id | file
@@ -1158,7 +1158,7 @@ python {self.boltz_compounds_py} \\
             ids=structure_ids,
             files=structure_files,
             map_table=self.structures_map_csv,
-            format=self.output_format
+            format="pdb" if self.output_format == "pdb" else "cif"
         )
 
         # One full PAE matrix per structure, so the ids mirror the structures stream exactly.

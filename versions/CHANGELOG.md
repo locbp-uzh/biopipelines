@@ -41,6 +41,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Boltz2** 2.10 → 2.11. With `output_format="mmcif"` the `structures` stream was declared with format `mmcif` although its files are `.cif`; the structure renderer and the tools that check the format (IPSAE accepts `pdb` and `cif`) know only `cif`, so the step page lost its structure viewer and IPSAE refused the stream. It is declared as `cif` now.
+
 - **LigandMPNN** 3.2 → 3.3. Documentation only: `sampling_probs` in the `save_stats` file has shape [B, L, 20] and `log_probs` [B, L, 21], not 21 for both, and `ligand` is documented as required, which `validate_params` already enforced.
 
 - **RFD4Proteina** 1.1 → 1.2. One input the contig did not fit (a residue range its chain lacks) stopped `rfd4-generate` at that example and lost every design after it, with the same generic cause recorded for all of them. Each prepared input is now built once through upstream's own `build_annotated_atom_array_from_condition_spec` before the run, so that input alone is a failure row carrying upstream's message and the others are designed. The docstring also says which chain id a designed segment receives.

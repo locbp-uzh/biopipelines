@@ -30,7 +30,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 18 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 19 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
 | 20 | AlphaFold                 | Structure Prediction & Docking | 1.13 | `biopipelines/alphafold.py` |
-| 21 | Boltz2 | Structure Prediction & Docking | 2.10 | `biopipelines/boltz2.py` |
+| 21 | Boltz2 | Structure Prediction & Docking | 2.11 | `biopipelines/boltz2.py` |
 | 22 | DiffDock | Structure Prediction & Docking | 2.1 | `biopipelines/diffdock.py` |
 | 23 | DynamicBind | Structure Prediction & Docking | 2.2 | `biopipelines/dynamicbind.py` |
 | 24 | ESMFold | Structure Prediction & Docking | 2.1 | `biopipelines/esmfold.py` |

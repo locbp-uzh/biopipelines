@@ -257,8 +257,12 @@ Boltz2:
   - pipe_scripts/pipe_boltz_results.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.10"
+  current: "2.11"
   history:
+  - version: '2.11'
+    date: '2026-10-28'
+    note: >-
+      With `output_format="mmcif"` the `structures` stream was declared with format `mmcif` while its files are `.cif`. The structure renderer and the tools that check the stream format (IPSAE accepts `pdb` and `cif`) know only `cif`, so the step page silently dropped its structure viewer and IPSAE refused the stream at configuration. The stream is declared as `cif` now; the files and everything else are unchanged.
   - version: '2.10'
     date: '2026-10-27'
     note: >-

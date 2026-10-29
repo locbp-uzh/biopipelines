@@ -306,6 +306,13 @@ class TestBoltz2Wrapper:
         assert pae.files == [os.path.join(tool.output_folder, "pae", "<id>.npz")]
         assert pae.map_table == os.path.join(tool.output_folder, "pae", "pae_map.csv")
 
+    def test_mmcif_output_is_declared_as_cif_so_the_viewer_accepts_it(self, local_config, isolated_cwd, new_pipeline):
+        """The renderer and the other consumers know `cif`; `mmcif` made the step page silently drop its structures."""
+        tool, _ = self._boltz(new_pipeline, output_format="mmcif")
+        structures = tool.get_output_files()["structures"]
+        assert structures.format == "cif"
+        assert structures.files == [os.path.join(tool.output_folder, "structures", "<id>.cif")]
+
     @pytest.mark.parametrize("samples", [None, 1, 3])
     def test_every_diffusion_sample_has_a_matrix_when_top_only_is_off(
             self, local_config, isolated_cwd, new_pipeline, samples):
