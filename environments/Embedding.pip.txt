@@ -1,0 +1,15 @@
+# Embedding pip dependencies. The torch and torch-scatter pair is pinned because the PyG extension wheel is built for one exact torch (the same pair the LASErMPNN and HBDesigner envs use); everything else is unpinned.
+--extra-index-url https://download.pytorch.org/whl/cu128
+--find-links https://data.pyg.org/whl/torch-2.8.0+cu128.html
+torch==2.8.0+cu128
+torch-scatter==2.1.2+pt28cu128
+torch-geometric
+
+# Progres family: `progres` brings biopython, mmtf-python, einops and pydantic; scipy is imported by its bundled chainsaw module but not declared by it. FAISS (database search) and STRIDE (domain splitting) are not used here.
+progres
+scipy
+numpy
+
+# BioPipelines interop (pipe script reads/writes CSVs, DataStream JSON and the config yaml)
+pandas
+pyyaml

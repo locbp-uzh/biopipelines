@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `node_embeddings` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-residue embedding of each id, one `.npy` of shape (residues, dimension), emitted by `Embedding`.
+
 - `IPSAE` 1.1 → 1.2 - a single-chain structure is reported as having fewer than two chains, not as lacking `binder_chain` (`chains: none`).
 
 - `IPSAE` 1.0 → 1.1 - accepts structure streams advertised as `mmcif` (Boltz2 with `output_format="mmcif"`), which the format check refused.
@@ -40,6 +42,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 - `pae` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-id predicted aligned error matrix a structure predictor can emit for a downstream scorer to read.
 
 ### Tools
+
+- **`Embedding` 1.0 (new)** - a model-agnostic embedder. Every model is one entry of a registry in `biopipelines/embedding.py` (input kind, accepted formats, adapter, weights environment variable, where upstream ships default weights, vector length, per-node module, extra reader arguments); nothing else in the tool names a model. Registered now: `progres` and `cirpin`, the Progres family (C-alpha graph, six EGNN layers, one 128-number L2-normalized vector per structure from the first chain). `weights` is a file path you supply, checked at configuration time and exported as `TRAINED_MODEL_FP`; the step loads it itself with `weights_only=True`, because the `progres` package's own `load_trained_model` takes no path and first downloads its default data. Streams `embeddings` (one `.npy` per id) and, with `node_embeddings=True`, `node_embeddings` (residues x dimension, the per-node decoder output before pooling); with `first` and `second` naming two columns of one pair table, a `similarities` table of cosine similarities (NaN and a `kind="failure"` row for a pair with a member that has no embedding). Own `Embedding` env, no Daint entry. Run on CPU against the real Progres and CIRPIN checkpoints with progres 1.1.0 (a sum-scatter standing in for the uncompiled `torch_scatter`); GPU, the cluster install and real structures are untested.
 
 - **Foldseek** 1.1 → 1.2. A coverage below 1e-4 was written in exponent form, which Foldseek's `-c` rejects; it is written as a plain decimal now.
 

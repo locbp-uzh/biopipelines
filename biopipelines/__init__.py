@@ -68,6 +68,7 @@ from .admet_ai import ADMETAI
 from .aizynthfinder import AiZynthFinder
 from .reinvent4 import REINVENT4
 from .binding_data import BindingData
+from .embedding import Embedding
 from .esm2 import ESM2
 from .esmfold import ESMFold
 from .esmfold2 import ESMFold2
@@ -222,6 +223,7 @@ __all__ = [
     'AiZynthFinder',
     'REINVENT4',
     'BindingData',
+    'Embedding',
     'ESM2',
     'ESMFold',
     'ESMFold2',

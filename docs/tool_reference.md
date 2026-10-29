@@ -87,6 +87,7 @@ Analyze structures, interactions, stability, and fitness.
 - [LigandDdG](tool/analysis.md#ligandddg) — Rosetta protein–ligand binding energy (PyRosetta), hard or soft-repulsive scoring
 - [DSSP](tool/analysis.md#dssp) — Secondary-structure assignment
 - [EnsembleAnalysis](tool/analysis.md#ensembleanalysis) — Per-residue RMSF from any ensemble
+- [Embedding](tool/analysis.md#embedding) — Structure embeddings from a registered model (Progres, CIRPIN) and pairwise cosine similarity
 - [ESM2](tool/analysis.md#esm2) — Pseudo-log-likelihood and mean-pooled embeddings of sequences from ESM-2
 - [StructureCluster](tool/analysis.md#structurecluster) — Cluster designs by fold and rank the families by mean metrics
 - [Foldseek](tool/analysis.md#foldseek) — Structural clustering at TM-score thresholds

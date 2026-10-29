@@ -1093,6 +1093,83 @@ Note that `parse error at line 1: This file does not seem to be an mmCIF file` a
 
 ---
 
+### Embedding
+
+One fixed-length vector per input from a registered embedding model, and the cosine similarity of the pairs you ask for. The tool is model-agnostic: every model is one entry of a registry in `biopipelines/embedding.py`, and today the two entries read structures with the Progres family of networks (Progres, CIRPIN), which embed the C-alpha graph of a protein into 128 numbers so that two structures of the same fold land close together, and CIRPIN's training makes that hold across circular permutations. A model of another input kind, for instance a sequence embedder, is one more registry entry plus an adapter class, not a new tool. It sits in Analysis next to ESM2, whose embeddings it complements, rather than in Sequence Statistics, whose tools work on frequency and correlation tables of mutations.
+
+**Tags**: predict-property, protein, residues
+
+**Environment**: `Embedding` (Python 3.12, `torch` 2.8.0+cu128 with the matching `torch-scatter` wheel pinned as a pair, `torch-geometric`, `progres`, `scipy`; the rest unpinned). It needs no GPU: the network has 12 MB of weights and the default `device="cpu"` is upstream's own. Not configured on Daint: the repository's config marks PyG wheels as unavailable on aarch64, and no run there exists.
+
+**Installation**: `Embedding.install()` builds the env and checks that `torch`, `torch_scatter`, `torch_geometric`, `einops` and `progres.progres` import. It downloads no weights, and importing `progres.progres` downloads none either. `force_reinstall=True` rebuilds the env.
+
+**Parameters**:
+- `inputs`: DataStream | StandardizedOutput (required) - the structures to embed, PDB or mmCIF. From a standardized output the `structures` stream is read (the stream the registry entry names as its `input_kind`). Only the first chain of the first model is read, from the C-alpha atoms of its `ATOM` records; `HETATM` records, further chains and further models are ignored without a warning, so give one chain per id. A structure with fewer than 3 C-alpha atoms fails its id. The reader guesses the format from the extension (`.cif` or `.mmcif` is read as mmCIF, anything else as PDB), so a structure file must carry its real extension.
+- `model`: str (required) - `"progres"` or `"cirpin"`. Required, with no default, because the two share one network and the name is what records which weights you meant.
+- `weights`: str (required) - path to the checkpoint file of that model: a torch file holding a dict whose `model` key is the state dict. It must exist when the pipeline is configured, and a URL or a directory is refused. The step exports it as `TRAINED_MODEL_FP` and prints the first 12 digits of its SHA-256 in the log, so the log names the weights that ran. No default is downloaded. The file is read with `weights_only=True`.
+- `first`, `second`: column references (default `None`) - the two members of each pair to compare, as columns of one table: `first=pairs.tables.data.query, second=pairs.tables.data.target` (or `(table, "column")` tuples). Both or neither, and both from the same table. Ids are compared as text with the ids of `inputs`; a pair is one table row, in the table's order, repeats included. Omit both for no `similarities` table.
+- `node_embeddings`: bool = False - also write the `node_embeddings` stream. For the three registered models it is the output of the per-node decoder (`node_dec`) before the sum over residues, not normalized.
+- `device`: str = `"cpu"` - `"cpu"`, `"cuda"` (fails the step when no GPU is visible rather than falling back) or `"auto"`.
+
+**Registry contract.** The registry is `EMBEDDING_MODELS` in `biopipelines/embedding.py`; nothing else in the wrapper or the pipe script names a model. Each entry is a frozen `EmbeddingModel` declaring:
+
+| Field | Meaning | The three registered entries |
+|---|---|---|
+| `name` | value of `model` | `progres`, `cirpin` |
+| `input_kind` | stream the model reads | `structures` |
+| `formats` | file formats accepted on that stream | `pdb`, `cif`, `mmcif` |
+| `adapter` | class in `pipe_scripts/pipe_embedding.py` (`ADAPTERS`) that builds the model from the weights and embeds one input | `progres_graph` |
+| `weights_env` | environment variable the script sets to the weights path; the adapter reads it | `TRAINED_MODEL_FP` |
+| `upstream_default` | where upstream ships default weights, shown when `weights` is wrong; empty when none is named | Progres: Zenodo download and a copy in the CIRPIN repository; CIRPIN: its repository |
+| `dimension` | length of one embedding vector; another length fails that id | 128 |
+| `node_module` | submodule whose output is the per-node embedding; empty means `node_embeddings=True` is refused | `node_dec` |
+| `extra_args` | keyword arguments the adapter passes to the upstream reader | `fileformat="guess"` |
+
+Adding a model is one `EmbeddingModel` in the registry and, when its network or reader differs, one adapter class (`embed(path) -> (vector, nodes)`) in the pipe script. No adapter exists yet for a model that reads sequences, and none is built until one can be tested.
+
+**How each model is selected.**
+- `progres` and `cirpin` are selected by the weights file alone. They are the same `Model` of the `progres` package: the CIRPIN repository's copy of the Progres checkpoint (`Progres_trained_model.pt`) and its CIRPIN checkpoint (`CIRPIN_model_5k_cp_epoch301.pt`) both hold a dict with the keys `epoch` and `model`, and both load strictly into that `Model`. The Zenodo `trained_model.pt` that the pip package downloads was not fetched, so its identity with the repository's copy is not checked. CIRPIN differs in how it was trained (synthetic circular permutations of the training chains), not in the network or the graph features.
+- The CIRPIN repository also ships a modified copy of `progres.py`, which reads `TRAINED_MODEL_FP` at import, lets `load_trained_model` take a path, skips the data download, and returns per-node embeddings through `embed_nodes`. This tool does not use that file. It uses the pip package's `Model`, `read_coords` and `coords_to_graph` and loads the checkpoint itself, because the pip package's `load_trained_model(device)` takes no path and first downloads its default weights and databases (about 850 MB, per its README), which a compute node without internet cannot do. The step still exports `TRAINED_MODEL_FP`, the variable the modified copy reads, so both agree on the weights.
+
+**Streams**:
+- `embeddings` - `<id>.npy` per input (format `npy`), float32, shape (128,), L2-normalized by the network, so the dot product of two vectors is their cosine.
+- `node_embeddings` - `<id>.npy` per input (format `npy`), float32, shape (residues, dimension). Empty unless `node_embeddings=True`.
+
+**Tables**:
+- `similarities` (absent without `first` and `second`):
+
+  | id | first | second | cosine_similarity |
+  |----|-------|--------|-------------------|
+
+  One row per row of the pair table; `id` is `<first>+<second>`. `cosine_similarity` is NaN when either member has no embedding, and the pair is then a `kind="failure"` row in `missing` under its pair id, with the cause naming the member and whether it is not in the input stream, was dropped upstream, or failed to embed.
+- `missing`: | id | removed_by | kind | cause | - an input that failed to embed (no C-alpha atoms, fewer than 3, a non-finite vector) under its own id, and an uncomparable pair under its pair id; both `kind="failure"`.
+
+**Cosine versus the Progres score.** `cosine_similarity` is the plain cosine in [-1, 1]. Progres's own score is `(1 + cosine) / 2`, running 0 to 1, and its search threshold (0.8 by default) is on that scale; convert with `Panda.calculate({"progres_score": "(1 + cosine_similarity) / 2"})`.
+
+**Example**:
+```python
+from biopipelines.embedding import Embedding
+
+with Pipeline("Project", "FoldSearch", description="CIRPIN embeddings of designs"):
+    Resources(gpu="none", memory="8GB", time="1:00:00")
+    designs = Boltz2(proteins=sequences)
+    pairs = Table("pairs.csv")   # columns: query, target
+    vectors = Embedding(
+        designs, model="cirpin",
+        weights="/data/weights/CIRPIN_model_5k_cp_epoch301.pt",
+        first=pairs.tables.data.query, second=pairs.tables.data.target,
+        node_embeddings=True,
+    )
+    scored = Panda(tables=vectors.tables.similarities,
+                   operations=[Panda.calculate({"progres_score": "(1 + cosine_similarity) / 2"})])
+```
+
+**Verified and not verified.** Run on a Windows CPU with the real `progres` 1.1.0 package (torch 2.11, torch_geometric 2.8.1, einops 0.8.2) and the real Progres and CIRPIN checkpoints from the CIRPIN repository, on synthetic C-alpha traces: both checkpoints load strictly and under `weights_only=True`; each embedding is (128,) with norm 1; the first chain alone is embedded for a two-chain file; the node embeddings are (residues, 128) and `graph_dec(sum of nodes)`, normalized, reproduces the embedding to 1e-7 (so the hooked tensor is the one the network pools); the whole pipe script runs on the real weights, pairs included. On a synthetic helix and the same helix circularly permuted by 15 residues the cosine is 0.994 with CIRPIN and 0.680 with Progres, as the CIRPIN training predicts, but that is one synthetic example, not a benchmark. `torch_scatter` had no wheel on that machine and was replaced by a ten-line sum-scatter, which is what the network uses it for; the compiled `torch_scatter`, a GPU, the cluster, Colab and container installs, and real protein structures have not been run. The embeddings of real structures were not compared against `progres embed` output.
+
+**References**: Progres: Greener & Jamali (2025) Fast protein structure searching using structure graph embeddings. *Bioinformatics Advances* 5, vbaf042. https://github.com/greener-group/progres. CIRPIN: Kolodziej, Abulnaga & Ovchinnikov (2025) CIRPIN: Learning Circular Permutation-Invariant Representations to Uncover Putative Protein Homologs. *bioRxiv* 10.1101/2025.11.18.689110. https://github.com/aidenkoloj/CIRPIN
+
+---
+
 ### ESM2
 
 Pseudo-log-likelihood and mean-pooled embeddings of protein sequences from the ESM-2 language model. It runs through Hugging Face `transformers` on the released `facebook/esm2_t*_UR50D` checkpoints (MIT license). Per sequence the tool writes how probable the model finds it (`pll`, `pll_per_residue`) and a mean-pooled embedding vector, so a pipeline can rank designs by naturalness or feed the vectors to its own downstream analysis. VespaG and PLM_Sol already use ESM-2 and ProtT5 internally but expose neither; this tool exposes the model itself. It sits with them in Analysis rather than in Sequence Statistics, whose tools work on frequency and correlation tables of mutations, not on sequences.

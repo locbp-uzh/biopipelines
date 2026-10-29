@@ -129,6 +129,7 @@ environments:
   DNAEncoder: "biopipelines"
   DSSP: "dssp"
   DynamicBind: "dynamicbind"
+  Embedding: "Embedding"
   ESM2: "esm2"
   ESMFold: "esmfold"
   ESMFold2: "esmfold2"

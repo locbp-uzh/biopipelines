@@ -1,0 +1,7 @@
+# Embedding - shared by every variant. Python + pip only; torch, the PyG wheels and progres come from Embedding.pip.txt.
+name: Embedding
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
