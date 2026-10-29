@@ -30,6 +30,32 @@ from biopipelines.id_map_utils import DEFAULT_ID_MAP, get_mapped_ids, map_table_
 PANDA_SOURCE = "bp_panda_source"
 
 
+def read_table_csv(path: str) -> pd.DataFrame:
+    """Read a table with ids kept as text and blank cells in numeric or boolean columns read as missing.
+
+    ``keep_default_na=False`` keeps an id such as "NA" a string, but it also leaves every blank cell as text and so turns the whole column into text. A column whose non-blank cells are all numbers or all True/False gets its type back, with the blanks missing.
+    """
+    df = pd.read_csv(path, keep_default_na=False, na_values=['NA', 'N/A', '#N/A'])
+    for col in df.columns:
+        if col == 'id' or not (pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col])):
+            continue
+        blank = df[col] == ''
+        if not blank.any() or blank.all():
+            continue
+        filled = df.loc[~blank, col]
+        if set(filled.unique()) <= {'True', 'False'}:
+            df[col] = df[col].map({'True': True, 'False': False})
+            continue
+        try:
+            numbers = pd.to_numeric(filled)
+        except (ValueError, TypeError):
+            continue
+        column = pd.Series(np.nan, index=df.index, dtype='float64')
+        column[~blank] = numbers
+        df[col] = column.astype('Int64') if pd.api.types.is_integer_dtype(numbers) else column
+    return df
+
+
 def validate_expression(expr: str) -> None:
     """
     Validate that an expression is safe for pandas eval/query.
@@ -1235,7 +1261,7 @@ def filter_and_copy_pool_tables(
                 continue
 
             # Load the pool table
-            pool_df = pd.read_csv(table_path, keep_default_na=False, na_values=['NA', 'N/A', '#N/A'])
+            pool_df = read_table_csv(table_path)
 
             if 'id' not in pool_df.columns:
                 print(f"  Warning: Table {table_name} has no 'id' column, skipping")
@@ -1358,7 +1384,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
             raise FileNotFoundError(f"Input file not found: {csv_path}")
 
         print(f"Loading: {csv_path}")
-        df = pd.read_csv(csv_path, keep_default_na=False, na_values=['NA', 'N/A', '#N/A'])
+        df = read_table_csv(csv_path)
         print(f"  Shape: {df.shape}")
         print(f"  Columns: {list(df.columns)}")
         dataframes.append(df)

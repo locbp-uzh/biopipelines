@@ -91,7 +91,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 79 | MutationProfiler | Sequence Statistics            | 2.0 | `biopipelines/mutation_profiler.py` |
 | 80 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
 | 81 | ExtractMetrics            | Data Management                | 1.1 | `biopipelines/extract_metrics.py` |
-| 82 | Panda                     | Data Management                | 1.5 | `biopipelines/panda.py` |
+| 82 | Panda                     | Data Management                | 1.6 | `biopipelines/panda.py` |
 | 83 | Pool                      | Data Management                | 1.3 | `biopipelines/pool.py` |
 | 84 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
 | 85 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |

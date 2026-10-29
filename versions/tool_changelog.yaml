@@ -1360,8 +1360,12 @@ Panda:
   files:
   - biopipelines/panda.py
   - pipe_scripts/pipe_panda.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-28'
+    note: >-
+      A numeric or boolean column with a blank cell stays numeric or boolean. Panda reads its input tables with `keep_default_na=False` so that an id such as "nan" stays text, which also left every blank cell as text and turned the whole column into text. A result table keeps one row for an id that failed and writes its NaN as a blank, so any table with one failed id was affected: `Panda.filter("score > 0.5")` raised TypeError, `passed == True` kept no row and said nothing (the documented SequenceIdentityGate example), `cluster_tm50 == 1` kept no row, and `sort` ordered "10.5" before "9.5". The pipe script now restores the type of a column whose non-blank cells are all numbers (integers stay integers) or all True/False, with the blanks missing.
   - version: '1.5'
     date: '2026-09-22'
     note: >-
