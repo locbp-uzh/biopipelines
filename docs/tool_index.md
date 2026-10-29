@@ -29,18 +29,18 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 17 | ProteinMPNN | Sequence Design                | 2.10 | `biopipelines/protein_mpnn.py` |
 | 18 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 19 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
-| 20 | AlphaFold                 | Structure Prediction & Docking | 1.13 | `biopipelines/alphafold.py` |
+| 20 | AlphaFold                 | Structure Prediction & Docking | 1.14 | `biopipelines/alphafold.py` |
 | 21 | Boltz2 | Structure Prediction & Docking | 2.11 | `biopipelines/boltz2.py` |
 | 22 | DiffDock | Structure Prediction & Docking | 2.1 | `biopipelines/diffdock.py` |
 | 23 | DynamicBind | Structure Prediction & Docking | 2.2 | `biopipelines/dynamicbind.py` |
 | 24 | ESMFold | Structure Prediction & Docking | 2.1 | `biopipelines/esmfold.py` |
-| 25 | ESMFold2 | Structure Prediction & Docking | 2.8 | `biopipelines/esmfold2.py` |
+| 25 | ESMFold2 | Structure Prediction & Docking | 2.9 | `biopipelines/esmfold2.py` |
 | 26 | Gnina | Structure Prediction & Docking | 2.2 | `biopipelines/gnina.py` |
 | 27 | Vina | Structure Prediction & Docking | 2.2 | `biopipelines/gnina.py` |
 | 28 | NeuralPLexer | Structure Prediction & Docking | 2.1 | `biopipelines/neuralplexer.py` |
-| 29 | OpenFold3 | Structure Prediction & Docking | 1.5 | `biopipelines/openfold3.py` |
+| 29 | OpenFold3 | Structure Prediction & Docking | 1.6 | `biopipelines/openfold3.py` |
 | 30 | PLACER | Structure Prediction & Docking | 2.1 | `biopipelines/placer.py` |
-| 31 | Protenix | Structure Prediction & Docking | 1.4 | `biopipelines/protenix.py` |
+| 31 | Protenix | Structure Prediction & Docking | 1.5 | `biopipelines/protenix.py` |
 | 32 | ADMETAI | Analysis                       | 2.0 | `biopipelines/admet_ai.py` |
 | 33 | AF2BIND | Analysis                       | 2.0 | `biopipelines/af2bind.py` |
 | 34 | Aggrescan3D | Analysis                       | 2.2 | `biopipelines/aggrescan3d.py` |
@@ -112,7 +112,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 100 | Sequence                  | Inputs & I/O                   | 1.1 | `biopipelines/sequence.py` |
 | 101 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |
 | 102 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
-| 103 | RF3 | Structure Prediction & Docking | 1.1 | `biopipelines/rf3.py` |
+| 103 | RF3 | Structure Prediction & Docking | 1.2 | `biopipelines/rf3.py` |
 | 104 | FoundryMPNN | Sequence Design                | 1.1 | `biopipelines/foundry_mpnn.py` |
 | 105 | Foldcomp | Inputs & I/O                   | 1.1 | `biopipelines/foldcomp.py` |
 | 106 | Embedding                 | Analysis                       | 1.1 | `biopipelines/embedding.py` |

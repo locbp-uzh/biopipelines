@@ -37,11 +37,11 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, 
         pae_folder: If set, each best model's scores JSON (which carries the full `pae` matrix) is copied here as <id>.json
         pae_map: Path of the pae stream map, listing the ids copied to pae_folder
     """
-    confidence_data = []
+    confidence_by_id = {}
     pae_files = {}
 
-    # Look for unrelaxed or relaxed rank_001 PDB files (best models)
-    for pdb_file in glob.glob(os.path.join(folding_folder, "*_rank_001_*.pdb")):
+    # Look for unrelaxed or relaxed rank_001 PDB files (best models); with relaxation both exist and share one scores JSON
+    for pdb_file in sorted(glob.glob(os.path.join(folding_folder, "*_rank_001_*.pdb"))):
         # Extract base name and corresponding JSON file
         # ColabFold naming:
         # PDB:  <id>_unrelaxed_rank_001_alphafold2_ptm_model_2_seed_000.pdb
@@ -95,9 +95,10 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, 
             'max_pae': round(max_pae, 2) if max_pae is not None else None,
             'ptm': round(ptm, 4) if ptm is not None else None
         }
-        confidence_data.append(confidence_row)
+        confidence_by_id[seq_id] = confidence_row
 
     # Save to CSV
+    confidence_data = list(confidence_by_id.values())
     if confidence_data:
         df = pd.DataFrame(confidence_data)
         df.to_csv(confidence_csv, index=False)

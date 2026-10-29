@@ -58,6 +58,7 @@ def main():
     p.add_argument("--pae-map", default=None)
     p.add_argument("--ligands-table", default=None)
     p.add_argument("--compounds-map", default=None)
+    p.add_argument("--local-missing-csv", default=None)
     args = p.parse_args()
 
     with open(args.combinatorics_config) as f:
@@ -108,6 +109,20 @@ def main():
     if not struct_rows:
         print("ERROR: no predicted structures found", file=sys.stderr)
         sys.exit(1)
+
+    # A complex that raised keeps a row of its id in the result table and a failure row in the local missing file.
+    failures_path = os.path.join(args.predictions_dir, "ESMFold2_failures.json")
+    failures = {}
+    if os.path.exists(failures_path):
+        with open(failures_path) as f:
+            failures = json.load(f)
+    for cid in failures:
+        conf_rows.append({"id": cid})
+    if args.local_missing_csv:
+        os.makedirs(os.path.dirname(args.local_missing_csv), exist_ok=True)
+        pd.DataFrame([{"id": cid, "removed_by": "ESMFold2", "kind": "failure", "cause": cause}
+                      for cid, cause in failures.items()],
+                     columns=["id", "removed_by", "kind", "cause"]).to_csv(args.local_missing_csv, index=False)
 
     os.makedirs(os.path.dirname(args.structures_map), exist_ok=True)
     pd.DataFrame(struct_rows).to_csv(args.structures_map, index=False)

@@ -82,7 +82,7 @@ class OpenFold3(BaseConfig):
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     ENV_NAME = "openfold3"
 
     # Upstream spells its flags with underscores. The auto-generated option table in the docs

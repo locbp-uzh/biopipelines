@@ -216,6 +216,14 @@ class TestAlphaFoldScores:
         assert list(pd.read_csv(tmp_path / "pae" / "pae_map.csv")["id"]) == ["c1"]
         assert sorted(os.listdir(tmp_path / "pae")) == ["c1.json", "pae_map.csv"]
 
+    def test_a_relaxed_run_gets_one_confidence_row_per_id(self, tmp_path):
+        """ColabFold writes one scores JSON for the relaxed and the unrelaxed rank_001 model, so both pdb files used to make a row."""
+        _colabfold(tmp_path / "execution", "c1", relaxed=True)
+        _colabfold(tmp_path / "execution", "c1", relaxed=False)
+        _af_confidence(tmp_path)
+        assert list(pd.read_csv(tmp_path / "tables" / "confidence.csv")["id"]) == ["c1"]
+        assert list(pd.read_csv(tmp_path / "pae" / "pae_map.csv")["id"]) == ["c1"]
+
     def test_the_ids_mirror_the_structures_that_get_a_confidence_row(self, tmp_path):
         for prefix in ("c1", "c2"):
             _colabfold(tmp_path / "execution", prefix)

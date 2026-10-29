@@ -191,6 +191,14 @@ class TestTheInputsJson:
         stream.write_text(json.dumps({"map_table": str(table)}))
         assert pipe_rf3_config.load_msa_lookup(str(stream)) == {"p1": f"/x/{name}"}
 
+    def test_rows_named_after_the_alignment_are_found_by_the_protein_id_they_carry(self, tmp_path):
+        """MMseqs2 names its rows `<id>_msa` and keeps the protein id in `sequences.id`; keyed by `id` alone no chain ever found its alignment."""
+        table = tmp_path / "msas.csv"
+        table.write_text("id,sequences.id,file\np1_msa,p1,/x/p1.a3m\n")
+        stream = tmp_path / "msas.json"
+        stream.write_text(json.dumps({"map_table": str(table)}))
+        assert pipe_rf3_config.load_msa_lookup(str(stream))["p1"] == "/x/p1.a3m"
+
     def test_an_alignment_upstream_cannot_read_is_named_not_ignored(self, tmp_path):
         table = tmp_path / "msas.csv"
         table.write_text("id,file\np1,/x/p1.sto\n")

@@ -8,6 +8,8 @@
 
 Predicts protein structures from amino acid sequences using AlphaFold2. Generates high-confidence 3D models with optional relaxation. Supports single-sequence prediction mode for fast predictions without MSA generation.
 
+Single-sequence mode has no parameter of its own: forward ColabFold's flag, which a Python keyword cannot spell because it holds a dash, as `AlphaFold(proteins=seqs, **{"msa-mode": "single_sequence"})`. Written `msa_mode=` it reaches `colabfold_batch` with an underscore, which that parser rejects (`unrecognized arguments: --msa_mode`).
+
 By default each input sequence is folded as a separate monomer. Wrap `proteins` in `Bundle(...)` to fold the bundled sequences together as one multi-chain complex: ColabFold receives a single colon-joined query (`SEQ_A:SEQ_B`), auto-selects the multimer model, and runs its default paired+unpaired MSA pipeline. `Bundle(static, Each(...))` holds `static` fixed and folds it against each iterated sequence (one complex per element). A bundled complex's output id is the chain ids joined with `+` (e.g. `p1+p2`). Pre-computed `msas=` cannot be combined with a `Bundle` (a bundled complex always uses ColabFold's own MSA pipeline).
 
 **Tags**: predict-structure, protein, complex
@@ -424,7 +426,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 - `structures`: | id | file |
 - `confidence`: | id | file | plddt | ptm | iptm | max_pae | — `max_pae` is present only with `include_pae=True`.
 - `compounds` (only when ligands are folded): | id | format | code | smiles | ccd |
-- `missing` (only when an input axis carries an upstream manifest): | id | removed_by | kind | cause |
+- `missing`: | id | removed_by | kind | cause | — always declared. A complex that raises while folding (a modification past the end of a chain, an unknown atom name, an out-of-memory error) keeps its id as a row of `confidence` with every score blank and gets a `failure` row here carrying the first line of the error; the other ids are still folded. Ids dropped upstream are carried over.
 
 `structures` gains one `<axis>.id` provenance column per input axis at runtime, appended after the declared columns (`pipe_esmfold2_postprocessing.py:79`). `confidence` does not — it is written without them.
 

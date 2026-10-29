@@ -88,7 +88,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.

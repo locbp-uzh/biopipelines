@@ -125,8 +125,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.13"
+  current: "1.14"
   history:
+  - version: '1.14'
+    date: '2026-10-29'
+    note: >-
+      With `num_relax` above 0 the confidence table had two rows for each id: ColabFold writes a relaxed and an unrelaxed rank_001 model that share one scores JSON, and the extraction script made a row for each pdb file. It keeps one row per id now (the structure file was already the relaxed one). The documentation also says how to reach single-sequence mode, which has no parameter of its own: forward ColabFold's dashed flag as `**{"msa-mode": "single_sequence"}`, since `msa_mode=` reaches colabfold_batch with an underscore and is rejected.
   - version: '1.13'
     date: '2026-10-27'
     note: >-
@@ -684,8 +688,12 @@ ESMFold2:
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.8"
+  current: "2.9"
   history:
+  - version: '2.9'
+    date: '2026-10-29'
+    note: >-
+      A complex that raised while folding (a modification position past the end of a shorter chain, an unknown atom name, an out-of-memory error) left no trace: the inference script logged a warning, the confidence table had no row for the id, and no `missing` table was declared unless an input axis carried an upstream manifest, so the step ended FAILED with nothing naming the id or the reason. The inference script now writes the failures with the first line of each error, the post-processing step keeps a blank row of the id in `confidence` and writes a `failure` row to the local missing file, and `missing` is always declared. A step in which every complex fails still stops at the inference script with a non-zero status.
   - version: '2.8'
     date: '2026-10-29'
     note: >-
@@ -1464,8 +1472,12 @@ OpenFold3:
   - pipe_scripts/pipe_openfold3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-29'
+    note: >-
+      The `msas` stream was looked up by the `id` of its table rows, but MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`, so an alignment from MMseqs2 matched no chain: OpenFold3 logged a dummy single-sequence MSA for every chain and folded without it, a barnase-barstar complex at ipTM 0.14. The lookup is keyed by `id` and by `sequences.id`, so both naming schemes find their alignment. A supplied `.a3m` or `.sto` then failed with `IndexError: list index out of range` inside upstream's MSA parser, which reads an alignment file only when its stem is one of the databases it names (`colabfold_main`, `uniref90_hits`, ...) and skips every other. The config script now copies each such alignment to `_configuration/msas/<id>/colabfold_main.<ext>` and names that copy in the query; a `.npz` is passed through unchanged.
   - version: '1.5'
     date: '2026-10-27'
     note: >-
@@ -2472,8 +2484,12 @@ RF3:
   - pipe_scripts/pipe_rf3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-29'
+    note: >-
+      The `msas` stream was looked up by the `id` of its table rows, but MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`, so an alignment from MMseqs2 matched no chain: RF3 gave no chain an `msa_path` and folded single-sequence, where the default early-stopping threshold abandons it. The lookup is keyed by `id` and by `sequences.id`, so both naming schemes find their alignment.
   - version: '1.1'
     date: '2026-10-29'
     note: >-
@@ -2522,8 +2538,12 @@ Protenix:
   - pipe_scripts/pipe_protenix_weights.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-29'
+    note: >-
+      The `msas` stream was looked up by the `id` of its table rows, but MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`, so an alignment from MMseqs2 matched no chain: Protenix skipped every query with `no alignment for this protein chain in the msas stream`. The lookup is keyed by `id` and by `sequences.id`, so both naming schemes find their alignment.
   - version: '1.4'
     date: '2026-10-29'
     note: >-

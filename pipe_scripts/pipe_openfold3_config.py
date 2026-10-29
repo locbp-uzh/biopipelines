@@ -15,6 +15,8 @@ campaign costs one model load rather than one per complex.
 import argparse
 import json
 import os
+import re
+import shutil
 import sys
 from typing import Dict, List, Optional
 
@@ -111,7 +113,10 @@ def build_chain(entity_type: str, record: Dict, label: str, msa_lookup: Dict[str
 
 
 def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
-    """{id: alignment path} from the msas stream, when one was passed."""
+    """{protein id: alignment path} from the msas stream, when one was passed.
+
+    A row is keyed by its `id` and by the `sequences.id` it carries: MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`.
+    """
     if not msas_json:
         return {}
     with open(msas_json) as handle:
@@ -119,12 +124,15 @@ def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
     table = stream.get("map_table")
     if not table or not os.path.exists(table):
         return {}
-    frame = pd.read_csv(table, dtype={"id": str})
+    frame = pd.read_csv(table, dtype={"id": str, "sequences.id": str})
     column = next((c for c in ("file", "path") if c in frame.columns), None)
     if column is None:
         return {}
-    lookup = {str(row["id"]): str(row[column]) for _, row in frame.iterrows()
-              if isinstance(row.get(column), str)}
+    lookup = {}
+    for key in ("id", "sequences.id"):
+        if key in frame.columns:
+            lookup.update({str(row[key]): str(row[column]) for _, row in frame.iterrows()
+                           if isinstance(row.get(column), str) and not pd.isna(row[key])})
     unsupported = sorted({os.path.splitext(p)[1].lower() for p in lookup.values()}
                          - {".a3m", ".sto", ".npz"})
     if unsupported:
@@ -148,6 +156,25 @@ def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
             "static_first": static_first,
         }
     return elements
+
+
+def stage_alignments(lookup: Dict[str, str], directory: str) -> Dict[str, str]:
+    """Copy each .a3m or .sto alignment to <directory>/<id>/colabfold_main.<ext>, the name upstream parses.
+
+    Upstream reads an alignment file only when its stem is one of the databases it names (`colabfold_main`, `uniref90_hits`, ...) and skips any other, which leaves the chain with no alignment and raises an IndexError.
+    A `.npz` is already parsed and is passed through unchanged.
+    """
+    staged = {}
+    for key, path in lookup.items():
+        extension = os.path.splitext(path)[1].lower()
+        if extension not in (".a3m", ".sto"):
+            staged[key] = path
+            continue
+        folder = os.path.join(directory, re.sub(r"[^A-Za-z0-9_.+-]", "_", key))
+        os.makedirs(folder, exist_ok=True)
+        staged[key] = os.path.join(folder, f"colabfold_main{extension}")
+        shutil.copyfile(path, staged[key])
+    return staged
 
 
 def build_queries(elements: Dict[str, Dict], msa_lookup: Dict[str, str],
@@ -238,7 +265,8 @@ def main():
     args = parser.parse_args()
 
     config = CombinatoricsConfig.load(args.combinatorics_config)
-    msa_lookup = load_msa_lookup(args.msas_json)
+    msa_lookup = stage_alignments(load_msa_lookup(args.msas_json),
+                                  os.path.join(os.path.dirname(os.path.abspath(args.queries_json)), "msas"))
     template_chains = args.template_chains.split(",") if args.template_chains else None
 
     payload = build_queries(axis_elements(config), msa_lookup, args.template, template_chains)

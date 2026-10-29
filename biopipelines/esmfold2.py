@@ -206,6 +206,10 @@ class ESMFold2(BaseConfig):
             structures: id | file
             confidence: id | file | plddt | ptm | iptm [| max_pae]
             compounds:  ligand chemistry passthrough (code = the code ESMFold2 used)
+            missing:    id | removed_by | kind | cause
+                        A complex that raises while folding (a modification past the end of a chain, an unknown atom
+                        name, an out-of-memory error) keeps its id as a row of `confidence` with every score blank and
+                        gets a `failure` row here carrying the first line of the error. The other ids are still folded.
 
     Usage::
 
@@ -221,7 +225,7 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.8"
+    TOOL_VERSION = "2.9"
     ENV_NAME = "esmfold2"
 
     @classmethod
@@ -282,6 +286,7 @@ fi
     compounds_map_csv         = Path(lambda self: self.stream_map_path("compounds"))
     confidence_csv            = Path(lambda self: self.table_path("confidence"))
     missing_csv               = Path(lambda self: self.table_path("missing"))
+    local_missing_csv         = Path(lambda self: self.execution_path("local_missing.csv"))
 
     inference_py = Path(lambda self: self.pipe_script_path("pipe_esmfold2_inference.py"))
     postprocess_py = Path(lambda self: self.pipe_script_path("pipe_esmfold2_postprocessing.py"))
@@ -552,7 +557,8 @@ fi
     --combinatorics-config "{self.combinatorics_config_file}" \\
     --predictions-dir "{self.predictions_folder}" \\
     --structures-map "{self.structures_map_csv}" \\
-    --confidence-csv "{self.confidence_csv}"{pae_post_flag}{compounds_flag}
+    --confidence-csv "{self.confidence_csv}" \\
+    --local-missing-csv "{self.local_missing_csv}"{pae_post_flag}{compounds_flag}
 
 if [ $? -eq 0 ]; then
     echo "ESMFold2 post-processing completed successfully"
@@ -562,9 +568,7 @@ else
 fi
 
 """
-        # Condition mirrors get_output_files() so declared <=> produced.
-        if self._collect_upstream_missing_paths(*self._missing_input_sources()):
-            script += self._generate_missing_table_propagation()
+        script += self._generate_missing_table_propagation()
         script += self.generate_completion_check_footer()
         return script
 
@@ -636,8 +640,7 @@ fi
                 description="Ligand compounds with the residue code ESMFold2 used",
             )
 
-        if self._collect_upstream_missing_paths(*self._missing_input_sources()):
-            tables["missing"] = self.missing_table_info(self.missing_csv)
+        tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
             "structures": structures,
@@ -656,5 +659,7 @@ fi
 
     def _generate_missing_table_propagation(self) -> str:
         return self.generate_missing_propagation(
-            *self._missing_input_sources(), missing_csv=self.missing_csv
+            *self._missing_input_sources(),
+            local_missing=self.local_missing_csv,
+            missing_csv=self.missing_csv,
         )

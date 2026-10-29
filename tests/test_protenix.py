@@ -371,6 +371,14 @@ class TestAlignments:
         stream.write_text(json.dumps({"map_table": str(table)}))
         assert config_script.load_msa_lookup(str(stream)) == {"p1": os.path.abspath("rel/p1.a3m")}
 
+    def test_rows_named_after_the_alignment_are_found_by_the_protein_id_they_carry(self, tmp_path):
+        """MMseqs2 names its rows `<id>_msa` and keeps the protein id in `sequences.id`; keyed by `id` alone no chain ever found its alignment."""
+        table = tmp_path / "msas_map.csv"
+        pd.DataFrame([{"id": "p1_msa", "sequences.id": "p1", "file": "rel/p1.a3m"}]).to_csv(table, index=False)
+        stream = tmp_path / "msas.json"
+        stream.write_text(json.dumps({"map_table": str(table)}))
+        assert config_script.load_msa_lookup(str(stream))["p1"] == os.path.abspath("rel/p1.a3m")
+
 
 class TestCovalentBondsInTheQuery:
 

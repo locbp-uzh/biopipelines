@@ -486,7 +486,7 @@ def main():
     print(f"Assembled {len(complexes)} complex(es)", flush=True)
 
     scores = []
-    failed = []
+    failed = {}
     for cid, chains in complexes:
         try:
             spi = to_structure_input(chains, input_builder, MSA, args.msa_max_depth, constraints)
@@ -574,7 +574,7 @@ def main():
         except Exception as e:
             print(f"WARNING: {cid} failed: {e}", file=sys.stderr)
             traceback.print_exc()
-            failed.append(cid)
+            failed[cid] = str(e).splitlines()[0] if str(e) else type(e).__name__
         finally:
             # RELEASE THE PER-DESIGN GPU TENSORS BEFORE THE NEXT COMPLEX.
             #
@@ -608,9 +608,11 @@ def main():
 
     with open(os.path.join(args.output_dir, "ESMFold2_scores.json"), "w") as f:
         json.dump(scores, f)
+    with open(os.path.join(args.output_dir, "ESMFold2_failures.json"), "w") as f:
+        json.dump(failed, f)
 
     if failed:
-        print(f"Failed {len(failed)}/{len(complexes)}: {failed}", file=sys.stderr)
+        print(f"Failed {len(failed)}/{len(complexes)}: {sorted(failed)}", file=sys.stderr)
     if not scores:
         print("ERROR: no complexes folded successfully", file=sys.stderr)
         sys.exit(1)

@@ -151,6 +151,35 @@ class TestTheQueryJson:
         assert chain_ids(1, 25) == ["Z"]
         assert chain_ids(1, 26) == ["AA"]
 
+    def test_rows_named_after_the_alignment_are_found_by_the_protein_id_they_carry(self, tmp_path):
+        """MMseqs2 names its rows `<id>_msa` and keeps the protein id in `sequences.id`; keyed by `id` alone every chain got a dummy single-sequence MSA without a word."""
+        table = tmp_path / "msas_map.csv"
+        table.write_text("id,sequences.id,file\np1_msa,p1,/x/p1.a3m\n")
+        stream = tmp_path / "msas.json"
+        stream.write_text(json.dumps({"map_table": str(table)}))
+        assert pipe_openfold3_config.load_msa_lookup(str(stream))["p1"] == "/x/p1.a3m"
+
+    def test_a_supplied_a3m_is_staged_under_a_name_upstream_reads(self, tmp_path):
+        """Upstream parses an a3m only when its stem is a database it names (colabfold_main, uniref90_hits, ...): `p1.a3m` was skipped and the chain failed with an IndexError."""
+        source = tmp_path / "p1.a3m"
+        source.write_text(">p1\nMKV\n")
+        staged = pipe_openfold3_config.stage_alignments({"p1": str(source)}, str(tmp_path / "msas"))
+        assert os.path.basename(staged["p1"]) == "colabfold_main.a3m"
+        assert open(staged["p1"]).read() == ">p1\nMKV\n"
+
+    def test_each_chain_gets_a_folder_of_its_own(self, tmp_path):
+        for name in ("p1", "p2"):
+            (tmp_path / f"{name}.a3m").write_text(f">{name}\nMKV\n")
+        staged = pipe_openfold3_config.stage_alignments(
+            {name: str(tmp_path / f"{name}.a3m") for name in ("p1", "p2")}, str(tmp_path / "msas"))
+        assert staged["p1"] != staged["p2"]
+        assert open(staged["p2"]).read() == ">p2\nMKV\n"
+
+    def test_a_preparsed_npz_is_passed_through_unchanged(self, tmp_path):
+        source = tmp_path / "p1.npz"
+        source.write_bytes(b"x")
+        assert pipe_openfold3_config.stage_alignments({"p1": str(source)}, str(tmp_path / "msas")) == {"p1": str(source)}
+
     def test_an_msa_the_model_cannot_read_is_named_not_ignored(self):
         """Our msas streams are often CSV (Boltz's format); OpenFold3 reads a3m/sto/npz. Passing
         one through would fold every chain single-sequence and report nothing amiss."""

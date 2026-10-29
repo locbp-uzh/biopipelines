@@ -80,6 +80,8 @@ def fold_with(monkeypatch):
 
     class FakeBuilder:
         def fold(self, model, spi, **kwargs):
+            if isinstance(queued["results"], Exception):
+                raise queued["results"]
             return queued["results"]
 
     builder = types.SimpleNamespace(ProteinInput=_Stub, DNAInput=_Stub, RNAInput=_Stub,
@@ -215,7 +217,7 @@ class TestTheInferenceLoop:
         """The default run must be byte-for-byte what it was before the stream existed."""
         fold_with([_FakeResult(60.0, _matrix(14)), _FakeResult(80.0, _matrix(15))])
         out = _run_inference(inference, tmp_path, monkeypatch, "--include-pae")
-        assert sorted(p.name for p in out.iterdir()) == ["ESMFold2_scores.json", "p1.cif"]
+        assert sorted(p.name for p in out.iterdir()) == ["ESMFold2_failures.json", "ESMFold2_scores.json", "p1.cif"]
         assert "max_pae" in json.loads((out / "ESMFold2_scores.json").read_text())[0]
 
     def test_a_result_without_pae_still_yields_its_structure(
@@ -356,3 +358,63 @@ class TestTheDeclaration:
         assert "max_pae" not in without.tables.confidence.info.columns
         assert with_pae.tables.confidence.info.columns == [
             "id", "file", "plddt", "ptm", "iptm", "max_pae"]
+
+
+# ── a complex that fails to fold ──────────────────────────────────────────────
+
+class TestAComplexThatFailsToFold:
+    """One id that raises must leave its trace: a NaN row in the result table and a `failure` row in `missing`."""
+
+    def test_the_inference_script_records_why_a_complex_failed(
+            self, inference, fold_with, tmp_path, monkeypatch):
+        fold_with(RuntimeError("CUDA out of memory"))
+        with pytest.raises(SystemExit):
+            _run_inference(inference, tmp_path, monkeypatch)
+        failures = json.loads((tmp_path / "structures" / "ESMFold2_failures.json").read_text())
+        assert failures == {"p1": "CUDA out of memory"}
+
+    def _postprocess_with_a_failure(self, tmp_path):
+        predictions = tmp_path / "structures"
+        predictions.mkdir()
+        (predictions / "p1.cif").write_text("data_x\n")
+        (predictions / "ESMFold2_scores.json").write_text(json.dumps(
+            [{"id": "p1", "plddt": 80.0, "ptm": 0.7, "iptm": 0.5}]))
+        (predictions / "ESMFold2_failures.json").write_text(
+            json.dumps({"p2": "position 60 is past the end of chain A"}))
+        config = tmp_path / "comb.json"
+        config.write_text(json.dumps({"predicted_ids": ["p1", "p2"], "provenance": {"proteins": ["a", "b"]}}))
+        done = subprocess.run(
+            [sys.executable, POSTPROCESS, "--combinatorics-config", str(config),
+             "--predictions-dir", str(predictions),
+             "--structures-map", str(tmp_path / "out" / "structures_map.csv"),
+             "--confidence-csv", str(tmp_path / "out" / "confidence.csv"),
+             "--local-missing-csv", str(tmp_path / "exec" / "local_missing.csv")],
+            capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+
+    def test_the_result_table_keeps_a_row_for_it_with_nothing_but_the_id(self, tmp_path):
+        self._postprocess_with_a_failure(tmp_path)
+        table = pd.read_csv(tmp_path / "out" / "confidence.csv")
+        assert table["id"].tolist() == ["p1", "p2"]
+        assert table.loc[1, ["plddt", "ptm", "iptm"]].isna().all()
+
+    def test_the_stream_map_lists_only_what_was_produced(self, tmp_path):
+        self._postprocess_with_a_failure(tmp_path)
+        assert pd.read_csv(tmp_path / "out" / "structures_map.csv")["id"].tolist() == ["p1"]
+
+    def test_the_local_missing_file_names_it_as_a_failure_with_the_reason(self, tmp_path):
+        self._postprocess_with_a_failure(tmp_path)
+        rows = pd.read_csv(tmp_path / "exec" / "local_missing.csv")
+        assert rows.to_dict("records") == [{"id": "p2", "removed_by": "ESMFold2", "kind": "failure",
+                                            "cause": "position 60 is past the end of chain A"}]
+
+    def test_the_local_missing_file_is_written_even_when_nothing_failed(self, tmp_path):
+        done = _postprocess(tmp_path, "--local-missing-csv", str(tmp_path / "exec" / "local_missing.csv"))
+        assert done.returncode == 0, done.stderr
+        assert list(pd.read_csv(tmp_path / "exec" / "local_missing.csv").columns) == [
+            "id", "removed_by", "kind", "cause"]
+
+    def test_the_missing_table_is_always_declared(self, local_config, isolated_cwd, new_pipeline):
+        tool, script = _fold(new_pipeline)
+        assert tool.tables.missing.info.columns == ["id", "removed_by", "kind", "cause"]
+        assert "--local-missing-csv" in script

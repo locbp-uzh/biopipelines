@@ -50,6 +50,10 @@ class AlphaFold(BaseConfig):
     paired+unpaired MSA pipeline. ``Bundle(static, Each(...))`` holds ``static``
     fixed and folds it against each iterated sequence (one complex per element).
 
+    Single-sequence mode has no parameter of its own: forward ColabFold's flag, which a Python
+    keyword cannot spell because it holds a dash: ``AlphaFold(proteins=seqs, **{"msa-mode": "single_sequence"})``.
+    Written ``msa_mode=`` it reaches colabfold_batch with an underscore, which that parser rejects.
+
     Example:
         # Using Sequence tool — two independent monomers
         proteins = Sequence(["MKTVRQ...", "AETGFT..."], ids=["p1", "p2"])
@@ -66,7 +70,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.13"
+    TOOL_VERSION = "1.14"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 

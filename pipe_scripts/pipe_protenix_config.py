@@ -74,7 +74,10 @@ def polymer_sequence(record: Dict, entity_key: str, record_id: str) -> str:
 
 
 def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
-    """{id: absolute alignment path} from the msas stream, when one was passed."""
+    """{protein id: absolute alignment path} from the msas stream, when one was passed.
+
+    A row is keyed by its `id` and by the `sequences.id` it carries: MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`.
+    """
     if not msas_json:
         return {}
     with open(msas_json) as handle:
@@ -82,12 +85,15 @@ def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
     table = stream.get("map_table")
     if not table or not os.path.exists(table):
         return {}
-    frame = pd.read_csv(table, dtype={"id": str})
+    frame = pd.read_csv(table, dtype={"id": str, "sequences.id": str})
     column = next((c for c in ("file", "path") if c in frame.columns), None)
     if column is None:
         return {}
-    lookup = {str(row["id"]): os.path.abspath(str(row[column])) for _, row in frame.iterrows()
-              if isinstance(row.get(column), str)}
+    lookup = {}
+    for key in ("id", "sequences.id"):
+        if key in frame.columns:
+            lookup.update({str(row[key]): os.path.abspath(str(row[column])) for _, row in frame.iterrows()
+                           if isinstance(row.get(column), str) and not pd.isna(row[key])})
     unsupported = sorted({os.path.splitext(p)[1].lower() for p in lookup.values()} - {".a3m"})
     if unsupported:
         raise ValueError(

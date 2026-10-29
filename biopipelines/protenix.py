@@ -98,7 +98,7 @@ class Protenix(BaseConfig):
     """
 
     TOOL_NAME = "Protenix"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     ENV_NAME = "protenix"
 
     PREDICT_COMMAND = "protenix pred"
