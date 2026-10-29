@@ -2464,3 +2464,27 @@ Foldcomp:
     date: '2026-10-29'
     note: >-
       Initial release. Extracts domains of the AlphaFold Database from a local Foldcomp database: takes the entry, start and end columns of a table, decompresses every distinct entry in one `foldcomp decompress --id-list` call, cuts each residue range from the decompressed model, renumbers it from 1 (offset recorded) and writes one PDB per domain with its mean pLDDT. Ranges past the model are clipped and flagged; an entry missing from the database or a range outside the model goes to `missing` as a failure. `install(swissprot_dir=...)` optionally downloads `afdb_swissprot_v4`.
+
+USalign:
+  files:
+  - biopipelines/usalign.py
+  - biopipelines/pair_alignment.py
+  - pipe_scripts/pipe_pair_alignment.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-29'
+    note: >-
+      Initial release. Aligns every pair of a table of structure pairs with US-align in three ways, sequential (`-mm 0`), circularly permuted (`-mm 3`) and non-sequential (`-mm 5`, or `-mm 6` with `non_sequential_variant="sNS"`), and returns one row per pair and mode in an `alignments` table: TM-score normalized by each structure's length, RMSD, aligned length, the two aligned sequences and the superposition as a rotation matrix and translation. The pair table is given as two column references into one table (`structure_1`, `structure_2`); both ids must be in the structures stream, otherwise the pair keeps NaN rows and a `kind="failure"` row per alignment in `missing`. A large table is split across sibling jobs with Panda slices and merged with Pool (recipe in the docs); the framework has no SLURM job arrays. Shares the pair handling (`pair_alignment.py`) and the pipe with TMalign, and the `usalign` bioconda env, which ships TMalign too.
+
+TMalign:
+  files:
+  - biopipelines/tmalign.py
+  - biopipelines/pair_alignment.py
+  - pipe_scripts/pipe_pair_alignment.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-29'
+    note: >-
+      Initial release. Aligns every pair of a table of structure pairs with TM-align, plain and with `-cp`, and returns the same `alignments` table as USalign for the two modes plus a per-pair `delta` table with the TM-score of the permuted alignment minus the sequential one, for each normalization. Runs the `TMalign` binary of the `usalign` bioconda package in the same env as USalign; the separate `tmalign` package claims the same `bin/TMalign` and is not installed.

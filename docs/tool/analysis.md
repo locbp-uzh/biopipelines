@@ -706,6 +706,128 @@ The parameters are recorded in the step's `_configuration/config.yaml` (`evalue`
 
 ---
 
+### USalign
+
+Aligns every pair of a table of structure pairs three ways with US-align: in sequence order, with a circular permutation, and non-sequentially. Each pair gives one row per way, with the TM-score normalized by either structure's length, the RMSD, the aligned length, the residue alignment as two gapped sequences and the superposition as a rotation matrix and a translation. It answers "does this design keep the fold of its parent, and does it keep it only once a circular permutation is allowed?": the sequential alignment of a circular permutant scores low although the fold is the same, while the permuted and non-sequential alignments do not.
+
+**Not Foldseek or StructureCluster.** [Foldseek](#foldseek) and [StructureCluster](#structurecluster) group a whole set into families. USalign scores the pairs you name, however few, and keeps the alignment itself. For the sequential and permuted alignments alone, with the TM-score difference per pair, see [TMalign](#tmalign).
+
+**Tags**: measure, protein
+
+**Environment**: `usalign` (bioconda `usalign`, which ships both `USalign` and `TMalign`; `USalign.install()` builds it from `environments/usalign.yaml` and TMalign runs in the same env). bioconda also builds it for aarch64, so a `config.daint.yaml` entry exists, but the env has not been built on Daint yet.
+
+**Pairs and ids.** The pair table is any table with one row per pair, such as a CSV loaded with `Table`. `structure_1` and `structure_2` name its two columns as references, `pairs.tables.data.<column>` or `(pairs.tables.data, "<column>")`, and must come from the same table. Both ids of a pair must be ids of `structures`. A pair with an id that is not there, or whose structure file an upstream tool removed, keeps its rows with NaN values and one `kind="failure"` row per alignment in `missing`. A pair listed twice is aligned once. `(a, b)` and `(b, a)` are different pairs: structure_1 is the one that is rotated onto structure_2, and the circular permutation is searched in structure_1.
+
+**Alignments.** One row per pair and mode:
+
+| `mode` | US-align flag | What it is |
+|---|---|---|
+| `sequential` | `-mm 0` | The standard alignment: aligned residues keep their order in both structures. |
+| `circular_permutation` | `-mm 3` | Allows a circular permutation of structure_1. When none is found it is the sequential alignment, with identical numbers. |
+| `non_sequential` | `-mm 5` (fNS) or `-mm 6` (sNS) | Pairs residues without regard to sequence order. `fNS` is fully non-sequential; `sNS` is semi-non-sequential and keeps the order within secondary-structure elements. |
+
+Only the first chain of each structure is aligned, which is US-align's default for a pair of monomers. A more elaborate alignment is not a better one: the permuted or non-sequential TM-score can fall slightly below the sequential one.
+
+**Reading the columns.** `tm_score_1` is normalized by `length_1` and `tm_score_2` by `length_2`; US-align recommends the one normalized by the reference structure, `tm_score_2`. `aligned_1` and `aligned_2` are the two aligned sequences, `-` marking a gap. In a permuted alignment a `*` in `aligned_1` marks the circular permutation point, and its position gives the cut. The rotation is `rotation_ij` (the matrix u) and `translation_i` (the vector t) of US-align: a coordinate x of structure_1 lands at `t + u x`.
+
+**Splitting a large pair table.** The framework has no SLURM job arrays and nothing that splits a table. What it has: `with Parallel():` submits one job per iteration, `DataStream.chunks()` splits a stream, and `Pool` merges the siblings' tables. A table is split by row with `Panda.filter("index % N == k")`, where `index` is the row number of the pandas query; it works on a pair table that has no `id` column. Each slice then gets its own USalign, in the same job as the slice:
+
+```python
+pairs = Table("pairs.csv")                           # columns: parent, variant
+runs = []
+with Parallel():
+    for k in range(8):
+        Resources(time="04:00:00", memory="4GB")     # one sibling job per slice
+        part = Panda(tables=pairs.tables.data, operations=[Panda.filter(f"index % 8 == {k}")])
+        runs.append(USalign(structures=folds,
+                            structure_1=part.tables.result.variant,
+                            structure_2=part.tables.result.parent))
+Resources(time="00:30:00", memory="4GB")
+cp = Pool(runs=runs, keep_ids=True)                  # cp.tables.alignments, cp.tables.missing
+```
+
+`keep_ids=True` leaves the ids as USalign wrote them, which stay unique because a pair is in one slice; a pair repeated in the table would put it in two, and Pool then raises naming it. Without `keep_ids` each id gains `_<k>` and `original.id` holds the id before the suffix. Use at most as many slices as the table has rows: a slice with no pair fails its step.
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) — PDB or mmCIF structures; every id used in the pair table must be one of them.
+- `structure_1`: TableReference | (TableInfo, str) (required) — column of the pair table with the id of the structure that is rotated.
+- `structure_2`: TableReference | (TableInfo, str) (required) — column of the same table with the id of the structure it is rotated onto.
+- `non_sequential_variant`: str = "fNS" — "fNS" (`-mm 5`, fully non-sequential) or "sNS" (`-mm 6`, semi-non-sequential).
+
+**Tables**:
+- `alignments`: | id | structure_1 | structure_2 | mode | length_1 | length_2 | aligned_length | rmsd | tm_score_1 | tm_score_2 | rotation_11 | rotation_12 | rotation_13 | rotation_21 | rotation_22 | rotation_23 | rotation_31 | rotation_32 | rotation_33 | translation_1 | translation_2 | translation_3 | aligned_1 | aligned_2 |
+- `missing`: | id | removed_by | kind | cause |
+
+`id` is `<structure_1>+<structure_2>_<mode>`. One row per distinct pair and mode; a pair or alignment that could not be run carries NaN in every number and empty aligned sequences, and a row of the same `id` in `missing`. The step fails only when every alignment failed. The tool filters nothing: apply `Panda.filter` to the table.
+
+**Example**:
+```python
+from biopipelines import ESMFold2, Table, USalign, Panda
+
+pairs = Table("pairs.csv")                           # one row per pair: parent, variant
+folds = ESMFold2(proteins=seqs)
+
+cp = USalign(structures=folds,
+             structure_1=pairs.tables.data.variant,
+             structure_2=pairs.tables.data.parent)
+
+# variants whose permuted alignment to the parent is good
+permuted = Panda(tables=cp.tables.alignments,
+                 operations=[Panda.filter("mode == 'circular_permutation' and tm_score_2 > 0.7")])
+
+# the semi-non-sequential variant instead of the fully non-sequential one
+sns = USalign(structures=folds, structure_1=pairs.tables.data.variant,
+              structure_2=pairs.tables.data.parent, non_sequential_variant="sNS")
+```
+
+**Reference**: Zhang et al. US-align: universal structure alignments of proteins, nucleic acids, and macromolecular complexes. *Nature Methods* 19, 1109-1115 (2022), doi:10.1038/s41592-022-01585-1. https://github.com/pylelab/USalign
+
+---
+
+### TMalign
+
+Aligns every pair of a table of structure pairs in sequence order and with a circular permutation using TM-align, and reports for each pair how much the permutation gained. It is USalign without the non-sequential alignment, plus a per-pair `delta` table: use it to ask "which of these pairs are circular permutants of each other?" at the lowest cost, and [USalign](#usalign) when the non-sequential alignment is wanted too. The pair table, the id rules, the columns of `alignments` and the splitting of a large table across jobs are the same as for USalign; read them there.
+
+**Tags**: measure, protein
+
+**Environment**: `usalign` (the same env as USalign: the bioconda `usalign` package ships `TMalign` too, and the separate bioconda `tmalign` package claims the same `bin/TMalign`, so it is not installed beside). `TMalign.install()` builds it through `USalign`.
+
+**Alignments.** One row per pair and mode, `mode` being `sequential` (plain `TMalign`) or `circular_permutation` (`TMalign -cp`, a circular permutation of structure_1). When TM-align finds no circular permutation the two rows hold identical numbers. Only the first chain of each structure is aligned.
+
+**The TM-score difference.** `delta` holds, per pair, the TM-score of the permuted alignment minus the sequential one: `delta_tm_1` for the TM-scores normalized by structure_1, `delta_tm_2` for those normalized by structure_2. A large positive value says the pair is a circular permutation of one fold; 0 says TM-align found none. It is not always non-negative: TM-align adopts the permuted alignment on its own criterion, and the TM-score of that alignment can be slightly lower for one normalization (1UBQ against 1CRN gave -0.001 and -0.031).
+
+**Parameters**:
+- `structures`: Union[DataStream, StandardizedOutput] (required) — PDB or mmCIF structures; every id used in the pair table must be one of them.
+- `structure_1`: TableReference | (TableInfo, str) (required) — column of the pair table with the id of the structure that is rotated.
+- `structure_2`: TableReference | (TableInfo, str) (required) — column of the same table with the id of the structure it is rotated onto.
+
+**Tables**:
+- `alignments`: | id | structure_1 | structure_2 | mode | length_1 | length_2 | aligned_length | rmsd | tm_score_1 | tm_score_2 | rotation_11 | rotation_12 | rotation_13 | rotation_21 | rotation_22 | rotation_23 | rotation_31 | rotation_32 | rotation_33 | translation_1 | translation_2 | translation_3 | aligned_1 | aligned_2 |
+- `delta`: | id | structure_1 | structure_2 | delta_tm_1 | delta_tm_2 |
+- `missing`: | id | removed_by | kind | cause |
+
+`alignments` ids are `<structure_1>+<structure_2>_<mode>`; `delta` has one row per distinct pair, with `id` `<structure_1>+<structure_2>`, and NaN where either alignment of the pair gave no TM-score. The ids in `missing` are those of the `alignments` rows that failed.
+
+**Example**:
+```python
+from biopipelines import ESMFold2, Table, TMalign, Panda
+
+pairs = Table("pairs.csv")                           # one row per pair: parent, variant
+folds = ESMFold2(proteins=seqs)
+
+cp = TMalign(structures=folds,
+             structure_1=pairs.tables.data.variant,
+             structure_2=pairs.tables.data.parent)
+
+# pairs the circular permutation explains
+permuted = Panda(tables=cp.tables.delta,
+                 operations=[Panda.filter("delta_tm_2 > 0.1")])
+```
+
+**Reference**: Zhang and Skolnick. TM-align: a protein structure alignment algorithm based on the TM-score. *Nucleic Acids Research* 33, 2302-2309 (2005), doi:10.1093/nar/gki524; circular permutation as implemented in US-align, Zhang et al. *Nature Methods* 19, 1109-1115 (2022), doi:10.1038/s41592-022-01585-1. https://github.com/pylelab/USalign
+
+---
+
 ### EnsembleAnalysis
 
 Per-residue RMSF and ensemble-level metrics from a conformer ensemble. Where CABSflex couples RMSF to its own coarse-grained sampling, EnsembleAnalysis analyzes *any* ensemble: it superposes the conformers (least-squares on CA or backbone) and reports per-residue fluctuation, so it overlays RMSF profiles from NMR ensembles, PLACER dumps, BioEmu samples, or any pool of conformers on the same footing. The `rmsf` stream uses the same `resi-csv` schema as CABSflex, so `Selection` thresholds on it unchanged.

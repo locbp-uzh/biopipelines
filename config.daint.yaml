@@ -155,6 +155,9 @@ environments:
   Selection: "ProteinEnv"
   SelectionTransfer: "biopipelines"
   DSSP: "dssp"
+  # bioconda builds usalign (20241201) and tmalign for linux-aarch64, and the usalign env is bioconda-only like dssp's; it has not been built on Daint yet.
+  USalign: "usalign"
+  TMalign: "usalign"
   # CPU docking. GNINA is absent on purpose: it ships only a prebuilt x86-64
   # binary. conda-forge builds vina, openbabel and rdkit for aarch64.
   Vina: "vina"

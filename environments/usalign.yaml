@@ -1,0 +1,13 @@
+# US-align environment - pairwise structure alignment (bioconda binaries USalign and TMalign).
+# The usalign package already ships TMalign; installing the tmalign package beside it makes the two overwrite bin/TMalign.
+name: usalign
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - usalign
+  - pandas
+  - numpy
+  - pyyaml

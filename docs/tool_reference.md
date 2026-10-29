@@ -109,6 +109,8 @@ Analyze structures, interactions, stability, and fitness.
 - [RTMScore](tool/analysis.md#rtmscore) — Pose ranking
 - [SASA](tool/analysis.md#sasa) — Solvent-accessible surface area
 - [ThermoMPNN](tool/analysis.md#thermompnn) — Fold-stability change (ddG) from structure
+- [TMalign](tool/analysis.md#tmalign) — Sequential and circularly permuted TM-align of structure pairs, with the TM-score gained
+- [USalign](tool/analysis.md#usalign) — Sequential, circularly permuted and non-sequential alignment of structure pairs
 - [VespaG](tool/analysis.md#vespag) — Zero-shot fitness from sequence
 - [XTB](tool/analysis.md#xtb) — Quantum interaction energy
 

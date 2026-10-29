@@ -96,6 +96,8 @@ from .ensemble_analysis import EnsembleAnalysis
 from .structure_cluster import StructureCluster
 from .foldseek import Foldseek
 from .foldcomp import Foldcomp
+from .usalign import USalign
+from .tmalign import TMalign
 from .foundry_mpnn import FoundryMPNN
 from .sequence_identity_gate import SequenceIdentityGate
 from .scripting import Scripting
@@ -252,6 +254,8 @@ __all__ = [
     'StructureCluster',
     'Foldseek',
     'Foldcomp',
+    'USalign',
+    'TMalign',
     'FoundryMPNN',
     'SequenceIdentityGate',
     'Scripting',
