@@ -81,7 +81,9 @@ def register_yaml(sha, tool, version):
     else:
         note = re.search(r"  history:\n  - version: '[^']+'\n    date: '([^']+)'\n    note: >-\n((?:      .*\n)+)", theirs)
         entry = f"  - version: '{version}'\n    date: '{note.group(1)}'\n    note: >-\n{note.group(2)}"
-        new = re.sub(r'  current: "[^"]+"', f'  current: "{version}"', mine, count=1).replace("  history:\n", "  history:\n" + entry, 1)
+        new = re.sub(r'  current: "[^"]+"', f'  current: "{version}"', mine, count=1)
+        empty = "  history: []\n"
+        new = new.replace(empty, "  history:\n" + entry, 1) if empty in new else new.replace("  history:\n", "  history:\n" + entry, 1)
         text = text.replace(mine, new)
     write("versions/tool_changelog.yaml", text, nl)
 
