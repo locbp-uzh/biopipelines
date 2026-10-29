@@ -2456,8 +2456,16 @@ FLOWR:
   files:
   - biopipelines/flowr.py
   - pipe_scripts/pipe_flowr.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-28'
+    note: >-
+      The first runs found that a crystal with alternate locations (3RY2, atomic resolution) failed upstream before any sampling: its reader looks the
+      CONECT records up by atom serial and raised an IndexError. The reference run reads a copy of the structure without CONECT records now; the reference
+      ligand is cut out of the original, so nothing else changes. The documentation also records what the hydrogen options did: `protonate_pocket` worked
+      with `interaction` on streptavidin and failed in upstream's ProLIF step on factor Xa, and `protonate_ligands` failed on both structures tried because
+      upstream swallows an RDKit KekulizeException in its pocket reading and returns no molecule.
   - version: '1.0'
     date: '2026-10-28'
     note: >-

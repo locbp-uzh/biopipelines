@@ -43,6 +43,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **FLOWR** 1.0 → 1.1. The first runs found that a crystal with alternate locations (3RY2, atomic resolution) failed upstream before any sampling: its reader looks the CONECT records up by atom serial and raised an IndexError. The reference run reads a copy of the structure without CONECT records now; the reference ligand is cut out of the original, so nothing else changes. The documentation also records what the hydrogen options did: `protonate_pocket` worked with `interaction` on streptavidin and failed in upstream's ProLIF step on factor Xa, and `protonate_ligands` failed on both structures tried because upstream swallows an RDKit KekulizeException in its pocket reading and returns no molecule.
+
 - **BioEmu2** 1.2 → 1.3. Documentation only: with a `seed` the conformers repeat exactly, but only at the same `batch_size` (the first batch matches at 16 and 2, the later ones do not); and how a ligand is written in a structure (next chain letter, ATOM records, CCD code or `LIG` as residue name, not covered by the physicality check).
 
 - **BioEmu2** 1.1 → 1.2. An apo run of one protein chain wrote no structure and failed with `TypeError: not all arguments converted during string formatting`: mdtraj reads CIF atom serials as text, and its PDB writer takes only integers when the system has fewer than two chains (a ligand or a second chain hid it). The atoms are numbered from their index before the per-conformer PDBs are written.

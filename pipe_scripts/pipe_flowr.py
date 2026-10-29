@@ -107,6 +107,12 @@ def stage_reference_ligand(pdb_path: str, code: str, smiles: Optional[str], run_
     return lig_sdf
 
 
+def stage_protein_pdb(pdb_path: str, out_pdb: str) -> None:
+    """The structure without its CONECT records, which upstream's reader cannot always resolve (3RY2: IndexError on an atom serial)."""
+    with open(pdb_path) as src, open(out_pdb, "w") as dst:
+        dst.writelines(line for line in src if not line.startswith("CONECT"))
+
+
 def stage_pocket_pdb(pdb_path: str, selection: str, out_pdb: str) -> int:
     """A PDB holding only the ATOM records of the selected residues; returns how many residues."""
     whole_chains, residues = sele_to_chains_and_list(selection)
@@ -203,7 +209,8 @@ def run_pocket(sid: str, pdb_path: str, config: dict, reference: Optional[dict],
     os.makedirs(run_dir, exist_ok=True)
     if reference is not None:
         ligand_file = stage_reference_ligand(pdb_path, reference["code"], reference["smiles"], run_dir, sid)
-        protein = pdb_path
+        protein = os.path.join(run_dir, f"{sid}.pdb")
+        stage_protein_pdb(pdb_path, protein)
     else:
         ligand_file = None
         protein = os.path.join(run_dir, f"{sid}.pdb")

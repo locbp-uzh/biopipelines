@@ -215,8 +215,8 @@ Not implemented: the checkpoint trained with explicit hydrogens, flexible (apo) 
 - `sample_sizes`: bool — Draw each molecule's size within 10 % of the reference (default: on for de novo generation from a reference ligand, off otherwise). Refused with `conditioning`.
 - `num_heavy_atoms`: int — Molecule size from 5 to 80 heavy atoms; required with `pocket_residues`, not allowed with `ligand`.
 - `pocket_cutoff`: float — Distance in A from the reference ligand within which residues enter the pocket (default 6.0).
-- `protonate_pocket`: bool — Add hydrogens to the protein before the pocket is built (default False).
-- `protonate_ligands`: bool — Add hydrogens to the generated molecules and relax them in the pocket; the poses are then the protonated ones (default False).
+- `protonate_pocket`: bool — Add hydrogens to the protein before the pocket is built (default False). Worked with `"interaction"` on streptavidin (1STP); on factor Xa (2P16) upstream's ProLIF step failed on the hydrogenated pocket (RDKit: explicit valence of a hydrogen is 4).
+- `protonate_ligands`: bool — Add hydrogens to the generated molecules and relax them in the pocket; the poses are then the protonated ones (default False). Failed on both structures tried (2P16, 1STP): upstream's pocket reading raises an RDKit `KekulizeException` inside the protonation, swallows it and returns no molecule, so the pocket fails.
 - `batch_cost`: int — Upstream's batch size knob (default 100).
 - `seed`: int — Random seed (default 42).
 

@@ -306,6 +306,22 @@ def test_a_failed_upstream_run_reports_the_last_line_of_its_log(pipe, monkeypatc
         pipe.run_pocket("s1", pdb, CFG, {"code": "LIG", "smiles": "CCO"}, paths(tmp_path), [], "004_FLOWR")
 
 
+def test_the_reference_run_reads_a_copy_of_the_structure_without_conect_records(pipe, monkeypatch, tmp_path):
+    """Upstream's reader raised IndexError on the CONECT records of a crystal (3RY2); everything else must be kept."""
+    fake = FakeUpstream({"s1": ["CCO"]})
+    monkeypatch.setattr(pipe.subprocess, "run", fake)
+    pdb = write_complex(tmp_path / "s1.pdb")
+    with open(pdb, "a") as handle:
+        handle.write("CONECT   49   50\nCONECT   50   49   51\n")
+    pipe.run_pocket("s1", pdb, CFG, {"code": "LIG", "smiles": "CCO"}, paths(tmp_path), [], "004_FLOWR")
+
+    staged = value(fake.commands[0][0], "--pdb_file")
+    text = open(staged).read()
+    assert staged != pdb and "CONECT" not in text
+    assert text.count("ATOM") + text.count("HETATM") == open(pdb).read().count("ATOM") + open(pdb).read().count("HETATM")
+    assert "CONECT" in open(pdb).read()
+
+
 def test_an_upstream_run_without_its_sdf_is_an_error(pipe, monkeypatch, tmp_path):
     monkeypatch.setattr(pipe.subprocess, "run", FakeUpstream({}))
     pdb = write_complex(tmp_path / "s1.pdb")

@@ -60,8 +60,8 @@ class FLOWR(BaseConfig):
         sample_sizes:       draw each molecule's atom count uniformly within 10 % of the reference size (or of `num_heavy_atoms`), clipped to 5-80 heavy atoms. Default None: on for de novo generation from a reference ligand, as in upstream's example script, and off otherwise. Upstream supports `conditioning` only at the reference size, so sample_sizes=True with it is refused.
         num_heavy_atoms:    heavy atoms of the generated molecules; required with `pocket_residues` and not allowed with `ligand`.
         pocket_cutoff:      distance (A) from the reference ligand within which protein residues enter the pocket (default 6.0, upstream's default).
-        protonate_pocket:   add hydrogens to the protein with hydride before the pocket is built (default False). Needed for "interaction" when the structure has none.
-        protonate_ligands:  add hydrogens to the generated molecules and relax them in the pocket (upstream's `--protonate_generated_ligands`, default False). The poses are then the protonated ones; the SMILES never carry explicit hydrogens.
+        protonate_pocket:   add hydrogens to the protein with hydride before the pocket is built (default False). Needed for "interaction" when the structure has none. Worked with "interaction" on streptavidin (1STP); on factor Xa (2P16) upstream's ProLIF step failed on the hydrogenated pocket (RDKit: explicit valence of a hydrogen is 4).
+        protonate_ligands:  add hydrogens to the generated molecules and relax them in the pocket (upstream's `--protonate_generated_ligands`, default False). The poses are then the protonated ones; the SMILES never carry explicit hydrogens. Failed on both structures tried (2P16, 1STP): upstream's pocket reading raises an RDKit KekulizeException inside the protonation, swallows it and returns no molecule, so the pocket fails.
         batch_cost:         upstream's batch size knob (default 100, the value of its example script). Upstream recommends a GPU with at least 40 GB; lower it on a smaller card.
         seed:               random seed (default 42, upstream's default).
 
@@ -91,7 +91,7 @@ class FLOWR(BaseConfig):
     """
 
     TOOL_NAME = "FLOWR"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "FLOWR"
 
     @classmethod
