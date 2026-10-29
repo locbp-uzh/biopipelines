@@ -4,7 +4,7 @@ Single-source-of-truth listing for every public-API tool. Generated from
 `TOOL_NAME` / `TOOL_VERSION` in `biopipelines/*.py` and grouped by the categories
 in [`tool_reference.md`](tool_reference.md).
 
-**Public-API count: 103** (listed below). Internal helpers — `BoltzGenMerge`,
+**Public-API count: 104** (listed below). Internal helpers — `BoltzGenMerge`,
 `BoltzGenImport`, `RFDAA_PrepareLigand`, `Mock` — the `TemplateTool` skeleton,
 and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 
@@ -112,7 +112,8 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 100 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
 | 101 | RF3 | Structure Prediction & Docking | 1.0 | `biopipelines/rf3.py` |
 | 102 | FoundryMPNN | Sequence Design                | 1.0 | `biopipelines/foundry_mpnn.py` |
-| 103 | Embedding                 | Analysis                       | 1.0 | `biopipelines/embedding.py` |
+| 103 | Foldcomp | Inputs & I/O                   | 1.0 | `biopipelines/foldcomp.py` |
+| 104 | Embedding                 | Analysis                       | 1.0 | `biopipelines/embedding.py` |
 
 ## Internal / auxiliary classes (not user-facing)
 

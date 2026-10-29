@@ -117,6 +117,63 @@ Requires RDKit (`conda install -c conda-forge rdkit`).
 
 ---
 
+### Foldcomp
+
+Extracts domains from a Foldcomp-compressed copy of the AlphaFold Database. It takes a table of AFDB entries with the first and last residue of each domain, decompresses every entry from a local database in one `foldcomp decompress --id-list` pass, cuts the ranges out of the decompressed models and writes one PDB per domain together with its mean pLDDT. Foldcomp has no residue-range option, so the cut is done by this tool.
+
+**Tags**: data, protein, residues
+
+**Environment**: `foldcomp` (bioconda binary; `Foldcomp.install()` builds it from `environments/foldcomp.yaml`). The tool runs on CPU; request memory for the database you use (see below).
+
+**The AFDB clusters and their domains.** The AFDB clusters of Barrio-Hernandez et al. (cluster.foldseek.com) identify each member by its bare UniProt accession (`A0A009F5K6`) and cluster whole chains, so the membership files (`1-AFDBClusters-...`, `5-allmembers-...`) carry no residue ranges. The domain boundaries of that release are in `4-domain-clustering.zip`, file `Structures_from_groups.csv` with the columns `structure_ID` (accession + `_<n>`), `structure_start`, `structure_end`, `group_ID`, `uniprot`, `pfam_all` and `pfam_overlap_rel`. The release does not state the convention of the positions; they are read here as 1-based, inclusive positions on the UniProt sequence (the smallest `structure_start` in the file is 1, the largest `structure_end` 2665). Load that file with [Table](#table) and pass `uniprot`, `structure_start` and `structure_end`. A bare accession is expanded to `AF-<accession>-F1-model_v<model_version>`, the name stored in the database; a full AFDB name (`AF-P69905-F1-model_v4`) is used as given, which is how a fragment `F2` of a long protein is requested.
+
+**Database.** `database` is the path prefix of a Foldcomp database: the stem shared by `<prefix>`, `<prefix>.index`, `<prefix>.dbtype` and `<prefix>.lookup`. The tool never downloads one while it runs. Published databases (https://opendata.mmseqs.org/foldcomp/): `afdb_swissprot_v4` (3 GB), `afdb_rep_dark_v4` (2.3 GB), `afdb_rep_v4` (10 GB, the AFDB cluster representatives) and `afdb_uniprot_v4` (1.1 TB, the full AFDB, so the one to use for arbitrary cluster members); an entry absent from the chosen database is a failure row in `missing`. `Foldcomp.install(swissprot_dir="/path")` downloads the four files of `afdb_swissprot_v4` once (resumable, skipped when complete) and prints the prefix to pass as `database`; fetch a larger database yourself. Foldcomp reads the whole `.lookup` file into memory before it looks names up (9 GB on disk for `afdb_uniprot_v4`), so give the step memory accordingly with `Resources`. All distinct entries are requested in a single Foldcomp call, so the cost does not grow with the number of ranges per entry.
+
+**Numbering.** Each domain is renumbered from 1 and keeps its chain letter; atom serials restart at 1. The `offset` column records the shift, so original residue number = residue number in the file + `offset`. Every tool downstream then sees a standalone chain starting at residue 1 (selections, fixed positions, contigs), and the UniProt numbering stays recoverable. A range running past the model is clipped to it and flagged in `clipped`; the id keeps the requested range.
+
+**pLDDT.** `plddt_mean` is the mean over the domain's residues of the B-factor column of the decompressed model. Foldcomp stores one 8-bit value per residue between the minimum and maximum of the chain, so a value differs from the original AFDB file by at most 0.2 pLDDT points.
+
+**Parameters**:
+- `entries`: TableReference (required) — column of AFDB entries, a table column (`tool.tables.name.column`) or a `(TableInfo | path, column)` tuple.
+- `start`: TableReference (required) — column with the first residue of each domain, from the same table as `entries`.
+- `end`: TableReference (required) — column with the last residue of each domain (inclusive), from the same table.
+- `database`: str (required) — path prefix of a local Foldcomp database.
+- `model_version`: int = 4 — the `N` of `model_vN` in the database's entry names, used to expand bare accessions; 4 for every published AFDB database.
+- `threads`: int = 1 — CPU threads Foldcomp uses (`-t`); match the CPUs requested with `Resources(cpus=...)`.
+
+**Streams**: `structures`
+
+The ids are `<entry>_<start>-<end>` as written in the table (for example `A0A009F5K6_12-150`) and are lazy, because the table is read when the step runs.
+
+**Tables**:
+- `domains`: `id | entry | database_name | start | end | length | offset | entry_length | plddt_mean | found | clipped`. One row per distinct domain id of the table. `start` and `end` are the requested range, `length` the residues written, `entry_length` the residues of the database model, `found` whether the domain was written and `clipped` whether the range was cut to the model. An id that failed carries NaN for what it could not obtain.
+- `missing`: `id | removed_by | kind | cause`. `kind="failure"` for an entry that is not in the database, a range outside the model (the cause names the model's residues and length), and an entry or position that cannot be parsed.
+
+The decompressed entries are not kept; `_execution/` holds the id list sent to Foldcomp and its log.
+
+**Example**:
+```python
+from biopipelines import Foldcomp, Panda, Resources, Table
+
+domains = Table("Structures_from_groups.csv", table_name="domains")
+
+Resources(cpus=4, memory="64GB", time="4:00:00")
+cut = Foldcomp(entries=domains.tables.domains.uniprot,
+               start=domains.tables.domains.structure_start,
+               end=domains.tables.domains.structure_end,
+               database="/data/foldcomp/afdb_rep_v4",
+               threads=4)
+
+# keep confidently predicted domains
+good = Panda(tables=cut.tables.domains,
+             operations=[Panda.filter("plddt_mean > 80")],
+             pool=cut)
+```
+
+**Reference**: Kim et al. Foldcomp: a library and format for compressing and indexing large protein structure sets. *Bioinformatics*, doi:10.1093/bioinformatics/btad153; Barrio-Hernandez et al. Clustering predicted structures at the scale of the known protein universe. *Nature*, doi:10.1038/s41586-023-06510-w. https://github.com/steineggerlab/foldcomp
+
+---
+
 ### Ligand
 
 Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates from SMILES.

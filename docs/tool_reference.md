@@ -163,6 +163,7 @@ Filter, transform, and route tables and streams.
 Bring data into a pipeline and take results out.
 
 - [CompoundLibrary](tool/inputs_io.md#compoundlibrary) — Create compound collections
+- [Foldcomp](tool/inputs_io.md#foldcomp) — Domains of the compressed AlphaFold Database by residue range
 - [Ligand](tool/inputs_io.md#ligand) — Fetch small molecules (also exported as `Compound`)
 - [Load / LoadMultiple](tool/inputs_io.md#load) — Reload previous outputs
 - [PDB](tool/inputs_io.md#pdb) — Fetch protein structures, PDB or mmCIF (also exported as `Structure`)

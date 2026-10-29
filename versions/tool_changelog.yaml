@@ -2453,3 +2453,14 @@ Embedding:
     date: '2026-10-29'
     note: >-
       Initial release. A model-agnostic embedder: every model is one entry of a registry in the module (input kind, formats, adapter, weights environment variable, upstream default weights, dimension, per-node module, extra reader arguments), and nothing else names a model. Registered now: progres and cirpin, the Progres family (C-alpha graph, six EGNN layers, a 128-number L2-normalized vector per structure, first chain only). The weights are a file path you supply and must exist at configuration time; the step exports it as TRAINED_MODEL_FP and loads it itself with weights_only=True, because the progres package's own load_trained_model takes no path and downloads its default data first. Emits an embeddings stream (one npy per id), an optional node_embeddings stream (residues x dimension, from the per-node decoder before pooling) and, for pairs given as two columns of one table, a similarities table (id, first, second, cosine_similarity; NaN and a failure row when a member has no embedding). The Progres and CIRPIN checkpoints load strictly into the pip package's network and the pipe script ran on them with progres 1.1.0 on CPU, with a sum-scatter standing in for the uncompiled torch_scatter; GPU, the cluster install and real structures are untested. Own Embedding env (torch 2.8.0+cu128 with the matching torch-scatter wheel, progres), no Daint entry.
+
+Foldcomp:
+  files:
+  - biopipelines/foldcomp.py
+  - pipe_scripts/pipe_foldcomp.py
+  current: "1.0"
+  history:
+  - version: '1.0'
+    date: '2026-10-29'
+    note: >-
+      Initial release. Extracts domains of the AlphaFold Database from a local Foldcomp database: takes the entry, start and end columns of a table, decompresses every distinct entry in one `foldcomp decompress --id-list` call, cuts each residue range from the decompressed model, renumbers it from 1 (offset recorded) and writes one PDB per domain with its mean pLDDT. Ranges past the model are clipped and flagged; an entry missing from the database or a range outside the model goes to `missing` as a failure. `install(swissprot_dir=...)` optionally downloads `afdb_swissprot_v4`.

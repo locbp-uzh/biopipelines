@@ -127,6 +127,7 @@ environments:
   ESMFold2: "esmfold2"
   ExtractMetrics: "biopipelines"
   FLOWR: "FLOWR"
+  Foldcomp: "foldcomp"
   Foldseek: "foldseek"
   FPocket: "fpocket"
   FoundryMPNN: "foundry"

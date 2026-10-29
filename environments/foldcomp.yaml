@@ -1,0 +1,12 @@
+# Foldcomp environment - compressed protein structure databases (bioconda binary).
+name: foldcomp
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10,<3.13
+  - pip
+  - foldcomp
+  - pandas
+  - numpy
+  - pyyaml

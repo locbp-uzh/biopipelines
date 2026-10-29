@@ -95,6 +95,7 @@ from .cabsflex import CABSflex
 from .ensemble_analysis import EnsembleAnalysis
 from .structure_cluster import StructureCluster
 from .foldseek import Foldseek
+from .foldcomp import Foldcomp
 from .foundry_mpnn import FoundryMPNN
 from .sequence_identity_gate import SequenceIdentityGate
 from .scripting import Scripting
@@ -250,6 +251,7 @@ __all__ = [
     'EnsembleAnalysis',
     'StructureCluster',
     'Foldseek',
+    'Foldcomp',
     'FoundryMPNN',
     'SequenceIdentityGate',
     'Scripting',
