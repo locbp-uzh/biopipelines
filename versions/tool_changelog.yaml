@@ -2393,8 +2393,15 @@ LigandDdG:
   - biopipelines/ligand_ddg.py
   - pipe_scripts/pipe_ligand_ddg.py
   - biopipelines/rosetta_scoring.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-28'
+    note: >-
+      New `seed` (default 42). PyRosetta seeds itself from /dev/urandom, so no run could be repeated. Each replicate of each structure is now seeded from
+      `seed` with a distinct, fixed value (`rosetta_scoring.replicate_seed`), and the hard scheme once. The seed does not change the soft value on the five
+      streptavidin complexes tried: ten seeds each gave one ddG to four decimals, because the repack of the interface reaches the same optimum, so
+      `ddg_soft_std` is 0 and `replicates=1` gives the same number as 5; the documentation says so.
   - version: '1.1'
     date: '2026-10-28'
     note: >-
@@ -2416,8 +2423,15 @@ PPIDdG:
   - biopipelines/ppi_ddg.py
   - pipe_scripts/pipe_ppi_ddg.py
   - biopipelines/rosetta_scoring.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-28'
+    note: >-
+      New `seed` (default 42). PyRosetta seeds itself from /dev/urandom, so a rerun gave other numbers: barnase-barstar read -62.1, -64.4 and -64.3 in three
+      identical one-replicate runs.Each replicate of each structure is now seeded from `seed` with a distinct, fixed value
+      (`rosetta_scoring.replicate_seed`), so a run repeats exactly (seed 7 twice gave -66.7726 both times, seed 8 gave -62.6831) and the replicates of one
+      run still differ.
   - version: '1.0'
     date: '2026-10-27'
     note: >-

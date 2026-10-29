@@ -25,6 +25,8 @@ from biopipelines.rosetta_scoring import (  # noqa: E402
     RELAX_INIT_OPTIONS,
     init_pyrosetta,
     mean_std,
+    replicate_seed,
+    seed_rosetta,
     unbound_ddg,
     collect_rows,
     write_outputs,
@@ -57,8 +59,8 @@ def chains_of(pose):
     return {info.chain(i) for i in range(1, pose.total_residue() + 1)}
 
 
-def score_structure(path, config):
-    """Mean and spread of the ddG over independent relax cycles of one structure."""
+def score_structure(path, config, structure_id):
+    """Mean and spread of the ddG over independent relax cycles of one structure, each seeded from config["seed"]."""
     import pyrosetta as pyr
 
     binder, target = config["binder_chain"], config["target_chain"]
@@ -69,7 +71,8 @@ def score_structure(path, config):
             raise ValueError(f"chain {chain!r} is not in the structure (chains: {', '.join(sorted(present))})")
 
     ddgs, scores = [], []
-    for _ in range(config["replicates"]):
+    for replicate in range(config["replicates"]):
+        seed_rosetta(replicate_seed(config["seed"], structure_id, replicate))
         ddg, total = relax_and_ddg(pose, binder, config["relax_rounds"],
                                    config["constrain_to_start_coords"], config["constraint_weight"])
         ddgs.append(ddg)
@@ -95,7 +98,7 @@ def main(argv=None):
     init_pyrosetta(RELAX_INIT_OPTIONS)
 
     rows, missing, attempted, failures = collect_rows(
-        iterate_files(ds), lambda sid, path: score_structure(path, config), COLUMNS, step_id)
+        iterate_files(ds), lambda sid, path: score_structure(path, config, sid), COLUMNS, step_id)
     write_outputs(args.table_csv, rows, COLUMNS, args.local_missing_csv, missing)
 
     print(f"ppi_ddg: {args.table_csv} ({len(rows)} rows, {failures} failed)")

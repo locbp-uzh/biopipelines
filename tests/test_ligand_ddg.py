@@ -63,6 +63,8 @@ def build(new_pipeline, name, fmt="pdb", ligand="smiles", **kwargs):
     ({"ph": 15}, "between 0 and 14"),
     ({"ph": "7.4"}, "between 0 and 14"),
     ({"params_file": "  "}, "params_file must be a path"),
+    ({"seed": 0}, "positive integer"),
+    ({"seed": 1.5}, "positive integer"),
 ])
 def test_bad_parameters_are_refused_before_a_job_is_queued(local_config, isolated_cwd, new_pipeline, kwargs, match):
     with pytest.raises(ValueError, match=match):
@@ -85,7 +87,7 @@ def test_the_default_scheme_is_soft_with_five_replicates(local_config, isolated_
     _, tool = build(new_pipeline, "lddg_default")
     config = yaml.safe_load(open(tool.config_yaml))
     assert config == {"scoring": "soft", "binder_chain": "A", "ligand_chain": "B", "replicates": 5,
-                      "ph": 7.4, "params_file": ""}
+                      "ph": 7.4, "params_file": "", "seed": 42}
 
 
 def test_the_hard_scheme_runs_once_and_says_so_in_the_config(local_config, isolated_cwd, new_pipeline):
@@ -433,6 +435,7 @@ def recorders(pipe, monkeypatch):
     monkeypatch.setattr(pipe, "prepare_ligand", lambda *a: (log.append(("prepare", a[1:5])) or ("x.sdf", ["HETATM\n"])))
     monkeypatch.setattr(pipe, "generate_params", lambda sdf, code, work: log.append(("params", sdf, code)) or "gen.params")
     monkeypatch.setattr(pipe, "load_pose", load_pose)
+    monkeypatch.setattr(pipe, "seed_rosetta", lambda seed: None)
     monkeypatch.setattr(pipe, "soft_ddg", lambda *a: log.append(("soft", a[1:])) or {"ddg_soft": -4.0, "ddg_soft_std": 0.1,
                                                                                     "n_replicates_used": 3})
     monkeypatch.setattr(pipe, "hard_ddg", lambda p, i: log.append(("hard", i)) or {"ddg_norepack": -6.0})
@@ -440,7 +443,8 @@ def recorders(pipe, monkeypatch):
 
 
 def config(**overrides):
-    base = {"scoring": "soft", "binder_chain": "A", "ligand_chain": "B", "replicates": 5, "ph": 7.4, "params_file": ""}
+    base = {"scoring": "soft", "binder_chain": "A", "ligand_chain": "B", "replicates": 5, "ph": 7.4, "params_file": "",
+            "seed": 42}
     base.update(overrides)
     return base
 
@@ -454,8 +458,36 @@ def test_the_soft_scheme_parameterizes_from_the_smiles_and_scores_with_the_chain
     assert recorders[0] == ("prepare", ("LIG", "B", "CC(=O)O", 7.4))
     assert recorders[1] == ("params", "x.sdf", "LIG")
     assert recorders[2][3] == "gen.params" and recorders[2][2] == ["HETATM\n"]
-    assert recorders[3] == ("soft", ("A", "B", 4))
+    from biopipelines.rosetta_scoring import replicate_seed
+    assert recorders[3] == ("soft", ("A", "B", 4, [replicate_seed(42, "s1", r) for r in range(4)]))
     assert os.path.isdir(tmp_path / "work" / "s1")
+
+
+def test_each_soft_replicate_is_seeded_before_its_repack_and_the_hard_scheme_once(pipe, monkeypatch):
+    """The replicate seeds are distinct and fixed, so a rerun repeats exactly; the repack without them drew from /dev/urandom."""
+    from biopipelines.rosetta_scoring import replicate_seed
+
+    events = []
+    fake = types.SimpleNamespace(create_score_function=lambda name: name)
+    monkeypatch.setitem(sys.modules, "pyrosetta", fake)
+    monkeypatch.setattr(pipe, "seed_rosetta", lambda seed: events.append(("seed", seed)))
+    monkeypatch.setattr(pipe, "repack_around_chain", lambda *a: events.append(("repack",)))
+    monkeypatch.setattr(pipe, "unbound_ddg", lambda *a: -20.0 - len(events))
+    seeds = [replicate_seed(9, "s1", r) for r in range(3)]
+    pipe.soft_ddg(object(), "A", "B", 3, seeds)
+    assert [e for e in events if e[0] == "seed"] == [("seed", s) for s in seeds]
+    assert [e[0] for e in events] == ["seed", "repack", "seed", "repack", "seed", "repack"]
+    assert len(set(seeds)) == 3
+
+
+def test_the_hard_scheme_seeds_rosetta_once_from_the_structure_id(pipe, tmp_path, recorders, monkeypatch):
+    from biopipelines.rosetta_scoring import replicate_seed
+
+    seeded = []
+    monkeypatch.setattr(pipe, "seed_rosetta", lambda seed: seeded.append(seed))
+    path = write_complex(tmp_path / "c.pdb", embedded_ligand("CC(=O)O"))
+    pipe.score_structure("s1", path, config(scoring="hard", replicates=None, seed=5), "LIG", "CC(=O)O", str(tmp_path / "w"))
+    assert seeded == [replicate_seed(5, "s1", 0)]
 
 
 def test_the_hard_scheme_reads_the_ligand_position_from_the_pose(pipe, tmp_path, recorders):

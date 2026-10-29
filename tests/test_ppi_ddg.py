@@ -57,6 +57,8 @@ def build(new_pipeline, name, fmt="pdb", **kwargs):
     ({"relax_rounds": True}, "positive integer"),
     ({"replicates": 0}, "positive integer"),
     ({"replicates": 1.5}, "positive integer"),
+    ({"seed": 0}, "positive integer"),
+    ({"seed": True}, "positive integer"),
     ({"constrain_to_start_coords": "yes"}, "must be a bool"),
     ({"constraint_weight": -1.0}, "number >= 0"),
 ])
@@ -94,7 +96,7 @@ def test_parameters_reach_the_pipe_through_the_config_yaml(local_config, isolate
                            replicates=2, constrain_to_start_coords=False, constraint_weight=0.5)
     config = yaml.safe_load(open(tool.config_yaml))
     assert config == {"binder_chain": "H", "target_chain": "L", "relax_rounds": 3, "replicates": 2,
-                      "constrain_to_start_coords": False, "constraint_weight": 0.5}
+                      "constrain_to_start_coords": False, "constraint_weight": 0.5, "seed": 42}
 
 
 def test_the_result_table_and_the_missing_table_are_declared(local_config, isolated_cwd, new_pipeline):
@@ -149,6 +151,35 @@ def test_trimmed_mean_drops_best_and_worst_from_three_replicates_on(values, expe
     assert trimmed_mean_std(values) == expected
 
 
+def test_each_replicate_of_each_structure_gets_its_own_fixed_seed():
+    """PyRosetta seeds itself from the system, so a rerun gave other numbers; the seeds are derived, not drawn."""
+    from biopipelines.rosetta_scoring import MAX_SEED, replicate_seed
+
+    seeds = {(sid, r): replicate_seed(42, sid, r) for sid in ("wt", "mutant") for r in range(5)}
+    assert seeds == {(sid, r): replicate_seed(42, sid, r) for sid in ("wt", "mutant") for r in range(5)}
+    assert len(set(seeds.values())) == 10
+    assert replicate_seed(43, "wt", 0) != seeds[("wt", 0)]
+    assert all(1 <= value <= MAX_SEED for value in seeds.values())
+
+
+def test_the_pipe_seeds_rosetta_before_every_replicate(pipe, monkeypatch):
+    import types
+
+    from biopipelines.rosetta_scoring import replicate_seed
+
+    seeded, relaxed = [], []
+    monkeypatch.setitem(sys.modules, "pyrosetta", types.SimpleNamespace(
+        pose_from_file=lambda path: "pose"))
+    monkeypatch.setattr(pipe, "chains_of", lambda pose: {"A", "B"})
+    monkeypatch.setattr(pipe, "seed_rosetta", lambda seed: seeded.append(seed))
+    monkeypatch.setattr(pipe, "relax_and_ddg", lambda *a: relaxed.append(len(seeded)) or (-10.0, -300.0))
+    config = {"binder_chain": "A", "target_chain": "B", "relax_rounds": 1, "replicates": 3,
+              "constrain_to_start_coords": True, "constraint_weight": 1.0, "seed": 7}
+    pipe.score_structure("s1.pdb", config, "s1")
+    assert seeded == [replicate_seed(7, "s1", r) for r in range(3)]
+    assert relaxed == [1, 2, 3]
+
+
 def test_a_failed_id_keeps_its_row_with_nan_and_is_recorded_as_a_failure(pipe):
     from biopipelines.rosetta_scoring import collect_rows
 
@@ -199,7 +230,7 @@ def test_main_writes_one_row_per_id_a_local_missing_file_and_scores_with_the_yam
                     "constrain_to_start_coords": True, "constraint_weight": 1.0}, open(config, "w"))
     seen = []
 
-    def fake_score(path, cfg):
+    def fake_score(path, cfg, sid):
         seen.append((os.path.basename(path), cfg["replicates"], cfg["relax_rounds"]))
         if path.endswith("b.pdb"):
             raise ValueError("chain 'B' is not in the structure")
@@ -229,7 +260,7 @@ def test_main_exits_non_zero_when_every_id_raised(pipe, tmp_path, monkeypatch):
     structures = _write_structures(tmp_path, ["a", "b"])
     config = tmp_path / "config.yaml"
     yaml.safe_dump({"binder_chain": "A", "target_chain": "B"}, open(config, "w"))
-    monkeypatch.setattr(pipe, "score_structure", lambda path, cfg: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(pipe, "score_structure", lambda path, cfg, sid: (_ for _ in ()).throw(RuntimeError("boom")))
     monkeypatch.setattr(pipe, "init_pyrosetta", lambda options: None)
     with pytest.raises(SystemExit) as stop:
         pipe.main(["--config-yaml", str(config), "--structures-json", structures,

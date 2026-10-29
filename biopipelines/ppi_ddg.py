@@ -20,14 +20,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .rosetta_scoring import pyrosetta_install_script, validate_chain, validate_positive_int
+    from .rosetta_scoring import DEFAULT_SEED, pyrosetta_install_script, validate_chain, validate_positive_int
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from rosetta_scoring import pyrosetta_install_script, validate_chain, validate_positive_int
+    from rosetta_scoring import DEFAULT_SEED, pyrosetta_install_script, validate_chain, validate_positive_int
 
 
 class PPIDdG(BaseConfig):
@@ -46,6 +46,7 @@ class PPIDdG(BaseConfig):
         replicates: independent relax + ddG cycles; mean and standard deviation are reported (default 1, which gives a standard deviation of 0). Each replicate adds one full relax run.
         constrain_to_start_coords: harmonic coordinate constraints to the input during FastRelax, keeping the backbone near the supplied geometry (default True).
         constraint_weight: weight of those constraints; higher stays closer to the input (default 1.0).
+        seed: base random seed (default 42). Every replicate of every structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system and a rerun gives other numbers. A different seed gives a different relaxation, with ddG differences of a few energy units at one replicate.
 
     Outputs:
         Streams: (none)
@@ -56,7 +57,7 @@ class PPIDdG(BaseConfig):
     """
 
     TOOL_NAME = "PPIDdG"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "PyRosetta"
 
     @classmethod
@@ -78,6 +79,7 @@ class PPIDdG(BaseConfig):
                  replicates: int = 1,
                  constrain_to_start_coords: bool = True,
                  constraint_weight: float = 1.0,
+                 seed: int = DEFAULT_SEED,
                  **kwargs):
         self.structures = structures
         if isinstance(structures, StandardizedOutput):
@@ -92,6 +94,7 @@ class PPIDdG(BaseConfig):
         self.replicates = replicates
         self.constrain_to_start_coords = constrain_to_start_coords
         self.constraint_weight = constraint_weight
+        self.seed = seed
         super().__init__(**kwargs)
 
     def validate_params(self):
@@ -112,6 +115,7 @@ class PPIDdG(BaseConfig):
         if isinstance(self.constraint_weight, bool) or not isinstance(self.constraint_weight, (int, float)) \
                 or self.constraint_weight < 0:
             raise ValueError(f"constraint_weight must be a number >= 0, got {self.constraint_weight!r}")
+        validate_positive_int("seed", self.seed)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         self.folders = pipeline_folders
@@ -155,6 +159,7 @@ python "{self.helper_py}" \\
                 "replicates": self.replicates,
                 "constrain_to_start_coords": self.constrain_to_start_coords,
                 "constraint_weight": float(self.constraint_weight),
+                "seed": self.seed,
             }, f, sort_keys=False)
 
     def get_output_files(self) -> Dict[str, Any]:

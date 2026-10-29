@@ -24,7 +24,7 @@ try:
     from .datastream import DataStream
     from .input_standardization import resolve_basic_input
     from .ligand import Ligand
-    from .rosetta_scoring import pyrosetta_install_script, validate_chain, validate_positive_int
+    from .rosetta_scoring import DEFAULT_SEED, pyrosetta_install_script, validate_chain, validate_positive_int
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -33,7 +33,7 @@ except ImportError:
     from datastream import DataStream
     from input_standardization import resolve_basic_input
     from ligand import Ligand
-    from rosetta_scoring import pyrosetta_install_script, validate_chain, validate_positive_int
+    from rosetta_scoring import DEFAULT_SEED, pyrosetta_install_script, validate_chain, validate_positive_int
 
 SCORINGS = ("soft", "hard")
 DEFAULT_SOFT_REPLICATES = 5
@@ -57,6 +57,7 @@ class LigandDdG(BaseConfig):
         ligand_chain: the chain carrying the ligand (default "B"). Exactly one residue named like the ligand code must sit on it, and it must be a chain of its own, as predictors write it: the ligand of a crystal file usually shares the protein chain and has to be moved to its own first. A ligand with no atom within 6 A of the binder chain (the ligand of another copy in a crystal, say) is a failure for that structure, since no pair of atoms is in range and the ddG would read as exactly zero.
         replicates: pack + score cycles for scoring="soft" (default 5). Not accepted with scoring="hard".
         ph: pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for (default 7.4). A ligand that already has hydrogens is used as it is. Ignored with `params_file`.
+        seed: base random seed (default 42). Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With scoring="soft" the seed does not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` is 0): the repack of the interface reaches the same optimum every time, and `replicates=1` gives the same number as 5.
         params_file: path to a pre-made Rosetta .params file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and no params are generated.
 
     Outputs:
@@ -69,7 +70,7 @@ class LigandDdG(BaseConfig):
     """
 
     TOOL_NAME = "LigandDdG"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "PyRosetta"
 
     @classmethod
@@ -93,6 +94,7 @@ class LigandDdG(BaseConfig):
                  replicates: Optional[int] = None,
                  ph: float = 7.4,
                  params_file: Optional[str] = None,
+                 seed: int = DEFAULT_SEED,
                  **kwargs):
         self.structures = structures
         if isinstance(structures, StandardizedOutput):
@@ -110,6 +112,7 @@ class LigandDdG(BaseConfig):
         self.replicates = replicates
         self.ph = ph
         self.params_file = params_file
+        self.seed = seed
         super().__init__(**kwargs)
 
     def validate_params(self):
@@ -135,6 +138,7 @@ class LigandDdG(BaseConfig):
             raise ValueError(f"ph must be a number between 0 and 14, got {self.ph!r}")
         if self.params_file is not None and (not isinstance(self.params_file, str) or not self.params_file.strip()):
             raise ValueError("params_file must be a path to a Rosetta .params file")
+        validate_positive_int("seed", self.seed)
 
     def configure_inputs(self, pipeline_folders: Dict[str, str]):
         self.folders = pipeline_folders
@@ -189,6 +193,7 @@ python "{self.helper_py}" \\
                 "replicates": self._resolved_replicates() if self.scoring == "soft" else None,
                 "ph": float(self.ph),
                 "params_file": self.params_file or "",
+                "seed": self.seed,
             }, f, sort_keys=False)
 
     def get_output_files(self) -> Dict[str, Any]:

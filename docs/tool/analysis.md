@@ -2005,6 +2005,7 @@ The numbers are Rosetta energy units, not kcal/mol and not measured affinities, 
 - `replicates`: int = None — Pack + score cycles for `scoring="soft"`, default 5. Refused with `scoring="hard"`, which runs once.
 - `ph`: float = 7.4 — pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for. Ignored with `params_file` and for a ligand that already has hydrogens.
 - `params_file`: str = None — Path to a pre-made Rosetta `.params` file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and nothing is generated.
+- `seed`: int = 42 — Base random seed. Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With `scoring="soft"` the seed does not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` is 0): the repack of the interface reaches the same optimum every time, and `replicates=1` gives the same number as 5.
 
 **Tables**:
 - `ligand_ddg`: the columns follow `scoring`.
@@ -2059,6 +2060,7 @@ The numbers are Rosetta energy units, not kcal/mol and not measured affinities; 
 - `replicates`: int = 1 — Independent relax + ddG cycles, each starting from the input. Each adds one full relax run; with 1 the standard deviation is 0.
 - `constrain_to_start_coords`: bool = True — Harmonic coordinate constraints to the input during FastRelax, keeping the backbone near the supplied geometry. The reported scores use plain beta_nov16, so the constraint weight never enters them.
 - `constraint_weight`: float = 1.0 — Weight of those constraints; higher stays closer to the input.
+- `seed`: int = 42 — Base random seed. Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly (PyRosetta otherwise seeds itself from the system and a rerun gives other numbers). A different seed gives a different relaxation, with ddG differences of a few energy units at one replicate.
 
 **Tables**:
 - `ppi_ddg`:

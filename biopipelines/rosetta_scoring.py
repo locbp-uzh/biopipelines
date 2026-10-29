@@ -9,6 +9,7 @@ Imported by both sides, so it has no intra-package imports and never imports pyr
 PyRosetta is free for academic and non-profit use and needs a paid commercial license from the University of Washington. Installing it accepts that license.
 """
 
+import hashlib
 import math
 import os
 import re
@@ -41,6 +42,10 @@ HARD_INIT_OPTIONS = (
     "-dunbrack_prob_nonburied_semi 0.8",
 )
 
+# PyRosetta seeds itself from /dev/urandom, so a run is not repeatable unless every replicate is seeded.
+DEFAULT_SEED = 42
+MAX_SEED = 2**31 - 2
+
 UNBOUND_DISTANCE_A = 10000.0
 PACK_RADIUS_A = 10.0
 
@@ -65,6 +70,18 @@ def init_pyrosetta(options: Sequence[str]) -> None:
     import pyrosetta
     pyrosetta.init(" ".join(options), silent=True)
     _INITIALIZED = True
+
+
+def replicate_seed(seed: int, structure_id: str, replicate: int) -> int:
+    """The seed of one replicate of one structure: the same on every run, and different for every structure, replicate and base seed."""
+    digest = hashlib.sha256(f"{seed}:{structure_id}:{replicate}".encode()).digest()
+    return int.from_bytes(digest[:4], "big") % MAX_SEED + 1
+
+
+def seed_rosetta(seed: int) -> None:
+    """Seed Rosetta's random generator; unlike an init option it can be set again before every replicate."""
+    import pyrosetta
+    pyrosetta.rosetta.numeric.random.rg().set_seed(seed)
 
 
 def move_chain_far_away(pose, chain: str, distance: float = UNBOUND_DISTANCE_A):

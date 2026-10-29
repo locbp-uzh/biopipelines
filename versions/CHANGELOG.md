@@ -55,6 +55,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **LigandDdG** 1.1 → 1.2. New `seed` (default 42). PyRosetta seeds itself from /dev/urandom, so no run could be repeated. Each replicate of each structure is now seeded from `seed` with a distinct, fixed value (`rosetta_scoring.replicate_seed`), and the hard scheme once. The seed does not change the soft value on the five streptavidin complexes tried: ten seeds each gave one ddG to four decimals, because the repack of the interface reaches the same optimum, so `ddg_soft_std` is 0 and `replicates=1` gives the same number as 5; the documentation says so.
+
+- **PPIDdG** 1.0 → 1.1. New `seed` (default 42). PyRosetta seeds itself from /dev/urandom, so a rerun gave other numbers: barnase-barstar read -62.1, -64.4 and -64.3 in three identical one-replicate runs.Each replicate of each structure is now seeded from `seed` with a distinct, fixed value (`rosetta_scoring.replicate_seed`), so a run repeats exactly (seed 7 twice gave -66.7726 both times, seed 8 gave -62.6831) and the replicates of one run still differ.
+
 - **PoseBusters** 2.2 → 2.3. The protein written beside each extracted ligand was written entirely as HETATM when the structure declares no entities, which gemmi leaves unknown for a PDB without SEQRES such as a docking output. PoseBusters then read the protein as organic cofactors and ignored it, so `protein-ligand_maximum_distance` failed for twenty poses sitting in the pocket (nearest ligand atom 2.4 A from the protein) and no pose could pass. Residues of such a structure keep the record they had.
 
 - **ESM2** 1.0 → 1.1. The install check imports every module the pipe scripts import (numpy, pandas, yaml, torch, transformers, huggingface_hub). It imported only torch, transformers and huggingface_hub, so an env without numpy, pandas or pyyaml was reported as installed.

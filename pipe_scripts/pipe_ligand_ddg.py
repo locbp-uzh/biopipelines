@@ -34,6 +34,8 @@ from biopipelines.rosetta_scoring import (  # noqa: E402
     unbound_ddg,
     repack_around_chain,
     trimmed_mean_std,
+    replicate_seed,
+    seed_rosetta,
     collect_rows,
     write_outputs,
     step_exit_status,
@@ -274,14 +276,15 @@ def check_ligand_names(residue, ligand_lines, params):
             f"params and heavy atoms {absent[:6]} of the params are not in the structure")
 
 
-def soft_ddg(pose, binder_chain, ligand_chain, replicates):
-    """Pack with beta_nov16, score with beta_nov16_soft, repeat; trimmed mean over the replicates."""
+def soft_ddg(pose, binder_chain, ligand_chain, replicates, seeds):
+    """Pack with beta_nov16, score with beta_nov16_soft, repeat with one seed per replicate; trimmed mean over the replicates."""
     import pyrosetta as pyr
 
     hard = pyr.create_score_function("beta_nov16")
     soft = pyr.create_score_function("beta_nov16_soft")
     values = []
-    for _ in range(replicates):
+    for replicate in range(replicates):
+        seed_rosetta(seeds[replicate])
         repack_around_chain(pose, ligand_chain, hard)
         values.append(unbound_ddg(pose, soft, binder_chain))
     mean, std, used = trimmed_mean_std(values)
@@ -329,8 +332,10 @@ def score_structure(sid, path, config, code, smiles, work_root):
     if config.get("params_file"):
         check_ligand_names(pose.residue(pose.total_residue()), ligand_lines, params)
     if scoring == "soft":
-        result = soft_ddg(pose, config["binder_chain"], config["ligand_chain"], config["replicates"])
+        seeds = [replicate_seed(config["seed"], sid, r) for r in range(config["replicates"])]
+        result = soft_ddg(pose, config["binder_chain"], config["ligand_chain"], config["replicates"], seeds)
     else:
+        seed_rosetta(replicate_seed(config["seed"], sid, 0))
         result = hard_ddg(pose, pose.total_residue())
     print("  " + ", ".join(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}" for k, v in result.items()))
     return result
