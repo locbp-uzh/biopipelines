@@ -88,7 +88,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
@@ -136,7 +136,7 @@ else
 fi
 
 # Verify installation
-if {have_weights} && {run}python -c "import rf3" >/dev/null 2>&1; then
+if {have_weights} && {run}python -c "import rf3.inference_engines.rf3" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== RF3 installation complete ==="
 else

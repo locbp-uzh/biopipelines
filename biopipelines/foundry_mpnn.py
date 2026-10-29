@@ -110,7 +110,7 @@ class FoundryMPNN(BaseConfig):
     """
 
     TOOL_NAME = "FoundryMPNN"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
     ENV_NAME = "foundry"
 
@@ -157,7 +157,7 @@ else
 fi
 
 # Verify installation
-if ({have_weights}) && {run}python -c "import mpnn" >/dev/null 2>&1; then
+if ({have_weights}) && {run}python -c "import mpnn.inference_engines.mpnn" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== FoundryMPNN installation complete ==="
 else

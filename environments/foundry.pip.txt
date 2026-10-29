@@ -1,1 +1,4 @@
 rc-foundry[all]
+# rc-foundry 0.2.0 declares atomworks[ml]>=2.1.1, so an unpinned install resolves atomworks 3.x, where rfd3 and rf3 no longer import
+# (get_inferred_polymer_bonds and AtomSelectionStack moved). Checked: with atomworks 3.0.4 `import rfd3.engine` and `import rf3.inference_engines.rf3` fail.
+atomworks[ml]<3

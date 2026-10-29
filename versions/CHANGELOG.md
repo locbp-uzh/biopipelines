@@ -43,6 +43,12 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **RFdiffusion3** 3.7 → 3.8. A fresh `foundry` env resolved atomworks 3.x, in which `rfd3.engine` does not import (`get_inferred_polymer_bonds` moved), and the install check (`import foundry`) still passed. The env spec now keeps `atomworks[ml]<3` and the install check imports `rfd3.engine`.
+
+- **RF3** 1.0 → 1.1. The shared foundry env spec keeps `atomworks[ml]<3` (atomworks 3.x moved `AtomSelectionStack`, so `rf3.inference_engines.rf3` did not import), and the install check imports that module instead of the bare `rf3` package.
+
+- **FoundryMPNN** 1.0 → 1.1. The install check imports `mpnn.inference_engines.mpnn` instead of the bare `mpnn` package; the shared foundry env spec keeps `atomworks[ml]<3`.
+
 - **USalign** 1.0 (new). Aligns every pair of a table of structure pairs with US-align three ways, sequential, circularly permuted and non-sequential, and returns one `alignments` row per pair and mode: TM-score normalized by each structure's length, RMSD, aligned length, the two aligned sequences and the rotation matrix and translation. The pair table is two column references into one table; a pair with an id outside the structures stream keeps NaN rows and a `kind="failure"` row in `missing`. Installs from bioconda into the `usalign` env, which ships TMalign as well. A large table is split across sibling jobs with `Panda.filter("index % N == k")` slices and merged with `Pool(keep_ids=True)`; the framework has no SLURM job arrays and no table splitter of its own.
 
 - **TMalign** 1.0 (new). The sequential and `-cp` TM-align alignments of a table of structure pairs, with the same `alignments` table as USalign and a per-pair `delta` table with the TM-score gained by the circular permutation for each normalization. Shares the pair handling, the pipe and the `usalign` env with USalign.

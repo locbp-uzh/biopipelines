@@ -213,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.7"
+    TOOL_VERSION = "3.8"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -253,11 +253,11 @@ else
 fi
 
 # Verify installation
-if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {cls._env_run(env, env_manager)}python -c "import foundry" >/dev/null 2>&1; then
+if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {cls._env_run(env, env_manager)}python -c "import rfd3.engine" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFdiffusion3 installation complete ==="
 else
-    echo "ERROR: RFdiffusion3 verification failed (checkpoints missing or foundry not importable)"
+    echo "ERROR: RFdiffusion3 verification failed (checkpoints missing or rfd3 not importable)"
     exit 1
 fi
 """
