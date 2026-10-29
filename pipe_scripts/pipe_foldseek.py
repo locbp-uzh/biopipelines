@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -44,6 +45,11 @@ def stage_structures(files: List[Tuple[str, str]], stage_dir: str) -> Dict[int, 
     return index_to_id
 
 
+def positional(value) -> str:
+    """A float without an exponent: Foldseek's coverage option rejects 1e-05."""
+    return format(Decimal(repr(float(value))), "f")
+
+
 def build_command(stage_dir: str, prefix: str, tmp_dir: str, tm: float, cfg: dict, container_prefix: str = "") -> List[str]:
     """The Foldseek argv for one threshold."""
     common = ["--alignment-type", str(cfg["alignment_type"]),
@@ -52,7 +58,7 @@ def build_command(stage_dir: str, prefix: str, tmp_dir: str, tm: float, cfg: dic
     if cfg.get("evalue") is not None:
         common += ["-e", str(cfg["evalue"])]
     if cfg.get("coverage") is not None:
-        common += ["-c", str(cfg["coverage"])]
+        common += ["-c", positional(cfg["coverage"])]
     if cfg["multimer"]:
         cmd = ["foldseek", "easy-multimercluster", stage_dir, prefix, tmp_dir] + common + [
             "--multimer-tm-threshold", str(cfg["multimer_tm_threshold"]),

@@ -737,8 +737,12 @@ Foldseek:
   files:
   - biopipelines/foldseek.py
   - pipe_scripts/pipe_foldseek.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-29'
+    note: >-
+      A coverage below 1e-4 was written in exponent form (`1e-05`), which Foldseek's `-c` rejects; it is now written as a plain decimal.
   - version: '1.1'
     date: '2026-10-29'
     note: >-

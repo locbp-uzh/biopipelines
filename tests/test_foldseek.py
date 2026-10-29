@@ -74,6 +74,11 @@ def test_evalue_and_coverage_are_passed_when_set(pipe):
     assert cmd[cmd.index("-c") + 1] == "0.9"
 
 
+def test_a_small_coverage_is_written_without_an_exponent(pipe):
+    cmd = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, coverage=1e-5))
+    assert cmd[cmd.index("-c") + 1] == "0.00001"
+
+
 def test_each_of_evalue_and_coverage_is_passed_alone(pipe):
     only_e = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, evalue=0.01))
     assert "-e" in only_e and "-c" not in only_e

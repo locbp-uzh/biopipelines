@@ -57,7 +57,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 45 | DistanceSelector          | Analysis                       | 2.0 | `biopipelines/distance_selector.py` |
 | 46 | DSSP | Analysis                       | 2.2 | `biopipelines/dssp.py` |
 | 47 | EnsembleAnalysis          | Analysis                       | 1.0 | `biopipelines/ensemble_analysis.py` |
-| 48 | Foldseek | Analysis                       | 1.1 | `biopipelines/foldseek.py` |
+| 48 | Foldseek | Analysis                       | 1.2 | `biopipelines/foldseek.py` |
 | 49 | FPocket | Analysis                       | 2.1 | `biopipelines/fpocket.py` |
 | 50 | GEMS | Analysis                       | 2.0 | `biopipelines/gems.py` |
 | 51 | IPSAE                     | Analysis                       | 1.2 | `biopipelines/ipsae.py` |
