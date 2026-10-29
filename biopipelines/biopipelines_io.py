@@ -918,6 +918,25 @@ def read_upstream_missing(paths) -> List[Dict[str, Any]]:
     return rows
 
 
+def write_skipped_queries(path: str, skipped: Dict[str, str]) -> None:
+    """Write {query id: cause} for the queries a config step could not write, for the postprocess to turn into failure rows."""
+    import csv
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["id", "cause"])
+        writer.writerows(skipped.items())
+
+
+def read_skipped_queries(path: Optional[str]) -> Dict[str, str]:
+    """{query id: cause} written by :func:`write_skipped_queries`; empty when there is no file."""
+    import csv
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path, newline="") as handle:
+        return {row["id"]: row["cause"] for row in csv.DictReader(handle)}
+
+
 # =============================================================================
 # Provenance-based ID Resolution
 # =============================================================================

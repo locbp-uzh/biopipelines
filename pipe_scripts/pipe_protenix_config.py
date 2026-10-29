@@ -26,9 +26,9 @@ _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..
 sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pandas as pd
-
 from combinatorics import CombinatoricsConfig, predict_single_output_id
+from biopipelines.biopipelines_io import write_skipped_queries
+from biopipelines.id_map_utils import MissingAlignment, MsaLookup
 from ligand_utils import auth_ligand_field
 from nucleic_acids import DOUBLE_STRANDED_ENTITY_TYPES, reverse_complement
 from pipe_axis_data import load_axis_data
@@ -73,40 +73,11 @@ def polymer_sequence(record: Dict, entity_key: str, record_id: str) -> str:
     return sequence
 
 
-def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
-    """{protein id: absolute alignment path} from the msas stream, when one was passed.
-
-    A row is keyed by its `id` and by the `sequences.id` it carries: MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`.
-    """
-    if not msas_json:
-        return {}
-    with open(msas_json) as handle:
-        stream = json.load(handle)
-    table = stream.get("map_table")
-    if not table or not os.path.exists(table):
-        return {}
-    frame = pd.read_csv(table, dtype={"id": str, "sequences.id": str})
-    column = next((c for c in ("file", "path") if c in frame.columns), None)
-    if column is None:
-        return {}
-    lookup = {}
-    for key in ("id", "sequences.id"):
-        if key in frame.columns:
-            lookup.update({str(row[key]): os.path.abspath(str(row[column])) for _, row in frame.iterrows()
-                           if isinstance(row.get(column), str) and not pd.isna(row[key])})
-    unsupported = sorted({os.path.splitext(p)[1].lower() for p in lookup.values()} - {".a3m"})
-    if unsupported:
-        raise ValueError(
-            f"Protenix reads precomputed alignments as .a3m; the msas stream carries "
-            f"{', '.join(unsupported)}. Generate the MSA with MMseqs2(output_format=\"a3m\").")
-    return lookup
-
-
-def build_entity(entity_type: str, record: Dict, msa_lookup: Optional[Dict[str, str]],
+def build_entity(entity_type: str, record: Dict, msas: Optional[MsaLookup],
                  rev_comp: bool = False) -> Dict:
     """One upstream entity (count 1) for one record.
 
-    msa_lookup is None when no alignments were supplied, and a dict (possibly empty) when they were: then a protein without one is an error, since a path that is absent would make upstream search the server.
+    msas is None when no alignments were supplied, and a lookup when they were: then a protein without one is an error, since a path that is absent would make upstream search the server.
     """
     record_id = str(record.get("id", "?"))
 
@@ -121,10 +92,13 @@ def build_entity(entity_type: str, record: Dict, msa_lookup: Optional[Dict[str, 
         sequence = reverse_complement(sequence, entity_type)
     entity = {"sequence": sequence, "count": 1}
 
-    if entity_key == "proteinChain" and msa_lookup is not None:
-        path = msa_lookup.get(record_id)
-        if not path:
-            raise QueryError(f"{record_id}: no alignment for this protein chain in the msas stream")
+    if entity_key == "proteinChain" and msas is not None:
+        try:
+            path = os.path.abspath(msas.require(record_id, sequence))
+        except MissingAlignment as exc:
+            raise QueryError(str(exc)) from None
+        if os.path.splitext(path)[1].lower() != ".a3m":
+            raise QueryError(f"{record_id}: Protenix reads precomputed alignments as .a3m, not {path}")
         if not os.path.exists(path):
             raise QueryError(f"{record_id}: the alignment {path} does not exist")
         entity["unpairedMsaPath"] = path
@@ -204,14 +178,14 @@ def check_bonds(bonds: List[Dict], n_entities: int) -> None:
                     f"covalent_bonds[{index}]: {key}={bond[key]} but this query has {n_entities} entities")
 
 
-def build_job(query_id: str, items: List, msa_lookup: Optional[Dict[str, str]],
+def build_job(query_id: str, items: List, msas: Optional[MsaLookup],
               bonds: Optional[List[Dict]]) -> Dict:
     entities = []
     for entity_type, record in items:
         for member in record.get("__members__", [record]):
-            entities.append(build_entity(entity_type, member, msa_lookup))
+            entities.append(build_entity(entity_type, member, msas))
             if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
-                entities.append(build_entity(entity_type, member, msa_lookup, rev_comp=True))
+                entities.append(build_entity(entity_type, member, msas, rev_comp=True))
     job = {"name": query_id, "sequences": entities}
     if bonds:
         check_bonds(bonds, len(entities))
@@ -219,7 +193,7 @@ def build_job(query_id: str, items: List, msa_lookup: Optional[Dict[str, str]],
     return job
 
 
-def build_queries(elements: Dict[str, Dict], msa_lookup: Optional[Dict[str, str]],
+def build_queries(elements: Dict[str, Dict], msas: Optional[MsaLookup],
                   bonds: Optional[List[Dict]]) -> Tuple[Dict[str, Dict], Dict[str, str]]:
     """({query id: upstream job}, {query id: cause}) for the queries written and the ones skipped."""
     iteration, static_only = plan_iteration(elements)
@@ -237,7 +211,7 @@ def build_queries(elements: Dict[str, Dict], msa_lookup: Optional[Dict[str, str]
         # The id comes from the framework's own helper: it is what the wrapper predicted at configuration time.
         query_id = predict_single_output_id(**selections)
         try:
-            jobs[query_id] = build_job(query_id, items, msa_lookup, bonds)
+            jobs[query_id] = build_job(query_id, items, msas, bonds)
         except ValueError as exc:
             skipped[query_id] = str(exc)
     return jobs, skipped
@@ -262,19 +236,19 @@ def main():
     args = parser.parse_args()
 
     config = CombinatoricsConfig.load(args.combinatorics_config)
-    msa_lookup = load_msa_lookup(args.msas_json) if args.msas_json else None
+    msas = MsaLookup.load(args.msas_json) if args.msas_json else None
     bonds = None
     if args.covalent_bonds_json:
         with open(args.covalent_bonds_json) as handle:
             bonds = json.load(handle)
 
-    jobs, skipped = build_queries(axis_elements(config), msa_lookup, bonds)
+    jobs, skipped = build_queries(axis_elements(config), msas, bonds)
     if not jobs and not skipped:
         print("ERROR: no queries were built; every input axis resolved to zero records")
         sys.exit(1)
 
     write_csv(args.query_ids_csv, ["id"], [[query_id] for query_id in [*jobs, *skipped]])
-    write_csv(args.skipped_csv, ["id", "cause"], [[query_id, cause] for query_id, cause in skipped.items()])
+    write_skipped_queries(args.skipped_csv, skipped)
     for query_id, cause in skipped.items():
         print(f"WARNING: query {query_id} skipped: {cause}")
 

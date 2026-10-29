@@ -400,7 +400,7 @@ Ligand-capable successor of BioEmu (microsoft/bioemu2). Samples `num_samples` co
 - `sampler`: str = "edm" - `edm` (unsteered), `edm_gd` (gradient guidance), `edm_fk` (Feynman-Kac resampling) or `edm_fkc` (Feynman-Kac corrector). The steered samplers use upstream's default physicality potentials
 - `contacts`: list[dict] | None = None - upstream contact dicts, `{"token1": {"asym_id": "A", "res_id": 3}, "token2": {"asym_id": "B", "atom_name": "PG"}, "max_distance": 6.0}`. A token is a chain with a 1-based residue index or with a ligand atom name
 - `covalent_linkage`: dict | None = None - `{"chain": "A", "position": 3, "protein_atom": "SG", "ligand_atom": "C1"}`. Requires `ligands`, given by CCD code
-- `msas`: DataStream | StandardizedOutput | None = None - precomputed `.a3m` or Boltz-style `.csv` alignments, for single-chain systems. Formerly `precomputed_msa`, which still works and is deprecated
+- `msas`: DataStream | StandardizedOutput | None = None - precomputed `.a3m` or Boltz-style `.csv` alignments, for single-chain systems. Formerly `precomputed_msa`, which still works and is deprecated. An alignment is matched to its sequence by id (maps written before the id rule included), else by sequence; a sequence with none is searched through ColabFold as usual and the log names it
 - `physicality_filter`: str = "high_quality" - `high_quality`, `high_quality_per_residue` (violation counts per residue), `no_violations` or `no_filter` (no check, every frame `not_checked`). It only changes what the `physicality` table reports
 
 **Streams**: `structures`, `trajectories`

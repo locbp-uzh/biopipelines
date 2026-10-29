@@ -34,7 +34,8 @@ Installation is verified by running `colabfold_batch --help` and importing `jax_
 **Parameters**:
 - `proteins`: DataStream | StandardizedOutput | Bundle | Each (required) - Input protein sequences. A bare input folds one monomer per sequence; `Bundle(...)` folds the bundled sequences as one multi-chain complex.
 - `msas`: StandardizedOutput = None - Pre-computed MSAs in A3M format. When provided,
-  ColabFold uses these instead of generating new MSAs.
+  ColabFold uses these instead of generating new MSAs, and every query needs one, matched to its id:
+  a query with none is not predicted, keeps a blank row of `confidence` and lands in `missing` as a `failure`.
   **Note**: Prefer an A3M the search produced — `MMseqs2(output_format="a3m")`,
   AlphaFold or ColabFold. `MSA(source, convert="a3m")` rebuilds a usable A3M only when
   the CSV has its `.a3m_meta` sidecar; without one (any CSV written before the sidecar
@@ -61,10 +62,10 @@ Installation is verified by running `colabfold_batch --help` and importing `jax_
 
 - `msas`:
 
-  | id | sequences.id | sequence | file |
-  |----|--------------|----------|----------|
+  | id | sequence | file |
+  |----|----------|----------|
 
-- `missing` (only when an input axis carries an upstream manifest):
+- `missing` (when `msas` is given, or an input axis carries an upstream manifest):
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
@@ -116,7 +117,7 @@ pip install boltz[cuda] -U
 - `ssRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - Single-stranded RNA sequences
 - `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - Double-stranded RNA sequences
 - `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - Ligand compounds stream (e.g. from `Ligand` / `CompoundLibrary`). May be the **only** input: a ligands-only job folds or scores compounds on their own. Pass `affinity=False` when you do — `affinity` defaults to `True` and a ligands-only prediction has no receptor to bind to, so `Boltz2(ligands=lib)` raises rather than silently scoring nothing.
-- `msas`: Optional[StandardizedOutput] = None - Pre-computed MSA files for recycling (pass entire tool output, not .msas).
+- `msas`: Optional[StandardizedOutput] = None - Pre-computed MSA files for recycling (pass entire tool output, not .msas). Every protein chain needs an alignment matched to its protein id (or, failing that, its sequence): a complex with a chain that has none is not predicted, keeps a blank row of `confidence` and lands in `missing` as a `failure`; Boltz2 no longer folds that chain single-sequence
   Supports recycling from AlphaFold via `MSA(af_result, convert="csv")`.
 - `single_sequence`: bool = False - Fold without an MSA. Mutually exclusive with `msas`. The `msas` stream comes back empty, and accuracy drops for anything that is not already well represented in the model — use it for speed or when no homologs exist, not as a default.
 - `affinity`: bool = True - Calculate binding affinity predictions
@@ -176,15 +177,15 @@ pip install boltz[cuda] -U
 
 - `msas` (only when `single_sequence=False`):
 
-  | id | sequences.id | sequence | file |
-  |----|--------------|----------|----------|
+  | id | sequence | file |
+  |----|----------|----------|
 
 - `compounds` (only when ligands are folded; `code` carries the residue code Boltz assigned):
 
   | id | format | code | smiles | ccd |
   |----|--------|------|--------|-----|
 
-- `missing` (only when an input axis carries an upstream manifest):
+- `missing` (when `msas` is given, or an input axis carries an upstream manifest):
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
@@ -406,7 +407,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 - `proteins`: DataStream | StandardizedOutput = None — Protein sequences.
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: DataStream | StandardizedOutput = None — Nucleic-acid sequences (double-stranded axes add the reverse-complement chain automatically).
 - `ligands`: DataStream | StandardizedOutput = None — Compounds stream (`Ligand` / `CompoundLibrary`); folded by CCD code (SMILES ligands supported too).
-- `msas`: StandardizedOutput = None — Precomputed MSAs to recycle per protein chain (e.g. from MMseqs2 or a previous run). Omit for single-sequence folding.
+- `msas`: StandardizedOutput = None — Precomputed MSAs to recycle per protein chain (e.g. from MMseqs2 or a previous run). Omit for single-sequence folding. With it, every protein chain needs an alignment matched to its protein id (or, failing that, its sequence): a complex with a chain that has none is not folded, keeps a blank row of `confidence` and lands in `missing` as a `failure`.
 - `modifications`: Optional[List[Dict]] = None — Per-residue CCD substitutions on a polymer chain, e.g. `[{"chain": "A", "position": 122, "ccd": "SEP"}]`. The residue is replaced by its CCD entry and atom-tokenized, so `SEP` / `TPO` / `PTR` give real phospho-residues with their phosphate rather than the unmodified parent. Works on DNA/RNA chains too (`PSU`, …). CCD codes only — the upstream `Modification.smiles` field is not implemented, and a `smiles` key is rejected rather than ignored.
 - `covalent_bonds`: Optional[List[Dict]] = None — Inter-entity covalent links, e.g. `[{"atom1": ["A", 122, "SG"], "atom2": ["C", 1, "C1"]}]`. Atom names are resolved against the residue's CCD atoms at runtime; an unknown chain, residue, or atom name raises instead of being silently dropped.
 - `num_loops`: int = 10 — Recurrent folding loops (inference-time scaling).
@@ -682,7 +683,7 @@ The whole batch folds in one process — `run_openfold predict` takes a single J
 - `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement
 - `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them, so both models receive the same chemistry for the same input
-- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA server off; passing `use_msa_server=True` as well is refused
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA server off; passing `use_msa_server=True` as well is refused. Every protein chain of a query needs one, matched to its protein id: a query with a chain that has none is not predicted, keeps a blank row of `confidence` and lands in `missing` as a `failure`
 - `use_msa_server`: Optional[bool] = None - generate alignments through the ColabFold server; unset means on, unless `msas` is given
 - `num_diffusion_samples`: Optional[int] = None - structures sampled per query (upstream default 5)
 - `num_model_seeds`: Optional[int] = None - random seeds per query (upstream default 1)
@@ -800,7 +801,7 @@ RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `
 - `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement. The chain type is passed to upstream explicitly, because a string such as "ACGT" is also a valid protein sequence
 - `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them. Upstream's own guidance is that a CCD code folds better than a SMILES string
-- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`). Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence, and then the default early-stopping threshold often abandons them. Upstream pairs alignments across chains on the fly and does not accept pre-paired ones
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`). Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence, and then the default early-stopping threshold often abandons them. With `msas`, an input with a protein chain that has no alignment is not predicted and lands in `missing` as a `failure`. Upstream pairs alignments across chains on the fly and does not accept pre-paired ones
 - `n_recycles`: Optional[int] = None - trunk recycles (upstream default 10). A single recycle is refused while early stopping is on, because upstream spends the first recycle on the early-stopping check and has none left to fold with
 - `diffusion_batch_size`: int = 5 - structures sampled per input from one forward pass of the trunk (upstream default 5). Always passed, so the ids declared for `top_only=False` are exact
 - `num_steps`: Optional[int] = None - diffusion sampling steps. Upstream's config default is 50; its README states 200 and says 50 performs similarly and is more than twice as fast. Left to upstream unless given

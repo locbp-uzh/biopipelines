@@ -63,7 +63,7 @@ class Protenix(BaseConfig):
         ssDNA / dsDNA / ssRNA / dsRNA: nucleic-acid sequences in upper case, A/C/G/T/N for DNA and A/C/G/U/N for RNA. A double-stranded axis becomes two chains, the second the reverse complement.
         ligands: compounds, by SMILES or CCD code. A single-atom ion is a ligand with its CCD code (`MG`), which upstream builds the same way as its `ion` entity.
         msas: precomputed alignments (`.a3m`) for the protein chains, from `MMseqs2(output_format="a3m")` or `MSA`.
-            Every protein chain of a query needs one; a query with a chain that has none is not predicted and lands in `missing`.
+            Every protein chain of a query needs one, matched to its protein id; a query with a chain that has none is not predicted and lands in `missing` as a `failure`.
             They are passed as unpaired alignments; upstream's ColabFold note says Protenix pairs chains through species information that ColabFold-style alignments lack.
         use_msa_server: search alignments through upstream's MSA service at protenix-server.com, to which the sequences are sent (default: on, unless `msas` is given).
             False without `msas` folds every chain single-sequence.
@@ -98,7 +98,7 @@ class Protenix(BaseConfig):
     """
 
     TOOL_NAME = "Protenix"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     ENV_NAME = "protenix"
 
     PREDICT_COMMAND = "protenix pred"

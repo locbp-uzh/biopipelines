@@ -23,6 +23,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
 sys.path.insert(0, SCRIPTS)
 
+from biopipelines.id_map_utils import MsaLookup  # noqa: E402
 from biopipelines.protenix import MODEL_NAMES, Protenix  # noqa: E402
 import pipe_protenix_config as config_script  # noqa: E402
 import pipe_protenix_weights  # noqa: E402
@@ -332,10 +333,14 @@ class TestAlignments:
         return {"proteins": _axis("protein", [{"id": "p1", "sequence": PROTEIN},
                                               {"id": "p2", "sequence": PROTEIN}])}
 
+    @staticmethod
+    def _msas(*rows):
+        return MsaLookup([{"id": row_id, "file": path} for row_id, path in rows])
+
     def test_a_supplied_alignment_becomes_an_absolute_unpaired_path(self, tmp_path):
         a3m = tmp_path / "p1.a3m"
         a3m.write_text(">q\n" + PROTEIN + "\n")
-        jobs, skipped = config_script.build_queries(self._elements(), {"p1": str(a3m)}, None)
+        jobs, skipped = config_script.build_queries(self._elements(), self._msas(("p1", str(a3m))), None)
         assert jobs["p1"]["sequences"][0]["proteinChain"]["unpairedMsaPath"] == str(a3m)
         assert "pairedMsaPath" not in jobs["p1"]["sequences"][0]["proteinChain"]
 
@@ -343,13 +348,15 @@ class TestAlignments:
         """A path that is absent makes upstream search for every chain, the opposite of supplying them."""
         a3m = tmp_path / "p1.a3m"
         a3m.write_text(">q\n" + PROTEIN + "\n")
-        jobs, skipped = config_script.build_queries(self._elements(), {"p1": str(a3m)}, None)
+        elements = {"proteins": _axis("protein", [{"id": "p1", "sequence": PROTEIN},
+                                                  {"id": "p2", "sequence": "MKTAYIAKQRQ"}])}
+        jobs, skipped = config_script.build_queries(elements, self._msas(("p1", str(a3m))), None)
         assert list(jobs) == ["p1"]
-        assert "no alignment" in skipped["p2"]
+        assert skipped["p2"] == "no alignment in msas for p2 (ids present: p1)"
 
     def test_an_alignment_file_that_does_not_exist_skips_its_query(self, tmp_path):
-        jobs, skipped = config_script.build_queries(
-            self._elements(), {"p1": str(tmp_path / "gone.a3m"), "p2": str(tmp_path / "gone2.a3m")}, None)
+        msas = self._msas(("p1", str(tmp_path / "gone.a3m")), ("p2", str(tmp_path / "gone2.a3m")))
+        jobs, skipped = config_script.build_queries(self._elements(), msas, None)
         assert not jobs and "does not exist" in skipped["p1"]
 
     def test_without_supplied_alignments_no_path_is_written(self):
@@ -357,27 +364,24 @@ class TestAlignments:
         assert "unpairedMsaPath" not in jobs["p1"]["sequences"][0]["proteinChain"]
 
     def test_an_alignment_the_model_cannot_read_is_named_not_ignored(self, tmp_path):
-        table = tmp_path / "msas_map.csv"
-        pd.DataFrame([{"id": "p1", "file": str(tmp_path / "p1.csv")}]).to_csv(table, index=False)
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        with pytest.raises(ValueError, match="a3m"):
-            config_script.load_msa_lookup(str(stream))
+        msas = self._msas(("p1", str(tmp_path / "p1.csv")), ("p2", str(tmp_path / "p2.csv")))
+        jobs, skipped = config_script.build_queries(self._elements(), msas, None)
+        assert not jobs and "a3m" in skipped["p1"]
 
-    def test_the_lookup_maps_ids_to_absolute_paths(self, tmp_path):
-        table = tmp_path / "msas_map.csv"
-        pd.DataFrame([{"id": "p1", "file": "rel/p1.a3m"}]).to_csv(table, index=False)
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        assert config_script.load_msa_lookup(str(stream)) == {"p1": os.path.abspath("rel/p1.a3m")}
-
-    def test_rows_named_after_the_alignment_are_found_by_the_protein_id_they_carry(self, tmp_path):
-        """MMseqs2 names its rows `<id>_msa` and keeps the protein id in `sequences.id`; keyed by `id` alone no chain ever found its alignment."""
-        table = tmp_path / "msas_map.csv"
-        pd.DataFrame([{"id": "p1_msa", "sequences.id": "p1", "file": "rel/p1.a3m"}]).to_csv(table, index=False)
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        assert config_script.load_msa_lookup(str(stream))["p1"] == os.path.abspath("rel/p1.a3m")
+    @pytest.mark.parametrize("rows", [
+        [{"id": "p1", "file": "ALN"}],
+        [{"id": "p1_msa", "sequences.id": "p1", "file": "ALN"}],
+        [{"id": "p1_msa", "file": "ALN"}],
+    ], ids=["named_after_the_sequence", "provenance_column", "legacy_suffix_only"])
+    def test_a_map_written_before_or_after_the_id_rule_gives_the_chain_its_alignment(self, tmp_path, rows):
+        """The earlier bug: MMseqs2 named its rows `<id>_msa`; keyed by `id` alone no chain found its alignment."""
+        a3m = tmp_path / "p1.a3m"
+        a3m.write_text(">q\n" + PROTEIN + "\n")
+        msas = MsaLookup([{**row, "file": str(a3m)} for row in rows])
+        elements = {"proteins": _axis("protein", [{"id": "p1", "sequence": PROTEIN}])}
+        jobs, skipped = config_script.build_queries(elements, msas, None)
+        assert not skipped
+        assert jobs["p1"]["sequences"][0]["proteinChain"]["unpairedMsaPath"] == str(a3m)
 
 
 class TestCovalentBondsInTheQuery:

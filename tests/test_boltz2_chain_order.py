@@ -74,8 +74,7 @@ def test_static_only_bundle_puts_ligand_first(args, record_case):
     """Bundle(binder, target) + ligand -> ligand takes chain A."""
     from pipe_boltz_config_unified import generate_configs
 
-    configs = generate_configs(_axes(protein_iterated=False),
-                               {"by_id": {}, "by_seq": {}}, args)
+    configs, _skipped = generate_configs(_axes(protein_iterated=False), None, args)
     (_cid, config), = configs
     by_chain = _by_chain(config)
 
@@ -91,8 +90,7 @@ def test_iterated_protein_axis_takes_chain_a(args, record_case):
     """
     from pipe_boltz_config_unified import generate_configs
 
-    configs = generate_configs(_axes(protein_iterated=True),
-                               {"by_id": {}, "by_seq": {}}, args)
+    configs, _skipped = generate_configs(_axes(protein_iterated=True), None, args)
     (_cid, config), = configs
     by_chain = _by_chain(config)
 
@@ -106,7 +104,6 @@ def test_affinity_binder_follows_the_ligand_chain(args):
     from pipe_boltz_config_unified import generate_configs
 
     for iterated, expected in ((False, "A"), (True, "C")):
-        configs = generate_configs(_axes(protein_iterated=iterated),
-                                   {"by_id": {}, "by_seq": {}}, args)
+        configs, _skipped = generate_configs(_axes(protein_iterated=iterated), None, args)
         (_cid, config), = configs
         assert config["properties"] == [{"affinity": {"binder": expected}}]

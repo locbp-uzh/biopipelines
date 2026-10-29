@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "biopipelines"))
 from biopipelines.combinatorics import predict_single_output_id
+from biopipelines.id_map_utils import MsaLookup
 
 # Double-stranded axes add a reverse-complement chain; ligand axes drive the
 # affinity/first-ligand bookkeeping (none here, but kept for symmetry).
@@ -115,10 +116,11 @@ def load_axis_records(axis):
     return iterated, static, min_static_order < min_iter_order
 
 
-def build_complexes(config, msa_by_seq, glycans=None):
+def build_complexes(config, msas, glycans=None):
     """Yield (complex_id, [chain dicts]) for every output id.
 
-    Each chain dict is {entity_type, id (chain letter), sequence|ccd, msa_path}.
+    Each chain dict is {entity_type, id (chain letter), sequence|ccd, msa_path, msa_error}; msa_error is
+    set when msas were supplied and the protein has none, and fails that complex alone.
     Mirrors the framework cartesian-product assignment so ids match
     predict_output_ids_with_provenance exactly.
     """
@@ -223,9 +225,14 @@ def build_complexes(config, msa_by_seq, glycans=None):
                                ccd=[ccd] if ccd else [], smiles=smiles))
             return
         seq = str(item.get("sequence", ""))
-        msa_path = msa_by_seq.get(seq) if entity_type == "protein" else None
+        msa_path = msa_error = None
+        if entity_type == "protein" and msas is not None:
+            protein_id = str(item.get("id", ""))
+            msa_path = msas.path(protein_id, seq)
+            if msa_path is None:
+                msa_error = msas.cause(protein_id)
         chains.append(dict(entity_type=entity_type, id=None,
-                           sequence=seq, msa_path=msa_path))
+                           sequence=seq, msa_path=msa_path, msa_error=msa_error))
         if entity_type in DOUBLE_STRANDED:
             chains.append(dict(entity_type=entity_type, id=None,
                                sequence=reverse_complement(seq, entity_type), msa_path=None))
@@ -259,20 +266,6 @@ def build_complexes(config, msa_by_seq, glycans=None):
             for item in sa["items"]:
                 add_item(chains, sa["entity_type"], item, counter)
         yield predict_single_output_id(**selections), assign_chain_ids(add_glycan_chains(chains))
-
-
-def load_msa_by_sequence(msas_table):
-    """Map protein sequence -> MSA file path from the recycled msas table."""
-    if not msas_table or not os.path.exists(msas_table):
-        return {}
-    df = pd.read_csv(msas_table)
-    out = {}
-    for _, row in df.iterrows():
-        seq = str(row.get("sequence", "") or "")
-        msa_file = row.get("file", "") or ""
-        if seq and msa_file and os.path.exists(str(msa_file)):
-            out[seq] = str(msa_file)
-    return out
 
 
 def load_constraints(path):
@@ -386,6 +379,8 @@ def to_structure_input(chains, input_builder, MSA, max_depth, constraints):
         et = ch["entity_type"]
         if et == "protein":
             msa = None
+            if ch.get("msa_error"):
+                raise ValueError(ch["msa_error"])
             if ch.get("msa_path"):
                 if not ch["msa_path"].endswith((".a3m", ".a3m.gz")):
                     raise ValueError(
@@ -474,14 +469,14 @@ def main():
 
     with open(args.combinatorics_config) as f:
         config = json.load(f)
-    msa_by_seq = load_msa_by_sequence(args.msas_table)
+    msas = MsaLookup.load(args.msas_table) if args.msas_table else None
     constraints = load_constraints(args.constraints)
 
     print(f"Loading ESMFold2 model: {args.model_name}", flush=True)
     model = EsmFold2Model.from_pretrained(args.model_name, device="cuda").eval()
     folder = ESMFold2InputBuilder()
 
-    complexes = list(build_complexes(config, msa_by_seq,
+    complexes = list(build_complexes(config, msas,
                                      glycans=constraints.get("glycans")))
     print(f"Assembled {len(complexes)} complex(es)", flush=True)
 

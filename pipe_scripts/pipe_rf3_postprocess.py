@@ -219,6 +219,14 @@ def collect_example(prediction_folder: str, name: str, top_only: bool, n_samples
     return {"outputs": outputs, "dropped": dropped}
 
 
+def skipped_example(name: str, cause: str, top_only: bool, n_samples: int) -> Dict:
+    """What an example the config step could not write produced: nothing, under every id it declared."""
+    wanted = [name] if top_only else [f"{name}_{k}" for k in range(1, n_samples + 1)]
+    return {"outputs": [],
+            "dropped": [{"id": wanted_id, "kind": "failure", "early_stopped": False, "cause": cause}
+                        for wanted_id in wanted]}
+
+
 def stage_structure(source: str, destination: str) -> None:
     """Copy the model to `<id>.cif`, decompressing when upstream gzipped it."""
     if source.endswith(".gz"):
@@ -244,11 +252,12 @@ def write_rows(path: str, fieldnames: List[str], rows: List[Dict]) -> None:
 
 
 def main():
-    from biopipelines.biopipelines_io import step_id_from_table_path
+    from biopipelines.biopipelines_io import read_skipped_queries, step_id_from_table_path
 
     parser = argparse.ArgumentParser(description="Collect RF3 predictions")
     parser.add_argument("--prediction-folder", required=True)
     parser.add_argument("--queries-json", required=True)
+    parser.add_argument("--skipped-csv", default=None)
     parser.add_argument("--structures-dir", required=True)
     parser.add_argument("--structures-map-csv", required=True)
     parser.add_argument("--confidence-csv", required=True)
@@ -261,7 +270,8 @@ def main():
     args = parser.parse_args()
 
     names = example_names(args.queries_json)
-    if not names:
+    skipped = read_skipped_queries(args.skipped_csv)
+    if not names and not skipped:
         print("ERROR: no examples to collect — the inputs JSON is empty")
         sys.exit(1)
 
@@ -272,9 +282,14 @@ def main():
     map_rows, pae_rows, confidence_rows, missing_rows = [], [], [], []
     failed_examples = 0
 
-    for name in names:
-        result = collect_example(args.prediction_folder, name, parse_bool(args.top_only),
-                                 args.diffusion_batch_size, args.early_stopping_plddt_threshold)
+    top_only = parse_bool(args.top_only)
+    results = [collect_example(args.prediction_folder, name, top_only,
+                               args.diffusion_batch_size, args.early_stopping_plddt_threshold)
+               for name in names]
+    results += [skipped_example(name, cause, top_only, args.diffusion_batch_size)
+                for name, cause in skipped.items()]
+
+    for result in results:
         for output in result["outputs"]:
             destination = os.path.join(args.structures_dir, f"{output['id']}.cif")
             stage_structure(output["structure"], destination)
@@ -300,11 +315,11 @@ def main():
     write_rows(args.confidence_csv, CONFIDENCE_COLUMNS, confidence_rows)
     write_rows(args.local_missing_csv, ["id", "removed_by", "kind", "cause"], missing_rows)
 
-    print(f"Collected {len(map_rows)} structure(s) for {len(names)} example(s); "
+    print(f"Collected {len(map_rows)} structure(s) for {len(results)} example(s); "
           f"{len(missing_rows)} id(s) without one")
 
     # Every example failed means the step did not work; early-stopped examples were filtered, not failed.
-    if failed_examples == len(names):
+    if failed_examples == len(results):
         print("ERROR: no RF3 prediction produced a structure")
         sys.exit(1)
 

@@ -18,15 +18,15 @@ import os
 import re
 import shutil
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
 sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pandas as pd
-
 from combinatorics import CombinatoricsConfig, predict_single_output_id
+from biopipelines.biopipelines_io import write_skipped_queries
+from biopipelines.id_map_utils import MissingAlignment, MsaLookup
 from ligand_utils import auth_ligand_field
 from nucleic_acids import DOUBLE_STRANDED_ENTITY_TYPES, RNA_ENTITY_TYPES, reverse_complement
 from pipe_axis_data import load_axis_data
@@ -75,13 +75,49 @@ def polymer_sequence(record: Dict, entity_type: str, record_id: str) -> str:
     return sequence.strip()
 
 
-def msa_paths_for(record_id: str, msa_lookup: Dict[str, str]) -> Optional[List[str]]:
-    """The precomputed alignment for one chain, if one was supplied for it."""
-    path = msa_lookup.get(str(record_id))
-    return [path] if path else None
+ALIGNMENT_EXTENSIONS = (".a3m", ".sto", ".npz")
 
 
-def build_chain(entity_type: str, record: Dict, label: str, msa_lookup: Dict[str, str],
+def stage_alignment(path: str, key: str, directory: str) -> str:
+    """Copy an .a3m or .sto alignment to <directory>/<key>/colabfold_main.<ext>, the name upstream parses.
+
+    Upstream reads an alignment file only when its stem is one of the databases it names (`colabfold_main`, `uniref90_hits`, ...) and skips any other, which leaves the chain with no alignment and raises an IndexError.
+    A `.npz` is already parsed and is passed through unchanged.
+    """
+    extension = os.path.splitext(path)[1].lower()
+    if extension not in ALIGNMENT_EXTENSIONS:
+        raise ValueError(
+            f"OpenFold3 reads precomputed alignments as .a3m, .sto or .npz; the msas stream "
+            f"carries {extension or 'a file with no extension'} ({path}). Generate the MSA with "
+            f"MMseqs2(output_format=\"a3m\") or leave use_msa_server on.")
+    if extension == ".npz":
+        return path
+    folder = os.path.join(directory, re.sub(r"[^A-Za-z0-9_.+-]", "_", key))
+    os.makedirs(folder, exist_ok=True)
+    staged = os.path.join(folder, f"colabfold_main{extension}")
+    shutil.copyfile(path, staged)
+    return staged
+
+
+class Alignments:
+    """The supplied alignments, each staged once under the name upstream reads when its protein first asks."""
+
+    def __init__(self, lookup: MsaLookup, directory: str):
+        self.lookup = lookup
+        self.directory = directory
+        self._staged: Dict[str, str] = {}
+
+    def paths_for(self, protein_id: str, sequence: Optional[str]) -> List[str]:
+        """The staged alignment of one protein chain; raises MissingAlignment when it has none."""
+        if protein_id not in self._staged:
+            path = self.lookup.require(protein_id, sequence)
+            if not os.path.exists(path):
+                raise MissingAlignment(f"the alignment {path} of {protein_id} does not exist")
+            self._staged[protein_id] = stage_alignment(path, protein_id, self.directory)
+        return [self._staged[protein_id]]
+
+
+def build_chain(entity_type: str, record: Dict, label: str, alignments: Optional[Alignments],
                 template: Optional[str], template_chains: Optional[List[str]],
                 rev_comp: bool = False) -> Dict:
     record_id = str(record.get("id", "?"))
@@ -103,44 +139,12 @@ def build_chain(entity_type: str, record: Dict, label: str, msa_lookup: Dict[str
     chain["sequence"] = sequence
 
     if entity_type == "protein":
-        paths = msa_paths_for(record_id, msa_lookup)
-        if paths:
-            chain["main_msa_file_paths"] = paths
+        if alignments is not None:
+            chain["main_msa_file_paths"] = alignments.paths_for(record_id, sequence)
         if template and (not template_chains or label in template_chains):
             chain["template_cif_paths"] = [template]
             chain["template_cif_chain_ids"] = [None]
     return chain
-
-
-def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
-    """{protein id: alignment path} from the msas stream, when one was passed.
-
-    A row is keyed by its `id` and by the `sequences.id` it carries: MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`.
-    """
-    if not msas_json:
-        return {}
-    with open(msas_json) as handle:
-        stream = json.load(handle)
-    table = stream.get("map_table")
-    if not table or not os.path.exists(table):
-        return {}
-    frame = pd.read_csv(table, dtype={"id": str, "sequences.id": str})
-    column = next((c for c in ("file", "path") if c in frame.columns), None)
-    if column is None:
-        return {}
-    lookup = {}
-    for key in ("id", "sequences.id"):
-        if key in frame.columns:
-            lookup.update({str(row[key]): str(row[column]) for _, row in frame.iterrows()
-                           if isinstance(row.get(column), str) and not pd.isna(row[key])})
-    unsupported = sorted({os.path.splitext(p)[1].lower() for p in lookup.values()}
-                         - {".a3m", ".sto", ".npz"})
-    if unsupported:
-        raise ValueError(
-            f"OpenFold3 reads precomputed alignments as .a3m, .sto or .npz; the msas stream "
-            f"carries {', '.join(unsupported)}. Generate the MSA with MMseqs2(output_format="
-            f"\"a3m\") or leave use_msa_server on.")
-    return lookup
 
 
 def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
@@ -158,27 +162,13 @@ def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
     return elements
 
 
-def stage_alignments(lookup: Dict[str, str], directory: str) -> Dict[str, str]:
-    """Copy each .a3m or .sto alignment to <directory>/<id>/colabfold_main.<ext>, the name upstream parses.
+def build_queries(elements: Dict[str, Dict], alignments: Optional[Alignments],
+                  template: Optional[str], template_chains: Optional[List[str]]
+                  ) -> Tuple[Dict, Dict[str, str]]:
+    """({"queries": {query id: query}}, {query id: cause}) for the queries written and the ones skipped.
 
-    Upstream reads an alignment file only when its stem is one of the databases it names (`colabfold_main`, `uniref90_hits`, ...) and skips any other, which leaves the chain with no alignment and raises an IndexError.
-    A `.npz` is already parsed and is passed through unchanged.
+    A query with a protein chain that has no supplied alignment is skipped with that cause, so it folds nowhere instead of folding single-sequence.
     """
-    staged = {}
-    for key, path in lookup.items():
-        extension = os.path.splitext(path)[1].lower()
-        if extension not in (".a3m", ".sto"):
-            staged[key] = path
-            continue
-        folder = os.path.join(directory, re.sub(r"[^A-Za-z0-9_.+-]", "_", key))
-        os.makedirs(folder, exist_ok=True)
-        staged[key] = os.path.join(folder, f"colabfold_main{extension}")
-        shutil.copyfile(path, staged[key])
-    return staged
-
-
-def build_queries(elements: Dict[str, Dict], msa_lookup: Dict[str, str],
-                  template: Optional[str], template_chains: Optional[List[str]]) -> Dict:
     import itertools
 
     ordered = [name for name in AXIS_ORDER if name in elements]
@@ -198,6 +188,7 @@ def build_queries(elements: Dict[str, Dict], msa_lookup: Dict[str, str],
             static_only.append((name, data["entity_type"], data["static"]))
 
     queries: Dict[str, Dict] = {}
+    skipped: Dict[str, str] = {}
     # One empty combination only when nothing iterates; an iterating axis with no records yields no query, not an IndexError.
     combinations = (list(itertools.product(*[list(enumerate(items))
                                              for _, _, items, _, _ in iteration]))
@@ -205,6 +196,7 @@ def build_queries(elements: Dict[str, Dict], msa_lookup: Dict[str, str],
 
     for combination in combinations:
         chains: List[Dict] = []
+        causes: List[str] = []
         counter = 0
 
         def add(entity_type, record):
@@ -212,12 +204,15 @@ def build_queries(elements: Dict[str, Dict], msa_lookup: Dict[str, str],
             for member in record.get("__members__", [record]):
                 label = chain_ids(1, counter)[0]
                 counter += 1
-                chains.append(build_chain(entity_type, member, label, msa_lookup,
-                                          template, template_chains))
+                try:
+                    chains.append(build_chain(entity_type, member, label, alignments,
+                                              template, template_chains))
+                except MissingAlignment as exc:
+                    causes.append(str(exc))
                 if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
                     label2 = chain_ids(1, counter)[0]
                     counter += 1
-                    chains.append(build_chain(entity_type, member, label2, msa_lookup,
+                    chains.append(build_chain(entity_type, member, label2, alignments,
                                               template, template_chains, rev_comp=True))
 
         # The id is composed by the framework's own helper, not by joining strings here: it is
@@ -250,34 +245,44 @@ def build_queries(elements: Dict[str, Dict], msa_lookup: Dict[str, str],
         if not axis_selections:
             continue
         query_id = predict_single_output_id(**axis_selections)
-        queries[query_id] = {"chains": chains}
+        if causes:
+            skipped[query_id] = "; ".join(dict.fromkeys(causes))
+        else:
+            queries[query_id] = {"chains": chains}
 
-    return {"queries": queries}
+    return {"queries": queries}, skipped
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build the OpenFold3 query JSON")
     parser.add_argument("--combinatorics-config", required=True)
     parser.add_argument("--queries-json", required=True)
+    parser.add_argument("--skipped-csv", required=True)
     parser.add_argument("--msas-json")
     parser.add_argument("--template")
     parser.add_argument("--template-chains")
     args = parser.parse_args()
 
     config = CombinatoricsConfig.load(args.combinatorics_config)
-    msa_lookup = stage_alignments(load_msa_lookup(args.msas_json),
-                                  os.path.join(os.path.dirname(os.path.abspath(args.queries_json)), "msas"))
+    alignments = None
+    if args.msas_json:
+        alignments = Alignments(MsaLookup.load(args.msas_json),
+                                os.path.join(os.path.dirname(os.path.abspath(args.queries_json)), "msas"))
     template_chains = args.template_chains.split(",") if args.template_chains else None
 
-    payload = build_queries(axis_elements(config), msa_lookup, args.template, template_chains)
-    if not payload["queries"]:
-        print("ERROR: no queries were built — every input axis resolved to zero records")
-        sys.exit(1)
-
+    payload, skipped = build_queries(axis_elements(config), alignments, args.template, template_chains)
+    write_skipped_queries(args.skipped_csv, skipped)
+    for query_id, cause in skipped.items():
+        print(f"WARNING: query {query_id} skipped: {cause}")
+    # Written even when empty, so a stale file from an earlier run is never mistaken for this one's queries.
     os.makedirs(os.path.dirname(os.path.abspath(args.queries_json)), exist_ok=True)
     with open(args.queries_json, "w") as handle:
         json.dump(payload, handle, indent=2)
-    print(f"Wrote {len(payload['queries'])} quer(y/ies) to {args.queries_json}")
+    print(f"Wrote {len(payload['queries'])} quer(y/ies) to {args.queries_json}; {len(skipped)} skipped")
+    if not payload["queries"]:
+        print("ERROR: every query was skipped" if skipped
+              else "ERROR: no queries were built — every input axis resolved to zero records")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

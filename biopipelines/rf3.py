@@ -47,6 +47,7 @@ class RF3(BaseConfig):
             than a SMILES string.
         msas: precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`).
             Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence.
+            With it, every protein chain of an input needs an alignment: an input with a chain that has none is not predicted and lands in `missing` as a `failure`.
             Upstream says it pairs alignments across chains on the fly and does not accept pre-paired ones.
         n_recycles: trunk recycles (upstream default 10). A single recycle is refused while early stopping is on, because upstream spends the first recycle on the early-stopping check and has none left to fold with.
         diffusion_batch_size: structures sampled per input from one forward pass of the trunk (upstream default 5).
@@ -88,7 +89,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
@@ -150,6 +151,7 @@ fi
     msas_json = Path(lambda self: self.configuration_path("msas.json"))
     # Written at EXECUTION time: one JSON list of every example, so `rf3 fold` loads the model once.
     queries_json = Path(lambda self: self.configuration_path("queries.json"))
+    skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
     checkpoint_dir = Path(lambda self: self.folders["RF3"])
@@ -329,7 +331,8 @@ fi
         return f"""echo "Building RF3 inputs JSON"
 python "{self.config_py}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
-    --queries-json "{self.queries_json}"{msa_flag}
+    --queries-json "{self.queries_json}" \\
+    --skipped-csv "{self.skipped_csv}"{msa_flag}
 
 """
 
@@ -371,6 +374,7 @@ fi
 python "{self.postprocess_py}" \\
     --prediction-folder "{self.prediction_folder}" \\
     --queries-json "{self.queries_json}" \\
+    --skipped-csv "{self.skipped_csv}" \\
     --structures-dir "{self.stream_folder('structures')}" \\
     --structures-map-csv "{self.structures_map_csv}" \\
     --confidence-csv "{self.confidence_csv}" \\

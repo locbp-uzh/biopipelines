@@ -29,6 +29,9 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import read_skipped_queries  # noqa: E402
+
 CONFIDENCE_COLUMNS = ["id", "plddt", "ptm", "iptm", "gpde", "has_clash",
                       "disorder", "ranking_score", "seed", "sample"]
 
@@ -132,13 +135,6 @@ def read_ids(path: str) -> List[str]:
         return [row["id"] for row in csv.DictReader(handle)]
 
 
-def read_skipped(path: Optional[str]) -> Dict[str, str]:
-    if not path or not os.path.exists(path):
-        return {}
-    with open(path, newline="") as handle:
-        return {row["id"]: row["cause"] for row in csv.DictReader(handle)}
-
-
 def write_rows(path: str, fieldnames: List[str], rows: List[Dict]) -> None:
     with open(path, "w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -163,7 +159,7 @@ def main():
 
     top_only = parse_bool(args.top_only)
     queries = read_ids(args.query_ids_csv)
-    skipped = read_skipped(args.skipped_csv)
+    skipped = read_skipped_queries(args.skipped_csv)
     if not queries:
         print(f"ERROR: {args.query_ids_csv} lists no queries")
         sys.exit(1)

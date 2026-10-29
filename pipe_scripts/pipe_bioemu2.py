@@ -39,6 +39,7 @@ from combinatorics import CombinatoricsConfig, predict_single_output_id
 from ligand_utils import auth_ligand_field, ligand_chemistry
 from pipe_axis_data import load_axis_data
 from biopipelines.biopipelines_io import container_argv_prefix, step_id_from_table_path  # noqa: E402
+from biopipelines.id_map_utils import MsaLookup  # noqa: E402
 
 
 # Entity order is chain order: protein chains first, then ligands.
@@ -258,37 +259,25 @@ def load_alignment(path: str) -> str:
     raise RunError(f"the alignment {path} is neither .a3m nor .csv")
 
 
-def load_msa_lookup(msas_json: str) -> Dict[str, str]:
-    """{sequence id: absolute alignment path} from the msas stream; a row answers to its `sequences.id` and to its own id."""
-    with open(msas_json) as handle:
-        table = json.load(handle).get("map_table")
-    if not table or not os.path.exists(table):
-        return {}
-    frame = pd.read_csv(table, dtype=str)
-    column = next((c for c in ("file", "path") if c in frame.columns), None)
-    if column is None:
-        return {}
-    lookup = {}
-    for row in frame.to_dict("records"):
-        path = row.get(column)
-        if not isinstance(path, str) or not path.strip():
-            continue
-        for key in (row.get("sequences.id"), row.get("id")):
-            if isinstance(key, str) and key:
-                lookup.setdefault(key, os.path.abspath(path))
-    return lookup
+def stage_msa(sources: List[Tuple[Dict, str]], msas: MsaLookup, cache_dir: str) -> List[str]:
+    """Write the supplied alignment of a one-protein system into the step's MSA cache; returns the ids that got one.
 
-
-def stage_msa(sources: List[Tuple[Dict, str]], msa_lookup: Dict[str, str], cache_dir: str) -> List[str]:
-    """Write the supplied alignment of a one-protein system into the step's MSA cache; returns the ids that got one."""
+    A protein with no alignment among the msas is left to bioemu2's own ColabFold search, as documented, and the log says so.
+    """
     proteins = [(entity, rid) for entity, rid in sources if entity["entity_type"] == "protein"]
-    supplied = [(entity, rid) for entity, rid in proteins if rid in msa_lookup]
+    supplied = []
+    for entity, rid in proteins:
+        path = msas.path(rid, entity["sequence"])
+        if path is None:
+            print(f"  WARNING: {msas.cause(rid)}; it is searched through ColabFold")
+        else:
+            supplied.append((entity, rid, path))
     if not supplied:
         return []
     if len(proteins) > 1:
         raise RunError(f"msas serves a system with one protein chain, and this one has {len(proteins)}")
-    (entity, rid), = supplied
-    a3m = load_alignment(msa_lookup[rid])
+    (entity, rid, path), = supplied
+    a3m = load_alignment(os.path.abspath(path))
     if a3m_query(a3m) != entity["sequence"].upper():
         raise RunError(f"the first record of the alignment for {rid} is not its sequence")
     name, entry = msa_cache_entry(entity["sequence"], a3m)
@@ -362,14 +351,14 @@ def read_physicality(path: str) -> Dict[int, Dict]:
 
 
 def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
-                msa_lookup: Optional[Dict[str, str]]) -> Dict:
+                msas: Optional[MsaLookup]) -> Dict:
     """Sample one run and stage its outputs; the rows each output gets are in the returned dict."""
     run_id = run["id"]
     system, sources = build_system(run["records"], config.get("contacts"), config.get("covalent_linkage"))
 
     env = dict(os.environ)
-    if msa_lookup is not None:
-        staged = stage_msa(sources, msa_lookup, paths.msa_cache_dir)
+    if msas is not None:
+        staged = stage_msa(sources, msas, paths.msa_cache_dir)
         if staged:
             env["BIOEMU2_MSA_CACHE"] = paths.msa_cache_dir
             print(f"  alignment supplied for {', '.join(staged)}")
@@ -442,8 +431,8 @@ def main():
         config = yaml.safe_load(handle) or {}
 
     runs = build_runs(axis_elements(CombinatoricsConfig.load(args.combinatorics_config)))
-    msa_lookup = load_msa_lookup(args.msas_json) if args.msas_json else None
-    if msa_lookup is not None and not args.msa_cache_dir:
+    msas = MsaLookup.load(args.msas_json) if args.msas_json else None
+    if msas is not None and not args.msa_cache_dir:
         parser.error("--msas-json needs --msa-cache-dir")
     step_id = step_id_from_table_path(args.local_missing_csv)
 
@@ -453,7 +442,7 @@ def main():
         attempted += 1
         print(f"Run {run['id']}")
         try:
-            outcome = process_run(run, config, args, msa_lookup)
+            outcome = process_run(run, config, args, msas)
         except Exception as exc:
             cause = str(exc) if isinstance(exc, RunError) else f"{type(exc).__name__}: {exc}"
             print(f"WARNING: {run['id']} failed: {cause}", file=sys.stderr)

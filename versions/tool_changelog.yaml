@@ -125,8 +125,12 @@ AlphaFold:
   - pipe_scripts/pipe_alphafold_msas.py
   - pipe_scripts/pipe_alphafold_queries.py
   - pipe_scripts/pipe_unsanitize_ids.py
-  current: "1.14"
+  current: "1.15"
   history:
+  - version: '1.15'
+    date: '2026-10-29'
+    note: >-
+      `msas=` is matched to the queries through the shared `MsaLookup`, and a query with no alignment, which colabfold_batch left out of the folder it reads without a word, is a `failure` row in `missing` and a blank row of `confidence`; the other queries run. The `msas` table drops the `sequences.id` column that repeated its id. `pipe_boltz_msa_copy.py`, which stages the alignments, joins the files this tool owns.
   - version: '1.14'
     date: '2026-10-29'
     note: >-
@@ -248,8 +252,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-29'
+    note: >-
+      `msas` is matched through the shared `MsaLookup` (exact id, `sequences.id`, legacy `<id>_msa`, then the sequence), and the per-tool copy is gone. The documented partial mode stays, a sequence with no alignment is searched through ColabFold as usual, and the log now names each sequence that went that way with the ids that were present.
   - version: '1.5'
     date: '2026-10-29'
     note: >-
@@ -291,8 +299,12 @@ Boltz2:
   - pipe_scripts/pipe_boltz_results.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.11"
+  current: "2.12"
   history:
+  - version: '2.12'
+    date: '2026-10-29'
+    note: >-
+      With `msas` supplied, every protein chain needs an alignment, matched to its protein id through the shared `MsaLookup` (the per-tool `load_msa_mappings` and `get_msa_file` are gone; matching by sequence stays as the last tier). A chain with none was folded single-sequence (`msa: empty`) in silence; its complex is now left out, keeps a blank row of `confidence` and a `failure` row in `missing` (`no alignment in msas for <id> (ids present: ...)`), and the other complexes run. The `msas` table drops the `sequences.id` column that repeated its id.
   - version: '2.11'
     date: '2026-10-28'
     note: >-
@@ -688,8 +700,12 @@ ESMFold2:
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.9"
+  current: "2.10"
   history:
+  - version: '2.10'
+    date: '2026-10-29'
+    note: >-
+      `msas` is matched through the shared `MsaLookup`: the protein id first, then the legacy forms, and the sequence as the last tier (it was matched by sequence alone, so a chain whose alignment was not in the table folded single-sequence in silence). A complex with a chain that has no alignment is not folded, keeps a blank row of `confidence` and gets a `failure` row in `missing`; the other complexes are folded.
   - version: '2.9'
     date: '2026-10-29'
     note: >-
@@ -1488,8 +1504,12 @@ OpenFold3:
   - pipe_scripts/pipe_openfold3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-10-29'
+    note: >-
+      The `msas` lookup is the shared `MsaLookup` (exact id, `sequences.id`, legacy `<id>_msa`, then the sequence), and the per-tool copy is gone. A query with a protein chain that has no alignment used to be built with that chain unaligned; it is skipped now, keeps a blank row of `confidence` and a `failure` row in `missing`, and the other queries run. Only the alignments that are used are staged, where every alignment was copied under every key.
   - version: '1.6'
     date: '2026-10-29'
     note: >-
@@ -2500,8 +2520,12 @@ RF3:
   - pipe_scripts/pipe_rf3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-10-29'
+    note: >-
+      The `msas` lookup is the shared `MsaLookup` (exact id, `sequences.id`, legacy `<id>_msa`, then the sequence), and the per-tool copy is gone. An input with a protein chain that has no alignment used to be folded with that chain unaligned; it is skipped now, keeps a blank row of `confidence` and a `failure` row in `missing` under every id it declared, and the other inputs run.
   - version: '1.3'
     date: '2026-10-29'
     note: >-
@@ -2558,8 +2582,12 @@ Protenix:
   - pipe_scripts/pipe_protenix_weights.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-29'
+    note: >-
+      The `msas` lookup is the shared `MsaLookup`, and the per-tool copy is gone. The cause of a skipped query reads `no alignment in msas for <id> (ids present: ...)`, and an alignment the model cannot read fails the query of the chain concerned instead of the whole step. The skipped-query file is read and written through `biopipelines_io`.
   - version: '1.5'
     date: '2026-10-29'
     note: >-

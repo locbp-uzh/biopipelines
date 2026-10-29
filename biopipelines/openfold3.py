@@ -46,7 +46,8 @@ class OpenFold3(BaseConfig):
             two chains, the second the reverse complement.
         ligands: compounds, by SMILES or CCD code.
         msas: precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA
-            server off, since a run cannot take both.
+            server off, since a run cannot take both. Every protein chain of a query needs one, matched to its protein id;
+            a query with a chain that has none is not predicted and lands in `missing` as a `failure`.
         use_msa_server: generate alignments through the ColabFold server (default: on, unless
             `msas` is given). True together with `msas` is refused.
         num_diffusion_samples: structures sampled per query (upstream default 5).
@@ -82,7 +83,7 @@ class OpenFold3(BaseConfig):
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
     ENV_NAME = "openfold3"
 
     # Upstream spells its flags with underscores. The auto-generated option table in the docs
@@ -136,6 +137,7 @@ fi
     # Written at EXECUTION time: one JSON holding every query, since run_openfold folds a whole
     # batch in one process rather than one file at a time.
     queries_json = Path(lambda self: self.configuration_path("queries.json"))
+    skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
 
@@ -391,7 +393,8 @@ fi
         return f"""echo "Building OpenFold3 query JSON"
 python "{self.config_py}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
-    --queries-json "{self.queries_json}"{msa_flag}{template_flag}
+    --queries-json "{self.queries_json}" \\
+    --skipped-csv "{self.skipped_csv}"{msa_flag}{template_flag}
 
 """
 
@@ -427,6 +430,7 @@ python "{self.postprocess_py}" \\
     --prediction-folder "{self.prediction_folder}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
     --queries-json "{self.queries_json}" \\
+    --skipped-csv "{self.skipped_csv}" \\
     --structures-dir "{self.stream_folder('structures')}" \\
     --structures-map-csv "{self.structures_map_csv}" \\
     --confidence-csv "{self.confidence_csv}" \\

@@ -33,7 +33,8 @@ sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from combinatorics import predict_single_output_id, CombinatoricsConfig
 from ligand_utils import auth_ligand_field
-from biopipelines.id_map_utils import get_mapped_ids
+from biopipelines.biopipelines_io import write_skipped_queries
+from biopipelines.id_map_utils import MissingAlignment, MsaLookup, get_mapped_ids
 import id_patterns
 from pipe_axis_data import load_axis_data, group_records
 from nucleic_acids import (AXIS_NAME_TO_ENTITY_TYPE, DOUBLE_STRANDED_ENTITY_TYPES,
@@ -68,7 +69,7 @@ def parse_arguments():
     )
     parser.add_argument(
         '--msa-table',
-        help='Path to MSA table CSV file (columns: id, sequences.id, sequence, file)'
+        help='Path to the msas map_table CSV (columns: id, sequence, file)'
     )
     parser.add_argument(
         '--affinity', action='store_true',
@@ -101,6 +102,8 @@ def parse_arguments():
     parser.add_argument('--single-sequence', action='store_true',
                         help="Fold without an MSA (sets msa: empty on every protein chain)")
     parser.add_argument('--sequences-csv', help='Path to write protein sequences CSV (id, sequence)')
+    parser.add_argument('--skipped-csv', required=True,
+                        help='Path to write the configs left out because a protein chain has no supplied alignment (id, cause)')
     parser.add_argument('--sequence-ids', help='Path for sequence_ids.csv (defaults to parent of --output-dir)')
 
     return parser.parse_args()
@@ -112,50 +115,17 @@ def load_combinatorics_config(config_path: str) -> Dict:
         return json.load(f)
 
 
-def load_msa_mappings(msa_table: Optional[str]) -> Dict:
+def get_msa_file(protein: Dict, msas: Optional[MsaLookup]) -> Optional[str]:
+    """The alignment of one protein chain, None when no msas were supplied.
+
+    With msas supplied, a protein with no alignment raises MissingAlignment: Boltz would otherwise fold it single-sequence (the `msa: empty` backfill) without a word.
     """
-    Load MSA mappings from table CSV.
-
-    Returns dict with 'by_id' and 'by_seq' sub-dicts for flexible matching.
-    """
-    if not msa_table or not os.path.exists(msa_table):
-        return {'by_id': {}, 'by_seq': {}}
-
-    try:
-        df = pd.read_csv(msa_table)
-        msa_map_by_id = {}
-        msa_map_by_seq = {}
-
-        for _, row in df.iterrows():
-            seq_id = row.get('sequences.id', row.get('id', ''))
-            msa_file = row.get('file', '')
-            sequence = row.get('sequence', '')
-
-            if seq_id and msa_file:
-                msa_map_by_id[seq_id] = msa_file
-            if sequence and msa_file:
-                msa_map_by_seq[sequence] = msa_file
-
-        return {'by_id': msa_map_by_id, 'by_seq': msa_map_by_seq}
-    except Exception as e:
-        print(f"Error loading MSA table: {e}")
-        return {'by_id': {}, 'by_seq': {}}
-
-
-def get_msa_file(protein_id: str, sequence: str, msa_mappings: Dict) -> Optional[str]:
-    """Look up MSA file for a protein by ID or sequence."""
-    # Try by ID first
-    msa_file = msa_mappings['by_id'].get(protein_id)
-    if msa_file and os.path.exists(msa_file):
-        return msa_file
-
-    # Try by sequence
-    msa_file = msa_mappings['by_seq'].get(sequence)
-    if msa_file and os.path.exists(msa_file):
-        print(f"MSA matched by sequence for protein '{protein_id}'")
-        return msa_file
-
-    return None
+    if msas is None:
+        return None
+    path = msas.require(protein['id'], protein.get('sequence', ''))
+    if not os.path.exists(path):
+        raise MissingAlignment(f"the alignment {path} of {protein['id']} does not exist")
+    return path
 
 
 def add_template_to_config(config: Dict, args) -> Dict:
@@ -470,7 +440,7 @@ LIGAND_ENTITY_TYPES = {'ligand'}
 
 
 
-def build_entry(entity_type: str, item: Dict, chain_id: str, msa_mappings: Dict,
+def build_entry(entity_type: str, item: Dict, chain_id: str, msas: Optional[MsaLookup],
                 rev_comp: bool = False) -> Dict:
     """Build a YAML sequence entry based on entity_type."""
     # A polymer with no residues is never a legitimate request, and it does not
@@ -486,7 +456,7 @@ def build_entry(entity_type: str, item: Dict, chain_id: str, msa_mappings: Dict,
                 f"{entity_type} '{item.get('id', '?')}' (chain {chain_id}) has an "
                 f"empty sequence ({seq!r}) — check the FASTA or table it came from")
     if entity_type == 'protein':
-        msa_file = get_msa_file(item['id'], item.get('sequence', ''), msa_mappings)
+        msa_file = get_msa_file(item, msas)
         return build_protein_entry(item, chain_id, msa_file)
     elif entity_type in ('dna', 'ssdna', 'dsdna'):
         return build_dna_entry(item, chain_id, rev_comp=rev_comp)
@@ -498,7 +468,7 @@ def build_entry(entity_type: str, item: Dict, chain_id: str, msa_mappings: Dict,
         raise ValueError(f"Unknown entity_type: {entity_type}")
 
 
-def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> List[tuple]:
+def generate_configs(axis_data: Dict[str, Dict], msas: Optional[MsaLookup], args) -> tuple:
     """
     Generate all config dicts for N axes with independent Each/Bundle modes.
 
@@ -511,11 +481,12 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
 
     Args:
         axis_data: Dict mapping axis_name -> {entity_type, mode, iterated, static, static_first}
-        msa_mappings: MSA file mappings for protein entries
+        msas: the supplied alignments, or None when Boltz searches its own
         args: Command line arguments
 
     Returns:
-        List of (config_id, config_dict) tuples.
+        ([(config_id, config_dict), ...], {config_id: cause}): the configs written and the ones skipped
+        because a protein chain has no supplied alignment.
     """
     import itertools
 
@@ -573,13 +544,13 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
         first_ligand_chain = None
         for member in item.get('__members__', [item]):
             chain_id = next_chain_id(chain_counter)
-            config['sequences'].append(build_entry(entity_type, member, chain_id, msa_mappings))
+            config['sequences'].append(build_entry(entity_type, member, chain_id, msas))
             if entity_type in LIGAND_ENTITY_TYPES and first_ligand_chain is None:
                 first_ligand_chain = chain_id
             # Double-stranded: add a second chain with the reverse complement
             if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
                 chain_id2 = next_chain_id(chain_counter)
-                config['sequences'].append(build_entry(entity_type, member, chain_id2, msa_mappings, rev_comp=True))
+                config['sequences'].append(build_entry(entity_type, member, chain_id2, msas, rev_comp=True))
         return first_ligand_chain
 
     def add_axis_items_to_config(config, entity_type, items, chain_counter):
@@ -619,78 +590,85 @@ def generate_configs(axis_data: Dict[str, Dict], msa_mappings: Dict, args) -> Li
 
     # If no iteration axes, single config with everything bundled
     if not iteration_axes:
+        axis_selections = {
+            sa['axis_name']: ('bundle', [s['id'] for s in sa['items']], None, [], False)
+            for sa in static_only_axes
+        }
+        config_id = predict_single_output_id(**axis_selections)
         config = {'sequences': []}
         chain_counter = [0]
         first_ligand_chain = None
-        axis_selections = {}
-        for sa in static_only_axes:
-            axis_selections[sa['axis_name']] = ('bundle', [s['id'] for s in sa['items']], None, [], False)
-            flc = add_axis_items_to_config(config, sa['entity_type'], sa['items'], chain_counter)
-            if first_ligand_chain is None:
-                first_ligand_chain = flc
-        config = apply_decorations(config, first_ligand_chain)
-        config_id = predict_single_output_id(
-            **axis_selections
-        )
-        return [(config_id, config)]
+        try:
+            for sa in static_only_axes:
+                flc = add_axis_items_to_config(config, sa['entity_type'], sa['items'], chain_counter)
+                if first_ligand_chain is None:
+                    first_ligand_chain = flc
+            config = apply_decorations(config, first_ligand_chain)
+        except MissingAlignment as exc:
+            return [], {config_id: str(exc)}
+        return [(config_id, config)], {}
 
     # Compute cartesian product of all iteration axes
     item_lists = [list(enumerate(ia['items'])) for ia in iteration_axes]
     product = list(itertools.product(*item_lists))
 
     configs = []
+    skipped = {}
     for combo in product:
         config = {'sequences': []}
         chain_counter = [0]
         first_ligand_chain = None
         axis_selections = {}
-
-        # Add entries from iteration axes
         for i, ia in enumerate(iteration_axes):
-            idx, item = combo[i]
-            axis_name = ia['axis_name']
-            entity_type = ia['entity_type']
-            static_items = ia['static']
-            static_first = ia['static_first']
+            idx, _item = combo[i]
+            axis_selections[ia['axis_name']] = (ia['mode'], ia['all_ids'], idx,
+                                                [s['id'] for s in ia.get('static', [])],
+                                                ia.get('static_first', False))
+        for sa in static_only_axes:
+            axis_selections[sa['axis_name']] = ('bundle', [s['id'] for s in sa['items']], None, [], False)
+        config_id = predict_single_output_id(**axis_selections)
 
-            static_ids = [s['id'] for s in ia.get('static', [])]
-            axis_selections[axis_name] = (ia['mode'], ia['all_ids'], idx, static_ids, ia.get('static_first', False))
+        try:
+            # Add entries from iteration axes
+            for i, ia in enumerate(iteration_axes):
+                idx, item = combo[i]
+                entity_type = ia['entity_type']
+                static_items = ia['static']
+                static_first = ia['static_first']
 
-            if ia['mode'] == 'bundle' and static_first and static_items:
-                # Static items first (for Bundle(cofactor, Each(library)) pattern)
-                flc = add_axis_items_to_config(config, entity_type, static_items, chain_counter)
-                if first_ligand_chain is None:
-                    first_ligand_chain = flc
-                # Then iterated item
-                flc = add_one_item(config, entity_type, item, chain_counter)
-                if first_ligand_chain is None:
-                    first_ligand_chain = flc
-            else:
-                # Iterated item first
-                flc = add_one_item(config, entity_type, item, chain_counter)
-                if first_ligand_chain is None:
-                    first_ligand_chain = flc
-                # Then static items
-                if static_items:
+                if ia['mode'] == 'bundle' and static_first and static_items:
+                    # Static items first (for Bundle(cofactor, Each(library)) pattern)
                     flc = add_axis_items_to_config(config, entity_type, static_items, chain_counter)
                     if first_ligand_chain is None:
                         first_ligand_chain = flc
+                    # Then iterated item
+                    flc = add_one_item(config, entity_type, item, chain_counter)
+                    if first_ligand_chain is None:
+                        first_ligand_chain = flc
+                else:
+                    # Iterated item first
+                    flc = add_one_item(config, entity_type, item, chain_counter)
+                    if first_ligand_chain is None:
+                        first_ligand_chain = flc
+                    # Then static items
+                    if static_items:
+                        flc = add_axis_items_to_config(config, entity_type, static_items, chain_counter)
+                        if first_ligand_chain is None:
+                            first_ligand_chain = flc
 
-        # Add entries from static-only (pure bundle) axes
-        for sa in static_only_axes:
-            axis_selections[sa['axis_name']] = ('bundle', [s['id'] for s in sa['items']], None, [], False)
-            flc = add_axis_items_to_config(config, sa['entity_type'], sa['items'], chain_counter)
-            if first_ligand_chain is None:
-                first_ligand_chain = flc
+            # Add entries from static-only (pure bundle) axes
+            for sa in static_only_axes:
+                flc = add_axis_items_to_config(config, sa['entity_type'], sa['items'], chain_counter)
+                if first_ligand_chain is None:
+                    first_ligand_chain = flc
 
-        config = apply_decorations(config, first_ligand_chain)
-
-        config_id = predict_single_output_id(
-            **axis_selections
-        )
+            config = apply_decorations(config, first_ligand_chain)
+        except MissingAlignment as exc:
+            skipped[config_id] = str(exc)
+            continue
         configs.append((config_id, config))
 
-    return configs
+    return configs, skipped
 
 
 def write_configs(configs: List[tuple], output_dir: str) -> List[str]:
@@ -782,13 +760,16 @@ def main():
             'static_first': static_first,
         }
 
-    # Load MSA mappings
-    msa_mappings = load_msa_mappings(args.msa_table)
-    if msa_mappings['by_id']:
-        print(f"Loaded MSA mappings for {len(msa_mappings['by_id'])} proteins")
+    # The supplied alignments, when there are any
+    msas = MsaLookup.load(args.msa_table) if args.msa_table else None
+    if msas is not None:
+        print(f"Loaded {len(msas.ids)} alignment row(s) from {args.msa_table}")
 
     # Generate configs
-    configs = generate_configs(axis_data, msa_mappings, args)
+    configs, skipped = generate_configs(axis_data, msas, args)
+    write_skipped_queries(args.skipped_csv, skipped)
+    for config_id, cause in skipped.items():
+        print(f"WARNING: config {config_id} skipped: {cause}")
 
     # Write configs
     generated_ids = write_configs(configs, args.output_dir)

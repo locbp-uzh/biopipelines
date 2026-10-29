@@ -71,8 +71,8 @@ class BioEmu2(BaseConfig):
         covalent_linkage: optional dict `{"chain": "A", "position": 3, "protein_atom": "SG", "ligand_atom": "C1"}` bonding a protein atom to an atom of the first ligand.
                    It becomes an upstream `bonds` entry, with the residue name read from the sequence. The ligand must be given by CCD code, because the bond names the ligand's residue and atoms.
                    Requires `ligands`.
-        msas: optional precomputed alignments (msas stream, `.a3m` or Boltz-style `.csv`), matched to a sequence by its id (the `sequences.id` column, else the row id).
-                   The alignment is written into bioemu2's ColabFold cache for this step, so no search is made for that sequence. A sequence with no alignment is searched through ColabFold as usual.
+        msas: optional precomputed alignments (msas stream, `.a3m` or Boltz-style `.csv`), matched to a sequence by its id (through the framework's shared msas lookup, which also reads maps written before the id rule), else by its sequence.
+                   The alignment is written into bioemu2's ColabFold cache for this step, so no search is made for that sequence. A sequence with no alignment is searched through ColabFold as usual, and the log names it.
                    Only a system with one protein chain can use it. Formerly `precomputed_msa`.
         physicality_filter: `high_quality` (default), `high_quality_per_residue`, `no_violations` or `no_filter`.
                    Frames that fail stay in the trajectory and the structures; the mode only decides what the physicality table reports.
@@ -96,7 +96,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}

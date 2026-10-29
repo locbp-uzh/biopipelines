@@ -70,7 +70,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.14"
+    TOOL_VERSION = "1.15"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 
@@ -250,6 +250,8 @@ fi
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     pae_map = Path(lambda self: self.stream_map_path("pae"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    # Written at execution time, only when `msas` is supplied: the queries that have no alignment in it.
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     # Helper script paths
     colabfold_batch = Path(lambda self: os.path.join(self.folders["AlphaFold"], "colabfold-conda/bin/colabfold_batch"))
@@ -276,7 +278,8 @@ fi
                       Use Sequence("MKTVRQ...") to create from raw sequence strings.
             msas: Pre-computed MSAs as StandardizedOutput with msas stream in A3M format.
                   When provided, these MSAs are copied into the Folding directory so
-                  ColabFold skips MSA generation for matching queries.
+                  ColabFold skips MSA generation, and every query needs one, matched to its
+                  id: a query with none is not predicted and lands in `missing` as a `failure`.
                   Use MSA(source, convert="a3m") to convert from CSV if needed.
             num_relax: Number of best models to relax with AMBER
             num_recycle: Number of recycling iterations (default 3)
@@ -288,7 +291,7 @@ fi
             Tables:
                 structures: id | file
                 confidence: id | structure | plddt | max_pae | ptm
-                msas: id | sequences.id | sequence | file
+                msas: id | sequence | file
                 missing: id | removed_by | kind | cause
         """
         # Store original input for upstream missing table lookup and
@@ -479,6 +482,7 @@ mkdir -p "{self.msa_input_folder}"
 python "{self.msa_copy_py}" \\
     --msa-table "{msa_table_path}" \\
     --queries-csv "{self.queries_csv}" \\
+    --missing-csv "{self.local_missing_csv}" \\
     --output-folder "{self.msa_input_folder}"
 
 """
@@ -639,8 +643,9 @@ python {self.update_map_py} --structures-map "{self.structures_map}" --output-fo
         """Generate script section to extract confidence metrics from JSON files."""
         structures_dir = self.stream_folder("structures")
         pae_dir = self.stream_folder("pae")
+        missing_flag = f' --missing-csv "{self.local_missing_csv}"' if self.msas_input is not None else ""
         return f"""echo "Extracting confidence metrics from JSON files"
-python {self.alphafold_confidence_py} "{self.folding_folder}" "{structures_dir}" "{self.confidence_csv}" --pae-folder "{pae_dir}" --pae-map "{self.pae_map}"
+python {self.alphafold_confidence_py} "{self.folding_folder}" "{structures_dir}" "{self.confidence_csv}" --pae-folder "{pae_dir}" --pae-map "{self.pae_map}"{missing_flag}
 
 """
 
@@ -675,7 +680,8 @@ python {self.unsanitize_ids_py} \\
     def _generate_missing_table_propagation(self) -> str:
         """Propagate the union of upstream `missing` manifests into tables/missing.csv."""
         return self.generate_missing_propagation(
-            self.proteins, self.sequences_stream, missing_csv=self.missing_csv
+            self.proteins, self.sequences_stream, missing_csv=self.missing_csv,
+            local_missing=self.local_missing_csv if self.msas_input is not None else None,
         )
 
     def get_output_files(self) -> Dict[str, Any]:
@@ -742,13 +748,13 @@ python {self.unsanitize_ids_py} \\
             "msas": TableInfo(
                 name="msas",
                 path=self.msa_csv,
-                columns=["id", "sequences.id", "sequence", "file"],
+                columns=["id", "sequence", "file"],
                 description="MSA files for sequence recycling between predictions"
             )
         }
 
         # Declare a `missing` table when any input axis carries one.
-        if self._collect_upstream_missing_paths(self.proteins, self.sequences_stream):
+        if self.msas_input is not None or self._collect_upstream_missing_paths(self.proteins, self.sequences_stream):
             tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {

@@ -114,28 +114,28 @@ class TestTheQueryJson:
 
     def test_a_double_stranded_axis_becomes_two_chains(self):
         from pipe_openfold3_config import build_chain
-        forward = build_chain("dsdna", {"id": "d1", "sequence": "ACGT"}, "A", {}, None, None)
-        reverse = build_chain("dsdna", {"id": "d1", "sequence": "ACGT"}, "B", {}, None, None,
+        forward = build_chain("dsdna", {"id": "d1", "sequence": "ACGT"}, "A", None, None, None)
+        reverse = build_chain("dsdna", {"id": "d1", "sequence": "ACGT"}, "B", None, None, None,
                               rev_comp=True)
         assert forward["sequence"] == "ACGT"
         assert reverse["sequence"] == "ACGT", "reverse complement of ACGT is itself"
-        second = build_chain("dsdna", {"id": "d2", "sequence": "AAAG"}, "B", {}, None, None,
+        second = build_chain("dsdna", {"id": "d2", "sequence": "AAAG"}, "B", None, None, None,
                              rev_comp=True)
         assert second["sequence"] == "CTTT"
 
     def test_dna_and_rna_map_onto_the_upstream_molecule_types(self):
         from pipe_openfold3_config import build_chain
-        assert build_chain("ssdna", {"id": "d", "sequence": "ACGT"}, "A", {}, None,
+        assert build_chain("ssdna", {"id": "d", "sequence": "ACGT"}, "A", None, None,
                            None)["molecule_type"] == "dna"
-        assert build_chain("ssrna", {"id": "r", "sequence": "ACGU"}, "A", {}, None,
+        assert build_chain("ssrna", {"id": "r", "sequence": "ACGU"}, "A", None, None,
                            None)["molecule_type"] == "rna"
 
     def test_a_ccd_ligand_uses_ccd_codes_and_a_smiles_ligand_uses_smiles(self):
         from pipe_openfold3_config import build_chain
         ccd = build_chain("ligand", {"id": "l1", "ccd": "NAG", "smiles": "CC", "source": "rcsb"},
-                          "A", {}, None, None)
+                          "A", None, None, None)
         assert ccd["ccd_codes"] == ["NAG"] and "smiles" not in ccd
-        smiles = build_chain("ligand", {"id": "l2", "smiles": "CCO"}, "A", {}, None, None)
+        smiles = build_chain("ligand", {"id": "l2", "smiles": "CCO"}, "A", None, None, None)
         assert smiles["smiles"] == "CCO" and "ccd_codes" not in smiles
 
     def test_an_empty_polymer_is_refused_by_the_id_that_caused_it(self):
@@ -143,7 +143,7 @@ class TestTheQueryJson:
         and the failure surfaces inside the model with nothing naming the input."""
         from pipe_openfold3_config import build_chain
         with pytest.raises(ValueError, match="p_bad"):
-            build_chain("protein", {"id": "p_bad", "sequence": float("nan")}, "A", {}, None, None)
+            build_chain("protein", {"id": "p_bad", "sequence": float("nan")}, "A", None, None, None)
 
     def test_chain_labels_continue_past_z(self):
         from pipe_openfold3_config import chain_ids
@@ -151,49 +151,33 @@ class TestTheQueryJson:
         assert chain_ids(1, 25) == ["Z"]
         assert chain_ids(1, 26) == ["AA"]
 
-    def test_rows_named_after_the_alignment_are_found_by_the_protein_id_they_carry(self, tmp_path):
-        """MMseqs2 names its rows `<id>_msa` and keeps the protein id in `sequences.id`; keyed by `id` alone every chain got a dummy single-sequence MSA without a word."""
-        table = tmp_path / "msas_map.csv"
-        table.write_text("id,sequences.id,file\np1_msa,p1,/x/p1.a3m\n")
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        assert pipe_openfold3_config.load_msa_lookup(str(stream))["p1"] == "/x/p1.a3m"
-
     def test_a_supplied_a3m_is_staged_under_a_name_upstream_reads(self, tmp_path):
         """Upstream parses an a3m only when its stem is a database it names (colabfold_main, uniref90_hits, ...): `p1.a3m` was skipped and the chain failed with an IndexError."""
         source = tmp_path / "p1.a3m"
         source.write_text(">p1\nMKV\n")
-        staged = pipe_openfold3_config.stage_alignments({"p1": str(source)}, str(tmp_path / "msas"))
-        assert os.path.basename(staged["p1"]) == "colabfold_main.a3m"
-        assert open(staged["p1"]).read() == ">p1\nMKV\n"
+        staged = pipe_openfold3_config.stage_alignment(str(source), "p1", str(tmp_path / "msas"))
+        assert os.path.basename(staged) == "colabfold_main.a3m"
+        assert open(staged).read() == ">p1\nMKV\n"
 
     def test_each_chain_gets_a_folder_of_its_own(self, tmp_path):
+        staged = {}
         for name in ("p1", "p2"):
             (tmp_path / f"{name}.a3m").write_text(f">{name}\nMKV\n")
-        staged = pipe_openfold3_config.stage_alignments(
-            {name: str(tmp_path / f"{name}.a3m") for name in ("p1", "p2")}, str(tmp_path / "msas"))
+            staged[name] = pipe_openfold3_config.stage_alignment(
+                str(tmp_path / f"{name}.a3m"), name, str(tmp_path / "msas"))
         assert staged["p1"] != staged["p2"]
         assert open(staged["p2"]).read() == ">p2\nMKV\n"
 
     def test_a_preparsed_npz_is_passed_through_unchanged(self, tmp_path):
         source = tmp_path / "p1.npz"
         source.write_bytes(b"x")
-        assert pipe_openfold3_config.stage_alignments({"p1": str(source)}, str(tmp_path / "msas")) == {"p1": str(source)}
+        assert pipe_openfold3_config.stage_alignment(str(source), "p1", str(tmp_path / "msas")) == str(source)
 
-    def test_an_msa_the_model_cannot_read_is_named_not_ignored(self):
+    def test_an_msa_the_model_cannot_read_is_named_not_ignored(self, tmp_path):
         """Our msas streams are often CSV (Boltz's format); OpenFold3 reads a3m/sto/npz. Passing
         one through would fold every chain single-sequence and report nothing amiss."""
-        import pandas as pd
-        from pipe_openfold3_config import load_msa_lookup
-        import tempfile, os, json as _json
-        directory = tempfile.mkdtemp()
-        table = os.path.join(directory, "msas_map.csv")
-        pd.DataFrame([{"id": "p1", "file": os.path.join(directory, "p1.csv")}]).to_csv(table, index=False)
-        stream = os.path.join(directory, "msas.json")
-        with open(stream, "w") as handle:
-            _json.dump({"map_table": table}, handle)
         with pytest.raises(ValueError, match="a3m"):
-            load_msa_lookup(stream)
+            pipe_openfold3_config.stage_alignment(str(tmp_path / "p1.csv"), "p1", str(tmp_path / "msas"))
 
 
 class TestTheDeclaredOutputs:
@@ -279,7 +263,7 @@ def test_a_query_with_no_folder_is_reported_missing(tmp_path):
 def test_an_iterating_axis_with_no_records_builds_no_query_instead_of_crashing():
     elements = {"proteins": {"mode": "each", "entity_type": "protein", "iterated": [],
                              "static": [], "static_first": False}}
-    assert pipe_openfold3_config.build_queries(elements, {}, None, None) == {"queries": {}}
+    assert pipe_openfold3_config.build_queries(elements, None, None, None) == ({"queries": {}}, {})
 
 
 

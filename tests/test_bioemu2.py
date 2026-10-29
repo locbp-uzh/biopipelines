@@ -30,6 +30,7 @@ from biopipelines.bioemu2 import (BioEmu2, COVALENT_LINKAGE_KEYS, MIN_PYTHON, PH
                                   SAMPLERS)
 from biopipelines.combinatorics import Bundle, CombinatoricsConfig, generate_combinatorics_config  # noqa: E402
 from biopipelines.datastream import DataStream  # noqa: E402
+from biopipelines.id_map_utils import MsaLookup  # noqa: E402
 import pipe_bioemu2 as pipe  # noqa: E402
 import pipe_bioemu2_weights as weights  # noqa: E402
 
@@ -643,27 +644,13 @@ class TestAlignments:
             pipe.load_alignment(str(tmp_path / "m.sto"))
 
     @staticmethod
-    def _msas_json(tmp_path, rows, columns):
-        table = tmp_path / "msas_map.csv"
-        pd.DataFrame(rows, columns=columns).to_csv(table, index=False)
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        return str(stream)
-
-    def test_an_alignment_is_found_by_the_sequence_id_it_was_built_for(self, tmp_path):
-        a3m = tmp_path / "x.a3m"
-        stream = self._msas_json(tmp_path, [["m1", "p1", str(a3m)]], ["id", "sequences.id", "file"])
-        lookup = pipe.load_msa_lookup(stream)
-        assert lookup["p1"] == lookup["m1"] == os.path.abspath(a3m)
-
-    def test_an_alignment_without_a_sequence_column_is_found_by_its_own_id(self, tmp_path):
-        stream = self._msas_json(tmp_path, [["p1", str(tmp_path / "x.a3m")]], ["id", "file"])
-        assert set(pipe.load_msa_lookup(stream)) == {"p1"}
+    def _msas(*pairs):
+        return MsaLookup([{"id": row_id, "file": path} for row_id, path in pairs])
 
     def test_a_supplied_alignment_is_written_to_the_step_cache(self, tmp_path):
         (tmp_path / "p1.a3m").write_text(self.A3M)
         system, sources = pipe.build_system({"sequences": [_protein("p1")]}, None, None)
-        staged = pipe.stage_msa(sources, {"p1": str(tmp_path / "p1.a3m")}, str(tmp_path / "cache"))
+        staged = pipe.stage_msa(sources, self._msas(("p1", str(tmp_path / "p1.a3m"))), str(tmp_path / "cache"))
         assert staged == ["p1"]
         entry = json.loads((tmp_path / "cache" / _upstream_cache_name(PROTEIN)).read_text())
         assert entry["a3ms"] == [self.A3M]
@@ -672,19 +659,27 @@ class TestAlignments:
         (tmp_path / "p1.a3m").write_text(">101\nAAAAAAAA\n")
         _system, sources = pipe.build_system({"sequences": [_protein("p1")]}, None, None)
         with pytest.raises(pipe.RunError, match="not its sequence"):
-            pipe.stage_msa(sources, {"p1": str(tmp_path / "p1.a3m")}, str(tmp_path / "cache"))
+            pipe.stage_msa(sources, self._msas(("p1", str(tmp_path / "p1.a3m"))), str(tmp_path / "cache"))
         assert not (tmp_path / "cache").exists()
 
-    def test_a_sequence_without_an_alignment_is_left_to_the_colabfold_search(self, tmp_path):
+    def test_a_sequence_without_an_alignment_is_left_to_the_colabfold_search_and_named(self, tmp_path, capsys):
+        """The documented partial mode: the search runs as usual, and the log says which id went that way."""
         _system, sources = pipe.build_system({"sequences": [_protein("p1")]}, None, None)
-        assert pipe.stage_msa(sources, {"other": "x.a3m"}, str(tmp_path / "cache")) == []
+        assert pipe.stage_msa(sources, self._msas(("other", "x.a3m")), str(tmp_path / "cache")) == []
         assert not (tmp_path / "cache").exists()
+        assert "no alignment in msas for p1 (ids present: other)" in capsys.readouterr().out
+
+    def test_an_alignment_written_before_the_id_rule_is_still_staged(self, tmp_path):
+        (tmp_path / "p1.a3m").write_text(self.A3M)
+        _system, sources = pipe.build_system({"sequences": [_protein("p1")]}, None, None)
+        msas = MsaLookup([{"id": "p1_msa", "sequences.id": "p1", "file": str(tmp_path / "p1.a3m")}])
+        assert pipe.stage_msa(sources, msas, str(tmp_path / "cache")) == ["p1"]
 
     def test_a_system_with_several_protein_chains_refuses_a_supplied_alignment(self, tmp_path):
         (tmp_path / "p1.a3m").write_text(self.A3M)
         _system, sources = pipe.build_system({"sequences": [_protein("p1"), _protein("p2")]}, None, None)
         with pytest.raises(pipe.RunError, match="one protein chain"):
-            pipe.stage_msa(sources, {"p1": str(tmp_path / "p1.a3m")}, str(tmp_path / "cache"))
+            pipe.stage_msa(sources, self._msas(("p1", str(tmp_path / "p1.a3m"))), str(tmp_path / "cache"))
 
 
 class TestThePhysicalityReport:

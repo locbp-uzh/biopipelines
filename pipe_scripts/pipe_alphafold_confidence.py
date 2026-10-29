@@ -17,11 +17,13 @@ parser.add_argument('output_folder', type=str, help='Path to output folder for m
 parser.add_argument('confidence_csv', type=str, help='Output CSV file path for confidence metrics')
 parser.add_argument('--pae-folder', type=str, default=None, help='Destination folder for the scores JSON (full PAE matrix) of each best model')
 parser.add_argument('--pae-map', type=str, default=None, help='Path to pae_map.csv, written for the ids whose scores JSON was copied')
+parser.add_argument('--missing-csv', type=str, default=None, help='Missing table of this step: each id in it that was not predicted keeps a blank confidence row')
 
 # Parse the arguments
 args = parser.parse_args()
 
-def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, pae_folder=None, pae_map=None):
+def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, pae_folder=None, pae_map=None,
+                                 missing_csv=None):
     """
     Extract confidence metrics from AlphaFold/ColabFold JSON files.
 
@@ -36,6 +38,7 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, 
         confidence_csv: Output CSV file path
         pae_folder: If set, each best model's scores JSON (which carries the full `pae` matrix) is copied here as <id>.json
         pae_map: Path of the pae stream map, listing the ids copied to pae_folder
+        missing_csv: Missing table whose ids entered the step without a prediction; each gets a blank row
     """
     confidence_by_id = {}
     pae_files = {}
@@ -97,6 +100,11 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, 
         }
         confidence_by_id[seq_id] = confidence_row
 
+    if missing_csv and os.path.exists(missing_csv):
+        for missing_id in pd.read_csv(missing_csv, dtype=str, keep_default_na=False).get('id', []):
+            confidence_by_id.setdefault(missing_id, {'id': missing_id, 'structure': None, 'plddt': None,
+                                                     'max_pae': None, 'ptm': None})
+
     # Save to CSV
     confidence_data = list(confidence_by_id.values())
     if confidence_data:
@@ -114,4 +122,4 @@ def extract_alphafold_confidence(folding_folder, output_folder, confidence_csv, 
 # Run the extraction
 if __name__ == "__main__":
     extract_alphafold_confidence(args.folding_folder, args.output_folder, args.confidence_csv,
-                                 pae_folder=args.pae_folder, pae_map=args.pae_map)
+                                 pae_folder=args.pae_folder, pae_map=args.pae_map, missing_csv=args.missing_csv)

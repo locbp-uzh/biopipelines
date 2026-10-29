@@ -32,6 +32,7 @@ sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from combinatorics import CombinatoricsConfig
+from biopipelines.biopipelines_io import read_skipped_queries
 
 CONFIDENCE_COLUMNS = ["id", "plddt", "ptm", "iptm", "gpde", "has_clash",
                       "disorder", "ranking_score", "seed", "sample"]
@@ -102,6 +103,7 @@ def main():
     parser.add_argument("--prediction-folder", required=True)
     parser.add_argument("--combinatorics-config", required=True)
     parser.add_argument("--queries-json", default=None)
+    parser.add_argument("--skipped-csv", default=None)
     parser.add_argument("--structures-dir", required=True)
     parser.add_argument("--structures-map-csv", required=True)
     parser.add_argument("--confidence-csv", required=True)
@@ -117,6 +119,7 @@ def main():
 
     # The queries that entered are the ones queries.json named; a query run_openfold never made a
     # folder for (a featurization or MSA failure) must still get a row, so the folders are not the list.
+    skipped = read_skipped_queries(args.skipped_csv)
     if args.queries_json and os.path.exists(args.queries_json):
         with open(args.queries_json) as handle:
             queries = sorted((json.load(handle).get("queries") or {}).keys())
@@ -124,6 +127,7 @@ def main():
         queries = sorted(name for name in os.listdir(args.prediction_folder)
                          if os.path.isdir(os.path.join(args.prediction_folder, name))
                          and not name.startswith("_") and name != "msas")
+    queries = sorted(set(queries) | set(skipped))
     if not queries:
         print(f"ERROR: no prediction folders under {args.prediction_folder} — "
               f"run_openfold produced nothing")
@@ -139,13 +143,17 @@ def main():
     map_rows, confidence_rows, missing_rows, pae_rows = [], [], [], []
     produced = 0
 
+    def fail(query: str, cause: str) -> None:
+        confidence_rows.append({"id": query, **{c: "" for c in CONFIDENCE_COLUMNS[1:]}})
+        missing_rows.append({"id": query, "removed_by": "OpenFold3", "kind": "failure", "cause": cause})
+
     for query in queries:
+        if query in skipped:
+            fail(query, skipped[query])
+            continue
         samples = discover(args.prediction_folder, query, extension)
         if not samples:
-            confidence_rows.append({"id": query, **{c: "" for c in CONFIDENCE_COLUMNS[1:]}})
-            missing_rows.append({
-                "id": query, "removed_by": "OpenFold3", "kind": "failure",
-                "cause": f"run_openfold wrote no {extension} for this query"})
+            fail(query, f"run_openfold wrote no {extension} for this query")
             continue
 
         scored = [(seed, sample, path, read_confidence(path)) for seed, sample, path in samples]

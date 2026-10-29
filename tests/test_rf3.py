@@ -17,6 +17,7 @@ import pytest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
 
+from biopipelines.id_map_utils import MsaLookup
 from biopipelines.rf3 import RF3
 import pipe_rf3_config  # noqa: E402
 import pipe_rf3_postprocess as post  # noqa: E402
@@ -138,33 +139,33 @@ class TestTheInputsJson:
 
     def test_a_protein_carries_its_msa_and_its_chain_label(self):
         built = pipe_rf3_config.build_component(
-            "protein", {"id": "p1", "sequence": "MKT"}, "A", {"p1": "/m/p1.a3m"})
+            "protein", {"id": "p1", "sequence": "MKT"}, "A", MsaLookup([{"id": "p1", "file": "/m/p1.a3m"}]))
         assert built == {"seq": "MKT", "chain_id": "A", "msa_path": "/m/p1.a3m"}
 
     def test_a_protein_without_an_alignment_has_no_msa_key(self):
-        built = pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", {})
+        built = pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", None)
         assert "msa_path" not in built
 
     def test_nucleic_acids_name_their_chain_type(self):
         """Upstream infers a type from the letters, and ACGT reads as a protein as well as DNA."""
-        dna = pipe_rf3_config.build_component("ssdna", {"id": "d", "sequence": "ACGT"}, "A", {})
-        rna = pipe_rf3_config.build_component("ssrna", {"id": "r", "sequence": "ACGU"}, "A", {})
+        dna = pipe_rf3_config.build_component("ssdna", {"id": "d", "sequence": "ACGT"}, "A", None)
+        rna = pipe_rf3_config.build_component("ssrna", {"id": "r", "sequence": "ACGU"}, "A", None)
         assert dna["chain_type"] == "polydeoxyribonucleotide"
         assert rna["chain_type"] == "polyribonucleotide"
 
     def test_the_second_strand_of_a_double_stranded_axis_is_the_reverse_complement(self):
         elements = {"dsDNA": {"mode": "each", "entity_type": "dsdna", "static_first": False, "static": [],
                               "iterated": [{"id": "d", "sequence": "AAAG"}]}}
-        (example,) = pipe_rf3_config.build_examples(elements, {})
+        (example,), _ = pipe_rf3_config.build_examples(elements, None)
         assert [c["seq"] for c in example["components"]] == ["AAAG", "CTTT"]
         assert [c["chain_id"] for c in example["components"]] == ["A", "B"]
         assert all(c["chain_type"] == "polydeoxyribonucleotide" for c in example["components"])
 
     def test_a_ccd_ligand_uses_ccd_code_and_a_smiles_ligand_uses_smiles(self):
         ccd = pipe_rf3_config.build_component(
-            "ligand", {"id": "l1", "ccd": "NAG", "smiles": "CC", "source": "rcsb"}, "B", {})
+            "ligand", {"id": "l1", "ccd": "NAG", "smiles": "CC", "source": "rcsb"}, "B", None)
         assert ccd == {"ccd_code": "NAG", "chain_id": "B"}
-        smiles = pipe_rf3_config.build_component("ligand", {"id": "l2", "smiles": "CCO"}, "B", {})
+        smiles = pipe_rf3_config.build_component("ligand", {"id": "l2", "smiles": "CCO"}, "B", None)
         assert smiles == {"smiles": "CCO", "chain_id": "B"}
 
     def test_an_example_is_named_by_the_id_the_wrapper_predicted(self):
@@ -174,7 +175,7 @@ class TestTheInputsJson:
             "ligands": {"mode": "each", "entity_type": "ligand", "static_first": False, "static": [],
                         "iterated": [{"id": "l1", "smiles": "CCO"}]},
         }
-        examples = pipe_rf3_config.build_examples(elements, {})
+        examples, _ = pipe_rf3_config.build_examples(elements, None)
         assert [e["name"] for e in examples] == ["p1+l1", "p2+l1"]
         assert [c["chain_id"] for c in examples[0]["components"]] == ["A", "B"]
 
@@ -182,41 +183,28 @@ class TestTheInputsJson:
         elements = {"proteins": {"mode": "bundle", "entity_type": "protein", "static_first": False,
                                  "iterated": [], "static": [{"id": "a", "sequence": "MKT"},
                                                             {"id": "b", "sequence": "MAA"}]}}
-        (example,) = pipe_rf3_config.build_examples(elements, {})
+        (example,), _ = pipe_rf3_config.build_examples(elements, None)
         assert [c["seq"] for c in example["components"]] == ["MKT", "MAA"]
 
     def test_an_empty_sequence_is_refused_by_the_id_that_caused_it(self):
         with pytest.raises(ValueError, match="'p9'"):
-            pipe_rf3_config.build_component("protein", {"id": "p9", "sequence": float("nan")}, "A", {})
+            pipe_rf3_config.build_component("protein", {"id": "p9", "sequence": float("nan")}, "A", None)
 
     def test_an_iterating_axis_with_no_records_builds_no_example(self):
         elements = {"proteins": {"mode": "each", "entity_type": "protein", "iterated": [],
                                  "static": [], "static_first": False}}
-        assert pipe_rf3_config.build_examples(elements, {}) == []
+        assert pipe_rf3_config.build_examples(elements, None) == ([], {})
 
     @pytest.mark.parametrize("name", ["a.a3m", "a.a3m.gz", "a.fasta"])
-    def test_the_alignment_formats_upstream_reads_are_accepted(self, tmp_path, name):
-        table = tmp_path / "msas.csv"
-        table.write_text(f"id,file\np1,/x/{name}\n")
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        assert pipe_rf3_config.load_msa_lookup(str(stream)) == {"p1": f"/x/{name}"}
+    def test_the_alignment_formats_upstream_reads_are_accepted(self, name):
+        msas = MsaLookup([{"id": "p1", "file": f"/x/{name}"}])
+        built = pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", msas)
+        assert built["msa_path"] == f"/x/{name}"
 
-    def test_rows_named_after_the_alignment_are_found_by_the_protein_id_they_carry(self, tmp_path):
-        """MMseqs2 names its rows `<id>_msa` and keeps the protein id in `sequences.id`; keyed by `id` alone no chain ever found its alignment."""
-        table = tmp_path / "msas.csv"
-        table.write_text("id,sequences.id,file\np1_msa,p1,/x/p1.a3m\n")
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
-        assert pipe_rf3_config.load_msa_lookup(str(stream))["p1"] == "/x/p1.a3m"
-
-    def test_an_alignment_upstream_cannot_read_is_named_not_ignored(self, tmp_path):
-        table = tmp_path / "msas.csv"
-        table.write_text("id,file\np1,/x/p1.sto\n")
-        stream = tmp_path / "msas.json"
-        stream.write_text(json.dumps({"map_table": str(table)}))
+    def test_an_alignment_upstream_cannot_read_is_named_not_ignored(self):
+        msas = MsaLookup([{"id": "p1", "file": "/x/p1.sto"}])
         with pytest.raises(ValueError, match=r"\.sto"):
-            pipe_rf3_config.load_msa_lookup(str(stream))
+            pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", msas)
 
 
 def _write_example(pred, name, ranking, *, gz=False, with_confidences=True):

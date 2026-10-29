@@ -156,7 +156,10 @@ class ESMFold2(BaseConfig):
                     axes add the reverse-complement chain automatically)
         msas:       precomputed MSAs to recycle per protein chain (StandardizedOutput
                     with an msas table, e.g. from MMseqs2 or a previous run). When
-                    omitted, ESMFold2 runs single-sequence (no MSA).
+                    omitted, ESMFold2 runs single-sequence (no MSA). When given, every protein
+                    chain needs an alignment matched to its protein id (or, failing that, to its
+                    sequence): a complex with a chain that has none is not folded, keeps its id as
+                    a blank row of `confidence` and gets a `failure` row in `missing`.
         modifications: per-residue CCD substitutions on a polymer chain, as
                     [{"chain": "A", "position": 122, "ccd": "SEP"}]. The residue is
                     replaced by the CCD entry and atom-tokenized, so SEP/TPO/PTR give
@@ -225,7 +228,7 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.9"
+    TOOL_VERSION = "2.10"
     ENV_NAME = "esmfold2"
 
     @classmethod

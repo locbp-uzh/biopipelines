@@ -24,6 +24,8 @@ parser.add_argument('--affinity-csv', type=str, default=None, help='Path for aff
 parser.add_argument('--sequences-csv', type=str, default=None, help='Path for sequences.csv')
 parser.add_argument('--msas-csv', type=str, default=None, help='Path for msas_map.csv')
 parser.add_argument('--scores-info', type=str, default=None, help='Path for scores_info.txt')
+parser.add_argument('--skipped-csv', type=str, default=None, help='Configs the generator left out (id, cause); each gets a blank confidence row and a failure row in --local-missing-csv')
+parser.add_argument('--local-missing-csv', type=str, default=None, help='Where the failure rows of this step are written')
 parser.add_argument('--all-samples', action='store_true', default=False,
                     help='Surface every diffusion sample (_model_0.._model_N) as a separate '
                          'structure <id>_1..N+1 instead of only the top model as <id>.')
@@ -52,6 +54,7 @@ def _provenance_indices(row_ids, predicted_ids):
     return {rid: position.get(matched.get(rid)) for rid in row_ids}
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import MISSING_COLUMNS, read_skipped_queries, step_id_from_table_path
 from biopipelines.id_map_utils import get_mapped_ids
 
 # ----- Helper function to flatten nested confidence JSON -----
@@ -391,6 +394,17 @@ for seq_id, conf_data in confidence_data.items():
         row.update(conf_data)
         confidence_rows.append(row)
 
+# A config the generator left out entered the step: it keeps a blank row here and a failure row in the missing table.
+skipped_configs = read_skipped_queries(args.skipped_csv)
+for seq_id in skipped_configs:
+    confidence_rows.append({'id': seq_id, 'input_file': seq_id})
+if args.local_missing_csv:
+    os.makedirs(os.path.dirname(os.path.abspath(args.local_missing_csv)), exist_ok=True)
+    step_id = step_id_from_table_path(args.local_missing_csv)
+    pd.DataFrame([{'id': seq_id, 'removed_by': step_id, 'kind': 'failure', 'cause': cause}
+                  for seq_id, cause in skipped_configs.items()],
+                 columns=MISSING_COLUMNS).to_csv(args.local_missing_csv, index=False)
+
 if confidence_rows:
     confidence_df = pd.DataFrame(confidence_rows)
     # Add provenance columns if available
@@ -481,8 +495,7 @@ if os.path.exists(msas_folder):
             seq_id = os.path.splitext(msa_file)[0]  # This is already the sequence_id since we renamed files
         
             msa_entry = {
-                'id': seq_id,  # Remove msa_ prefix - use same ID as other tables
-                'sequences.id': seq_id,
+                'id': seq_id,
                 'sequence': sequences_data.get(seq_id, ''),  # Add actual protein sequence
                 'file': os.path.join(msas_folder, msa_file)
             }
@@ -499,7 +512,7 @@ if msa_files_in_dir:
 else:
     print("[Warning] No MSA files found, creating empty MSAs CSV")
     # Create empty MSAs CSV so completion check doesn't fail
-    msa_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'file'])
+    msa_df = pd.DataFrame(columns=['id', 'sequence', 'file'])
     msa_df.to_csv(msa_csv, index=False)
     print(f"Created empty MSAs CSV: {msa_csv}")
 

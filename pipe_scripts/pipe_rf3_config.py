@@ -17,15 +17,15 @@ import argparse
 import json
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines')
 sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pandas as pd
-
 from combinatorics import CombinatoricsConfig, predict_single_output_id
+from biopipelines.biopipelines_io import write_skipped_queries
+from biopipelines.id_map_utils import MissingAlignment, MsaLookup
 from ligand_utils import auth_ligand_field
 from nucleic_acids import DOUBLE_STRANDED_ENTITY_TYPES, reverse_complement
 from pipe_axis_data import load_axis_data
@@ -73,7 +73,7 @@ def polymer_sequence(record: Dict, entity_type: str, record_id: str) -> str:
     return sequence.strip()
 
 
-def build_component(entity_type: str, record: Dict, label: str, msa_lookup: Dict[str, str],
+def build_component(entity_type: str, record: Dict, label: str, msas: Optional[MsaLookup],
                     rev_comp: bool = False) -> Dict:
     record_id = str(record.get("id", "?"))
 
@@ -90,41 +90,14 @@ def build_component(entity_type: str, record: Dict, label: str, msa_lookup: Dict
 
     if entity_type in NUCLEIC_ACID_CHAIN_TYPES:
         component["chain_type"] = NUCLEIC_ACID_CHAIN_TYPES[entity_type]
-    elif entity_type == "protein":
-        path = msa_lookup.get(record_id)
-        if path:
-            component["msa_path"] = path
+    elif entity_type == "protein" and msas is not None:
+        path = msas.require(record_id, sequence)
+        if not path.lower().endswith(MSA_EXTENSIONS):
+            raise ValueError(
+                f"RF3 reads precomputed alignments as {', '.join(MSA_EXTENSIONS)}; the msas stream "
+                f"carries {path}. Generate the MSA with MMseqs2(output_format=\"a3m\").")
+        component["msa_path"] = path
     return component
-
-
-def load_msa_lookup(msas_json: Optional[str]) -> Dict[str, str]:
-    """{protein id: alignment path} from the msas stream, when one was passed.
-
-    A row is keyed by its `id` and by the `sequences.id` it carries: MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`.
-    """
-    if not msas_json:
-        return {}
-    with open(msas_json) as handle:
-        stream = json.load(handle)
-    table = stream.get("map_table")
-    if not table or not os.path.exists(table):
-        return {}
-    frame = pd.read_csv(table, dtype={"id": str, "sequences.id": str})
-    column = next((c for c in ("file", "path") if c in frame.columns), None)
-    if column is None:
-        return {}
-    lookup = {}
-    for key in ("id", "sequences.id"):
-        if key in frame.columns:
-            lookup.update({str(row[key]): str(row[column]) for _, row in frame.iterrows()
-                           if isinstance(row.get(column), str) and not pd.isna(row[key])})
-    unsupported = sorted({p for p in lookup.values() if not p.lower().endswith(MSA_EXTENSIONS)})
-    if unsupported:
-        raise ValueError(
-            f"RF3 reads precomputed alignments as {', '.join(MSA_EXTENSIONS)}; the msas stream "
-            f"carries {', '.join(unsupported[:3])}. Generate the MSA with MMseqs2(output_format="
-            f"\"a3m\").")
-    return lookup
 
 
 def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
@@ -142,7 +115,11 @@ def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
     return elements
 
 
-def build_examples(elements: Dict[str, Dict], msa_lookup: Dict[str, str]) -> List[Dict]:
+def build_examples(elements: Dict[str, Dict], msas: Optional[MsaLookup]) -> Tuple[List[Dict], Dict[str, str]]:
+    """([example, ...], {example id: cause}) for the examples written and the ones skipped.
+
+    An example with a protein chain that has no supplied alignment is skipped with that cause, so it is predicted nowhere instead of single-sequence.
+    """
     import itertools
 
     ordered = [name for name in AXIS_ORDER if name in elements]
@@ -162,6 +139,7 @@ def build_examples(elements: Dict[str, Dict], msa_lookup: Dict[str, str]) -> Lis
             static_only.append((name, data["entity_type"], data["static"]))
 
     examples: List[Dict] = []
+    skipped: Dict[str, str] = {}
     # One empty combination only when nothing iterates; an iterating axis with no records yields no example, not an IndexError.
     combinations = (list(itertools.product(*[list(enumerate(items))
                                              for _, _, items, _, _ in iteration]))
@@ -169,6 +147,7 @@ def build_examples(elements: Dict[str, Dict], msa_lookup: Dict[str, str]) -> Lis
 
     for combination in combinations:
         components: List[Dict] = []
+        causes: List[str] = []
         counter = 0
 
         def add(entity_type, record):
@@ -176,11 +155,14 @@ def build_examples(elements: Dict[str, Dict], msa_lookup: Dict[str, str]) -> Lis
             for member in record.get("__members__", [record]):
                 label = chain_ids(1, counter)[0]
                 counter += 1
-                components.append(build_component(entity_type, member, label, msa_lookup))
+                try:
+                    components.append(build_component(entity_type, member, label, msas))
+                except MissingAlignment as exc:
+                    causes.append(str(exc))
                 if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
                     label2 = chain_ids(1, counter)[0]
                     counter += 1
-                    components.append(build_component(entity_type, member, label2, msa_lookup,
+                    components.append(build_component(entity_type, member, label2, msas,
                                                       rev_comp=True))
 
         # The id comes from the framework's helper so it matches what the wrapper predicted at configuration time.
@@ -210,29 +192,39 @@ def build_examples(elements: Dict[str, Dict], msa_lookup: Dict[str, str]) -> Lis
 
         if not axis_selections:
             continue
-        examples.append({"name": predict_single_output_id(**axis_selections),
-                         "components": components})
+        name = predict_single_output_id(**axis_selections)
+        if causes:
+            skipped[name] = "; ".join(dict.fromkeys(causes))
+        else:
+            examples.append({"name": name, "components": components})
 
-    return examples
+    return examples, skipped
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build the RF3 inputs JSON")
     parser.add_argument("--combinatorics-config", required=True)
     parser.add_argument("--queries-json", required=True)
+    parser.add_argument("--skipped-csv", required=True)
     parser.add_argument("--msas-json")
     args = parser.parse_args()
 
     config = CombinatoricsConfig.load(args.combinatorics_config)
-    examples = build_examples(axis_elements(config), load_msa_lookup(args.msas_json))
-    if not examples:
-        print("ERROR: no examples were built — every input axis resolved to zero records")
-        sys.exit(1)
+    msas = MsaLookup.load(args.msas_json) if args.msas_json else None
+    examples, skipped = build_examples(axis_elements(config), msas)
+    write_skipped_queries(args.skipped_csv, skipped)
+    for name, cause in skipped.items():
+        print(f"WARNING: example {name} skipped: {cause}")
 
+    # Written even when empty, so a stale file from an earlier run is never mistaken for this one's examples.
     os.makedirs(os.path.dirname(os.path.abspath(args.queries_json)), exist_ok=True)
     with open(args.queries_json, "w") as handle:
         json.dump(examples, handle, indent=2)
-    print(f"Wrote {len(examples)} example(s) to {args.queries_json}")
+    print(f"Wrote {len(examples)} example(s) to {args.queries_json}; {len(skipped)} skipped")
+    if not examples:
+        print("ERROR: every example was skipped" if skipped
+              else "ERROR: no examples were built — every input axis resolved to zero records")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

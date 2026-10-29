@@ -39,7 +39,7 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "2.11"
+    TOOL_VERSION = "2.12"
     # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Boltz2Env"
@@ -482,6 +482,9 @@ fi
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     affinity_csv = Path(lambda self: self.table_path("affinity"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    # Written at execution time, only when `msas` is supplied: the configs left out for want of an alignment.
+    skipped_csv = Path(lambda self: self.configuration_path("skipped_configs.csv"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     # Extras (informational)
     scores_info_file = Path(lambda self: os.path.join(self.extras_folder, "scores_info.txt"))
@@ -554,8 +557,10 @@ fi
                 the ligand on its own (requires affinity=False — there is no receptor).
             msas: Precomputed MSAs as an msas DataStream or a StandardizedOutput
                 carrying one (e.g. from MMseqs2 or a previous Boltz2 run). When
-                provided, the public MSA server is not queried. When omitted, MSAs
-                are generated via the public MSA server.
+                provided, the public MSA server is not queried, and every protein chain
+                needs an alignment matched to its protein id: a complex with a chain that
+                has none is not predicted and lands in `missing` as a `failure`.
+                When omitted, MSAs are generated via the public MSA server.
             affinity: Whether to calculate binding affinity
             output_format: Output format ("pdb" or "mmcif")
             recycling_steps: Number of recycling steps
@@ -609,7 +614,7 @@ fi
                 structures: id | file
                 confidence: id | input_file | confidence_score | ptm | iptm | complex_plddt | complex_iplddt
                 sequences: id | sequence
-                msas: id | sequences.id | sequence | file
+                msas: id | sequence | file
                 affinity: id | input_file | affinity_pred_value | affinity_probability_binary
                 compounds: id | format | code | smiles | ccd  (code = residue code Boltz assigned)
                 missing: id | removed_by | kind | cause
@@ -1009,6 +1014,7 @@ mkdir -p {self.config_files_dir}
             f'--combinatorics-config "{combinatorics_config_path}"',
             f'--output-dir "{self.config_files_dir}"',
             f'--sequence-ids "{self.sequence_ids_file}"',
+            f'--skipped-csv "{self.skipped_csv}"',
         ]
 
         msa_table_flag = self._get_msa_table_flag()
@@ -1070,7 +1076,7 @@ python {self.boltz_postprocessing_py} {self.execution_folder} {self.output_folde
     --affinity-csv "{self.affinity_csv}" \\
     --sequences-csv "{self.sequences_csv}" \\
     --msas-csv "{self.msas_csv}" \\
-    --scores-info "{self.scores_info_file}"{"" if self.top_only else " --all-samples"}
+    --scores-info "{self.scores_info_file}"{self._skipped_flags()}{"" if self.top_only else " --all-samples"}
 
 if [ $? -ne 0 ]; then
     echo "Error: Post-processing failed"
@@ -1080,6 +1086,12 @@ fi
 echo "Post-processing completed"
 
 """
+
+    def _skipped_flags(self) -> str:
+        """The postprocess flags that turn a config left out for want of an alignment into a blank row and a failure."""
+        if self.msas is None:
+            return ""
+        return f' \\\n    --skipped-csv "{self.skipped_csv}" \\\n    --local-missing-csv "{self.local_missing_csv}"'
 
     def _generate_compounds_section(self) -> str:
         """Emit the compounds stream map with the residue code Boltz assigned.
@@ -1115,7 +1127,8 @@ python {self.boltz_compounds_py} \\
     def _generate_missing_table_propagation(self) -> str:
         """Propagate the union of upstream `missing` manifests into tables/missing.csv."""
         return self.generate_missing_propagation(
-            *self._missing_input_sources(), missing_csv=self.missing_csv
+            *self._missing_input_sources(), missing_csv=self.missing_csv,
+            local_missing=self.local_missing_csv if self.msas is not None else None,
         )
 
 
@@ -1231,7 +1244,7 @@ python {self.boltz_compounds_py} \\
             tables["msas"] = TableInfo(
                 name="msas",
                 path=self.msas_csv,
-                columns=["id", "sequences.id", "sequence", "file"],
+                columns=["id", "sequence", "file"],
                 description="MSA files for recycling"
             )
 
@@ -1253,7 +1266,7 @@ python {self.boltz_compounds_py} \\
 
         # Declare a `missing` table whenever any input axis carries one, so the
         # completion check excuses upstream-filtered ids instead of failing.
-        if self._collect_upstream_missing_paths(*self._missing_input_sources()):
+        if self.msas is not None or self._collect_upstream_missing_paths(*self._missing_input_sources()):
             tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
