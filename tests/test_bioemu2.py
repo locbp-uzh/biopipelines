@@ -560,6 +560,51 @@ class TestTheCommand:
         assert command[:5] == ["apptainer", "exec", "--nv", "x.sif", "bioemu2"]
 
 
+class TestTheCauseOfAFailedSampler:
+    """`sample` runs a real subprocess here, standing in for upstream: the cause has to name what upstream said."""
+
+    @staticmethod
+    def _command(code):
+        return [sys.executable, "-c", code]
+
+    def test_the_last_line_of_upstreams_output_is_in_the_cause(self):
+        command = self._command(
+            "import sys\n"
+            "print('loading the model')\n"
+            "sys.stderr.write('Traceback (most recent call last):\\n  File \"x.py\", line 1, in <module>\\n')\n"
+            "sys.stderr.write('ValueError: residue 7 of chain A has no atom SG\\n')\n"
+            "sys.exit(1)\n")
+        with pytest.raises(pipe.RunError) as caught:
+            pipe.sample(command, dict(os.environ))
+        message = str(caught.value)
+        assert "status 1" in message and "ValueError: residue 7 of chain A has no atom SG" in message
+        assert "see the step log" not in message
+
+    def test_trailing_blank_lines_and_progress_carriage_returns_do_not_hide_it(self):
+        command = self._command(
+            "import sys\n"
+            "sys.stderr.write('step 1/3\\rstep 2/3\\rRuntimeError: CUDA out of memory\\n\\n  \\n')\n"
+            "sys.exit(3)\n")
+        with pytest.raises(pipe.RunError) as caught:
+            pipe.sample(command, dict(os.environ))
+        assert "status 3" in str(caught.value) and "RuntimeError: CUDA out of memory" in str(caught.value)
+
+    def test_a_silent_failure_still_names_the_status(self):
+        with pytest.raises(pipe.RunError) as caught:
+            pipe.sample(self._command("import sys; sys.exit(2)"), dict(os.environ))
+        assert "status 2" in str(caught.value)
+
+    def test_the_output_still_reaches_the_step_log(self, capsys):
+        pipe.sample(self._command("print('sampled 4 conformers')"), dict(os.environ))
+        assert "sampled 4 conformers" in capsys.readouterr().out
+
+    def test_a_long_line_is_shortened_so_the_cause_fits_the_missing_table(self):
+        command = self._command("import sys; sys.stderr.write('Error: ' + 'x' * 2000 + '\\n'); sys.exit(1)")
+        with pytest.raises(pipe.RunError) as caught:
+            pipe.sample(command, dict(os.environ))
+        assert len(str(caught.value)) <= pipe.CAUSE_LIMIT
+
+
 def _upstream_cache_name(sequence):
     """Upstream's key, restated from msa/colabfold.py so the test does not share the code under test."""
     request = {"sequences": [sequence], "use_pairing": False, "pairing_strategy": "greedy", "use_env": True}
@@ -779,7 +824,7 @@ class TestTheRunner:
                 seen.append({"id": run_id, "command": command, "env": env,
                              "stale": os.path.exists(os.path.join(out_dir, "stale.txt"))})
             if run_id in fail:
-                raise pipe.RunError("bioemu2 sample-equilibrium exited with status 1; see the step log")
+                raise pipe.RunError("bioemu2 sample-equilibrium exited with status 1: ValueError: no such residue")
             for name in ("samples.xtc", "topology.cif"):
                 open(os.path.join(out_dir, name), "w").write(name)
             with open(os.path.join(out_dir, "physicality.json"), "w") as handle:
@@ -825,8 +870,31 @@ class TestTheRunner:
         missing = pd.read_csv(out / "005_BioEmu2" / "_execution" / "local_missing.csv")
         assert list(missing["id"]) == ["bad"] and list(missing["kind"]) == ["failure"]
         assert list(missing["removed_by"]) == ["005_BioEmu2"]
-        assert "step log" in missing.loc[0, "cause"]
+        assert "ValueError: no such residue" in missing.loc[0, "cause"]
         assert list(missing.columns) == pipe.MISSING_COLUMNS
+
+    def test_the_counts_stay_integers_when_a_failed_run_left_a_blank(self, tmp_path, monkeypatch):
+        """A blank cell next to integers made pandas write `3.0`; the cells are read as text here, as a consumer without pandas would."""
+        out, argv = self._world(tmp_path)
+        self._fake(monkeypatch, fail=("bad",))
+        assert self._main(monkeypatch, argv) == 0
+        header, *rows = (out / "tables" / "summary.csv").read_text().splitlines()
+        by_id = {cells[0]: dict(zip(header.split(","), cells)) for cells in (row.split(",") for row in rows)}
+        assert by_id["ok"]["n_samples"] == "3" and by_id["ok"]["n_residues"] == "12"
+        assert by_id["bad"]["n_samples"] == "" and by_id["bad"]["n_residues"] == ""
+
+    def test_the_counts_are_integers_when_every_run_succeeds(self, tmp_path, monkeypatch):
+        out, argv = self._world(tmp_path, sequences=("ok",))
+        self._fake(monkeypatch)
+        assert self._main(monkeypatch, argv) == 0
+        assert (out / "tables" / "summary.csv").read_text().splitlines()[1].endswith(",3,12")
+
+    def test_the_counts_are_blank_when_every_run_failed(self, tmp_path, monkeypatch):
+        out, argv = self._world(tmp_path, sequences=("a", "b"))
+        self._fake(monkeypatch, fail=("a", "b"))
+        assert self._main(monkeypatch, argv) == 1
+        rows = (out / "tables" / "summary.csv").read_text().splitlines()[1:]
+        assert [row.split(",")[-2:] for row in rows] == [["", ""], ["", ""]]
 
     def test_every_run_failing_exits_non_zero_and_still_writes_every_artifact(self, tmp_path, monkeypatch):
         out, argv = self._world(tmp_path)

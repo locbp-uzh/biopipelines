@@ -15,8 +15,10 @@ The wrapper's propagation step merges that file with the upstream manifests into
 """
 
 import argparse
+import collections
 import copy
 import hashlib
+import io
 import itertools
 import json
 import os
@@ -47,6 +49,10 @@ PHYSICALITY_COLUMNS = ["id", "run.id", "frame", "status", "reason"]
 MISSING_COLUMNS = ["id", "removed_by", "kind", "cause"]
 
 CAUSE_LIMIT = 300
+# Lines of upstream's output kept to read the cause from; a traceback ends well inside this.
+OUTPUT_TAIL = 200
+# Count columns of the summary table: integers, blank where a run failed.
+INTEGER_COLUMNS = ("n_samples", "n_residues")
 
 # The name a bond names a residue by; X is upstream's letter for an unidentified residue.
 THREE_LETTER = {
@@ -292,11 +298,31 @@ def stage_msa(sources: List[Tuple[Dict, str]], msa_lookup: Dict[str, str], cache
     return [rid]
 
 
+def last_informative_line(lines) -> str:
+    """The last line of upstream's output that carries words, whitespace collapsed (blank lines, bar redraws and rules do not)."""
+    for line in reversed(list(lines)):
+        text = " ".join(line.split())
+        if any(character.isalnum() for character in text):
+            return text
+    return ""
+
+
 def sample(command: List[str], env: Dict[str, str]) -> None:
     print(f"  running: {' '.join(command)}")
-    result = subprocess.run(command, env=env)
-    if result.returncode != 0:
-        raise RunError(f"bioemu2 sample-equilibrium exited with status {result.returncode}; see the step log")
+    tail = collections.deque(maxlen=OUTPUT_TAIL)
+    # Unbuffered, so a traceback is not followed by stdout that python flushed at exit; newline="" keeps upstream's own line endings.
+    with subprocess.Popen(command, env={**env, "PYTHONUNBUFFERED": "1"}, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT) as process:
+        for line in io.TextIOWrapper(process.stdout, encoding="utf-8", errors="replace", newline=""):
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            tail.append(line)
+    if process.returncode != 0:
+        cause = f"bioemu2 sample-equilibrium exited with status {process.returncode}"
+        detail = last_informative_line(tail)
+        if detail:
+            cause = f"{cause}: {detail[:max(CAUSE_LIMIT - len(cause) - 2, 0)]}"
+        raise RunError(cause)
 
 
 def number_atoms(topology) -> None:
@@ -387,7 +413,12 @@ def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
 
 def write_table(path: str, columns: List[str], rows: List[Dict]) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    pd.DataFrame(rows, columns=columns).to_csv(path, index=False)
+    frame = pd.DataFrame(rows, columns=columns)
+    # A blank next to integers would make pandas write 3.0; the nullable type keeps 3 and writes the blank empty.
+    for column in INTEGER_COLUMNS:
+        if column in frame.columns:
+            frame[column] = frame[column].astype("Int64")
+    frame.to_csv(path, index=False)
 
 
 def main():

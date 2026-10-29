@@ -87,15 +87,16 @@ class BioEmu2(BaseConfig):
             trajectories: one `<run>.xtc` per run, with its `<run>_topology.cif` named in the map's `topology` column.
         Tables:
             summary:     id | sequences.id | ligands.id | n_samples | n_residues
-                         One row per run, with n_samples and n_residues empty when the run failed. n_residues counts every residue of the sampled system, ligands included.
+                         One row per run, with n_samples and n_residues empty when the run failed; both stay integers (3, not 3.0). n_residues counts every residue of the sampled system, ligands included.
             physicality: id | run.id | frame | status | reason
                          One row per conformer, with `id` the structure id and `frame` its zero-based index in the trajectory.
                          `status` is `passed`, `rejected` or `not_checked`, and `reason` the first failed check (empty when none).
             missing:     id | removed_by | kind | cause
+                         A run that fails is `kind="failure"` under its run id. When bioemu2 itself exits non-zero, `cause` is its exit status followed by the last line of its output (the full output is in the step log).
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}

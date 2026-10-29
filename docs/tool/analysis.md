@@ -379,7 +379,7 @@ Ligand-capable successor of BioEmu (microsoft/bioemu2). Samples `num_samples` co
 
 **Physicality.** bioemu2 checks every sampled frame (bond lengths, clashes, chirality, chain breaks, for the protein only) and reports it, but never removes a frame. All conformers are therefore in `structures` and `trajectories`, and the `physicality` table says which ones failed and the first check they failed. Filter on it with `Panda` to drop them.
 
-**Failures.** A run that bioemu2 does not complete, or that the wrapper cannot build (an empty sequence, a ligand with no chemistry, a bond to a residue the chain does not have), keeps its row in `summary` with empty `n_samples` and `n_residues`, has no entry in the stream maps, and gets a `failure` row in `missing` with the reason. The step exits non-zero only when no run was attempted or every run failed.
+**Failures.** A run that bioemu2 does not complete, or that the wrapper cannot build (an empty sequence, a ligand with no chemistry, a bond to a residue the chain does not have), keeps its row in `summary` with empty `n_samples` and `n_residues` (the counts of the other rows stay integers), has no entry in the stream maps, and gets a `failure` row in `missing` with the reason. When bioemu2 itself exits non-zero the reason is its exit status followed by the last line of its output (for a Python traceback, the exception), and the whole output is in the step log. The step exits non-zero only when no run was attempted or every run failed.
 
 **Tags**: sample-ensemble, protein, small-molecule, complex, ensemble, flexibility, all-atom, covalent, msa
 

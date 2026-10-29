@@ -143,6 +143,9 @@ def main():
     args = ap.parse_args()
 
     if not args.resume:
+        pending = git("diff", "--name-only", "HEAD", "--", *GENERATED).split()
+        if pending:
+            sys.exit("uncommitted changes in " + ", ".join(pending) + ": a previous --no-commit run is not committed, and this run would overwrite its bookkeeping. Commit or reset first.")
         git("cherry-pick", "-x", "--no-commit", args.sha)
         stuck = [f for f in git("diff", "--name-only", "--diff-filter=U").split() if f not in GENERATED]
         if stuck:

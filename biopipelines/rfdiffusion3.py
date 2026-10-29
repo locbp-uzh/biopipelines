@@ -213,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.8"
+    TOOL_VERSION = "3.9"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
