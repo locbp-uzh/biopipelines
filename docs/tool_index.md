@@ -48,7 +48,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 36 | APBS | Analysis                       | 2.0 | `biopipelines/apbs.py` |
 | 37 | BindingData               | Analysis                       | 1.2 | `biopipelines/binding_data.py` |
 | 38 | BioEmu | Analysis                       | 2.0 | `biopipelines/bioemu.py` |
-| 39 | BioEmu2 | Analysis                       | 1.1 | `biopipelines/bioemu2.py` |
+| 39 | BioEmu2 | Analysis                       | 1.2 | `biopipelines/bioemu2.py` |
 | 40 | CABSflex | Analysis                       | 2.1 | `biopipelines/cabsflex.py` |
 | 41 | ConformationalChange      | Analysis                       | 1.2 | `biopipelines/conformational_change.py` |
 | 42 | Consensus                 | Analysis                       | 1.1 | `biopipelines/consensus.py` |

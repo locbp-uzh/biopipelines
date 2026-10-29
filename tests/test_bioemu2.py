@@ -4,9 +4,10 @@ Nothing here runs the model or the CLI. The upstream flags, the system YAML, the
 physicality report are pinned from its source (github.com/microsoft/bioemu2: `cli.py`, `physicality.py`,
 `msa/colabfold.py`, `checkpoints.py` and `docs/system.md`).
 
-Not covered, because it needs the model or a cluster: that the sampler accepts the systems this builds, that
-mdtraj reads the `topology.cif` it writes, the residue and atom naming of a ligand in a sampled structure,
-and that the MSA cache key below is the one the installed release computes for a monomer.
+Not covered, because it needs the model or a cluster: that the sampler accepts the systems this builds, the
+residue and atom naming of a ligand in a sampled structure, and that the MSA cache key below is the one the
+installed release computes for a monomer. The trajectory split is run on a real single-chain `topology.cif`
+when mdtraj is installed and skipped otherwise.
 """
 
 import hashlib
@@ -656,6 +657,85 @@ class TestThePhysicalityReport:
         assert pipe.read_physicality(str(tmp_path / "bad.json")) == {}
         (tmp_path / "old.json").write_text(json.dumps({"frames": [{"clash": True}]}))
         assert pipe.read_physicality(str(tmp_path / "old.json")) == {}
+
+
+SINGLE_CHAIN_CIF = """data_topology
+#
+loop_
+_chem_comp_bond.pdbx_ordinal
+_chem_comp_bond.comp_id
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.value_order
+_chem_comp_bond.pdbx_aromatic_flag
+_chem_comp_bond.pdbx_stereo_config
+1   MET CA  C   ? ? ?
+2   MET C   O   ? ? ?
+3   MET CA  CB  ? ? ?
+4   MET N   CA  ? ? ?
+5   MET CB  CG  ? ? ?
+6   MET SD  CE  ? ? ?
+7   MET CG  SD  ? ? ?
+#
+loop_
+_atom_site.group_PDB
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.auth_seq_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_atom_id
+_atom_site.label_entity_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.pdbx_PDB_model_num
+_atom_site.id
+ATOM N N   . MET A 1  . 1  MET A N   1 2.7527437    -5.8161097   15.860241   1 1
+ATOM C CA  . MET A 1  . 1  MET A CA  1 2.800047     -5.19038     14.56017    1 2
+ATOM C C   . MET A 1  . 1  MET A C   1 2.9121616    -6.137147    13.36379    1 3
+ATOM O O   . MET A 1  . 1  MET A O   1 3.7524195    -6.99292     13.227924   1 4
+ATOM C CB  . MET A 1  . 1  MET A CB  1 3.9507031    -4.144405    14.456848   1 5
+ATOM C CG  . MET A 1  . 1  MET A CG  1 3.7267213    -3.102971    13.402943   1 6
+ATOM S SD  . MET A 1  . 1  MET A SD  1 2.4838057    -1.802271    13.745588   1 7
+ATOM C CE  . MET A 1  . 1  MET A CE  1 3.107978     -0.5251236   12.631086   1 8
+"""
+
+
+class TestTheTrajectorySplit:
+    """A single-chain apo system is what failed on the cluster, in every run: mdtraj gives a CIF atom a text serial and its PDB writer only takes integers when the system has one chain."""
+
+    def test_every_atom_gets_an_integer_serial_from_its_index(self):
+        class Atom:
+            def __init__(self, index):
+                self.index, self.serial = index, str(index + 1)
+
+        class Topology:
+            atoms = [Atom(0), Atom(1), Atom(2)]
+
+        pipe.number_atoms(Topology)
+        assert [atom.serial for atom in Topology.atoms] == [1, 2, 3]
+
+    def test_a_single_chain_cif_is_written_as_one_pdb_per_frame(self, tmp_path):
+        md = pytest.importorskip("mdtraj")
+        cif = tmp_path / "topology.cif"
+        cif.write_text(SINGLE_CHAIN_CIF)
+        frames = md.load(str(cif))
+        frames = md.join([frames, frames])
+        frames.save_xtc(str(tmp_path / "samples.xtc"))
+
+        written, n_residues = pipe.split_trajectory(str(cif), str(tmp_path / "samples.xtc"), "run",
+                                                    str(tmp_path / "structures"))
+
+        assert [name for name, _ in written] == ["run_1", "run_2"]
+        assert n_residues == 1
+        atoms = [line for line in open(written[0][1]).read().splitlines() if line.startswith("ATOM")]
+        assert [int(line[6:11]) for line in atoms] == list(range(1, 9))
 
 
 class TestTheRunner:

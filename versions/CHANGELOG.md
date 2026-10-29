@@ -43,6 +43,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **BioEmu2** 1.1 → 1.2. An apo run of one protein chain wrote no structure and failed with `TypeError: not all arguments converted during string formatting`: mdtraj reads CIF atom serials as text, and its PDB writer takes only integers when the system has fewer than two chains (a ligand or a second chain hid it). The atoms are numbered from their index before the per-conformer PDBs are written.
+
 - **RFdiffusion3** 3.7 → 3.8. A fresh `foundry` env resolved atomworks 3.x, in which `rfd3.engine` does not import (`get_inferred_polymer_bonds` moved), and the install check (`import foundry`) still passed. The env spec now keeps `atomworks[ml]<3` and the install check imports `rfd3.engine`.
 
 - **RF3** 1.0 → 1.1. The shared foundry env spec keeps `atomworks[ml]<3` (atomworks 3.x moved `AtomSelectionStack`, so `rf3.inference_engines.rf3` did not import), and the install check imports that module instead of the bare `rf3` package.

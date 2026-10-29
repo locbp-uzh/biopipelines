@@ -240,8 +240,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-29'
+    note: >-
+      Every apo run of one protein chain failed on its first cluster run with `TypeError: not all arguments converted during string formatting`, so no structure was ever written: sampling, the trajectory and the physicality report were complete, and the failure came in the split into per-conformer PDBs. mdtraj gives an atom read from a CIF a text serial (`'1'`), and its PDB writer uses the serial, and only integers, whenever the system has fewer than two chains. A system with a ligand or a second protein chain was unaffected, because the writer then numbers the atoms itself. The atoms are numbered from their index before the PDBs are written.
   - version: '1.1'
     date: '2026-10-28'
     note: >-

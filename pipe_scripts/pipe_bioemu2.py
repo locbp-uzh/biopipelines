@@ -299,12 +299,19 @@ def sample(command: List[str], env: Dict[str, str]) -> None:
         raise RunError(f"bioemu2 sample-equilibrium exited with status {result.returncode}; see the step log")
 
 
+def number_atoms(topology) -> None:
+    """Give every atom an integer serial: mdtraj reads them from a CIF as text, and its PDB writer takes only integers."""
+    for atom in topology.atoms:
+        atom.serial = atom.index + 1
+
+
 def split_trajectory(topology_cif: str, samples_xtc: str, run_id: str,
                      structures_dir: str) -> Tuple[List[Tuple[str, str]], int]:
     """One PDB per sampled frame as `<run>_<k>.pdb`; returns ([(structure id, path)], residues in the system)."""
     import mdtraj as md
 
     trajectory = md.load(samples_xtc, top=topology_cif)
+    number_atoms(trajectory.topology)
     os.makedirs(structures_dir, exist_ok=True)
     frames = []
     for index in range(trajectory.n_frames):
