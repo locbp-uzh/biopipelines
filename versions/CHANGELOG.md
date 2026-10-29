@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `Panda` 1.7 → 1.8 - the map of a pooled per-id stream keeps the extra columns of its upstream rows, and a value naming an existing file is copied with the row and rewritten to the copy. BioEmu2's pooled trajectories had lost their `topology` column, leaving an `.xtc` that could not be read. Single and multi-pool; values that are not files are kept as they were.
+
 - `Sequence` 1.0 → 1.1 - a FASTA, CSV or Excel file named without a path is validated against the alphabet of its type when the pipeline is configured, as the same file given with a path already was.
 
 - `Peppr` 1.1 → 1.2 - a ligand peppr cannot match is named in the failure with what its bonds lack (no bonds, or bonds of unknown order), and the documentation says which Boltz2 outputs work: the mmCIF of a ligand given by its CCD code does, the SMILES mmCIF and the PDB form do not.

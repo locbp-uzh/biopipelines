@@ -1418,8 +1418,12 @@ Panda:
   files:
   - biopipelines/panda.py
   - pipe_scripts/pipe_panda.py
-  current: "1.7"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-10-29'
+    note: >-
+      A pooled stream's map keeps the columns of its upstream rows beyond id and file, and a value that names an existing file travels with the row. The map written beside a pooled per-id stream held only id, file and the `<axis>.id` columns, so BioEmu2's trajectories lost the `topology` column and a trajectory arrived without the one file that makes it readable. Every other column of the matched upstream row is now carried, a value that is an absolute path to an existing file is copied once per distinct source into the stream folder as `<id>_<column>.<ext>` (further ids sharing it link to the first copy) and the column is rewritten to the copy, and every other value is kept as it was. Single and multi-pool.
   - version: '1.7'
     date: '2026-10-29'
     note: >-

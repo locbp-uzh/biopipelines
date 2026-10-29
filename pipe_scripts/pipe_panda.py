@@ -1104,13 +1104,17 @@ def order_stream_provenance_columns(df: pd.DataFrame, stream_name: str) -> List[
     return gen_cols
 
 
-def load_upstream_provenance_row(
+# The three columns every map_table carries: the id, the stream's own file, and a scratch value.
+MAP_BASE_COLUMNS = ("id", "file", "value")
+
+
+def load_upstream_row(
     pool_stream_jsons: List[Dict[str, str]],
     stream_name: str,
     source_idx: int,
     lookup_id: str,
 ) -> Dict[str, Any]:
-    """Load provenance columns for one upstream stream row, if available."""
+    """Load every column of one upstream stream row beyond the base three, if available."""
     if source_idx >= len(pool_stream_jsons):
         return {}
     stream_json = pool_stream_jsons[source_idx].get(stream_name)
@@ -1152,11 +1156,21 @@ def load_upstream_provenance_row(
         return {}
 
     row = matching.iloc[0].to_dict()
-    return {
-        col: row[col]
-        for col in map_df.columns
-        if col != "id" and col.endswith(".id")
-    }
+    return {col: row[col] for col in map_df.columns if col not in MAP_BASE_COLUMNS}
+
+
+def stage_row_columns(stream_name: str, row_id: str, columns: Dict[str, Any], dest_dir: str,
+                      staged: Dict[Tuple[str, str], str]) -> Dict[str, Any]:
+    """Carry a map row's extra columns: a value naming an existing file is copied once per source and rewritten to the copy, others stay."""
+    carried = {}
+    for column, value in columns.items():
+        if isinstance(value, str) and os.path.isabs(value) and os.path.isfile(value):
+            label = "".join(c if c.isalnum() or c in "-." else "_" for c in column)
+            dest = os.path.join(dest_dir, f"{row_id}_{label}{os.path.splitext(value)[1]}")
+            stage_pool_file(stream_name, value, dest, staged)
+            value = dest
+        carried[column] = value
+    return carried
 
 
 def unfilled_slot_rows(declared_output_ids: List[str], produced_count: int,
@@ -1680,6 +1694,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                     str(r['original_id']) if has_original else out_id
                 )
 
+            staged_columns: Dict[Tuple[str, str], str] = {}
             for tgt in stream_map_targets:
                 stream_name = tgt.get('stream_name')
                 map_path = tgt.get('map_table')
@@ -1757,11 +1772,10 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                             'id': row_id,
                             'file': file_val,
                         }
-                        row.update(load_upstream_provenance_row(
-                            pool_stream_jsons,
-                            stream_name,
-                            source_idx,
-                            lookup_id,
+                        row.update(stage_row_columns(
+                            stream_name, row_id,
+                            load_upstream_row(pool_stream_jsons, stream_name, source_idx, lookup_id),
+                            os.path.dirname(map_path), staged_columns,
                         ))
                         rows_out.append(row)
 

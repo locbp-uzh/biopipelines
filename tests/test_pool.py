@@ -749,6 +749,9 @@ def test_pool_over_rows_sharing_one_file_names_every_id_without_copying_per_row(
 
     Panda used to write one copy per id for this shape and miss the file the stream declared; Pool reads each
     row's own `file` and links it, so it was never affected. This pins that.
+
+    The extra `topology` column of the upstream rows is carried too, still naming the upstream file: nothing is lost,
+    and Pool links its stream files to their upstream location the same way.
     """
     import json
     import sys
@@ -763,11 +766,13 @@ def test_pool_over_rows_sharing_one_file_names_every_id_without_copying_per_row(
         shared, own = d / "shared.xtc", d / "own.xtc"
         shared.write_bytes(b"shared")
         own.write_bytes(b"own")
+        topology = d / "top.cif"
+        topology.write_text(f"data_run{i}")
         csv = d / "trajectories_map.csv"
         pd.DataFrame([
-            {"id": "a", "file": str(shared), "topology": "t.cif"},
-            {"id": "b", "file": str(shared), "topology": "t.cif"},
-            {"id": "c", "file": str(own), "topology": "t.cif"},
+            {"id": "a", "file": str(shared), "topology": str(topology)},
+            {"id": "b", "file": str(shared), "topology": str(topology)},
+            {"id": "c", "file": str(own), "topology": str(topology)},
         ], columns=cols).to_csv(csv, index=False)
         maps.append(str(csv))
 
@@ -798,7 +803,10 @@ def test_pool_over_rows_sharing_one_file_names_every_id_without_copying_per_row(
         assert os.path.exists(path), path
         with open(path, "rb") as handle:
             assert handle.read() == content
-    assert list(df["topology"]) == ["t.cif"] * 6, "the extra columns of the upstream rows are carried"
+    for path, run in zip(df["topology"], [1, 1, 1, 2, 2, 2]):
+        assert os.path.exists(path), f"the carried topology column names a file that is not there: {path}"
+        with open(path) as handle:
+            assert handle.read() == f"data_run{run}", "each row keeps its own run's topology"
 
     probe = tmp_path / "probe"
     try:

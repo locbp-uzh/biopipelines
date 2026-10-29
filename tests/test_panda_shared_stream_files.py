@@ -163,7 +163,7 @@ class TestARunWhoseEveryConformerWasFiltered:
         ok, missing = _check_completion(pan)
         assert ok, f"a run with nothing left failed the step over its own trajectory: {missing}"
         assert sorted(os.listdir(os.path.join(pan.output_folder, "trajectories"))) == [
-            "p1.xtc", "trajectories_map.csv"]
+            "p1.xtc", "p1_topology.cif", "trajectories_map.csv"]
 
         lost = [row for row in _rows(os.path.join(pan.output_folder, "tables", "missing.csv"))
                 if row["id"] == "p2"]
@@ -339,3 +339,117 @@ class TestIdsOnACoarserStream:
     def test_a_stream_id_that_is_itself_a_table_id_is_left_to_the_ordinary_route(self):
         from pipe_scripts.pipe_panda import lost_stream_ids
         assert lost_stream_ids(["a", "b"], ["a"], {"a": "a.pdb", "b": "b.pdb"}) == []
+
+
+def _topology_files(pan):
+    """{id: topology path} from the pooled trajectories map, failing if the column is gone."""
+    rows = _rows(pan.streams.trajectories.map_table)
+    assert rows and "topology" in rows[0], (
+        f"the pooled trajectories map lost its topology column: {list(rows[0]) if rows else rows}")
+    return {row["id"]: row["topology"] for row in rows}
+
+
+class TestAnExtraFileColumnOfTheStreamMap:
+    """A trajectory without its topology cannot be read, so the second file a map row names travels with it."""
+
+    def test_the_topology_of_each_run_is_copied_and_the_column_points_at_the_copy(
+            self, local_config, isolated_cwd, new_pipeline):
+        from biopipelines.panda import Panda
+        be, pan = _bioemu2_then_panda(new_pipeline, [Panda.filter("status == 'passed'")])
+
+        topology = _topology_files(pan)
+        assert sorted(topology) == ["p1", "p2"]
+        folder = os.path.join(pan.output_folder, "trajectories")
+        for run, path in topology.items():
+            assert os.path.dirname(path) == folder, f"{run}: the column still names the upstream file {path}"
+            with open(path) as handle:
+                assert handle.read() == f"data_{run}\n"
+
+    def test_a_rename_gives_each_new_id_a_readable_topology_stored_once_per_run(
+            self, local_config, isolated_cwd, new_pipeline, tmp_path):
+        from biopipelines.panda import Panda
+        _be, pan = _bioemu2_then_panda(
+            new_pipeline, [Panda.sort("frame"), Panda.head(4)], rename="sel")
+
+        topology = _topology_files(pan)
+        assert sorted(topology) == ["sel_1", "sel_2", "sel_3", "sel_4"]
+        for path in topology.values():
+            assert os.path.dirname(path) == os.path.join(pan.output_folder, "trajectories")
+            with open(path) as handle:
+                assert handle.read() in ("data_p1\n", "data_p2\n")
+        if _can_link(str(tmp_path)):
+            assert _independent_files(topology.values()) == 2
+
+    def test_a_run_that_kept_one_conformer_keeps_its_topology(
+            self, local_config, isolated_cwd, new_pipeline):
+        from biopipelines.panda import Panda
+        _be, pan = _bioemu2_then_panda(
+            new_pipeline, [Panda.filter("status == 'passed'")], rejected={"p1_1", "p1_3"})
+
+        with open(_topology_files(pan)["p1"]) as handle:
+            assert handle.read() == "data_p1\n"
+
+    def test_every_pool_of_a_multi_pool_step_brings_its_own_topologies(
+            self, local_config, isolated_cwd, new_pipeline):
+        from biopipelines.bioemu2 import BioEmu2
+        from biopipelines.panda import Panda
+        from biopipelines.sequence import Sequence
+
+        pipeline = new_pipeline("panda_shared_files_multi")
+        with pipeline:
+            first = BioEmu2(sequences=Sequence(seq=PROTEIN, type="protein", ids="p1"), num_samples=3)
+            second = BioEmu2(sequences=Sequence(seq=PROTEIN, type="protein", ids="q1"), num_samples=3)
+            pan = Panda(tables=[first.tables.physicality, second.tables.physicality],
+                        operations=[Panda.concat(), Panda.filter("status == 'passed'")],
+                        pool=[first, second])
+            pipeline.save()
+        _stage_bioemu2_outputs(first, ("p1",), 3)
+        _stage_bioemu2_outputs(second, ("q1",), 3)
+        _run_panda(pan)
+
+        topology = _topology_files(pan)
+        assert sorted(topology) == ["p1", "q1"]
+        for run, path in topology.items():
+            with open(path) as handle:
+                assert handle.read() == f"data_{run}\n"
+
+
+class TestCarryingTheExtraColumnsOfAMapRow:
+
+    @staticmethod
+    def _carry(tmp_path, columns, row_id="r", staged=None, name="traj"):
+        from pipe_scripts.pipe_panda import stage_row_columns
+        out = tmp_path / "out"
+        out.mkdir(exist_ok=True)
+        return stage_row_columns(name, row_id, columns, str(out), {} if staged is None else staged), out
+
+    def test_a_value_naming_a_file_is_copied_and_rewritten_others_are_kept(self, tmp_path):
+        top = tmp_path / "top.cif"
+        top.write_text("data_x")
+        carried, out = self._carry(tmp_path, {"topology": str(top), "n_atoms": 120,
+                                              "label": "closed", "empty": "", "run.id": "p1"})
+
+        assert carried["topology"] == str(out / "r_topology.cif")
+        assert (out / "r_topology.cif").read_text() == "data_x"
+        assert (carried["n_atoms"], carried["label"], carried["empty"], carried["run.id"]) == (
+            120, "closed", "", "p1")
+
+    def test_a_value_that_only_looks_like_a_path_is_left_alone(self, tmp_path):
+        carried, out = self._carry(tmp_path, {"gone": str(tmp_path / "deleted.cif"),
+                                              "relative": "top.cif", "folder": str(tmp_path)})
+
+        assert carried == {"gone": str(tmp_path / "deleted.cif"), "relative": "top.cif",
+                           "folder": str(tmp_path)}
+        assert list(out.iterdir()) == []
+
+    def test_rows_sharing_a_source_store_it_once(self, tmp_path):
+        top = tmp_path / "top.cif"
+        top.write_text("data_x")
+        staged = {}
+        first, out = self._carry(tmp_path, {"topology": str(top)}, row_id="a", staged=staged)
+        second, _ = self._carry(tmp_path, {"topology": str(top)}, row_id="b", staged=staged)
+
+        assert sorted(path.name for path in out.iterdir()) == ["a_topology.cif", "b_topology.cif"]
+        assert (out / "b_topology.cif").read_text() == "data_x"
+        if _can_link(str(tmp_path)):
+            assert _independent_files([first["topology"], second["topology"]]) == 1
