@@ -286,7 +286,8 @@ def test_boltz_writes_one_chain_entry_per_group_member(record_case, tmp_path):
     out = os.path.join(str(tmp_path), "out")
     pipe = os.path.join(REPO_ROOT, "pipe_scripts", "pipe_boltz_config_unified.py")
     r = subprocess.run([sys.executable, pipe, "--combinatorics-config", cfg,
-                        "--output-dir", out], capture_output=True, text=True)
+                        "--output-dir", out, "--skipped-csv", os.path.join(str(tmp_path), "skipped.csv")],
+                       capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
 
     written = yaml.safe_load(open(os.path.join(out, "d_1+tag.yaml")))
@@ -615,7 +616,7 @@ def test_esmfold2_folds_a_group_as_one_complex(record_case, tmp_path):
     spec.loader.exec_module(module)
     config = json.load(open(_grouped_combinatorics(tmp_path)))
     complexes = {cid: [c["sequence"] for c in chains]
-                 for cid, chains in module.build_complexes(config, {})}
+                 for cid, chains in module.build_complexes(config, None)}
     record_case(input="Bundle(Grouped(2-chain design), tag) into ESMFold2",
                 expected="one complex per design, partner last", actual=complexes)
     assert complexes == {"d_1+tag": ["AAAAAAAAAA", "CCCC", "CHRVVQGDLDVG"],
