@@ -59,10 +59,14 @@ class IPSAE(BaseConfig):
             missing:      id | removed_by | kind | cause
 
     `pdockq` and `pdockq2` need pLDDT and `iptm_af` needs the predictor's own ipTM. A PAE file that does not carry them (every `npz`, whose Boltz-layout siblings are not staged; an AlphaFold3 json without `atom_plddts`; a ColabFold json without `iptm`) leaves the column NaN rather than the zero upstream would compute from an absent input.
+
+    What each score sees: `ipsae`, `ipsae_d0chn`, `ipsae_d0dom`, `iptm_d0chn` and `lis` are functions of the PAE matrix and the chain lengths, not of the coordinates, so they do not know where the chains are. Chain B of a ColabFold complex moved 300 A away, with its json unchanged, keeps the ipSAE of the intact complex (0.925), and `dist1` and `dist2` fall to 0; a Boltz2 npz behaves the same (0.962 before and after). Only `pdockq` and `pdockq2`, which count contacts in the structure, fall (0.58 and 0.94 to 0.0 and 0.0 in that test), and they exist only for a json that carries pLDDT. A predictor's own PAE and coordinates agree, so this matters for a structure that was edited or docked after the PAE was written.
+
+    OpenFold3 json: `pdockq` and `pdockq2` are NaN for an OpenFold3 output even though its `*_confidences.json` holds a per-atom `plddt`. For an mmCIF structure upstream reads pLDDT only from `atom_plddts`, the AlphaFold3 key, and the wrapper leaves NaN what upstream could not read. `iptm_af` is NaN there too.
     """
 
     TOOL_NAME = "IPSAE"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

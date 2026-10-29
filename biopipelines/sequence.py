@@ -38,7 +38,7 @@ class Sequence(BaseConfig):
     """
 
     TOOL_NAME = "Sequence"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -396,7 +396,7 @@ echo "=== Sequence ready ==="
 
     def validate_params(self):
         """Validate Sequence parameters."""
-        # Pending-filename sequences are validated after configure_inputs resolves them
+        # A pending filename is validated by configure_inputs once the file is read
         if self._pending_filename:
             return
 
@@ -454,6 +454,7 @@ echo "=== Sequence ready ==="
                 self._detect_type(s) if self.seq_type == "auto" else self.seq_type
                 for s in self.sequences
             ]
+            self.validate_params()
 
         # For Excel inputs: write the converted CSV to sequences_csv (the lazy path)
         # so that source_csv_path and map_table both point to a real CSV file.

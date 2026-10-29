@@ -57,10 +57,10 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 45 | DistanceSelector          | Analysis                       | 2.0 | `biopipelines/distance_selector.py` |
 | 46 | DSSP | Analysis                       | 2.2 | `biopipelines/dssp.py` |
 | 47 | EnsembleAnalysis          | Analysis                       | 1.0 | `biopipelines/ensemble_analysis.py` |
-| 48 | Foldseek | Analysis                       | 1.3 | `biopipelines/foldseek.py` |
+| 48 | Foldseek | Analysis                       | 1.4 | `biopipelines/foldseek.py` |
 | 49 | FPocket | Analysis                       | 2.1 | `biopipelines/fpocket.py` |
 | 50 | GEMS | Analysis                       | 2.0 | `biopipelines/gems.py` |
-| 51 | IPSAE                     | Analysis                       | 1.3 | `biopipelines/ipsae.py` |
+| 51 | IPSAE                     | Analysis                       | 1.4 | `biopipelines/ipsae.py` |
 | 52 | LigandAtomSelector        | Analysis                       | 1.2 | `biopipelines/ligand_atom_selector.py` |
 | 53 | LigandDdG                 | Analysis                       | 1.1 | `biopipelines/ligand_ddg.py` |
 | 54 | OpenMM | Analysis                       | 3.3 | `biopipelines/openmm.py` |
@@ -70,7 +70,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 58 | PLM_Sol | Analysis                       | 2.0 | `biopipelines/plm_sol.py` |
 | 59 | PoseBusters | Analysis                       | 2.2 | `biopipelines/posebusters.py` |
 | 60 | PoseChange                | Analysis                       | 1.1 | `biopipelines/pose_change.py` |
-| 61 | Peppr                     | Analysis                       | 1.1 | `biopipelines/peppr.py` |
+| 61 | Peppr                     | Analysis                       | 1.2 | `biopipelines/peppr.py` |
 | 62 | Prodigy | Analysis                       | 2.0 | `biopipelines/prodigy.py` |
 | 63 | ProLIF | Analysis                       | 2.1 | `biopipelines/prolif.py` |
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |
@@ -109,7 +109,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 97 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |
 | 98 | Scripting | Inputs & I/O                   | 1.4 | `biopipelines/scripting.py` |
 | 99 | RCSB                      | Inputs & I/O                   | 1.5 | `biopipelines/rcsb.py` |
-| 100 | Sequence                  | Inputs & I/O                   | 1.0 | `biopipelines/sequence.py` |
+| 100 | Sequence                  | Inputs & I/O                   | 1.1 | `biopipelines/sequence.py` |
 | 101 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |
 | 102 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
 | 103 | RF3 | Structure Prediction & Docking | 1.1 | `biopipelines/rf3.py` |

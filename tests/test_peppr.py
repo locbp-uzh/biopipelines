@@ -433,6 +433,34 @@ def test_entities_that_cannot_be_matched_raise(pipe, library, complexes):
         pipe.evaluate_pair("x", complexes["reference"], complexes["monomer"], ALL_METRICS)
 
 
+def _without_conect(text):
+    return "".join(line for line in text.splitlines(keepends=True) if not line.startswith("CONECT"))
+
+
+def test_a_ligand_without_bonds_is_named_in_the_failure(pipe, library, complexes, tmp_path):
+    """A Boltz2 SMILES-ligand mmCIF has no chem_comp_bond and an unknown residue name, so the ligand has no bonds and peppr cannot match it."""
+    bondless = tmp_path / "bondless.pdb"
+    bondless.write_text(_without_conect(open(complexes["reference"]).read()))
+    with pytest.raises(ValueError) as raised:
+        pipe.evaluate_pair("x", complexes["reference"], str(bondless), ALL_METRICS)
+    cause = str(raised.value)
+    assert cause.startswith("pose ligand EDO has no bonds") and "give it a CCD code" in cause
+    assert "give it a CCD code" in cause[:200]
+
+
+def test_ligands_are_described_by_what_their_bonds_lack(pipe, library, complexes, tmp_path):
+    import biotite.structure.io.pdb as pdb
+
+    def ligands(path):
+        return pipe.ligands_without_typed_bonds(pdb.get_structure(pdb.PDBFile.read(path), model=1, include_bonds=True))
+
+    bondless = tmp_path / "bondless.pdb"
+    bondless.write_text(_without_conect(open(complexes["reference"]).read()))
+    assert ligands(complexes["reference"]) == {"EDO": "bonds of unknown order"}
+    assert ligands(str(bondless)) == {"EDO": "no bonds"}
+    assert ligands(complexes["monomer"]) == {}
+
+
 def test_an_unsupported_file_type_raises(pipe, library, complexes, tmp_path):
     odd = tmp_path / "model.xyz"
     odd.write_text("")

@@ -238,6 +238,35 @@ def test_sequence_fasta_missing_file_raises(isolated_cwd, record_case):
         s._load_from_fasta(missing)
 
 
+def test_a_bare_filename_fasta_is_validated_like_a_path_fasta(isolated_cwd, record_case):
+    """A bare filename is resolved against the sequences/ folder only at configure time, and the alphabet check must run there too."""
+    from biopipelines.sequence import Sequence
+
+    folder = isolated_cwd / "sequences"
+    folder.mkdir()
+    (folder / "odd.fasta").write_text(">ok\nMKTAY\n>odd\nMKJTAY\n")
+
+    with pytest.raises(ValueError, match="invalid characters"):
+        Sequence(seq=str(folder / "odd.fasta"), type="protein")
+
+    pending = Sequence(seq="odd.fasta", type="protein")
+    record_case(input="Sequence(seq='odd.fasta') with J in 'odd', then configure_inputs",
+                expected="ValueError invalid characters", actual="see assertion")
+    with pytest.raises(ValueError, match="Sequence 'odd' contains invalid characters for protein: J"):
+        pending.configure_inputs({"sequences": str(folder)})
+
+
+def test_a_bare_filename_fasta_with_valid_letters_still_loads(isolated_cwd):
+    from biopipelines.sequence import Sequence
+
+    folder = isolated_cwd / "sequences"
+    folder.mkdir()
+    (folder / "fine.fasta").write_text(">a\nMKTAY\n>b\nAETGF\n")
+    pending = Sequence(seq="fine.fasta", type="protein")
+    pending.configure_inputs({"sequences": str(folder)})
+    assert pending.sequences == ["MKTAY", "AETGF"]
+
+
 # ── RCSB PDB-code path (hits network) ────────────────────────────────────────
 
 @pytest.mark.network

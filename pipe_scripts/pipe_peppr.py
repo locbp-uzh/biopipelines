@@ -55,6 +55,32 @@ def load_system(path):
     raise ValueError(f"unsupported structure file {os.path.basename(path)!r}: expected .pdb, .cif or .mmcif")
 
 
+ADVICE = {
+    "no bonds": "an mmCIF needs chem_comp_bond or a CCD residue name",
+    "bonds of unknown order": "CONECT records carry no bond orders",
+}
+
+
+def ligands_without_typed_bonds(atoms):
+    """{residue name: what its bonds lack} for each ligand of two or more heavy atoms with no bonds, or only bonds of unknown order."""
+    import numpy as np
+    import biotite.structure as struc
+
+    atoms = atoms[atoms.element != "H"]
+    bonds = atoms.bonds.as_array() if atoms.bonds is not None else np.empty((0, 3), dtype=int)
+    starts = struc.get_residue_starts(atoms, add_exclusive_stop=True)
+    found = {}
+    for start, stop in zip(starts[:-1], starts[1:]):
+        if not atoms.hetero[start] or stop - start < 2:
+            continue
+        inside = bonds[(bonds[:, 0] >= start) & (bonds[:, 0] < stop)]
+        if len(inside) == 0:
+            found[str(atoms.res_name[start])] = "no bonds"
+        elif (inside[:, 2] == 0).all():
+            found[str(atoms.res_name[start])] = "bonds of unknown order"
+    return found
+
+
 def evaluate_pair(system_id, reference_path, pose_path, keys):
     """Return {key: float} for one pose against its reference, NaN where a metric could not be computed.
 
@@ -76,7 +102,10 @@ def evaluate_pair(system_id, reference_path, pose_path, keys):
                  if issubclass(w.category, peppr.MatchWarning)
                  or str(w.message).startswith("Failed to standardize")]
     if unmatched:
-        raise ValueError(unmatched[0])
+        hints = [f"{which} ligand {name} has {reason} ({ADVICE[reason]}), so peppr cannot match it; give it a CCD code"
+                 for which, atoms in (("pose", pose), ("reference", reference))
+                 for name, reason in ligands_without_typed_bonds(atoms).items()]
+        raise ValueError("; ".join(hints + [unmatched[0]]) if hints else unmatched[0])
     failed = [str(w.message) for w in caught if issubclass(w.category, peppr.EvaluationWarning)]
     if len(failed) >= len(keys):
         raise ValueError(failed[0])

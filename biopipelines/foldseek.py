@@ -72,6 +72,8 @@ class Foldseek(BaseConfig):
     easy-multimercluster uses `-e 10` and `-c 0.0`, no coverage requirement.
     Counts shift with these filters, so state them when you compare studies.
 
+    Below TM 0.5 the thresholds do nothing under the defaults, because the E-value and coverage filters act before the TM-score threshold does and structures of different folds never reach it. In a test set of ubiquitin (two copies), three T4 lysozyme variants, GFP and a 12-residue ubiquitin fragment, thresholds of 0.05, 0.3, 0.5 to 0.8, 0.95 and 0.99 all gave the same 4 clusters. With `evalue=10, coverage=0.0` the threshold 0.05 merged ubiquitin with GFP (3 clusters), while 0.3 and 0.5 still gave 4, so those two filters, not the TM-score, set the limit; the 12-residue fragment stayed alone in every run. `cov_mode` changed which structure represents a cluster (`cov_mode=1` chose the first copy and the first lysozyme) but not its members. In multimer mode, `coverage=0.8, cov_mode=2` merged a trypsin-ubiquitin complex with the ubiquitin monomer (5 clusters became 4), which the default, with no coverage requirement, kept apart.
+
     MULTIMER MODE
     With `multimer=True` the structures are clustered as complexes with
     `foldseek easy-multimercluster`. `tm_thresholds` then sets
@@ -143,7 +145,7 @@ class Foldseek(BaseConfig):
     """
 
     TOOL_NAME = "Foldseek"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "foldseek"
 
     @classmethod

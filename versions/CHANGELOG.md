@@ -13,6 +13,14 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `Sequence` 1.0 → 1.1 - a FASTA, CSV or Excel file named without a path is validated against the alphabet of its type when the pipeline is configured, as the same file given with a path already was.
+
+- `Peppr` 1.1 → 1.2 - a ligand peppr cannot match is named in the failure with what its bonds lack (no bonds, or bonds of unknown order), and the documentation says which Boltz2 outputs work: the mmCIF of a ligand given by its CCD code does, the SMILES mmCIF and the PDB form do not.
+
+- `IPSAE` 1.3 → 1.4 - documentation: ipSAE uses the PAE only and does not fall when the chains are moved apart, the json-only `pdockq` and `pdockq2` do, and an OpenFold3 json gives NaN `pdockq` because upstream reads `atom_plddts`.
+
+- `Foldseek` 1.3 → 1.4 - documentation: below TM 0.5 the thresholds are inert under the default E-value and coverage, and `evalue`, `coverage` and `cov_mode` change that.
+
 - `Panda` 1.6 → 1.7 - a pooled stream keyed more coarsely than the table (BioEmu2's one trajectory per run, filtered through its per-conformer `physicality` table) is copied once per row it has, under its own id. It was copied once per surviving conformer under the conformer's name, so the declared `<run>.xtc` was never written and the step was marked FAILED. A run whose every conformer the filter removed is recorded in `missing`. Files sharing one source are stored once, the other names linking to it.
 
 - `node_embeddings` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-residue embedding of each id, one `.npy` of shape (residues, dimension), emitted by `Embedding`.

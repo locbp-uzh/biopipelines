@@ -37,7 +37,7 @@ class Peppr(BaseConfig):
         references: reference structures (PDB or mmCIF). A stream with one id scores every prediction; a stream with several is matched to the predictions by id (the same id, or a parent or child of it), so a refold finds the design it derives from. A sibling id is not a match. A prediction with no matching reference is not evaluated and is recorded in `missing`.
         metrics: keys to compute, a list drawn from the table below (default: all eight).
 
-    Every molecule of a structure, polymer chain or ligand, must have its own chain id, and bonds must be known. biotite reads them: polymer bonds come from the Chemical Component Dictionary, and ligand bonds from CONECT records in a PDB file or from chem_comp_bond (else the dictionary) in an mmCIF file. A ligand in a PDB file without CONECT records has no bonds, so its id cannot be matched and lands in `missing`; give such structures as mmCIF. Hydrogens, solvent and monoatomic ions are dropped.
+    Every molecule of a structure, polymer chain or ligand, must have its own chain id, and bonds must be known. biotite reads them: polymer bonds come from the Chemical Component Dictionary, and ligand bonds from CONECT records in a PDB file or from chem_comp_bond (else the dictionary) in an mmCIF file. A ligand is matched to its counterpart through its bonds and their orders, so a ligand whose file gives no usable bonds cannot be matched and its id lands in `missing`, with a `cause` that names the ligand and what its bonds lack. Tested with Boltz2 predictions of benzamidine against the 3PTB crystal: an mmCIF whose ligand was given as SMILES (residue LIG1) has no chem_comp_bond and a name the dictionary does not know, so the ligand has no bonds and the id fails; an mmCIF whose ligand was given by its CCD code (`Ligand("BEN")`, residue BEN) takes its bonds from the dictionary and is scored (lddt_pli 0.74, dockq 0.95); the PDB output of the same prediction carries CONECT records, which give bonds of unknown order, and fails too. A ligand in a PDB file without CONECT records has no bonds either. To score a predicted ligand, give it its CCD code or supply a file with chem_comp_bond. Hydrogens, solvent and monoatomic ions are dropped.
 
     Metrics (key: peppr class, what it reports):
         rmsd:     MonomerRMSD, backbone RMSD (Calpha, and C3' for nucleic acids) of each polymer chain after superposing it alone, averaged over chains weighted by atom count. Angstrom.
@@ -58,7 +58,7 @@ class Peppr(BaseConfig):
     """
 
     TOOL_NAME = "Peppr"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "peppr"
 
     @classmethod
@@ -67,7 +67,7 @@ class Peppr(BaseConfig):
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
         env_run = cls._env_run(env, env_manager)
-        imports = f'{env_run}python -c "import peppr, biotite, pandas, yaml"'
+        imports = f'{env_run}python -c "import peppr, biotite, numpy, pandas, yaml"'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {imports} >/dev/null 2>&1; then
     echo "Peppr already installed, skipping. Use force_reinstall=True to reinstall."
