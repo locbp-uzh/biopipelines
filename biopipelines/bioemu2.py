@@ -62,7 +62,8 @@ class BioEmu2(BaseConfig):
                    `Each` makes one run per ligand and sequence; `Bundle` puts several ligands in one system.
         num_samples: conformers per run (default 100).
         batch_size: samples denoised together per forward pass (default 16). It caps GPU memory at long sequence times large batch.
-        seed: RNG seed (default None: every run draws its own).
+                   With a `seed`, the first batch is the same at any batch size and the later ones are not, so changing it changes the conformers after the first batch.
+        seed: RNG seed (default None: every run draws its own). The same seed and batch size gave identical conformers on repeat.
         sampler: `edm` (default, unsteered), `edm_gd` (gradient guidance), `edm_fk` (Feynman-Kac resampling) or `edm_fkc` (Feynman-Kac corrector).
                    The steered samplers use upstream's default physicality potentials.
         contacts: optional list of upstream contact dicts, `{"token1": {"asym_id": "A", "res_id": 3}, "token2": {"asym_id": "B", "atom_name": "C1"}, "max_distance": 6.0}`.
@@ -82,6 +83,7 @@ class BioEmu2(BaseConfig):
     Outputs:
         Streams:
             structures:   one `<run>_<1..num_samples>.pdb` per sampled conformer.
+                          A ligand takes the next chain letter after the protein chains and is written as ATOM records, with its CCD code as the residue name (`LIG` for a SMILES) and atom names that bioemu2 assigns.
             trajectories: one `<run>.xtc` per run, with its `<run>_topology.cif` named in the map's `topology` column.
         Tables:
             summary:     id | sequences.id | ligands.id | n_samples | n_residues
@@ -93,7 +95,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}

@@ -395,8 +395,8 @@ Ligand-capable successor of BioEmu (microsoft/bioemu2). Samples `num_samples` co
 - `sequences`: DataStream | StandardizedOutput (required) - protein sequences, one chain per row. `Bundle` puts several in one system
 - `ligands`: DataStream | StandardizedOutput | None = None - compounds, by CCD code or SMILES. None for an apo ensemble. `Bundle` puts several in one system
 - `num_samples`: int = 100 - conformers per run
-- `batch_size`: int = 16 - samples denoised together per forward pass; it caps GPU memory at long sequence times large batch
-- `seed`: int | None = None - RNG seed; None gives every run its own
+- `batch_size`: int = 16 - samples denoised together per forward pass; it caps GPU memory at long sequence times large batch. With a `seed`, the first batch is the same at any batch size and the later ones are not, so changing it changes the conformers after the first batch
+- `seed`: int | None = None - RNG seed; None gives every run its own. The same seed and batch size gave identical conformers on repeat
 - `sampler`: str = "edm" - `edm` (unsteered), `edm_gd` (gradient guidance), `edm_fk` (Feynman-Kac resampling) or `edm_fkc` (Feynman-Kac corrector). The steered samplers use upstream's default physicality potentials
 - `contacts`: list[dict] | None = None - upstream contact dicts, `{"token1": {"asym_id": "A", "res_id": 3}, "token2": {"asym_id": "B", "atom_name": "PG"}, "max_distance": 6.0}`. A token is a chain with a 1-based residue index or with a ligand atom name
 - `covalent_linkage`: dict | None = None - `{"chain": "A", "position": 3, "protein_atom": "SG", "ligand_atom": "C1"}`. Requires `ligands`, given by CCD code
@@ -405,7 +405,7 @@ Ligand-capable successor of BioEmu (microsoft/bioemu2). Samples `num_samples` co
 
 **Streams**: `structures`, `trajectories`
 
-`structures` holds one `<run>_<k>.pdb` per conformer. `trajectories` holds one `<run>.xtc` per run, and the `topology` column of its map names the `<run>_topology.cif` that goes with it.
+`structures` holds one `<run>_<k>.pdb` per conformer. `trajectories` holds one `<run>.xtc` per run, and the `topology` column of its map names the `<run>_topology.cif` that goes with it. In a structure the protein chains come first and each ligand follows as the next chain letter, one residue numbered 1. A ligand is written as ATOM records, not HETATM, under its CCD code as the residue name, or `LIG` when it was given by SMILES, with atom names that bioemu2 assigns (`PG` of ATP, `C1`, `O1` of a SMILES ethanol). `Contacts` and `PoseBusters` read the ATP ligand of such a structure when given `Ligand("ATP")`. The physicality check does not cover the ligand, and `PoseBusters` failed three of four ATP conformers (bond lengths in two, sanitization in one).
 
 **Tables**:
 - `summary`:
