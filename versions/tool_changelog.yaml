@@ -1644,8 +1644,15 @@ PoseBusters:
   files:
   - biopipelines/posebusters.py
   - pipe_scripts/pipe_posebusters.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-28'
+    note: >-
+      The protein written beside each extracted ligand was written entirely as HETATM when the structure declares no entities, which gemmi leaves unknown
+      for a PDB without SEQRES such as a docking output. PoseBusters then read the protein as organic cofactors and ignored it, so
+      `protein-ligand_maximum_distance` failed for twenty poses sitting in the pocket (nearest ligand atom 2.4 A from the protein) and no pose could pass.
+      Residues of such a structure keep the record they had.
   - version: '2.2'
     date: '2026-09-02'
     note: >-

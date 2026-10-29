@@ -112,7 +112,7 @@ class PoseBusters(BaseConfig):
     """
 
     TOOL_NAME = "PoseBusters"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "posebusters"
 
     @classmethod

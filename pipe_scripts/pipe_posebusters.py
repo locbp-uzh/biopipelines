@@ -24,6 +24,15 @@ from biopipelines.biopipelines_io import load_datastream, iterate_files
 from biopipelines.ligand_utils import resolve_ligand_code, resolve_ligand_smiles as _resolve_ligand_smiles
 
 
+def is_polymer_residue(residue):
+    """A residue of a polymer chain; with no entities declared (a PDB without SEQRES, as docking programs write it) its ATOM records."""
+    import gemmi
+
+    if residue.entity_type == gemmi.EntityType.Unknown:
+        return residue.het_flag == "A"
+    return residue.entity_type == gemmi.EntityType.Polymer
+
+
 def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structure_id,
                                ligand_smiles=None):
     """
@@ -69,7 +78,7 @@ def extract_ligand_and_protein(structure_path, ligand_name, output_dir, structur
             else:
                 # Write all non-ligand residues to protein PDB
                 for atom in residue:
-                    record = "HETATM" if not residue.entity_type == gemmi.EntityType.Polymer else "ATOM  "
+                    record = "ATOM  " if is_polymer_residue(residue) else "HETATM"
                     protein_lines.append(
                         f"{record}{atom.serial:5d} {atom.name:<4s} {residue.name:>3s} "
                         f"{chain.name:1s}{residue.seqid.num:4d}    "

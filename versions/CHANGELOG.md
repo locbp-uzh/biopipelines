@@ -55,6 +55,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **PoseBusters** 2.2 → 2.3. The protein written beside each extracted ligand was written entirely as HETATM when the structure declares no entities, which gemmi leaves unknown for a PDB without SEQRES such as a docking output. PoseBusters then read the protein as organic cofactors and ignored it, so `protein-ligand_maximum_distance` failed for twenty poses sitting in the pocket (nearest ligand atom 2.4 A from the protein) and no pose could pass. Residues of such a structure keep the record they had.
+
 - **ESM2** 1.0 → 1.1. The install check imports every module the pipe scripts import (numpy, pandas, yaml, torch, transformers, huggingface_hub). It imported only torch, transformers and huggingface_hub, so an env without numpy, pandas or pyyaml was reported as installed.
 
 - **Peppr** 1.0 → 1.1. The install check also imports biotite, and the shortcut for an existing env runs the same check (peppr, biotite, pandas, yaml); it accepted any env that existed. An existing env that fails the check is no longer built over, and the failure says to retry with `force_reinstall=True`.
