@@ -19,6 +19,9 @@ import sys
 
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.id_map_utils import prune_redundant_provenance_columns  # noqa: E402
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
@@ -188,14 +191,14 @@ def main():
 
     for _, row in df.iterrows():
         msa_file = row['file']
-        row_id = str(row.get('id', '') or '')
-        seq_id = str(row.get('sequences.id', row_id) or row_id)
+        out_id = str(row.get('id', '') or '')
+        provenance = row.get('sequences.id', '')
+        provenance = '' if pd.isna(provenance) else str(provenance)
 
         if not msa_file or not os.path.exists(msa_file):
             print(f"Warning: MSA file not found: {msa_file}")
             continue
 
-        out_id = row_id if row_id.endswith("_msa") else f"{seq_id}_msa"
         output_file = os.path.join(output_folder, f"{out_id}{ext}")
 
         if convert == "a3m":
@@ -207,12 +210,13 @@ def main():
 
         output_rows.append({
             'id': out_id,
-            'sequences.id': seq_id,
+            'sequences.id': provenance,
             'sequence': query_seq,
             'file': output_file
         })
 
-    output_df = pd.DataFrame(output_rows)
+    output_df = prune_redundant_provenance_columns(
+        pd.DataFrame(output_rows, columns=['id', 'sequences.id', 'sequence', 'file']))
     output_df.to_csv(output_msas_csv, index=False)
     print(f"\nConverted {len(output_rows)} MSA files to {convert} format")
     print(f"Output table: {output_msas_csv}")

@@ -1149,8 +1149,12 @@ MMseqs2:
   - biopipelines/mmseqs2.py
   - pipe_scripts/pipe_mmseqs2_sequences.py
   - pipe_scripts/mmseqs2_client.sh
-  current: "1.10"
+  current: "1.11"
   history:
+  - version: '1.11'
+    date: '2026-10-29'
+    note: >-
+      An `msas` row is named after the sequence it belongs to. The step wrote `<id>_msa` and kept the sequence id in `sequences.id`, so every consumer had to special-case the suffix, and three predictors that matched on `id` alone folded single-sequence without a word. The id is the sequence id at all four write sites (the three conversions and the reuse of an existing alignment), and the table is `id | sequence | file`: `sequences.id` repeated the id, which the framework prunes. File names are unchanged (`<id>.<ext>`). Consumers still read maps written before this, through `id_map_utils.MsaLookup`.
   - version: '1.10'
     date: '2026-10-16'
     note: >-
@@ -1204,8 +1208,12 @@ MMseqs2Server:
   files:
   - biopipelines/mmseqs2.py
   - pipe_scripts/mmseqs2_server_gpu.sh
-  current: "1.9"
+  current: "1.10"
   history:
+  - version: '1.10'
+    date: '2026-10-29'
+    note: >-
+      No change to the server. Version follows MMseqs2 1.11, with which it shares `biopipelines/mmseqs2.py`.
   - version: '1.9'
     date: '2026-10-16'
     note: >-
@@ -1275,8 +1283,12 @@ MSA:
   files:
   - biopipelines/msa.py
   - pipe_scripts/pipe_msa.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-29'
+    note: >-
+      A converted row keeps the id of its input row. The step named every output `<id>_msa`, passing an id that already carried the suffix through, so the id was never the sequence's. `sequences.id` is carried only when the input row had one that its id does not already spell (`prune_redundant_provenance_columns`), the declared ids are the input ids, and the converted files are named after the id.
   - version: '1.4'
     date: '2026-10-16'
     note: >-
@@ -1303,8 +1315,12 @@ Mutagenesis:
   files:
   - biopipelines/mutagenesis.py
   - pipe_scripts/pipe_mutagenesis.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-10-29'
+    note: >-
+      The synthetic MSA of a mutant finds its parent's alignment through the shared `MsaLookup` (exact id, then the `sequences.id` column, then the legacy `<id>_msa` row id). It matched the parent on the `id` column alone, so with alignments from an MMseqs2 map every mutant was skipped. Its own `msas` table is `id | original.id | sequence | file`: `id` is the mutant id, and the `sequences.id` column that repeated it is no longer written. `pipe_mutagenesis_msa.py` joins the files this tool owns.
   - version: '1.3'
     date: '2026-10-13'
     note: >-

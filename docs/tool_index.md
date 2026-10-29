@@ -24,7 +24,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 12 | Fuse | Sequence Design                | 1.3 | `biopipelines/fuse.py` |
 | 13 | LigandMPNN | Sequence Design                | 3.4 | `biopipelines/ligand_mpnn.py` |
 | 14 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
-| 15 | Mutagenesis               | Sequence Design                | 1.3 | `biopipelines/mutagenesis.py` |
+| 15 | Mutagenesis               | Sequence Design                | 1.4 | `biopipelines/mutagenesis.py` |
 | 16 | MutationComposer          | Sequence Design                | 1.0 | `biopipelines/mutation_composer.py` |
 | 17 | ProteinMPNN | Sequence Design                | 2.10 | `biopipelines/protein_mpnn.py` |
 | 18 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
@@ -98,9 +98,9 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 86 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
 | 87 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
 | 88 | SelectionTransfer | Data Management | 1.0 | `biopipelines/selection_transfer.py` |
-| 89 | MMseqs2                   | MSAs                           | 1.10 | `biopipelines/mmseqs2.py` |
-| 90 | MMseqs2Server             | MSAs                           | 1.9 | `biopipelines/mmseqs2.py` |
-| 91 | MSA                       | MSAs                           | 1.4 | `biopipelines/msa.py` |
+| 89 | MMseqs2                   | MSAs                           | 1.11 | `biopipelines/mmseqs2.py` |
+| 90 | MMseqs2Server             | MSAs                           | 1.10 | `biopipelines/mmseqs2.py` |
+| 91 | MSA                       | MSAs                           | 1.5 | `biopipelines/msa.py` |
 | 92 | CompoundLibrary           | Inputs & I/O                   | 1.0 | `biopipelines/compound_library.py` |
 | 93 | Ligand                    | Inputs & I/O                   | 1.5 | `biopipelines/ligand.py` |
 | 94 | Load | Inputs & I/O                   | 1.7 | `biopipelines/load.py` |

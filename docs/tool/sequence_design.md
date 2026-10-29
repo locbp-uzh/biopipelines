@@ -393,10 +393,10 @@ Performs mutagenesis at specified positions. Generates systematic amino acid sub
 
 - `msas` (only when `msas=` is given):
 
-  | id | sequences.id | original.id | sequence | file |
-  |----|--------------|-------------|----------|----------|
+  | id | original.id | sequence | file |
+  |----|-------------|----------|----------|
 
-  `id` and `sequences.id` are both the mutant id (so downstream folding tools match the mutant query); `original.id` records the parent protein the MSA was derived from; `sequence` is the mutated query sequence.
+  `id` is the mutant id, the id of the sequence the alignment belongs to (so downstream folding tools match the mutant query); `original.id` records the parent protein the MSA was derived from; `sequence` is the mutated query sequence.
 
 **Example**:
 ```python

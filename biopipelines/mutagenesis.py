@@ -40,7 +40,7 @@ class Mutagenesis(BaseConfig):
     """
 
     TOOL_NAME = "Mutagenesis"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -414,7 +414,7 @@ echo "Synthetic MSAs saved to: {self.msas_folder}"
             tables["msas"] = TableInfo(
                 name="msas",
                 path=self.msas_csv,
-                columns=["id", "sequences.id", "original.id", "sequence", "file"],
+                columns=["id", "original.id", "sequence", "file"],
                 description="Synthetic per-mutant MSAs (query-row substitution)"
             )
 

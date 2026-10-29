@@ -1448,6 +1448,10 @@ When a tool multiplies inputs by a suffix (e.g., ProteinMPNN generates N sequenc
 | LigandMPNN | `_{seq_num}` | `prot1_1`, `prot1_2` |
 | Mutagenesis | `_{position}{aa}` | `prot1_50A`, `prot1_50V` |
 
+A stream that is 1:1 with its input keeps the input's id: one `msas` row per sequence is `prot1`, not `prot1_msa`, and a table row per structure is that structure's id. A tool never invents a suffix for such a stream, because a name that spells the parent in another form makes every consumer re-derive the parent, each in its own way. A plain `<axis>.id` provenance column that repeats the id carries nothing, so it is not written (see `prune_redundant_provenance_columns`); it stays only where the id does not spell the parent.
+
+A consumer that needs "the row that belongs to protein X" asks the shared helper of that stream instead of matching ids itself. For `msas` it is `id_map_utils.MsaLookup` (`MsaLookup.load(stream_json_or_map_table)`, then `.path(protein_id, sequence)` or `.require(...)`): the exact id, then the `sequences.id` provenance column, then the legacy `<id>_msa` row id of maps written before this rule, then, when the caller passes the protein's sequence, the row whose `sequence` column equals it. Nothing looser is tried; the child, parent and sibling tiers of `get_mapped_ids` would give `prot` the alignment of `prot_1`. When `msas=` is supplied and a protein has none, that id is a `failure` row of the consuming step (`no alignment in msas for <id> (ids present: ...)`), a blank row of its result table, and the rest of the batch continues; it is never folded single-sequence in silence. A tool that documents a partial-alignment mode (BioEmu2 searches ColabFold for the sequences without one) says so and logs each id it leaves out.
+
 ### Provenance Columns
 
 Every map_table CSV includes provenance columns named `{alias}.id` that track which input from each axis produced each output row. The alias matches the **tool parameter name** (e.g., `proteins` not `sequences` for Boltz2), making provenance columns unambiguous when a tool accepts multiple inputs of the same stream type.

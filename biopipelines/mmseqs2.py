@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.10"
+    TOOL_VERSION = "1.11"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -124,7 +124,8 @@ echo "=== MMseqs2 ready ==="
         Output:
             Streams: msas (.csv/.a3m)
             Tables:
-                msas: id | sequences.id | sequence | file
+                msas: id | sequence | file
+                      `id` is the id of the sequence the alignment belongs to.
         """
         # Resolve sequences input
         self.sequences_input = sequences  # retained for upstream missing-table lookup
@@ -347,7 +348,7 @@ echo "MMseqs2 processing completed"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msa_csv,
-                columns=["id", "sequences.id", "sequence", "file"],
+                columns=["id", "sequence", "file"],
                 description="MSA files for sequence alignment"
             ),
             "missing": TableInfo(
@@ -393,7 +394,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    TOOL_VERSION = "1.9"
+    TOOL_VERSION = "1.10"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,

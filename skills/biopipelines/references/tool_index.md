@@ -90,9 +90,9 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 
 ## MSAs
 
-- **MMseqs2** v1.10 · CPU · x86-64 — Generates multiple sequence alignments for structure prediction by querying a local MMseqs2 server. `docs/tool/msas.md#mmseqs2` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: build-msa, fetch, msa, protein
-- **MMseqs2Server** v1.9 · CPU · x86-64 — Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated MSA queries hit a warm local server instead of the public endpoint. `docs/tool/msas.md#mmseqs2server` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: data, build-msa, msa, protein
-- **MSA** v1.4 · CPU · x86-64, aarch64, Colab — Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). `docs/tool/msas.md#msa` · tags: data, msa
+- **MMseqs2** v1.11 · CPU · x86-64 — Generates multiple sequence alignments for structure prediction by querying a local MMseqs2 server. `docs/tool/msas.md#mmseqs2` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: build-msa, fetch, msa, protein
+- **MMseqs2Server** v1.10 · CPU · x86-64 — Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated MSA queries hit a warm local server instead of the public endpoint. `docs/tool/msas.md#mmseqs2server` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: data, build-msa, msa, protein
+- **MSA** v1.5 · CPU · x86-64, aarch64, Colab — Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). `docs/tool/msas.md#msa` · tags: data, msa
 
 ## Sequence Design
 
@@ -102,7 +102,7 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 - **Fuse** v1.3 · CPU · x86-64, aarch64, Colab — Concatenates multiple sequences with flexible linkers. `docs/tool/sequence_design.md#fuse` · tags: design-sequence, protein, nucleic-acid, sequence-only
 - **LASErMPNN** v2.2 · GPU · x86-64, Colab — Ligand-conditioned inverse folding with all-atom sidechain packing. `docs/tool/sequence_design.md#lasermpnn` [repo](https://github.com/polizzilab/LASErMPNN) · tags: inverse-folding, design-sequence, protein, small-molecule, pocket, all-atom, sidechain
 - **LigandMPNN** v3.4 · GPU · x86-64, aarch64, Colab — Designs protein sequences optimized for ligand binding. `docs/tool/sequence_design.md#ligandmpnn` [repo](https://github.com/dauparas/LigandMPNN) [paper](https://www.biorxiv.org/content/10.1101/2023.12.22.573103v1) · tags: inverse-folding, design-sequence, protein, small-molecule, pocket, all-atom, sidechain
-- **Mutagenesis** v1.3 · CPU · x86-64, aarch64, Colab — Performs mutagenesis at specified positions. `docs/tool/sequence_design.md#mutagenesis` · tags: design-sequence, protein, residues, sequence-only
+- **Mutagenesis** v1.4 · CPU · x86-64, aarch64, Colab — Performs mutagenesis at specified positions. `docs/tool/sequence_design.md#mutagenesis` · tags: design-sequence, protein, residues, sequence-only
 - **MutationComposer** v1.0 · CPU · x86-64, aarch64, Colab — Generates new protein sequences by composing mutations based on frequency analysis. `docs/tool/sequence_design.md#mutationcomposer` · tags: design-sequence, protein, residues, sequence-only
 - **ProteinMPNN** v2.10 · GPU/CPU · x86-64, aarch64, Colab — Designs protein sequences for given backbone structures. `docs/tool/sequence_design.md#proteinmpnn` [repo](https://github.com/dauparas/ProteinMPNN) [paper](https://www.science.org/doi/10.1126/science.add2187) · tags: inverse-folding, design-sequence, protein
 - **RBSDesigner** v2.0 · CPU · x86-64, Colab — Designs synthetic ribosome binding sites (RBS) to control protein expression in bacteria. `docs/tool/sequence_design.md#rbsdesigner` [paper](https://doi.org/10.1038/nbt.1568) · tags: design-sequence, nucleic-acid, energy, sequence-only

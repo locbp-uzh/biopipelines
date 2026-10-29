@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `id_map_utils.MsaLookup` (and `get_msa_paths`) is the one place that answers which alignment belongs to a protein: its exact id, then the `sequences.id` provenance column, then the legacy `<id>_msa` row id of maps written before the rule, then, when the caller passes the protein's sequence, the row whose `sequence` column equals it. Nothing looser is tried. A stream that is 1:1 with its input keeps the input's id, and a provenance column that only repeats the id is not written; both are stated in the developer manual next to the output id rules. `tests/test_msas_ids.py` pins the lookup, the producers and a lint that no module builds an id with the `_msa` suffix.
+
 - `Panda` 1.7 → 1.8 - the map of a pooled per-id stream keeps the extra columns of its upstream rows, and a value naming an existing file is copied with the row and rewritten to the copy. BioEmu2's pooled trajectories had lost their `topology` column, leaving an `.xtc` that could not be read. Single and multi-pool; values that are not files are kept as they were.
 
 - `Sequence` 1.0 → 1.1 - a FASTA, CSV or Excel file named without a path is validated against the alphabet of its type when the pipeline is configured, as the same file given with a path already was.
@@ -54,6 +56,14 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 - `pae` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-id predicted aligned error matrix a structure predictor can emit for a downstream scorer to read.
 
 ### Tools
+
+- **MMseqs2Server** 1.9 → 1.10. No change to the server. Version follows MMseqs2 1.11, with which it shares `biopipelines/mmseqs2.py`.
+
+- **MMseqs2** 1.10 → 1.11. An `msas` row is named after the sequence it belongs to. The step wrote `<id>_msa` and kept the sequence id in `sequences.id`, so every consumer had to special-case the suffix, and three predictors that matched on `id` alone folded single-sequence without a word. The id is the sequence id at all four write sites (the three conversions and the reuse of an existing alignment), and the table is `id | sequence | file`: `sequences.id` repeated the id, which the framework prunes. File names are unchanged (`<id>.<ext>`). Consumers still read maps written before this, through `id_map_utils.MsaLookup`.
+
+- **MSA** 1.4 → 1.5. A converted row keeps the id of its input row. The step named every output `<id>_msa`, passing an id that already carried the suffix through, so the id was never the sequence's. `sequences.id` is carried only when the input row had one that its id does not already spell (`prune_redundant_provenance_columns`), the declared ids are the input ids, and the converted files are named after the id.
+
+- **Mutagenesis** 1.3 → 1.4. The synthetic MSA of a mutant finds its parent's alignment through the shared `MsaLookup` (exact id, then the `sequences.id` column, then the legacy `<id>_msa` row id). It matched the parent on the `id` column alone, so with alignments from an MMseqs2 map every mutant was skipped. Its own `msas` table is `id | original.id | sequence | file`: `id` is the mutant id, and the `sequences.id` column that repeated it is no longer written. `pipe_mutagenesis_msa.py` joins the files this tool owns.
 
 - **RF3** 1.2 → 1.3. `n_recycles=1` is refused while early stopping is on: upstream takes the first recycle for the early-stopping check and has none left to fold with, so every input failed with `RuntimeError: Recycling generator produced no outputs`. With `early_stopping_plddt_threshold=0` one recycle is accepted.
 

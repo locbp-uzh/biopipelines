@@ -507,8 +507,7 @@ def convert_a3m_to_csv_format(a3m_file, sequence_id, output_csv_file, mask_posit
 
         # Return single summary row pointing to the converted CSV file
         return [{
-            'id': f"{sequence_id}_msa",
-            'sequences.id': sequence_id,
+            'id': sequence_id,
             'sequence': query_sequence,
             'file': output_csv_file  # Reference to converted CSV file
         }]
@@ -582,8 +581,7 @@ def write_a3m_output(a3m_file, sequence_id, output_a3m_file, mask_positions=None
         log(f"Wrote A3M with headers preserved: {output_a3m_file}")
 
         return [{
-            'id': f"{sequence_id}_msa",
-            'sequences.id': sequence_id,
+            'id': sequence_id,
             'sequence': sequences[0] if sequences else "",
             'file': output_a3m_file,
         }]
@@ -636,8 +634,7 @@ def process_csv_output(csv_file, sequence_id, output_csv_file, mask_positions=No
 
         # Return single summary row pointing to the MSA CSV file
         return [{
-            'id': f"{sequence_id}_msa",
-            'sequences.id': sequence_id,
+            'id': sequence_id,
             'sequence': query_sequence,
             'file': output_csv_file  # Reference to output CSV file
         }]
@@ -1008,8 +1005,7 @@ def main():
                 query_seq = read_existing_query(individual_msa_file, emit_ext)
                 if query_seq:
                     all_msa_rows.append({
-                        'id': f"{sequence_id}_msa",
-                        'sequences.id': sequence_id,
+                        'id': sequence_id,
                         'sequence': query_seq,
                         'file': individual_msa_file,
                     })
@@ -1100,7 +1096,7 @@ def main():
     else:
         log("WARNING: No MSA entries generated")
         # Create empty file with correct columns
-        empty_df = pd.DataFrame(columns=['id', 'sequences.id', 'sequence', 'file'])
+        empty_df = pd.DataFrame(columns=['id', 'sequence', 'file'])
         empty_df.to_csv(args.output_msa_csv, index=False)
         log(f"Created empty MSA CSV: {args.output_msa_csv}")
 

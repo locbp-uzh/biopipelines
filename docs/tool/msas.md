@@ -30,7 +30,8 @@ Generates multiple sequence alignments for structure prediction by querying a lo
 **Streams**: `msas`
 
 **Tables**:
-- `msas`: | id | sequences.id | sequence | file |
+- `msas`: | id | sequence | file |
+  `id` is the id of the sequence the alignment belongs to. Older maps named the row `<id>_msa` and carried the id in `sequences.id`; consumers read both.
 - `missing`: | id | removed_by | kind | cause |
 
 **Example**:
@@ -78,7 +79,8 @@ Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFol
 **Streams**: `msas`
 
 **Tables**:
-- `msas`: | id | sequences.id | sequence | file |
+- `msas`: | id | sequence | file |
+  One row per input row, under the input row's id. `sequences.id` is carried only when the input row had one that its id does not already spell.
 
 **MSA Recycling Compatibility**:
 

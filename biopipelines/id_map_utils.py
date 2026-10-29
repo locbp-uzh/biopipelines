@@ -50,10 +50,13 @@ Matching priority order (when using get_mapped_ids with unique=True):
        Sibling match (common ancestor, closest combined distance first)
 """
 
+import csv
+import json
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 try:
     from .id_patterns import SEGMENT_REGEX, SUFFIX_DELIMITER
@@ -969,3 +972,115 @@ def get_mapped_ids_grouped(
         }
 
     return result
+
+
+# =============================================================================
+# Alignment lookup: which row of an `msas` table belongs to which protein
+# =============================================================================
+# An `msas` row is 1:1 with the sequence it aligns, so it keeps that sequence's id. Every consumer asks the same question (which alignment is this protein's?) and answers it here, so the rule lives in one place instead of one copy per predictor.
+
+# Maps written before the id rule was applied named a row `<id>_msa`; the suffix is read, never written.
+LEGACY_MSA_SUFFIX = "_msa"
+MSA_PROVENANCE_COLUMN = "sequences.id"
+_MSA_FILE_COLUMNS = ("file", "path")
+_MSA_IDS_SHOWN = 5
+
+
+class MissingAlignment(LookupError):
+    """A protein has no alignment among the rows of an msas table; the message is the cause to record."""
+
+
+class MsaLookup:
+    """The alignment path of each protein, read from the rows of one `msas` table.
+
+    A protein is matched by, in this order:
+
+      1. its exact id, which is what every table written now carries;
+      2. the ``sequences.id`` provenance column, which Panda-renamed ids and older tables carry;
+      3. the legacy ``<id>_msa`` row id of tables written before the id rule;
+      4. the row whose ``sequence`` column equals the protein's sequence, only when the caller passes one.
+
+    Nothing looser is tried: the child, parent and sibling tiers of :func:`get_mapped_ids` would hand ``prot`` the alignment of ``prot_1``, and a wrong alignment is worse than none.
+    """
+
+    def __init__(self, rows: Iterable[Dict[str, str]], source: str = ""):
+        self.source = source
+        self.ids: List[str] = []
+        # (protein id, path) per row: the id of the sequence the row belongs to, for a caller that walks the rows instead of asking by protein.
+        self.entries: List[Tuple[str, str]] = []
+        self._exact: Dict[str, str] = {}
+        self._provenance: Dict[str, str] = {}
+        self._legacy: Dict[str, str] = {}
+        self._sequence: Dict[str, str] = {}
+        for row in rows:
+            path = next((str(row[c]).strip() for c in _MSA_FILE_COLUMNS
+                         if str(row.get(c) or "").strip()), "")
+            row_id = str(row.get("id") or "").strip()
+            if not path or not row_id:
+                continue
+            self.ids.append(row_id)
+            self._exact.setdefault(row_id, path)
+            provenance = str(row.get(MSA_PROVENANCE_COLUMN) or "").strip()
+            self.entries.append((provenance or row_id, path))
+            if provenance:
+                self._provenance.setdefault(provenance, path)
+            if row_id.endswith(LEGACY_MSA_SUFFIX) and len(row_id) > len(LEGACY_MSA_SUFFIX):
+                self._legacy.setdefault(row_id[:-len(LEGACY_MSA_SUFFIX)], path)
+            sequence = str(row.get("sequence") or "").strip()
+            if sequence:
+                self._sequence.setdefault(sequence, path)
+
+    @classmethod
+    def load(cls, msas: Union[str, Dict]) -> "MsaLookup":
+        """From an msas stream (its JSON file or the dict), or from the map_table CSV itself."""
+        if isinstance(msas, dict):
+            table = msas.get("map_table")
+        elif str(msas).lower().endswith(".json"):
+            with open(msas) as handle:
+                table = json.load(handle).get("map_table")
+        else:
+            table = msas
+        if not table:
+            raise ValueError(f"the msas stream {msas!r} names no map_table")
+        if not os.path.exists(table):
+            raise FileNotFoundError(f"the msas map_table {table} does not exist")
+        with open(table, newline="") as handle:
+            reader = csv.DictReader(handle)
+            if not any(column in (reader.fieldnames or ()) for column in _MSA_FILE_COLUMNS):
+                raise ValueError(f"the msas map_table {table} has no 'file' column")
+            return cls(list(reader), source=str(table))
+
+    def path(self, protein_id: str, sequence: Optional[str] = None) -> Optional[str]:
+        """The alignment path of one protein, or None when no row is its."""
+        key = str(protein_id)
+        for index in (self._exact, self._provenance, self._legacy):
+            if key in index:
+                return index[key]
+        if isinstance(sequence, str) and sequence.strip():
+            return self._sequence.get(sequence.strip())
+        return None
+
+    def cause(self, protein_id: str) -> str:
+        """The sentence recorded for a protein without an alignment."""
+        shown = ", ".join(self.ids[:_MSA_IDS_SHOWN]) or "none"
+        if len(self.ids) > _MSA_IDS_SHOWN:
+            shown += f", and {len(self.ids) - _MSA_IDS_SHOWN} more"
+        return f"no alignment in msas for {protein_id} (ids present: {shown})"
+
+    def require(self, protein_id: str, sequence: Optional[str] = None) -> str:
+        """:meth:`path`, raising :class:`MissingAlignment` instead of returning None."""
+        found = self.path(protein_id, sequence)
+        if found is None:
+            raise MissingAlignment(self.cause(protein_id))
+        return found
+
+
+def get_msa_paths(msas: Union[str, Dict], protein_ids: Iterable[str],
+                  sequences: Optional[Dict[str, str]] = None) -> Dict[str, Optional[str]]:
+    """{protein id: alignment path, or None} for the given proteins, matched as :class:`MsaLookup` does.
+
+    ``msas`` is the stream JSON, the stream dict or the map_table CSV. ``sequences`` optionally maps a protein id to its sequence, for the last tier. A caller that looks proteins up as it discovers them loads :class:`MsaLookup` once instead of calling this per protein.
+    """
+    lookup = MsaLookup.load(msas)
+    sequences = sequences or {}
+    return {pid: lookup.path(pid, sequences.get(pid)) for pid in protein_ids}

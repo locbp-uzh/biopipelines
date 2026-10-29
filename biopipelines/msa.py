@@ -49,7 +49,7 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -80,7 +80,8 @@ echo "=== MSA ready ==="
         Output:
             Streams: msas (.a3m or .csv)
             Tables:
-                msas: id | sequences.id | sequence | file
+                msas: id | sequence | file
+                      One row per input row, under the input row's id; `sequences.id` is carried only when the input had one that its id does not already spell.
         """
         self.msas_input = msas
         self.msas_stream = resolve_input_to_datastream(msas, fallback_stream="msas")
@@ -147,9 +148,8 @@ python "{self.msa_py}" --config "{self.config_json}"
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after MSA conversion."""
-        # Mirrors pipe_msa.py: an id already carrying the suffix is passed through, so a chain of conversions does not accumulate `_msa_msa`.
-        msa_ids = [i if i.endswith("_msa") else f"{i}_msa"
-                   for i in self.msas_stream.ids]
+        # One row per input row, under the input row's id.
+        msa_ids = list(self.msas_stream.ids)
 
         ext = ".a3m" if self.convert == "a3m" else ".csv"
         msa_files = [os.path.join(self.output_msas_folder, f"<id>{ext}")]
@@ -166,7 +166,7 @@ python "{self.msa_py}" --config "{self.config_json}"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msas_csv,
-                columns=["id", "sequences.id", "sequence", "file"],
+                columns=["id", "sequence", "file"],
                 description="Converted MSA files"
             )
         }

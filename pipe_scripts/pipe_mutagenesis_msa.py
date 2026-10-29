@@ -25,17 +25,18 @@ Inputs:
         new_aa). mutation_positions is PyMOL-style ("50" or "57+58"); new_aa is
         the per-position substituted residue(s) ("A" or "AS"). Empty for
         passthrough (selection) rows.
-    --input-msas: MSA map_table with columns id, sequences.id, file. Keyed
-        by the ORIGINAL protein id (matched against the mutants' original.id).
+    --input-msas: MSA map_table whose rows belong to the ORIGINAL proteins; a
+        parent's row is found by the shared MsaLookup (id_map_utils), matched
+        against the mutants' original.id.
     --output-folder: where per-mutant MSA files are written.
-    --output: output MSA map_table (id, sequences.id, original.id, sequence,
-        file), keyed by mutant id.
+    --output: output MSA map_table (id, original.id, sequence, file), keyed by
+        mutant id.
 
-Output map columns mirror the MSA stream contract used elsewhere
-(id | sequences.id | sequence | file): both `id` and `sequences.id` are the
-mutant id, so downstream MSA consumers (AlphaFold/Boltz copy step, which name
-the copied A3M after `sequences.id`) match the mutant query correctly. An extra
-`original.id` column records the parent protein the MSA was derived from.
+Output map columns follow the MSA stream contract used elsewhere
+(id | sequence | file): `id` is the mutant id, the id of the sequence the
+alignment belongs to, so downstream MSA consumers match the mutant query
+through the shared lookup. An extra `original.id` column records the parent
+protein the MSA was derived from.
 """
 
 import argparse
@@ -46,6 +47,7 @@ import pandas as pd
 
 # Add repo root so biopipelines is importable on SLURM nodes / base Python.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from biopipelines.id_map_utils import MsaLookup  # noqa: E402
 
 
 def parse_arguments():
@@ -160,19 +162,7 @@ def main():
             print(f"Error: mutants table missing '{col}' column", file=sys.stderr)
             sys.exit(1)
 
-    input_msas = pd.read_csv(args.input_msas)
-    if "file" not in input_msas.columns:
-        print("Error: input MSA table missing 'file' column", file=sys.stderr)
-        sys.exit(1)
-
-    # Map original protein id -> its MSA file. The input map's own `id` column
-    # is the original protein id (Mutagenesis keys MSAs by original.id).
-    parent_msa = {}
-    for _, row in input_msas.iterrows():
-        parent_id = str(row.get("id", ""))
-        msa_file = row.get("file", "")
-        if parent_id and isinstance(msa_file, str) and msa_file:
-            parent_msa[parent_id] = msa_file
+    lookup = MsaLookup.load(args.input_msas)
 
     os.makedirs(args.output_folder, exist_ok=True)
 
@@ -185,9 +175,9 @@ def main():
         positions_str = "" if pd.isna(row.get("mutation_positions")) else str(row.get("mutation_positions", ""))
         new_aa = "" if pd.isna(row.get("new_aa")) else str(row.get("new_aa", ""))
 
-        parent_file = parent_msa.get(original_id)
+        parent_file = lookup.path(original_id)
         if not parent_file or not os.path.exists(parent_file):
-            print(f"WARNING: no input MSA for original id '{original_id}' (mutant '{mutant_id}'); skipping",
+            print(f"WARNING: {lookup.cause(original_id)} (mutant '{mutant_id}'); skipping",
                   file=sys.stderr)
             skipped.append(mutant_id)
             continue
@@ -221,13 +211,12 @@ def main():
 
         out_rows.append({
             "id": mutant_id,
-            "sequences.id": mutant_id,
             "original.id": original_id,
             "sequence": new_query,
             "file": out_file,
         })
 
-    out_df = pd.DataFrame(out_rows, columns=["id", "sequences.id", "original.id", "sequence", "file"])
+    out_df = pd.DataFrame(out_rows, columns=["id", "original.id", "sequence", "file"])
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     out_df.to_csv(args.output, index=False)
 
