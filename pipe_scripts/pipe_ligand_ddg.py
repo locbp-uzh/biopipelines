@@ -11,6 +11,7 @@ Rosetta needs a .params file for every non-standard residue. It is generated fro
 """
 
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -43,7 +44,7 @@ COLUMNS = {
     "soft": ["id", "ddg_soft", "ddg_soft_std", "n_replicates_used"],
 }
 
-# The active steps of Chaperone's ddg_protocol.xml: backbone constraints, soft then hard minimization of the interface, then the no-repack Ddg filter across jump 1. Its unused selectors, filters and metrics are left out.
+# The active steps of Chaperone's ddg_protocol.xml: backbone constraints, soft then hard minimization of the interface, then the no-repack Ddg filter across the ligand's jump, which is not jump 1 when the binder chain carries hetero residues (the movers' `jump` is a boolean, the interface task operation and the filter take a jump number). Its unused selectors, filters and metrics are left out. The schema requires a PROTOCOLS section even though the movers are applied one by one.
 HARD_PROTOCOL_XML = """<ROSETTASCRIPTS>
   <SCOREFXNS>
     <ScoreFunction name="sfxn_softish" weights="beta_nov16">
@@ -58,7 +59,7 @@ HARD_PROTOCOL_XML = """<ROSETTASCRIPTS>
     <Not name="not_interface" selector="interface"/>
   </RESIDUE_SELECTORS>
   <TASKOPERATIONS>
-    <ProteinInterfaceDesign name="pack_long" design_chain1="0" design_chain2="0" jump="1" interface_distance_cutoff="15"/>
+    <ProteinInterfaceDesign name="pack_long" design_chain1="0" design_chain2="0" jump="%%ligand_jump%%" interface_distance_cutoff="15"/>
     <OperateOnResidueSubset name="restrict_to_interface" selector="not_interface"><PreventRepackingRLT/></OperateOnResidueSubset>
     <OperateOnResidueSubset name="restrict_target2repacking" selector="ligand"><PreventRepackingRLT/></OperateOnResidueSubset>
   </TASKOPERATIONS>
@@ -70,11 +71,15 @@ HARD_PROTOCOL_XML = """<ROSETTASCRIPTS>
     <TaskAwareMinMover name="min" scorefxn="sfxn" bb="0" chi="1" task_operations="pack_long"/>
   </MOVERS>
   <FILTERS>
-    <Ddg name="ddg_norepack" threshold="0" jump="1" repeats="1" repack="0" relax_mover="min" confidence="0" scorefxn="sfxn"/>
+    <Ddg name="ddg_norepack" threshold="0" jump="%%ligand_jump%%" repeats="1" repack="0" relax_mover="min" confidence="0" scorefxn="sfxn"/>
   </FILTERS>
+  <PROTOCOLS/>
 </ROSETTASCRIPTS>
 """
 HARD_PROTOCOL_MOVERS = ("add_bb_cst", "softish_min", "hard_min", "rm_bb_cst")
+
+# The longest range of a pairwise Rosetta score term: a ligand with no protein atom this close cannot interact, and its ddG is zero.
+CONTACT_RANGE_A = 6.0
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +120,16 @@ def split_complex(pdb_path, binder_chain, ligand_chain, code):
     if len(residues) > 1:
         raise ValueError(f"{len(residues)} residues named {code!r} on chain {ligand_chain!r}; expected one")
     return binder, ligand
+
+
+def nearest_distance(binder, ligand):
+    """Smallest heavy-atom distance in A between the binder chain and the ligand."""
+    def position(line):
+        return float(line[30:38]), float(line[38:46]), float(line[46:54])
+
+    binder_atoms = [position(line) for line in binder]
+    ligand_atoms = [position(line) for line in ligand if element_of(line) != "H"]
+    return min(math.dist(a, b) for a in ligand_atoms for b in binder_atoms)
 
 
 def hetatm_line(serial, name, element, resname, chain, resseq, xyz):
@@ -244,6 +259,21 @@ def load_pose(binder_lines, ligand_lines, params):
     return pose
 
 
+def check_ligand_names(residue, ligand_lines, params):
+    """Refuse a structure whose ligand atom names differ from the ones the params file defines.
+
+    Rosetta drops an atom it has no name for and does not say so, which scores the wrong molecule without an error.
+    """
+    names = [residue.atom_name(i).strip() for i in range(1, residue.natoms() + 1)]
+    heavy = {name for i, name in enumerate(names, start=1) if not residue.atom_is_hydrogen(i)}
+    present = {line[12:16].strip() for line in ligand_lines}
+    unknown, absent = sorted(present - set(names)), sorted(heavy - present)
+    if unknown or absent:
+        raise ValueError(
+            f"the ligand in the structure does not match {os.path.basename(params)}: atoms {unknown[:6]} are not in the "
+            f"params and heavy atoms {absent[:6]} of the params are not in the structure")
+
+
 def soft_ddg(pose, binder_chain, ligand_chain, replicates):
     """Pack with beta_nov16, score with beta_nov16_soft, repeat; trimmed mean over the replicates."""
     import pyrosetta as pyr
@@ -262,7 +292,9 @@ def hard_ddg(pose, ligand_index):
     """Minimize the interface with backbone constraints, then read the Ddg filter (no repacking) across the ligand jump."""
     from pyrosetta.rosetta.protocols.rosetta_scripts import XmlObjects
 
-    objects = XmlObjects.create_from_string(HARD_PROTOCOL_XML.replace("%%ligand_res_number%%", str(ligand_index)))
+    jump = pose.fold_tree().get_jump_that_builds_residue(ligand_index)
+    xml = HARD_PROTOCOL_XML.replace("%%ligand_res_number%%", str(ligand_index)).replace("%%ligand_jump%%", str(jump))
+    objects = XmlObjects.create_from_string(xml)
     for mover in HARD_PROTOCOL_MOVERS:
         objects.get_mover(mover).apply(pose)
     return {"ddg_norepack": float(objects.get_filter("ddg_norepack").report_sm(pose))}
@@ -272,6 +304,11 @@ def score_structure(sid, path, config, code, smiles, work_root):
     """ddG of one structure; the ligand is parameterized from the structure itself unless a params file was given."""
     scoring = config["scoring"]
     binder_lines, ligand_lines = split_complex(path, config["binder_chain"], config["ligand_chain"], code)
+    gap = nearest_distance(binder_lines, ligand_lines)
+    if gap > CONTACT_RANGE_A:
+        raise ValueError(
+            f"ligand {code} on chain {config['ligand_chain']!r} is {gap:.0f} A from chain {config['binder_chain']!r}, "
+            f"so there is no interface to score; a crystal with several copies may list another copy's ligand there")
 
     work_dir = os.path.join(work_root, sid)
     os.makedirs(work_dir, exist_ok=True)
@@ -289,6 +326,8 @@ def score_structure(sid, path, config, code, smiles, work_root):
         params = generate_params(sdf_path, code, work_dir)
 
     pose = load_pose(binder_lines, ligand_lines, params)
+    if config.get("params_file"):
+        check_ligand_names(pose.residue(pose.total_residue()), ligand_lines, params)
     if scoring == "soft":
         result = soft_ddg(pose, config["binder_chain"], config["ligand_chain"], config["replicates"])
     else:

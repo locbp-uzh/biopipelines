@@ -48,13 +48,13 @@ class LigandDdG(BaseConfig):
     PyRosetta is free for academic use and needs a paid commercial license; installing it accepts the PyRosetta license.
 
     Inputs:
-        structures: PDB complexes (StandardizedOutput or DataStream); mmCIF is not read. Only `binder_chain` and the ligand are kept; other chains, waters and other hetero residues are dropped, and hydrogens on the protein chain are discarded for Rosetta to rebuild.
+        structures: PDB complexes (StandardizedOutput or DataStream); mmCIF is not read. Only `binder_chain` and the ligand are kept; other chains are dropped. Everything else on the binder chain stays as it is, hetero residues and waters included, except hydrogens, which are discarded for Rosetta to rebuild.
         ligand: compounds stream naming the ligand (`Ligand(smiles=..., codes="LIG")` or any compounds-producing tool); a bare string is shorthand for `Ligand(codes=...)`. The residue code is read from the stream's `code` column and must be the residue name of the ligand in the structures (at most 3 characters in a PDB). Unless `params_file` is given, the stream must carry a single SMILES, which supplies the bond orders and charges; a code-only ligand cannot be parameterized.
         scoring: "soft" (default) or "hard".
             soft: the interface within 10 A of the ligand is repacked with beta_nov16, and the complex is scored with beta_nov16_soft against the separated state; repeated `replicates` times on the same pose, then the best and worst values are dropped when there are at least three and the rest averaged. Forgiving of the small clashes of predicted structures.
             hard: backbone-constrained soft-then-hard minimization of the interface followed by Rosetta's Ddg filter (beta_nov16, no repacking) across the ligand's jump. A single run; `replicates` does not apply.
         binder_chain: the protein chain, translated away to give the unbound state (default "A").
-        ligand_chain: the chain carrying the ligand (default "B"). Exactly one residue named like the ligand code must sit on it.
+        ligand_chain: the chain carrying the ligand (default "B"). Exactly one residue named like the ligand code must sit on it, and it must be a chain of its own, as predictors write it: the ligand of a crystal file usually shares the protein chain and has to be moved to its own first. A ligand with no atom within 6 A of the binder chain (the ligand of another copy in a crystal, say) is a failure for that structure, since no pair of atoms is in range and the ddG would read as exactly zero.
         replicates: pack + score cycles for scoring="soft" (default 5). Not accepted with scoring="hard".
         ph: pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for (default 7.4). A ligand that already has hydrogens is used as it is. Ignored with `params_file`.
         params_file: path to a pre-made Rosetta .params file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and no params are generated.
@@ -69,7 +69,7 @@ class LigandDdG(BaseConfig):
     """
 
     TOOL_NAME = "LigandDdG"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "PyRosetta"
 
     @classmethod

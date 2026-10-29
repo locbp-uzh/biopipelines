@@ -414,13 +414,25 @@ def test_the_install_location_and_the_lookup_location_agree():
 
 # -- scoring orchestration (Rosetta replaced by recorders) -------------------------------------------------
 
+def residue_with(names, hydrogens=()):
+    """A stand-in for a Rosetta residue: atom names padded the way Rosetta pads them, numbered from 1."""
+    names = list(names) + list(hydrogens)
+    return types.SimpleNamespace(natoms=lambda: len(names), atom_name=lambda i: f" {names[i - 1]:<3}",
+                                 atom_is_hydrogen=lambda i: names[i - 1] in hydrogens)
+
+
 @pytest.fixture
 def recorders(pipe, monkeypatch):
     log = []
-    pose = types.SimpleNamespace(total_residue=lambda: 42)
+
+    def load_pose(binder, ligand, params):
+        log.append(("pose", len(binder), ligand, params))
+        names = [line[12:16].strip() for line in ligand]
+        return types.SimpleNamespace(total_residue=lambda: 42, residue=lambda index: residue_with(names))
+
     monkeypatch.setattr(pipe, "prepare_ligand", lambda *a: (log.append(("prepare", a[1:5])) or ("x.sdf", ["HETATM\n"])))
     monkeypatch.setattr(pipe, "generate_params", lambda sdf, code, work: log.append(("params", sdf, code)) or "gen.params")
-    monkeypatch.setattr(pipe, "load_pose", lambda b, l, p: log.append(("pose", len(b), l, p)) or pose)
+    monkeypatch.setattr(pipe, "load_pose", load_pose)
     monkeypatch.setattr(pipe, "soft_ddg", lambda *a: log.append(("soft", a[1:])) or {"ddg_soft": -4.0, "ddg_soft_std": 0.1,
                                                                                     "n_replicates_used": 3})
     monkeypatch.setattr(pipe, "hard_ddg", lambda p, i: log.append(("hard", i)) or {"ddg_norepack": -6.0})
@@ -465,10 +477,39 @@ def test_a_premade_params_file_bypasses_the_chemistry_and_keeps_the_ligand_as_wr
     assert recorders[0][3] == str(params) and recorders[0][2] == lines
 
 
+def test_a_ligand_with_other_atom_names_than_the_params_is_refused_not_scored(pipe):
+    """Rosetta drops an atom it has no name for without a word, and the molecule that is scored is not the one given."""
+    lines = [atom_line("HETATM", 1, "C1", "LIG", "B", 7, (1.0, 0.0, 0.0), "C"),
+             atom_line("HETATM", 2, "O1", "LIG", "B", 7, (2.0, 0.0, 0.0), "O")]
+    with pytest.raises(ValueError, match=r"does not match LIG.params.*\['O1'\].*\['O2'\]"):
+        pipe.check_ligand_names(residue_with(["C1", "O2"], hydrogens=["H1"]), lines, "/x/LIG.params")
+
+
+def test_a_ligand_without_hydrogens_matches_params_that_carry_them(pipe):
+    lines = [atom_line("HETATM", 1, "C1", "LIG", "B", 7, (1.0, 0.0, 0.0), "C"),
+             atom_line("HETATM", 2, "O2", "LIG", "B", 7, (2.0, 0.0, 0.0), "O")]
+    pipe.check_ligand_names(residue_with(["C1", "O2"], hydrogens=["H1"]), lines, "/x/LIG.params")
+
+
 def test_a_missing_params_file_is_a_failure_of_that_id(pipe, tmp_path, recorders):
     path = write_complex(tmp_path / "c.pdb", embedded_ligand("CC"))
     with pytest.raises(FileNotFoundError, match="params_file not found"):
         pipe.score_structure("s1", path, config(params_file=str(tmp_path / "nope.params")), "LIG", None, str(tmp_path))
+
+
+@pytest.mark.parametrize("x", [200.0, 8.0])
+def test_a_ligand_out_of_range_of_the_binder_chain_is_a_failure_not_a_zero(pipe, tmp_path, recorders, x):
+    """The ligand of another copy sits 8 A away in a crystal: no pair of atoms interacts, so the ddG is zero."""
+    path = write_complex(tmp_path / "c.pdb", [atom_line("HETATM", 100, "C1", "LIG", "B", 7, (x, 1.4, 0.0), "C")])
+    assert pipe.nearest_distance(*pipe.split_complex(path, "A", "B", "LIG")) == pytest.approx(x)
+    with pytest.raises(ValueError, match="no interface to score"):
+        pipe.score_structure("s1", path, config(), "LIG", "CC", str(tmp_path / "work"))
+    assert recorders == []
+
+
+def test_a_ligand_within_the_contact_range_is_scored(pipe, tmp_path, recorders):
+    path = write_complex(tmp_path / "c.pdb", [atom_line("HETATM", 100, "C1", "LIG", "B", 7, (4.0, 1.4, 0.0), "C")])
+    assert pipe.score_structure("s1", path, config(), "LIG", "CC", str(tmp_path / "work")) is not None
 
 
 def test_without_a_smiles_or_a_params_file_the_ligand_cannot_be_parameterized(pipe, tmp_path, recorders):
@@ -597,7 +638,45 @@ def test_the_hard_protocol_is_well_formed_and_every_reference_resolves(pipe):
         if node.get("relax_mover"):
             assert node.get("relax_mover") in movers
     ddg = next(root.iter("Ddg"))
-    assert (ddg.get("repack"), ddg.get("jump"), ddg.get("repeats")) == ("0", "1", "1")
+    assert (ddg.get("repack"), ddg.get("jump"), ddg.get("repeats")) == ("0", "%%ligand_jump%%", "1")
+
+
+def test_the_hard_protocol_has_the_protocols_section_the_rosetta_schema_requires(pipe):
+    """Without it PyRosetta's parser rejects the script ("Missing child element(s)") and every structure fails."""
+    root = ET.fromstring(pipe.HARD_PROTOCOL_XML.replace("%%ligand_res_number%%", "42"))
+    assert root.find("PROTOCOLS") is not None
+
+
+def test_the_hard_protocol_uses_the_jump_that_builds_the_ligand_not_jump_1(pipe, monkeypatch):
+    """A hetero residue on the binder chain takes jump 1, so across it the Ddg filter would measure that residue."""
+    seen = {}
+
+    class Objects:
+        def get_mover(self, name):
+            return types.SimpleNamespace(apply=lambda pose: None)
+
+        def get_filter(self, name):
+            return types.SimpleNamespace(report_sm=lambda pose: -1.5)
+
+    class XmlObjects:
+        @staticmethod
+        def create_from_string(xml):
+            seen["xml"] = xml
+            return Objects()
+
+    scripts = types.ModuleType("pyrosetta.rosetta.protocols.rosetta_scripts")
+    scripts.XmlObjects = XmlObjects
+    for name in ("pyrosetta", "pyrosetta.rosetta", "pyrosetta.rosetta.protocols"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "pyrosetta.rosetta.protocols.rosetta_scripts", scripts)
+
+    tree = types.SimpleNamespace(get_jump_that_builds_residue=lambda index: 2 if index == 42 else 1)
+    assert pipe.hard_ddg(types.SimpleNamespace(fold_tree=lambda: tree), 42) == {"ddg_norepack": -1.5}
+    root = ET.fromstring(seen["xml"])
+    jumps = {node.tag: node.get("jump") for node in root.iter() if node.get("jump")}
+    # the movers' jump is a boolean ("minimize the rigid-body degrees of freedom"), a number there is refused by the schema
+    assert jumps == {"ProteinInterfaceDesign": "2", "TaskAwareMinMover": "1", "Ddg": "2"}
+    assert '<Index name="ligand" resnums="42"/>' in seen["xml"]
 
 
 def test_the_ligand_selection_uses_the_pose_index_and_the_hard_scheme_passes_it(pipe, tmp_path, recorders):

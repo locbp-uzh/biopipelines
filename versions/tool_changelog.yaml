@@ -2296,8 +2296,19 @@ LigandDdG:
   - biopipelines/ligand_ddg.py
   - pipe_scripts/pipe_ligand_ddg.py
   - biopipelines/rosetta_scoring.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-28'
+    note: >-
+      The first cluster run found four faults. In the hard scheme PyRosetta's RosettaScripts parser rejected the protocol for lack of a PROTOCOLS section
+      ("Missing child element(s)"), so every structure failed; the section is there now. The Ddg filter and the interface task operation took jump 1, which
+      is the ligand's jump only when the binder chain carries no hetero residue: a crystal with glycerol on the protein chain measured the glycerol and gave
+      -0.3 instead of -30. The ligand's own jump is read from the fold tree now (the movers' `jump` is a boolean and stays 1). A ligand with no atom within
+      6 A of the binder chain, such as the copy that belongs to another chain of a crystal, was scored as an exact zero without a word; it is a failure of
+      that structure now. And with `params_file`, a ligand whose atom names differ from the params was scored anyway, because Rosetta drops an atom it has
+      no name for and the run is muted (-8.5 instead of -22.3 for biotin on streptavidin); the names are compared now and a mismatch is a failure. The
+      documentation said hetero residues are dropped, but those on the binder chain are kept.
   - version: '1.0'
     date: '2026-10-27'
     note: >-

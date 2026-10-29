@@ -62,7 +62,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 50 | GEMS | Analysis                       | 2.0 | `biopipelines/gems.py` |
 | 51 | IPSAE                     | Analysis                       | 1.2 | `biopipelines/ipsae.py` |
 | 52 | LigandAtomSelector        | Analysis                       | 1.2 | `biopipelines/ligand_atom_selector.py` |
-| 53 | LigandDdG                 | Analysis                       | 1.0 | `biopipelines/ligand_ddg.py` |
+| 53 | LigandDdG                 | Analysis                       | 1.1 | `biopipelines/ligand_ddg.py` |
 | 54 | OpenMM | Analysis                       | 3.3 | `biopipelines/openmm.py` |
 | 55 | P2Rank | Analysis                       | 2.0 | `biopipelines/p2rank.py` |
 | 56 | PPIDdG                    | Analysis                       | 1.0 | `biopipelines/ppi_ddg.py` |
