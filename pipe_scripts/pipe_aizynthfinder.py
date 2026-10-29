@@ -163,7 +163,8 @@ def _run_cli(cfg, search_config, n_targets, container_prefix):
 
     os.makedirs(os.path.dirname(cfg["cli_output"]), exist_ok=True)
     print(f"Running: {' '.join(cmd)}", flush=True)
-    subprocess.run(cmd, check=True)
+    # aizynthcli writes aizynthcli<N>.log into its working directory when it runs several processes.
+    subprocess.run(cmd, check=True, cwd=os.path.dirname(cfg["cli_output"]))
 
 
 def _read_cli_output(path):
@@ -349,6 +350,28 @@ def _convert_result(target, result, extra_scorers, routes_dir, step_id):
     return out
 
 
+def _write_tables(cfg, route_columns, stream_order, target_rows, route_rows, precursor_rows,
+                  routes_map_rows, local_missing_rows):
+    """Write every table the step declares; also called before a step that searched nothing exits."""
+    target_rows.sort(key=lambda row: stream_order[row["id"]])
+
+    for path in (cfg["targets_csv"], cfg["routes_csv"], cfg["precursors_csv"],
+                 cfg["routes_map_csv"], cfg["local_missing_csv"]):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    pd.DataFrame(target_rows, columns=TARGET_COLUMNS).to_csv(cfg["targets_csv"], index=False)
+    pd.DataFrame(route_rows, columns=route_columns).to_csv(cfg["routes_csv"], index=False)
+    # ccd is empty for every precursor (SMILES have no CCD identity); keep it an
+    # empty string so downstream compounds consumers don't read a literal "nan".
+    precursors_df = pd.DataFrame(precursor_rows, columns=PRECURSOR_COLUMNS)
+    precursors_df["ccd"] = precursors_df["ccd"].fillna("")
+    precursors_df.to_csv(cfg["precursors_csv"], index=False)
+    pd.DataFrame(routes_map_rows, columns=["id", "file", "compounds.id"]).to_csv(
+        cfg["routes_map_csv"], index=False)
+    pd.DataFrame(local_missing_rows, columns=["id", "removed_by", "kind", "cause"]).to_csv(
+        cfg["local_missing_csv"], index=False)
+
+
 def main():
     p = argparse.ArgumentParser(description="Run AiZynthFinder over a compounds stream")
     p.add_argument("--config", required=True)
@@ -390,6 +413,7 @@ def main():
         targets.append(target)
 
     if not targets:
+        _write_tables(cfg, route_columns, stream_order, target_rows, [], [], [], local_missing_rows)
         print("ERROR: no compounds with valid SMILES to search "
               "(upstream stream is empty or carries no usable smiles)", file=sys.stderr)
         sys.exit(1)
@@ -426,23 +450,8 @@ def main():
         local_missing_rows.extend(converted["missing"])
         solved_targets += bool(converted["routes"])
 
-    target_rows.sort(key=lambda row: stream_order[row["id"]])
-
-    for path in (cfg["targets_csv"], cfg["routes_csv"], cfg["precursors_csv"],
-                 cfg["routes_map_csv"], cfg["local_missing_csv"]):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    pd.DataFrame(target_rows, columns=TARGET_COLUMNS).to_csv(cfg["targets_csv"], index=False)
-    pd.DataFrame(route_rows, columns=route_columns).to_csv(cfg["routes_csv"], index=False)
-    # ccd is empty for every precursor (SMILES have no CCD identity); keep it an
-    # empty string so downstream compounds consumers don't read a literal "nan".
-    precursors_df = pd.DataFrame(precursor_rows, columns=PRECURSOR_COLUMNS)
-    precursors_df["ccd"] = precursors_df["ccd"].fillna("")
-    precursors_df.to_csv(cfg["precursors_csv"], index=False)
-    pd.DataFrame(routes_map_rows, columns=["id", "file", "compounds.id"]).to_csv(
-        cfg["routes_map_csv"], index=False)
-    pd.DataFrame(local_missing_rows, columns=["id", "removed_by", "kind", "cause"]).to_csv(
-        cfg["local_missing_csv"], index=False)
+    _write_tables(cfg, route_columns, stream_order, target_rows, route_rows, precursor_rows,
+                  routes_map_rows, local_missing_rows)
 
     print(f"Targets: {cfg['targets_csv']} ({len(target_rows)} rows, {solved_targets} with routes)")
     print(f"Routes: {cfg['routes_csv']} ({len(route_rows)} rows)")

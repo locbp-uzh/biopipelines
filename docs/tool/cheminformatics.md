@@ -142,7 +142,7 @@ Retrosynthetic route planning. Runs a Monte-Carlo tree search that recursively a
 
 The output is nested, and the tool exposes all three levels: a **target** is searched, producing several ranked **routes**, each of which ends in several **precursors**. Routes are ranked best-first by the state score (a combination of stock availability and route length) unless `route_scorer` picks another; precursors carry only an `in_stock` boolean, so they are molecules rather than scored objects.
 
-The `precursors` stream is a **compounds** stream with the canonical `id | format | smiles | ccd` schema, so the building blocks feed directly into any compounds consumer (`ADMETAI`, `RDKit`, `OpenBabel`, a docking run). Its map_table *is* the `precursors` table, so filtering it with `Panda` and passing `pool=` carries the stream along.
+The `precursors` stream is a **compounds** stream with the canonical `id | format | smiles | ccd` schema, so the building blocks feed any compounds consumer (`ADMETAI`, `RDKit`, `OpenBabel`, a docking run). A consumer reads the stream called `compounds`, so hand it `azf.streams.precursors` rather than `azf`. Its map_table *is* the `precursors` table, so filtering it with `Panda` and passing `pool=` carries the stream along.
 
 **Tags**: predict-property, small-molecule
 
@@ -169,7 +169,7 @@ The `precursors` stream is a **compounds** stream with the canonical `id | forma
 - `frozen_substructures`: List[str] = None — SMARTS patterns that must survive every reaction; a reaction that splits one of them is rejected. A pattern that does not occur in the molecule being expanded is ignored for that molecule. Not supported by `"dfpn"`.
 - `stock_stop_criteria`: dict = None — Extra conditions a stock molecule must meet to count as purchasable: `{"weight": <max exact mass, g/mol>, "price": <max price>, "counts": {"C": <max atoms of that element>}}`.
 
-**Search algorithms**. `mcts` is the original search. `retrostar` is a best-first AND/OR search guided by the policy priors; with the default zero molecule cost it does not weigh the starting materials, and a learned Retro* cost model needs a config file. `breadth_first` expands every open molecule one level at a time and so is exhaustive but grows quickly with depth. `dfpn` is a depth-first proof-number search and does not apply a filter policy. Each reports the same `targets` columns, but `number_of_routes` counts what that algorithm found, which is not comparable across algorithms.
+**Search algorithms**. `mcts` is the original search. `retrostar` is a best-first AND/OR search guided by the policy priors; with the default zero molecule cost it does not weigh the starting materials, and a learned Retro* cost model needs a config file. `breadth_first` expands every open molecule one level at a time and so is exhaustive but grows quickly with depth. `dfpn` is a depth-first proof-number search and does not apply a filter policy. `time_limit` is checked between iterations and one `breadth_first` iteration expands a whole level, so a 30 s limit ran for 298 s on ethanol and 480 s on aspirin. Each reports the same `targets` columns, but `number_of_routes` counts what that algorithm found, which is not comparable across algorithms.
 
 **Scorers**. Every route is always scored by `state score`, `number of reactions`, `number of pre-cursors` and `number of pre-cursors in stock`; these fill `score`, `number_of_steps`, `number_of_precursors` and `number_of_precursors_in_stock`. `route_scorer` may be any of them or of the four extra scorers, and the direction is upstream's: lowest first for `number of reactions`, `number of pre-cursors`, `sum of prices` and `route cost`, highest first for the rest. The extra scorers are `fraction in stock` (share of the precursors that are purchasable), `average template occurrence` (mean frequency of the templates used, higher means better-precedented chemistry), `sum of prices` and `route cost` (Badowski et al. 2019: reaction cost and yield on top of the precursor prices). Prices come from the stock, and the public ZINC stock carries none, so the two price scorers fall back to a default cost per precursor; give a `config` whose stock entry sets `price_col` for meaningful values. A scorer that does not look at whether the route is solved (`number of reactions`, `number of pre-cursors`) can rank an unsolved route first, so filter `routes` on `is_solved` when ranking by one. Each extra scorer adds a `routes` column named after it with spaces as underscores (`route cost` becomes `route_cost`); `score` is always the state score, so ranking by another scorer reorders the `route` ranks but leaves `score` as is. The scorers that need extra model or data files (route similarity, expert-augmented, reaction class rank) and the search rewards of `mcts` (single, weighted or multi-objective) are only reachable through your own `config`.
 
@@ -182,7 +182,7 @@ The `precursors` stream is a **compounds** stream with the canonical `id | forma
 - `precursors` — compounds stream of route leaf molecules. ids are `<compound>_<route>_<precursor>`.
 
 **Tables**:
-- `targets` — `id | smiles | is_solved | top_score | number_of_routes | number_of_returned_routes | number_of_solved_routes | number_of_nodes | search_time | first_solution_time | first_solution_iteration`. One row per input compound; a target with no route is kept with `is_solved=False`. `number_of_routes` is how many routes the search found, `number_of_returned_routes` how many `max_routes` let through — the latter is how many route ids exist.
+- `targets` — `id | smiles | is_solved | top_score | number_of_routes | number_of_returned_routes | number_of_solved_routes | number_of_nodes | search_time | first_solution_time | first_solution_iteration`. One row per input compound; a target with no route is kept with `is_solved=False`. A target that nothing could be done with (a strict `filter_cutoff`, a `max_transforms` of 1, an expansion policy with no matching template) comes back as up to `min_routes` unsolved routes of zero steps whose only precursor is the target itself, so select on `is_solved` before selecting on `number_of_steps`. `number_of_routes` is how many routes the search found, `number_of_returned_routes` how many `max_routes` let through — the latter is how many route ids exist.
   `top_score` is the `route_scorer` score of the best route. `first_solution_time` and `first_solution_iteration` are 0 when the search never flagged a solution, as upstream reports them; `breadth_first` flags one only when every branch it expanded ends in stock, so it can report 0 for a target it does solve. A SMILES RDKit cannot sanitize is never searched but keeps its row, with everything but `id` and `smiles` empty.
 - `routes` — `id | compounds.id | route | score | is_solved | number_of_steps | number_of_precursors | number_of_precursors_in_stock`, then one column per extra scorer (`scorers`, plus `route_scorer` when it is not one of the four always-computed ones). `score` is the state score.
 - `precursors` — `id | format | smiles | ccd | compounds.id | route | precursor | in_stock`.
@@ -190,7 +190,7 @@ The `precursors` stream is a **compounds** stream with the canonical `id | forma
 
 **Example**:
 ```python
-from biopipelines import AiZynthFinder, Panda, CompoundLibrary
+from biopipelines import AiZynthFinder, Panda, CompoundLibrary, RDKit
 
 library = CompoundLibrary("designs.csv")
 azf = AiZynthFinder(compounds=library, max_routes=10, time_limit=120, nproc=8)
@@ -210,6 +210,7 @@ buyable = Panda(
                 Panda.drop_duplicates("smiles")],
     pool=azf,
 )
+RDKit(compounds=buyable.streams.precursors)
 ```
 
 Shortest-route-first selection uses the `routes` table, whose `route` column is the rank (`route == 1` is the best-scoring route for each target):
@@ -217,7 +218,7 @@ Shortest-route-first selection uses the `routes` table, whose `route` column is 
 ```python
 best_routes = Panda(
     tables=azf.tables.routes,
-    operations=[Panda.filter("route == 1 and number_of_steps <= 3")],
+    operations=[Panda.filter("route == 1 and is_solved == True and number_of_steps <= 3")],
     pool=azf,
 )
 ```

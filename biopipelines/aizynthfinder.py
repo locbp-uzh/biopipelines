@@ -120,7 +120,7 @@ class AiZynthFinder(BaseConfig):
         time_limit: per-target search cutoff in seconds.
         iteration_limit: per-target cap on tree-search iterations.
         nproc:      targets searched in parallel by aizynthcli.
-        search_algorithm: "mcts" (upstream default), "retrostar", "breadth_first" or "dfpn". Retro* runs with upstream's default zero molecule cost, so it is guided by the policy priors alone; a learned Retro* cost needs a config file.
+        search_algorithm: "mcts" (upstream default), "retrostar", "breadth_first" or "dfpn". Retro* runs with upstream's default zero molecule cost, so it is guided by the policy priors alone; a learned Retro* cost needs a config file. time_limit is checked between iterations and one breadth_first iteration expands a whole level, so breadth_first overruns it (298 s and 480 s on a 30 s limit).
         max_transforms: deepest route searched, in reaction steps (upstream default 6).
         route_scorer: scorer that ranks the routes and defines `top_score` (default "state score"). Any scorer in `scorers`, "number of reactions", "number of pre-cursors", "number of pre-cursors in stock", or a scorer named in your own config file when `config` is set. Scorers that ignore whether a route is solved can rank an unsolved route first, so filter the routes table on is_solved.
         scorers:    further scorers computed for every returned route, each adding a column to the routes table: "fraction in stock", "average template occurrence", "sum of prices", "route cost". Prices come from the stock and the public stock carries none, so the price scorers use default costs.
@@ -154,7 +154,8 @@ class AiZynthFinder(BaseConfig):
             precursors: id | format | smiles | ccd | compounds.id | route |
                         precursor | in_stock
                         (the precursors stream's map_table; filter it with Panda
-                        and pass pool= to carry the stream along)
+                        and pass pool= to carry the stream along. A consumer reads the stream
+                        called compounds, so hand it `azf.streams.precursors`)
             missing:    id | removed_by | kind | cause
 
     Usage:
@@ -166,10 +167,11 @@ class AiZynthFinder(BaseConfig):
             buyable = Panda(tables=azf.tables.precursors,
                             operations=[Panda.filter("in_stock == True")],
                             pool=azf)
+            RDKit(compounds=buyable.streams.precursors)
     """
 
     TOOL_NAME = "AiZynthFinder"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "aizynthfinder"
 
     @classmethod

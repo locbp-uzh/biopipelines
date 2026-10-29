@@ -39,8 +39,18 @@ AiZynthFinder:
   files:
   - biopipelines/aizynthfinder.py
   - pipe_scripts/pipe_aizynthfinder.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-28'
+    note: >-
+      A step whose every target is unsanitizable exited with an error as it should, but before writing anything, so the ids that entered left no row in
+      `targets` and none in `missing`; the tables are written before that exit now. `aizynthcli` ran in the repository folder, where it writes
+      `aizynthcli<N>.log` when `nproc` is set, shared and overwritten by every run; it runs in the step's `_execution` folder now. The documentation named
+      the `precursors` stream as feeding any compounds consumer, but a consumer reads the stream called `compounds`, so the example passes
+      `azf.streams.precursors`. It now also says that `breadth_first` overruns `time_limit` (one iteration expands a whole level: 298 s and 480 s on a 30 s
+      limit) and that a target nothing could be done with comes back as unsolved routes of zero steps, so `is_solved` has to be part of a selection by
+      `number_of_steps`.
   - version: '2.3'
     date: '2026-10-28'
     note: >-

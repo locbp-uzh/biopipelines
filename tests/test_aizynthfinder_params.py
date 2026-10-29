@@ -477,7 +477,7 @@ def test_invalid_smarts_stops_the_step_before_the_search():
 def test_cli_command_passes_selections_and_caps_the_processes(monkeypatch, tmp_path):
     helper = _load_helper()
     seen = {}
-    monkeypatch.setattr(helper.subprocess, "run", lambda cmd, check: seen.update(cmd=cmd))
+    monkeypatch.setattr(helper.subprocess, "run", lambda cmd, check, cwd: seen.update(cmd=cmd, cwd=cwd))
     cfg = _pipe_cfg(targets_smi="t.smi", cli_output=str(tmp_path / "o.json.gz"), nproc=16,
                     stocks=["zinc"], expansion_policy=["uspto", "ringbreaker"],
                     filter_policy=["uspto"], frozen_substructures=["C"])
@@ -488,12 +488,14 @@ def test_cli_command_passes_selections_and_caps_the_processes(monkeypatch, tmp_p
     assert cmd[cmd.index("--policy") + 1:cmd.index("--policy") + 3] == ["uspto", "ringbreaker"]
     assert cmd[cmd.index("--filter") + 1:cmd.index("--filter") + 3] == ["uspto", "frozen_substructure"]
     assert cmd[cmd.index("--nproc") + 1] == "3"
+    # aizynthcli<N>.log lands in its working directory, which must be the step's folder and not the repository
+    assert seen["cwd"] == str(tmp_path)
 
 
 def test_cli_command_leaves_defaults_to_aizynthcli_when_nothing_is_set(monkeypatch, tmp_path):
     helper = _load_helper()
     seen = {}
-    monkeypatch.setattr(helper.subprocess, "run", lambda cmd, check: seen.update(cmd=cmd))
+    monkeypatch.setattr(helper.subprocess, "run", lambda cmd, check, cwd: seen.update(cmd=cmd, cwd=cwd))
     helper._run_cli(_pipe_cfg(targets_smi="t.smi", cli_output=str(tmp_path / "o.json.gz")), "search.yml", 3, "")
     assert not {"--stocks", "--policy", "--filter", "--nproc"} & set(seen["cmd"])
 
@@ -827,6 +829,20 @@ def test_main_exits_non_zero_when_no_target_can_be_searched(tmp_path, monkeypatc
     with pytest.raises(SystemExit) as exit_info:
         _run_helper(tmp_path, monkeypatch, ["C(C)(C)(C)(C)C", "xyz"], lambda sent: [])
     assert exit_info.value.code == 1
+
+
+def test_main_records_every_id_even_when_no_target_can_be_searched(tmp_path, monkeypatch):
+    """The step still fails, but the ids that entered keep their row and their failure instead of vanishing."""
+    pytest.importorskip("rdkit")
+    with pytest.raises(SystemExit):
+        _run_helper(tmp_path, monkeypatch, ["C(C)(C)(C)(C)C", "xyz"], lambda sent: [])
+    step = tmp_path / "001_AiZynthFinder"
+    targets = pd.read_csv(step / "tables" / "targets.csv")
+    assert list(targets["id"]) == ["c1", "c2"] and targets["is_solved"].isna().all()
+    missing = pd.read_csv(step / "_execution" / "local_missing.csv")
+    assert list(missing["id"]) == ["c1", "c2"] and set(missing["kind"]) == {"failure"}
+    assert pd.read_csv(step / "tables" / "routes.csv").empty
+    assert pd.read_csv(step / "precursors" / "precursors.csv").empty
 
 
 def test_main_refuses_an_invalid_frozen_pattern_before_searching(tmp_path, monkeypatch):
