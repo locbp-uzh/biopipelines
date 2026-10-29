@@ -55,6 +55,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **RF3** 1.2 → 1.3. `n_recycles=1` is refused while early stopping is on: upstream takes the first recycle for the early-stopping check and has none left to fold with, so every input failed with `RuntimeError: Recycling generator produced no outputs`. With `early_stopping_plddt_threshold=0` one recycle is accepted.
+
 - **OpenFold3** 1.5 → 1.6. The `msas` stream was looked up by the `id` of its table rows, but MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`, so an alignment from MMseqs2 matched no chain: OpenFold3 logged a dummy single-sequence MSA for every chain and folded without it, a barnase-barstar complex at ipTM 0.14. The lookup is keyed by `id` and by `sequences.id`, so both naming schemes find their alignment. A supplied `.a3m` or `.sto` then failed with `IndexError: list index out of range` inside upstream's MSA parser, which reads an alignment file only when its stem is one of the databases it names (`colabfold_main`, `uniref90_hits`, ...) and skips every other. The config script now copies each such alignment to `_configuration/msas/<id>/colabfold_main.<ext>` and names that copy in the query; a `.npz` is passed through unchanged.
 
 - **RF3** 1.1 → 1.2. The `msas` stream was looked up by the `id` of its table rows, but MMseqs2, Boltz2 and AlphaFold name their rows `<id>_msa` and keep the protein id in `sequences.id`, so an alignment from MMseqs2 matched no chain: RF3 gave no chain an `msa_path` and folded single-sequence, where the default early-stopping threshold abandons it. The lookup is keyed by `id` and by `sequences.id`, so both naming schemes find their alignment.

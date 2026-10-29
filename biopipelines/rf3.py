@@ -48,7 +48,7 @@ class RF3(BaseConfig):
         msas: precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`).
             Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence.
             Upstream says it pairs alignments across chains on the fly and does not accept pre-paired ones.
-        n_recycles: trunk recycles (upstream default 10).
+        n_recycles: trunk recycles (upstream default 10). A single recycle is refused while early stopping is on, because upstream spends the first recycle on the early-stopping check and has none left to fold with.
         diffusion_batch_size: structures sampled per input from one forward pass of the trunk (upstream default 5).
             Always passed explicitly, so the declared ids of `top_only=False` are exact.
         num_steps: diffusion sampling steps. Upstream's config default is 50; its README states 200 and says 50
@@ -88,7 +88,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
@@ -234,6 +234,11 @@ fi
                 or not 0 <= threshold <= 1):
             raise ValueError(
                 "early_stopping_plddt_threshold must be a number from 0 to 1 (0 turns early stopping off)")
+
+        if self.n_recycles == 1 and threshold > 0:
+            raise ValueError(
+                "n_recycles=1 needs early_stopping_plddt_threshold=0: upstream takes the first recycle for the "
+                "early-stopping check and has none left to fold with, so every input fails")
 
         if not isinstance(self.top_only, bool):
             raise ValueError("top_only must be a bool")

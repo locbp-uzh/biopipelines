@@ -63,6 +63,17 @@ class TestItRefusesWhatItCannotDo:
     def test_zero_turns_early_stopping_off_and_is_accepted(self, tool, ok):
         RF3.validate_params(tool(early_stopping_plddt_threshold=ok))
 
+    def test_one_recycle_is_refused_while_early_stopping_is_on(self, tool):
+        """Upstream takes the first recycle for the early-stopping check and then needs another one to fold with; with one recycle every input fails with `Recycling generator produced no outputs`."""
+        with pytest.raises(ValueError, match="n_recycles"):
+            RF3.validate_params(tool(n_recycles=1))
+
+    def test_one_recycle_is_accepted_once_early_stopping_is_off(self, tool):
+        RF3.validate_params(tool(n_recycles=1, early_stopping_plddt_threshold=0))
+
+    def test_two_recycles_are_accepted_with_early_stopping_on(self, tool):
+        RF3.validate_params(tool(n_recycles=2))
+
     def test_msas_without_proteins_are_refused(self, tool):
         """An alignment has nothing to attach to; accepting it would leave the user believing one was used."""
         with pytest.raises(ValueError, match="proteins axis is required"):

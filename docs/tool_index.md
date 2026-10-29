@@ -112,7 +112,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 100 | Sequence                  | Inputs & I/O                   | 1.1 | `biopipelines/sequence.py` |
 | 101 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |
 | 102 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
-| 103 | RF3 | Structure Prediction & Docking | 1.2 | `biopipelines/rf3.py` |
+| 103 | RF3 | Structure Prediction & Docking | 1.3 | `biopipelines/rf3.py` |
 | 104 | FoundryMPNN | Sequence Design                | 1.1 | `biopipelines/foundry_mpnn.py` |
 | 105 | Foldcomp | Inputs & I/O                   | 1.1 | `biopipelines/foldcomp.py` |
 | 106 | Embedding                 | Analysis                       | 1.1 | `biopipelines/embedding.py` |
