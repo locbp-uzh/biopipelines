@@ -562,7 +562,7 @@ def test_the_install_pins_the_default_model_and_verifies_env_and_weights():
     script = ESM2._install_script({"ESM2": "/data/esm2", "biopipelines": "/bp"}, "mamba")
     assert '/bp/pipe_scripts/pipe_esm2_weights.py" --dest "/data/esm2" --models esm2_t33_650M_UR50D' in script
     assert '[ -f "/data/esm2/esm2_t33_650M_UR50D/REVISION" ]' in script
-    assert "import torch, transformers, huggingface_hub" in script and 'touch "$INSTALL_SUCCESS"' in script
+    assert "torch, transformers, huggingface_hub" in script and 'touch "$INSTALL_SUCCESS"' in script
     assert "already installed" in script
 
 

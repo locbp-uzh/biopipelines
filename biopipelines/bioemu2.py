@@ -95,7 +95,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}
@@ -112,7 +112,7 @@ class BioEmu2(BaseConfig):
         requirements = f"{biopipelines}/environments/{env}.pip.txt"
 
         python_ok = f'{run}python -c "{PYTHON_CHECK}" >/dev/null 2>&1'
-        installed = (f'{python_ok} && {run}python -c "import bioemu2, mdtraj, torch" >/dev/null 2>&1'
+        installed = (f'{python_ok} && {run}python -c "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub" >/dev/null 2>&1'
                      f' && {run}bioemu2 sample-equilibrium --help >/dev/null 2>&1')
         weights_cached = f'{run}python "{weights_py}" --check-only >/dev/null 2>&1'
 
@@ -151,7 +151,7 @@ if {installed}; then
     touch "$INSTALL_SUCCESS"
     echo "=== BioEmu2 installation complete ==="
 else
-    echo "ERROR: BioEmu2 verification failed (needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer, importable bioemu2, mdtraj and torch, and a working bioemu2 CLI)"
+    echo "ERROR: BioEmu2 verification failed (needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer, importable bioemu2, mdtraj, torch, pandas, yaml and huggingface_hub, and a working bioemu2 CLI)"
     exit 1
 fi
 """

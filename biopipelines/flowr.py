@@ -91,7 +91,7 @@ class FLOWR(BaseConfig):
     """
 
     TOOL_NAME = "FLOWR"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "FLOWR"
 
     @classmethod
@@ -101,7 +101,7 @@ class FLOWR(BaseConfig):
         repo_dir = folders.get("FLOWR", "")
         parent_dir = os.path.dirname(repo_dir)
         checkpoint = os.path.join(repo_dir, "checkpoints", CHECKPOINT_NAME)
-        import_check = f'cd "{repo_dir}" && PYTHONPATH="{repo_dir}" {cls._env_run(env, env_manager)}python -c "import flowr.gen.generate_from_pdb"'
+        import_check = f'cd "{repo_dir}" && PYTHONPATH="{repo_dir}" {cls._env_run(env, env_manager)}python -c "import pandas, yaml, rdkit, flowr.gen.generate_from_pdb"'
 
         env_check = cls._env_exists_check(env, env_manager)
         skip = "" if force_reinstall else f"""# Check if already installed
@@ -135,12 +135,12 @@ if [ ! -s "{checkpoint}" ]; then
     mv "{checkpoint}.part" "{checkpoint}"
 fi
 
-# Importing upstream's entry module is the check that matters: it pulls in every dependency the run needs.
+# Importing upstream's entry module pulls in every dependency the run needs; the rest are what the pipe script imports.
 if [ -s "{checkpoint}" ] && ( {import_check} ); then
     touch "$INSTALL_SUCCESS"
     echo "=== FLOWR installation complete ==="
 else
-    echo "ERROR: FLOWR verification failed (checkpoint missing or flowr.gen.generate_from_pdb does not import)"
+    echo "ERROR: FLOWR verification failed (checkpoint missing, or pandas, yaml, rdkit or flowr.gen.generate_from_pdb does not import)"
     exit 1
 fi
 """

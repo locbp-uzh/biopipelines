@@ -77,7 +77,7 @@ class ESM2(BaseConfig):
     """
 
     TOOL_NAME = "ESM2"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "esm2"
 
     @classmethod
@@ -99,7 +99,7 @@ class ESM2(BaseConfig):
         env_run = cls._env_run(env, env_manager)
         pipe_scripts = folders.get("pipe_scripts", f"{biopipelines}/pipe_scripts")
         weights_py = f"{pipe_scripts}/pipe_esm2_weights.py"
-        imports_ok = f'{env_run}python -c "import torch, transformers, huggingface_hub" >/dev/null 2>&1'
+        imports_ok = f'{env_run}python -c "import numpy, pandas, yaml, torch, transformers, huggingface_hub" >/dev/null 2>&1'
         weights_ok = " && ".join(f'[ -f "{weights_dir}/{m}/REVISION" ]' for m in models)
         skip = "" if force_reinstall else f"""# Check if already fully installed (env + pinned weights)
 if {env_check} && {imports_ok} && {weights_ok}; then
@@ -128,7 +128,7 @@ if {imports_ok} && {weights_ok}; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESM2 installation complete ==="
 else
-    echo "ERROR: ESM2 verification failed (torch/transformers missing from the env or a weights folder incomplete)"
+    echo "ERROR: ESM2 verification failed (an import of numpy, pandas, yaml, torch, transformers or huggingface_hub failed in the env, or a weights folder is incomplete)"
     exit 1
 fi
 """

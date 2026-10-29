@@ -43,6 +43,36 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **ESM2** 1.0 → 1.1. The install check imports every module the pipe scripts import (numpy, pandas, yaml, torch, transformers, huggingface_hub). It imported only torch, transformers and huggingface_hub, so an env without numpy, pandas or pyyaml was reported as installed.
+
+- **Peppr** 1.0 → 1.1. The install check also imports biotite, and the shortcut for an existing env runs the same check (peppr, biotite, pandas, yaml); it accepted any env that existed. An existing env that fails the check is no longer built over, and the failure says to retry with `force_reinstall=True`.
+
+- **Foldseek** 1.2 → 1.3. The install check also imports pandas and yaml, which the pipe script needs, beside `foldseek version`, and the shortcut for an existing env runs both; it accepted any env that existed. An existing env that fails the check is no longer built over.
+
+- **AiZynthFinder** 2.4 → 2.5. The install check also imports pandas, yaml and rdkit, which the pipe script needs, beside `aizynthcli --help` and the config.yml check, in the shortcut and in the final verification.
+
+- **REINVENT4** 1.0 → 1.1. The install check also imports pandas, which the pipe script needs, beside `reinvent --version`, in the shortcut and in the final verification.
+
+- **FLOWR** 1.1 → 1.2. The install check imports pandas, yaml and rdkit, which the pipe script needs, together with upstream's entry module `flowr.gen.generate_from_pdb`.
+
+- **Protenix** 1.3 → 1.4. The import-free install check also imports numpy and pandas, which the config and post-processing scripts need. protenix itself is still only looked up (distribution metadata and entry point), never imported.
+
+- **RFD4Proteina** 1.2 → 1.3. The install check imports yaml, pandas and huggingface_hub, which the pipe scripts need, and looks up atomworks and rfproteina without importing them. It only found the rfd4-proteina distribution and its entry point.
+
+- **BioEmu2** 1.3 → 1.4. The install check also imports pandas, yaml and huggingface_hub, which the pipe scripts need, beside bioemu2, mdtraj and torch.
+
+- **ESMFold2** 2.7 → 2.8. The install check imports numpy, pandas, torch and every esm module the inference script imports; it imported only the model class. The shortcut for an existing env runs the same check; it accepted any env that existed. An existing env that fails the check is no longer built over.
+
+- **IPSAE** 1.2 → 1.3. The install check also imports pandas and yaml, which the pipe script needs, beside numpy for upstream's script, and the shortcut runs the import check too; it only tested that ipsae.py existed.
+
+- **Embedding** 1.0 → 1.1. The install check also imports numpy, pandas and yaml, which the pipe script needs, beside torch, torch_scatter, torch_geometric, einops and progres.
+
+- **USalign** 1.0 → 1.1. The install check also imports pandas and yaml, which the pipe script needs, beside the USalign and TMalign binaries, and the shortcut for an existing env runs the same check; it accepted any env that existed. An existing env that fails the check is no longer built over.
+
+- **TMalign** 1.0 → 1.1. Installs through USalign's script, so it takes the same check: the two binaries and the pandas and yaml imports of the pipe script.
+
+- **Foldcomp** 1.0 → 1.1. The install check also imports pandas and yaml, which the pipe script needs, beside `foldcomp --version`.
+
 - **FLOWR** 1.0 → 1.1. The first runs found that a crystal with alternate locations (3RY2, atomic resolution) failed upstream before any sampling: its reader looks the CONECT records up by atom serial and raised an IndexError. The reference run reads a copy of the structure without CONECT records now; the reference ligand is cut out of the original, so nothing else changes. The documentation also records what the hydrogen options did: `protonate_pocket` worked with `interaction` on streptavidin and failed in upstream's ProLIF step on factor Xa, and `protonate_ligands` failed on both structures tried because upstream swallows an RDKit KekulizeException in its pocket reading and returns no molecule.
 
 - **BioEmu2** 1.2 → 1.3. Documentation only: with a `seed` the conformers repeat exactly, but only at the same `batch_size` (the first batch matches at 16 and 2, the later ones do not); and how a ligand is written in a structure (next chain letter, ATOM records, CCD code or `LIG` as residue name, not covered by the physicality check).

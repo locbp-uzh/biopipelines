@@ -143,7 +143,7 @@ class Foldseek(BaseConfig):
     """
 
     TOOL_NAME = "Foldseek"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "foldseek"
 
     @classmethod
@@ -151,9 +151,11 @@ class Foldseek(BaseConfig):
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
+        env_run = cls._env_run(env, env_manager)
+        verified = f'{env_run}foldseek version >/dev/null 2>&1 && {env_run}python -c "import pandas, yaml" >/dev/null 2>&1'
         pull = cls._container_pull_block(folders, force_reinstall)
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_check}; then
+if {env_check} && {verified}; then
     echo "Foldseek already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -163,13 +165,17 @@ fi
         env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing Foldseek ==="
 {pull}{skip}{remove_block}
+if ! {env_check}; then
 {env_block}
+else
+    echo "{env} environment already exists, skipping creation."
+fi
 
-if {cls._env_run(env, env_manager)}foldseek version >/dev/null 2>&1; then
+if {verified}; then
     touch "$INSTALL_SUCCESS"
     echo "=== Foldseek installation complete ==="
 else
-    echo "ERROR: Foldseek verification failed (foldseek binary not on PATH)"
+    echo "ERROR: Foldseek verification failed (foldseek binary not on PATH, or pandas/yaml not importable). Retry with force_reinstall=True to rebuild the env."
     exit 1
 fi
 """

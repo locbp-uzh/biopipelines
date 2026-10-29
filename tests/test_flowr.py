@@ -557,7 +557,7 @@ def test_the_install_script_pins_the_checkpoint_record_and_checks_the_import(mon
     assert "https://github.com/jule-c/flowr.git" in script
     assert "records/15737419/" in CHECKPOINT_URL and CHECKPOINT_URL in script and CHECKPOINT_MD5 in script
     assert os.path.join("/data/FLOWR", "checkpoints", "flowr_noHs.ckpt") in script
-    assert "import flowr.gen.generate_from_pdb" in script and 'touch "$INSTALL_SUCCESS"' in script
+    assert ", flowr.gen.generate_from_pdb\"" in script and 'touch "$INSTALL_SUCCESS"' in script
     assert script.index("mamba env create") < script.index("md5sum")
 
 

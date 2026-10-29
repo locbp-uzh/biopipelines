@@ -221,18 +221,24 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
     ENV_NAME = "esmfold2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
-        """Create the esmfold2 env (picks esmfold2.<variant>.yaml automatically) and
-        verify by importing the esm ESMFold2 model class (esm >= 3.4)."""
+        """Create the esmfold2 env (picks esmfold2.<variant>.yaml automatically) and verify by importing what the inference script imports (esm >= 3.4)."""
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
+        imports = (
+            f'{cls._env_run(env, env_manager)}python -c "import numpy, pandas, torch; '
+            "from esm.models.esmfold2 import EsmFold2Model, ESMFold2InputBuilder; "
+            "from esm.models.esmfold2.prepare_input import build_chains_from_input; "
+            "from esm.utils.structure import input_builder; "
+            'from esm.utils.msa import MSA" >/dev/null 2>&1'
+        )
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_check}; then
+if {env_check} && {imports}; then
     echo "{env} environment already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -242,18 +248,22 @@ fi
         env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing ESMFold2 ==="
 {skip}{remove_block}
+if ! {env_check}; then
 {env_block}
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
+else
+    echo "{env} environment already exists, skipping creation."
+fi
 
 # Verify installation
-if {cls._env_run(env, env_manager)}python -c "from esm.models.esmfold2 import EsmFold2Model, ESMFold2InputBuilder" >/dev/null 2>&1; then
+if {imports}; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESMFold2 installation complete ==="
 else
-    echo "ERROR: ESMFold2 verification failed (cannot import EsmFold2Model; needs esm >= 3.4)"
+    echo "ERROR: ESMFold2 verification failed (numpy, pandas, torch or the esm ESMFold2 modules do not import; needs esm >= 3.4). Retry with force_reinstall=True to rebuild the env."
     exit 1
 fi
 """

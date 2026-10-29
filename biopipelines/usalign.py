@@ -100,7 +100,7 @@ class USalign(PairAligner):
     """
 
     TOOL_NAME = "USalign"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "usalign"
     BINARY = "USalign"
 
@@ -109,8 +109,10 @@ class USalign(PairAligner):
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
+        run = cls._env_run(env, env_manager)
+        verified = f'{run}USalign -h >/dev/null 2>&1 && {run}TMalign -h >/dev/null 2>&1 && {run}python -c "import pandas, yaml" >/dev/null 2>&1'
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_check}; then
+if {env_check} && {verified}; then
     echo "USalign already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -118,16 +120,19 @@ fi
 """
         remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
         env_block = cls._env_install_block(env, env_manager, biopipelines)
-        run = cls._env_run(env, env_manager)
         return f"""echo "=== Installing USalign ==="
 {skip}{remove_block}
+if ! {env_check}; then
 {env_block}
+else
+    echo "{env} environment already exists, skipping creation."
+fi
 
-if {run}USalign -h >/dev/null 2>&1 && {run}TMalign -h >/dev/null 2>&1; then
+if {verified}; then
     touch "$INSTALL_SUCCESS"
     echo "=== USalign installation complete ==="
 else
-    echo "ERROR: USalign verification failed (USalign or TMalign not on PATH)"
+    echo "ERROR: USalign verification failed (USalign or TMalign not on PATH, or pandas/yaml not importable). Retry with force_reinstall=True to rebuild the env."
     exit 1
 fi
 """

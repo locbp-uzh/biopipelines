@@ -62,7 +62,7 @@ class IPSAE(BaseConfig):
     """
 
     TOOL_NAME = "IPSAE"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -73,7 +73,7 @@ class IPSAE(BaseConfig):
                 "it names the folder ipsae.py is downloaded into")
         script = f"{repo_dir}/ipsae.py"
         skip = "" if force_reinstall else f"""# Check if already installed
-if [ -s "{script}" ]; then
+if [ -s "{script}" ] && python -c "import numpy, pandas, yaml" >/dev/null 2>&1; then
     echo "IPSAE already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -85,12 +85,12 @@ rm -f "{script}"
 curl -fsSL -o "{script}.part" "{IPSAE_SCRIPT_URL}" || {{ echo "ERROR: download of {IPSAE_SCRIPT_URL} failed"; exit 1; }}
 mv "{script}.part" "{script}"
 
-# Verify the download parses as Python and that numpy, its only dependency, imports
-if python -c "import ast, sys, numpy; ast.parse(open(sys.argv[1]).read())" "{script}" >/dev/null 2>&1; then
+# Verify the download parses as Python, that numpy, its only dependency, imports, and that the pipe script's own imports do
+if python -c "import ast, sys, numpy, pandas, yaml; ast.parse(open(sys.argv[1]).read())" "{script}" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== IPSAE installation complete ==="
 else
-    echo "ERROR: IPSAE verification failed (ipsae.py does not parse or numpy is missing)"
+    echo "ERROR: IPSAE verification failed (ipsae.py does not parse, or numpy, pandas or yaml is missing)"
     exit 1
 fi
 """

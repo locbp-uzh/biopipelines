@@ -171,14 +171,14 @@ class AiZynthFinder(BaseConfig):
     """
 
     TOOL_NAME = "AiZynthFinder"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     ENV_NAME = "aizynthfinder"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
         """Create the aizynthfinder env and download the public models.
 
-        `download_public_data` fetches the expansion policies, templates and filter model from Zenodo and the stock from figshare, then writes the config.yml the CLI consumes, so the install is verified on that file's presence as well as on `aizynthcli` starting, which imports the whole package. An existing env is kept, so a failed download is retried without rebuilding it; force_reinstall rebuilds both.
+        `download_public_data` fetches the expansion policies, templates and filter model from Zenodo and the stock from figshare, then writes the config.yml the CLI consumes, so the install is verified on that file's presence as well as on `aizynthcli` starting, which imports the whole package, and on the modules the pipe script imports. An existing env is kept, so a failed download is retried without rebuilding it; force_reinstall rebuilds both.
         """
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
@@ -186,7 +186,7 @@ class AiZynthFinder(BaseConfig):
         config_check = f'[ -f "{data_dir}/config.yml" ]'
         env_check = cls._env_exists_check(env, env_manager)
         env_run = cls._env_run(env, env_manager)
-        cli_check = f"{env_run}aizynthcli --help >/dev/null 2>&1"
+        cli_check = f'{env_run}aizynthcli --help >/dev/null 2>&1 && {env_run}python -c "import pandas, yaml, rdkit" >/dev/null 2>&1'
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {config_check} \\
    && {cli_check}; then
@@ -223,7 +223,7 @@ if {config_check} \\
     touch "$INSTALL_SUCCESS"
     echo "=== AiZynthFinder installation complete ==="
 else
-    echo "ERROR: AiZynthFinder verification failed (aizynthcli does not start or config.yml missing). Retry with force_reinstall=True to rebuild the env."
+    echo "ERROR: AiZynthFinder verification failed (aizynthcli does not start, pandas, yaml or rdkit does not import, or config.yml missing). Retry with force_reinstall=True to rebuild the env."
     exit 1
 fi
 """

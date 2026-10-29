@@ -58,7 +58,7 @@ class Peppr(BaseConfig):
     """
 
     TOOL_NAME = "Peppr"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "peppr"
 
     @classmethod
@@ -66,8 +66,10 @@ class Peppr(BaseConfig):
         env = cls._install_env(env_manager)
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
+        env_run = cls._env_run(env, env_manager)
+        imports = f'{env_run}python -c "import peppr, biotite, pandas, yaml"'
         skip = "" if force_reinstall else f"""# Check if already installed
-if {env_check}; then
+if {env_check} && {imports} >/dev/null 2>&1; then
     echo "Peppr already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -77,15 +79,19 @@ fi
         env_block = cls._env_install_block(env, env_manager, biopipelines)
         return f"""echo "=== Installing Peppr ==="
 {skip}{remove_block}
+if ! {env_check}; then
 {env_block}
+else
+    echo "{env} environment already exists, skipping creation."
+fi
 
 # Importing peppr is the check that matters: it fails outright on a biotite it does not support.
-if {cls._env_run(env, env_manager)}python -c "import peppr, pandas, yaml" >/dev/null 2>&1; then
+if {imports} >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Peppr installation complete ==="
 else
-    echo "ERROR: Peppr verification failed (import of peppr/pandas/yaml)"
-    {cls._env_run(env, env_manager)}python -c "import peppr, pandas, yaml" 2>&1 | tail -5
+    echo "ERROR: Peppr verification failed (import of peppr, biotite, pandas or yaml). Retry with force_reinstall=True to rebuild the env."
+    {imports} 2>&1 | tail -5
     exit 1
 fi
 """

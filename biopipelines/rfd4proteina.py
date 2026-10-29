@@ -357,7 +357,7 @@ class RFD4Proteina(BaseConfig):
     """
 
     TOOL_NAME = "RFD4Proteina"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     # Hydra application: untyped keyword arguments become extra `key=value` overrides.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # `num_replicates` is upstream's own name; forwarded it would collide with the managed override.
@@ -377,10 +377,12 @@ class RFD4Proteina(BaseConfig):
         env_run = cls._env_run(env, env_manager)
         pipe_scripts = folders.get("pipe_scripts", f"{biopipelines}/pipe_scripts")
         weights_py = f"{pipe_scripts}/pipe_rfd4proteina_weights.py"
-        # Entry point present in the env, without importing the model (a login node has no GPU).
+        # The entry point and the model packages are looked up without importing the model (a login node has no GPU); the rest are imported.
         installed = (
             f'{env_run}python -c "import importlib.metadata as m; m.version(\'rfd4-proteina\'); '
             f'assert any(e.name == \'rfd4-generate\' for e in m.entry_points(group=\'console_scripts\'))" '
+            f'>/dev/null 2>&1 && {env_run}python -c "import yaml, pandas, huggingface_hub" >/dev/null 2>&1 '
+            f'&& {env_run}python -c "import importlib.util as u; assert u.find_spec(\'atomworks\') and u.find_spec(\'rfproteina\')" '
             '>/dev/null 2>&1'
         )
         weights_ok = f'[ -f "{weights_dir}/model.safetensors" ] && [ -f "{weights_dir}/config.json" ]'
@@ -415,7 +417,7 @@ if {installed} && {weights_ok}; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFD4Proteina installation complete ==="
 else
-    echo "ERROR: RFD4Proteina verification failed (rfd4-proteina missing from the env or weights bundle incomplete)"
+    echo "ERROR: RFD4Proteina verification failed (rfd4-proteina, atomworks, yaml, pandas or huggingface_hub missing from the env, or weights bundle incomplete)"
     exit 1
 fi
 """

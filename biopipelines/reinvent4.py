@@ -181,7 +181,7 @@ class REINVENT4(BaseConfig):
     """
 
     TOOL_NAME = "REINVENT4"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "REINVENT4"
 
     @classmethod
@@ -189,7 +189,7 @@ class REINVENT4(BaseConfig):
                         processor=DEFAULT_PROCESSOR, **kwargs):
         """Create the env, install REINVENT 4 from a clone with upstream's install.py, fetch the priors.
 
-        install.py runs pip without checking its exit status, so the install is verified by `reinvent --version`, which imports torch. An existing env is kept, so a failed download is retried by calling install() again; force_reinstall rebuilds the env and re-runs install.py on the existing clone.
+        install.py runs pip without checking its exit status, so the install is verified by `reinvent --version`, which imports torch and rdkit, and by importing pandas, which the pipe script needs. An existing env is kept, so a failed download is retried by calling install() again; force_reinstall rebuilds the env and re-runs install.py on the existing clone.
         """
         if not isinstance(processor, str) or not _PROCESSOR_RE.match(processor):
             raise ValueError(f"processor must be a PyTorch build tag such as 'cu126' or 'cpu', got {processor!r}")
@@ -199,7 +199,7 @@ class REINVENT4(BaseConfig):
         prior_dir = f"{repo_dir}/priors"
         env_check = cls._env_exists_check(env, env_manager)
         env_run = cls._env_run(env, env_manager)
-        cli_check = f"{env_run}reinvent --version >/dev/null 2>&1"
+        cli_check = f'{env_run}reinvent --version >/dev/null 2>&1 && {env_run}python -c "import pandas" >/dev/null 2>&1'
         priors_check = " && ".join(f'[ -s "{prior_dir}/{name}" ]' for name in PRIOR_MD5)
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} \\
@@ -244,7 +244,7 @@ if {cli_check} \\
     touch "$INSTALL_SUCCESS"
     echo "=== REINVENT4 installation complete ==="
 else
-    echo "ERROR: REINVENT4 verification failed (reinvent does not start or a prior is missing). Retry with force_reinstall=True to rebuild the env."
+    echo "ERROR: REINVENT4 verification failed (reinvent does not start, pandas does not import, or a prior is missing). Retry with force_reinstall=True to rebuild the env."
     exit 1
 fi
 """

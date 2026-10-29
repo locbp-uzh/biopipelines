@@ -118,7 +118,7 @@ class Foldcomp(BaseConfig):
     """
 
     TOOL_NAME = "Foldcomp"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "foldcomp"
 
     @classmethod
@@ -139,11 +139,11 @@ else
 {env_block}
 fi
 {database_block}
-if {cls._env_run(env, env_manager)}foldcomp --version >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}foldcomp --version >/dev/null 2>&1 && {cls._env_run(env, env_manager)}python -c "import pandas, yaml" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== Foldcomp installation complete ==="
 else
-    echo "ERROR: Foldcomp verification failed (foldcomp binary not on PATH)"
+    echo "ERROR: Foldcomp verification failed (foldcomp binary not on PATH, or pandas/yaml not importable)"
     exit 1
 fi
 """

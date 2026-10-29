@@ -98,7 +98,7 @@ class TMalign(PairAligner):
     """
 
     TOOL_NAME = "TMalign"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "usalign"
     BINARY = "TMalign"
     REPORTS_DELTA = True

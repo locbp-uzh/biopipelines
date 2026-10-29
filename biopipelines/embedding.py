@@ -138,7 +138,7 @@ class Embedding(BaseConfig):
     """
 
     TOOL_NAME = "Embedding"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "Embedding"
 
     @classmethod
@@ -147,7 +147,7 @@ class Embedding(BaseConfig):
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
         env_run = cls._env_run(env, env_manager)
-        imports_ok = (f'{env_run}python -c "import torch, torch_scatter, torch_geometric, einops, progres.progres" '
+        imports_ok = (f'{env_run}python -c "import torch, torch_scatter, torch_geometric, einops, progres.progres, numpy, pandas, yaml" '
                       '>/dev/null 2>&1')
         skip = "" if force_reinstall else f"""# Check if already installed
 if {env_check} && {imports_ok}; then
@@ -172,7 +172,7 @@ if {imports_ok}; then
     touch "$INSTALL_SUCCESS"
     echo "=== Embedding installation complete ==="
 else
-    echo "ERROR: Embedding verification failed (torch, torch_scatter, torch_geometric, einops or progres missing from the env)"
+    echo "ERROR: Embedding verification failed (torch, torch_scatter, torch_geometric, einops, progres, numpy, pandas or yaml missing from the env)"
     exit 1
 fi
 """
