@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `IPSAE` 1.0 → 1.1 - accepts structure streams advertised as `mmcif` (Boltz2 with `output_format="mmcif"`), which the format check refused.
+
 - `Panda` 1.5 → 1.6 - a numeric or boolean column that holds a blank cell (the NaN row of a failed id) stays numeric or boolean. It was read as text, so `Panda.filter("score > 0.5")` raised TypeError, `passed == True` and `cluster_tm50 == 1` silently kept no row, and `sort` ordered numbers as text.
 
 - Every `Tool.install()` step runs with `PYTHONNOUSERSITE=1`. pip counted a package in `~/.local` as already installed and, when a later install pinned another version, uninstalled it from there: an env built that way came out incomplete (it silently relied on the user site) and an unrelated env that relied on the same package lost it. The install body, its verification included, now sees only the env it builds.

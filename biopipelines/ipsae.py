@@ -25,7 +25,7 @@ except ImportError:
 
 IPSAE_SCRIPT_URL = "https://raw.githubusercontent.com/DunbrackLab/IPSAE/main/ipsae.py"
 
-STRUCTURE_FORMATS = ("pdb", "cif")
+STRUCTURE_FORMATS = ("pdb", "cif", "mmcif")
 PAE_FORMATS = ("npz", "json")
 
 # The score columns upstream prints per chain pair, lowercased.
@@ -62,7 +62,7 @@ class IPSAE(BaseConfig):
     """
 
     TOOL_NAME = "IPSAE"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

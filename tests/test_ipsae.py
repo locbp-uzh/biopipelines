@@ -404,6 +404,21 @@ def test_a_pae_stream_in_an_unsupported_format_is_refused(local_config, isolated
             IPSAE(structures=source, pae=source)
 
 
+@pytest.mark.parametrize("fmt", ["pdb", "cif", "mmcif"])
+def test_every_structure_format_a_predictor_emits_is_accepted(local_config, isolated_cwd, new_pipeline, fmt):
+    """Boltz2(output_format="mmcif") advertises its structures as `mmcif`, OpenFold3 as `cif`."""
+    from biopipelines.ipsae import IPSAE
+    from biopipelines.mock import Mock
+
+    pipeline = new_pipeline("ipsae_structure_format")
+    with pipeline:
+        source = Mock(ids=["s1"], streams={"structures": {"format": fmt, "file": "<id>." + ("pdb" if fmt == "pdb" else "cif")},
+                                           "pae": {"format": "npz", "file": "<id>.npz"}})
+        IPSAE(structures=source, pae=source)
+        pipeline.save()
+    assert pipeline.tools[-1].structures_stream.format == fmt
+
+
 def test_a_single_target_chain_string_is_one_chain(local_config, isolated_cwd, new_pipeline):
     tool, _ = build(new_pipeline, target_chains="B")
     assert tool.target_chains == ["B"]
