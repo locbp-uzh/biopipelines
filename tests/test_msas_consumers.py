@@ -330,3 +330,59 @@ class TestOneLookupForEveryConsumer:
     def test_the_consumer_does_not_read_the_provenance_column_itself(self, script):
         source = open(os.path.join(SCRIPTS, script), encoding="utf-8").read()
         assert "sequences.id" not in source, f"{script} matches on sequences.id itself instead of asking MsaLookup"
+
+
+# Each wrapper, the pipe scripts it calls with the skipped-query plumbing, and the format of the msas it takes.
+WIRING = {
+    "AlphaFold": ("alphafold", ["pipe_boltz_msa_copy.py", "pipe_alphafold_confidence.py"], "a3m"),
+    "Boltz2": ("boltz2", ["pipe_boltz_config_unified.py", "pipe_boltz_postprocessing.py"], "csv"),
+    "OpenFold3": ("openfold3", ["pipe_openfold3_config.py", "pipe_openfold3_postprocess.py"], "a3m"),
+    "RF3": ("rf3", ["pipe_rf3_config.py", "pipe_rf3_postprocess.py"], "a3m"),
+}
+
+
+class TestTheWrapperWiring:
+
+    @staticmethod
+    def _built(new_pipeline, name, with_msas):
+        import importlib
+        from pathlib import Path
+        from biopipelines.mock import Mock
+        module, _scripts, fmt = WIRING[name]
+        tool_class = getattr(importlib.import_module(f"biopipelines.{module}"), name)
+        pipeline = new_pipeline(f"msas_wiring_{name}_{with_msas}")
+        with pipeline:
+            seqs = Mock(ids=["p1"], streams={"sequences": {"format": "csv", "file": "<id>.csv"}})
+            kwargs = {"proteins": seqs.streams.sequences}
+            if with_msas:
+                msas = Mock(ids=["p1"], streams={"msas": {"format": fmt, "file": f"<id>.{fmt}"}})
+                kwargs["msas"] = msas if name == "AlphaFold" else msas.streams.msas
+            tool = tool_class(**kwargs)
+            script_path = pipeline.save()
+        steps = sorted(Path(script_path).parent.glob(f"*_{name}.sh"))
+        return tool, "\n".join(step.read_text(encoding="utf-8", errors="replace") for step in steps)
+
+    @pytest.mark.parametrize("name", list(WIRING))
+    def test_every_flag_the_wrapper_sends_is_known_to_the_pipe_script(self, local_config, isolated_cwd,
+                                                                      new_pipeline, name):
+        import re
+        _tool, script = self._built(new_pipeline, name, with_msas=True)
+        for pipe in WIRING[name][1]:
+            block = script.split(pipe)[1].split("\n\n")[0]
+            sent = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", block))
+            source = open(os.path.join(SCRIPTS, pipe), encoding="utf-8").read()
+            known = set(re.findall(r"""add_argument\(\s*['"](--[a-z-]+)['"]""", source))
+            assert sent <= known, f"{pipe}: {sorted(sent - known)} are sent but not read"
+
+    @pytest.mark.parametrize("name", list(WIRING))
+    def test_supplying_msas_declares_the_missing_table_that_excuses_the_ids_left_out(
+            self, local_config, isolated_cwd, new_pipeline, name):
+        tool, script = self._built(new_pipeline, name, with_msas=True)
+        assert "missing" in list(tool.tables.keys())
+        assert "skipped_" in script or "--missing-csv" in script
+
+    @pytest.mark.parametrize("name", ["AlphaFold", "Boltz2"])
+    def test_without_msas_nothing_new_is_declared_or_sent(self, local_config, isolated_cwd, new_pipeline, name):
+        tool, script = self._built(new_pipeline, name, with_msas=False)
+        assert "missing" not in list(tool.tables.keys())
+        assert "local_missing.csv" not in script and "--missing-csv" not in script
