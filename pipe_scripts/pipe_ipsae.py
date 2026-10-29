@@ -126,8 +126,10 @@ def summarize(rows, binder_chain, target_chains):
         for chain in (row["chain1"], row["chain2"]):
             if chain not in chains:
                 chains.append(chain)
+    if not chains:
+        raise ValueError(f"upstream scored no chain pair, so binder_chain {binder_chain!r} has no partner: the structure holds fewer than two chains")
     if binder_chain not in chains:
-        raise ValueError(f"binder_chain {binder_chain!r} is not a chain of the structure (chains: {', '.join(chains) or 'none'})")
+        raise ValueError(f"binder_chain {binder_chain!r} is not a chain of the structure (chains: {', '.join(chains)})")
     targets = list(target_chains) if target_chains else [c for c in sorted(chains) if c != binder_chain]
     if not targets:
         raise ValueError(f"the structure has no chain other than binder_chain {binder_chain!r}")

@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `IPSAE` 1.1 → 1.2 - a single-chain structure is reported as having fewer than two chains, not as lacking `binder_chain` (`chains: none`).
+
 - `IPSAE` 1.0 → 1.1 - accepts structure streams advertised as `mmcif` (Boltz2 with `output_format="mmcif"`), which the format check refused.
 
 - `Panda` 1.5 → 1.6 - a numeric or boolean column that holds a blank cell (the NaN row of a failed id) stays numeric or boolean. It was read as text, so `Panda.filter("score > 0.5")` raised TypeError, `passed == True` and `cluster_tm50 == 1` silently kept no row, and `sort` ordered numbers as text.

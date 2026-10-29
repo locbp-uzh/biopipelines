@@ -2237,8 +2237,12 @@ IPSAE:
   files:
   - biopipelines/ipsae.py
   - pipe_scripts/pipe_ipsae.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-28'
+    note: >-
+      A structure with a single chain is reported as one. Upstream prints no chain pair for it, so the id was recorded as `binder_chain 'A' is not a chain of the structure (chains: none)`, which says the binder chain is absent when it is the only chain. The failure now says upstream scored no chain pair because the structure holds fewer than two chains.
   - version: '1.1'
     date: '2026-10-28'
     note: >-

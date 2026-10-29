@@ -195,8 +195,10 @@ def test_a_missing_target_chain_is_an_error(pipe):
 
 
 def test_a_structure_with_only_the_binder_chain_is_an_error(pipe):
-    with pytest.raises(ValueError, match="binder_chain 'A'"):
+    """Upstream prints no chain pair for a monomer; the message must not claim the binder chain is absent from the structure."""
+    with pytest.raises(ValueError, match="no chain pair.*fewer than two chains") as raised:
         pipe.summarize([], "A", None)
+    assert "is not a chain of the structure" not in str(raised.value)
 
 
 # ── staging and the step loop, against a stand-in for upstream ───────────────
