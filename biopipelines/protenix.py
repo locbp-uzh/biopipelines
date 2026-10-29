@@ -81,6 +81,7 @@ class Protenix(BaseConfig):
         include_pae: write the PAE matrix of every kept structure to the `pae` stream (default True).
             It makes upstream dump a full-data JSON per sample, which is large; the wrapper reads the matrix out of it and deletes the JSONs.
         no_kernels: run the triangle operations with plain PyTorch instead of the cuEquivariance kernels, for a GPU those do not support.
+        The layer norm always runs in plain PyTorch (`LAYERNORM_TYPE=torch`), because upstream's default fused layer norm is compiled at the first import and needs nvcc and CUDA_HOME, which a node with only the pip CUDA wheels lacks; export `LAYERNORM_TYPE=fast_layernorm` beforehand to compile it.
 
     Outputs:
         Streams:
@@ -97,7 +98,7 @@ class Protenix(BaseConfig):
     """
 
     TOOL_NAME = "Protenix"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "protenix"
 
     PREDICT_COMMAND = "protenix pred"
@@ -410,6 +411,8 @@ python "{self.config_py}" \\
             options.append("--trimul_kernel torch --triatt_kernel torch")
         cp = self.container_prefix()
         return f"""echo "Running Protenix prediction"
+# Upstream's default fused layer norm JIT-compiles with nvcc at the first import; the PyTorch one needs no CUDA toolkit
+export LAYERNORM_TYPE="${{LAYERNORM_TYPE:-torch}}"
 {cp}{self.PREDICT_COMMAND} {" ".join(options)}
 
 """

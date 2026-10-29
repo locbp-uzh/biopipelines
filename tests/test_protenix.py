@@ -185,6 +185,12 @@ class TestThePredictCommand:
         assert "--trimul_kernel torch --triatt_kernel torch" in text
         assert "kernel" not in _predict_section(tool(no_kernels=False))
 
+    def test_the_layer_norm_is_plain_pytorch_unless_the_user_sets_it(self, tool):
+        """Upstream's default fused layer norm JIT-compiles with nvcc at the first import and dies on a node without CUDA_HOME."""
+        text = _predict_section(tool())
+        assert 'export LAYERNORM_TYPE="${LAYERNORM_TYPE:-torch}"' in text
+        assert text.index("LAYERNORM_TYPE") < text.index("protenix pred")
+
     def test_a_container_prefix_is_applied_to_the_command_only(self, tool):
         made = tool()
         made.queries_folder, made.prediction_folder = "/q", "/out"

@@ -874,6 +874,8 @@ It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is n
 - `include_pae`: bool = True - write the PAE matrix of every kept structure to the `pae` stream. This makes upstream dump a full-data JSON per sample (`--need_atom_confidence`), which is large; the wrapper reads the matrix out of it and deletes the JSONs
 - `no_kernels`: bool = False - run the triangle operations with plain PyTorch (`--trimul_kernel torch --triatt_kernel torch`) instead of the cuEquivariance kernels, for a GPU those do not support
 
+The layer norm always runs in plain PyTorch (`LAYERNORM_TYPE=torch`, exported by the generated script): upstream's default fused layer norm is JIT-compiled at the first import and needs nvcc and `CUDA_HOME`, which an environment holding only the pip CUDA wheels lacks. An exported `LAYERNORM_TYPE=fast_layernorm` selects the compiled one again.
+
 **Streams**: `structures`, `pae`
 
 `structures` holds one `<id>.cif` per predicted complex. `pae` holds one `<id>.npz` per structure under the same ids, with the full N_token x N_token predicted aligned error under the array key `pae` (float32, Å), the layout Boltz2 writes, which `IPSAE` and other readers of a `pae` stream accept. That Protenix's token order lines up with the residues of its CIF, as Boltz2's does, rests on both tokenizing like AlphaFold3 and has not been run. Rows and columns are Protenix's tokens over all chains: one per standard residue, one per atom for ligands and modified residues. The stream's map_table lists only the ids whose matrix could be read, and it is not declared with `include_pae=False`.
