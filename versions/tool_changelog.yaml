@@ -1065,8 +1065,12 @@ LigandMPNN:
 Load:
   files:
   - biopipelines/load.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-10-29'
+    note: >-
+      A stream with no files (value-based, such as ProteinMPNN's `sequences` and `designs`) is narrowed to the ids its map_table lists, and drops the ids `missing.csv` excuses. Both were skipped for it, so a batch of a finished step cut down by hand (tables narrowed, manifest left whole) kept the producer's full id list for every such stream. A tool that declares its outputs from those ids (`AlphaFold`, `Boltz2`, `ESMFold`, `DNAEncoder`; `Pool` multiplies it by the number of runs) then declared thousands of outputs it would never write, and the completion check marked a step that folded exactly what it was given as FAILED, which stranded every step queued behind it. The new ids are the declared ids that the map lists, in declared order, so a map keyed in another id space cannot invent ids; a `[...]` id selects the map rows its pattern covers; a map that lists none of the declared ids is ignored and named; a zero-row map recovers nothing; `files` stays empty. A pending step is still not narrowed. The recovery summary now names these streams.
   - version: '1.6'
     date: '2026-10-16'
     note: >-

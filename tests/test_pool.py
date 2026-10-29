@@ -656,6 +656,53 @@ def test_keep_ids_and_recount_prefix_are_mutually_exclusive(local_config, isolat
                  keep_ids=True, recount_prefix="r")
 
 
+def _narrowed_batch(root, name, kept):
+    """A finished ProteinMPNN-shaped step cut by hand to `kept` of its 10 designs, its manifest still naming all 10 and the source folder."""
+    import csv
+    import json
+
+    folder = root / name / "003_ProteinMPNN"
+    streams = {}
+    for stream in ("sequences", "designs"):
+        table = folder / stream / f"{stream}.csv"
+        table.parent.mkdir(parents=True)
+        with open(table, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["id", "sequence"])
+            w.writerows([design, "MKTAY"] for design in kept)
+        streams[stream] = {"name": stream, "ids": ["design_<1..10>"], "files": [],
+                           "map_table": str(table), "format": "csv", "metadata": {}}
+    (folder / ".expected_outputs.json").write_text(json.dumps({
+        "tool_name": "ProteinMPNN", "tool_class": "ProteinMPNN",
+        "output_structure": {**streams, "tables": {},
+                             "output_folder": str(root / "source" / "003_ProteinMPNN")},
+    }))
+    return str(folder)
+
+
+def test_pool_over_hand_narrowed_batches_declares_the_sum_of_the_batches(
+    local_config, isolated_cwd, new_pipeline, record_case,
+):
+    """Two batches of one finished step pool to the designs they hold, not to runs x the producer's full list."""
+    from biopipelines.load import Load
+    from biopipelines.pool import Pool
+
+    designs = [f"design_{i}" for i in range(1, 11)]
+    batch_a = _narrowed_batch(isolated_cwd, "a", designs[:4])
+    batch_b = _narrowed_batch(isolated_cwd, "b", designs[4:7])
+
+    pipeline = new_pipeline("pool_narrowed_batches")
+    with pipeline:
+        pooled = Pool(runs=[Load(batch_a), Load(batch_b)])
+        pipeline.save()
+
+    expected = [f"design_{i}_1" for i in range(1, 5)] + [f"design_{i}_2" for i in range(5, 8)]
+    actual = {name: list(getattr(pooled.streams, name).ids) for name in ("sequences", "designs")}
+    record_case(input="Pool(Load(4 of 10), Load(3 of 10))",
+                expected={"sequences": expected, "designs": expected}, actual=actual)
+    assert actual == {"sequences": expected, "designs": expected}
+
+
 def test_keep_ids_runs_end_to_end_through_pipe_pool_main(tmp_path):
     """The config Pool writes carries keep_ids; main() honors it for streams and tables."""
     import json

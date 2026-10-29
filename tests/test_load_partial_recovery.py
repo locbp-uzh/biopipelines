@@ -32,7 +32,8 @@ IDS = [f"design_{i}" for i in range(1, 11)]
 # ── fixture builders ──────────────────────────────────────────────────────────
 
 def _build(tool_folder, *, declared_ids=None, produced_ids=None,
-           map_rows="all", tables=None, suffix="", marker="COMPLETED"):
+           map_rows="all", tables=None, suffix="", marker="COMPLETED",
+           table_only=None):
     """A Mock-shaped output folder.
 
     map_rows: "all" (one row per produced id) | "none" (no map_table file) |
@@ -43,6 +44,10 @@ def _build(tool_folder, *, declared_ids=None, produced_ids=None,
     Aggrescan3D and CABSflex all ship such a template.
 
     marker: the completion marker the step left, or None for one not yet run.
+
+    table_only: {stream: (declared ids, ids listed in its map_table)}, each a
+    value-based stream (``files == []``) whose map_table is ``<stream>/<stream>.csv``,
+    the shape ProteinMPNN gives its ``sequences`` and ``designs``.
     """
     declared_ids = list(IDS if declared_ids is None else declared_ids)
     produced_ids = list(declared_ids if produced_ids is None else produced_ids)
@@ -87,19 +92,33 @@ def _build(tool_folder, *, declared_ids=None, produced_ids=None,
         table_decls[name] = {"name": name, "path": path,
                              "columns": columns, "description": ""}
 
+    streams = {
+        "structures": {
+            "name": "structures",
+            "ids": declared_ids,
+            "files": [os.path.join(stream_folder, f"<id>{suffix}.pdb")],
+            "map_table": map_table_field,
+            "format": "pdb",
+            "metadata": {},
+        },
+    }
+    for name, (stream_ids, listed) in (table_only or {}).items():
+        os.makedirs(os.path.join(tool_folder, name), exist_ok=True)
+        path = os.path.join(tool_folder, name, f"{name}.csv")
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["id", "sequence"])
+            for sid in listed:
+                w.writerow([sid, "MKTAY"])
+        streams[name] = {"name": name, "ids": list(stream_ids), "files": [],
+                         "map_table": path, "format": "csv", "metadata": {}}
+
     with open(os.path.join(tool_folder, ".expected_outputs.json"), "w") as f:
         json.dump({
             "tool_name": "Mock",
             "tool_class": "Mock",
             "output_structure": {
-                "structures": {
-                    "name": "structures",
-                    "ids": declared_ids,
-                    "files": [os.path.join(stream_folder, f"<id>{suffix}.pdb")],
-                    "map_table": map_table_field,
-                    "format": "pdb",
-                    "metadata": {},
-                },
+                **streams,
                 "tables": table_decls,
                 "output_folder": tool_folder,
             },
@@ -488,6 +507,148 @@ def test_declared_table_absent_from_disk_is_named(loadable_env, tmp_path, record
     # Still declared, so a caller can see the path it was meant to be at.
     assert "scores" in out["tables"]
     assert any("scores" in line for line in loaded.recovery_summary())
+
+
+# ── value-based streams: the map_table is their only record of what exists ───
+
+SEQ_PATTERN = ["design_<1..10>"]
+
+
+def _batch(tmp_path, listed):
+    """A finished step copied out of its job folder with the sequences map narrowed by hand and the manifest left whole."""
+    import shutil
+    src = _build(str(tmp_path / "old" / "001_Mock"), marker=None,
+                 table_only={"sequences": (SEQ_PATTERN, listed)})
+    dst = str(tmp_path / "new" / "001_Mock")
+    shutil.copytree(src, dst)
+    return dst
+
+
+def test_hand_narrowed_value_stream_loads_as_the_rows_of_its_map_table(loadable_env, tmp_path, record_case):
+    """A range pattern states the design space; a stream with no files has only its map_table to say what exists.
+
+    The folder is a copy whose `sequences.csv` lists 4 of the 10 declared designs. Its sibling file stream is
+    whole, so the narrowing has to come from the value-based stream itself.
+    """
+    loaded, out = _load(_batch(tmp_path, IDS[:4]))
+    seq = out["sequences"]
+    rec = loaded.recovery["sequences"]
+
+    record_case(input="sequences declared design_<1..10>, map lists 4, files == []",
+                expected=(IDS[:4], [], (10, 4, "map_table"), 10),
+                actual=(list(seq.ids_expanded), seq.files,
+                        (rec["declared"], rec["recovered"], rec["source"]),
+                        len(out["structures"].ids_expanded)))
+    assert list(seq.ids_expanded) == IDS[:4]
+    assert seq.files == []
+    assert (rec["declared"], rec["recovered"], rec["source"]) == (10, 4, "map_table")
+    assert len(out["structures"].ids_expanded) == 10
+    assert any(line.startswith("  sequences:") and "4 of 10" in line and "6 not produced" in line
+               for line in loaded.recovery_summary())
+
+
+def test_a_completed_step_that_wrote_fewer_rows_than_it_declared_loads_narrower(loadable_env, tmp_path):
+    """The marker does not matter: a stream is what its map_table lists, as it already is for a file stream."""
+    folder = _build(str(tmp_path / "001_Mock"), table_only={"sequences": (SEQ_PATTERN, IDS[:7])})
+    loaded, out = _load(folder)
+    assert loaded.completion_status == "COMPLETED"
+    assert list(out["sequences"].ids_expanded) == IDS[:7]
+
+
+def test_a_value_stream_with_every_id_listed_keeps_them_all(loadable_env, tmp_path):
+    loaded, out = _load(_build(str(tmp_path / "001_Mock"), table_only={"sequences": (SEQ_PATTERN, IDS)}))
+    rec = loaded.recovery["sequences"]
+    assert list(out["sequences"].ids_expanded) == IDS
+    assert (rec["declared"], rec["recovered"]) == (10, 10)
+
+
+def test_value_stream_ids_follow_the_declared_order_not_the_map_order(loadable_env, tmp_path):
+    _, out = _load(_batch(tmp_path, [IDS[3], IDS[0], IDS[2]]))
+    assert list(out["sequences"].ids_expanded) == [IDS[0], IDS[2], IDS[3]]
+
+
+def test_a_map_row_outside_the_declared_ids_does_not_invent_one(loadable_env, tmp_path):
+    """Intersect, never replace: a map keyed in a wider id space adds nothing."""
+    _, out = _load(_batch(tmp_path, IDS[:2] + ["design_11", "other_1"]))
+    assert list(out["sequences"].ids_expanded) == IDS[:2]
+
+
+def test_a_map_in_another_id_space_leaves_the_declared_ids_alone(loadable_env, tmp_path, capsys):
+    """No declared id in a map that has rows means the map is not this stream's: say so, keep what was declared."""
+    loaded, out = _load(_batch(tmp_path, ["x_1", "x_2"]))
+    assert list(out["sequences"].ids_expanded) == IDS
+    assert "sequences" not in loaded.recovery
+    assert "shares no id" in capsys.readouterr().out
+
+
+def test_lazy_value_stream_is_narrowed_to_the_rows_its_pattern_covers(loadable_env, tmp_path):
+    """`chains="all"` declares `design_1[_<?>]`: the rows `design_1_A` and `design_1_B` belong to design_1, never to design_10."""
+    import shutil
+    listed = ["design_1_A", "design_1_B", "design_10_A", "other_A"]
+    src = _build(str(tmp_path / "old" / "001_Mock"), marker=None,
+                 table_only={"sequences": (["design_<1..10>[_<?>]"], listed)})
+    dst = str(tmp_path / "new" / "001_Mock")
+    shutil.copytree(src, dst)
+
+    loaded, out = _load(dst)
+
+    assert list(out["sequences"].ids) == ["design_1_A", "design_1_B", "design_10_A"]
+    assert loaded.recovery["sequences"]["recovered"] == 3
+
+
+def test_ids_in_missing_csv_leave_a_value_stream_as_they_leave_a_file_stream(loadable_env, tmp_path, record_case):
+    """Parity with `test_populated_missing_csv_excuses_its_ids`: the map lists all 10 yet two ids were recorded as lost."""
+    folder = _build(
+        str(tmp_path / "001_Mock"), produced_ids=IDS[:8], map_rows="all",
+        tables={"scores": [[sid, "1.0"] for sid in IDS[:8]],
+                "missing": [[sid, "001_Mock", "failure", "mock"] for sid in IDS[8:]]},
+        table_only={"sequences": (SEQ_PATTERN, IDS)},
+    )
+
+    loaded, out = _load(folder)
+
+    record_case(input="sequences map lists 10, missing.csv lists design_9/10",
+                expected=(IDS[:8], IDS[:8], 8),
+                actual=(list(out["structures"].ids_expanded), list(out["sequences"].ids_expanded),
+                        loaded.recovery["sequences"]["recovered"]))
+    assert list(out["structures"].ids_expanded) == IDS[:8]
+    assert list(out["sequences"].ids_expanded) == IDS[:8]
+    assert loaded.recovery["sequences"]["recovered"] == 8
+
+
+def test_a_zero_row_map_recovers_nothing_for_a_value_stream(loadable_env, tmp_path, record_case):
+    """A step that wrote no row produced nothing; it must not read as a stream that kept its declared ids."""
+    loaded, out = _load(_batch(tmp_path, []))
+    rec = loaded.recovery["sequences"]
+
+    record_case(input="sequences.csv header-only", expected=([], 10, 0),
+                actual=(list(out["sequences"].ids_expanded), rec["declared"], rec["recovered"]))
+    assert list(out["sequences"].ids_expanded) == []
+    assert (rec["declared"], rec["recovered"]) == (10, 0)
+    assert any("0 of 10" in line for line in loaded.recovery_summary())
+    assert not loaded.recovered_nothing  # structures still hold their 10
+
+
+def test_every_stream_empty_reads_as_recovered_nothing_with_a_value_stream_present(loadable_env, tmp_path):
+    folder = _build(str(tmp_path / "001_Mock"), produced_ids=[], map_rows="empty",
+                    table_only={"sequences": (SEQ_PATTERN, [])})
+    loaded, out = _load(folder)
+    assert loaded.recovered_nothing is True
+    assert list(out["sequences"].ids_expanded) == []
+
+
+def test_a_running_value_stream_is_not_narrowed_to_what_it_has_written_so_far(loadable_env, tmp_path):
+    folder = _build(str(tmp_path / "001_Mock"), produced_ids=IDS[:3], marker=None,
+                    table_only={"sequences": (SEQ_PATTERN, IDS[:3])})
+    loaded, out = _load(folder)
+    assert loaded.pending
+    assert list(out["sequences"].ids) == SEQ_PATTERN
+    assert "sequences" not in loaded.recovery
+
+
+def test_validate_files_false_leaves_a_value_stream_as_declared(loadable_env, tmp_path):
+    _, out = _load(_batch(tmp_path, IDS[:4]), validate_files=False)
+    assert list(out["sequences"].ids) == SEQ_PATTERN
 
 
 # ── the guarantee, across every shape ─────────────────────────────────────────

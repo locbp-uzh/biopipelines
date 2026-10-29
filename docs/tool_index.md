@@ -101,7 +101,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 89 | MSA                       | MSAs                           | 1.4 | `biopipelines/msa.py` |
 | 90 | CompoundLibrary           | Inputs & I/O                   | 1.0 | `biopipelines/compound_library.py` |
 | 91 | Ligand                    | Inputs & I/O                   | 1.5 | `biopipelines/ligand.py` |
-| 92 | Load | Inputs & I/O                   | 1.6 | `biopipelines/load.py` |
+| 92 | Load | Inputs & I/O                   | 1.7 | `biopipelines/load.py` |
 | 93 | PDB | Inputs & I/O                   | 1.6 | `biopipelines/pdb.py` |
 | 94 | Plot                      | Inputs & I/O                   | 1.0 | `biopipelines/plot.py` |
 | 95 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |

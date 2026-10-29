@@ -109,6 +109,12 @@ class Load(BaseConfig):
     recovered and what it could not through ``recovery``, ``recovery_summary()``
     and ``recovered_nothing``.
 
+    With ``validate_files=True`` every stream is cut down to what its map_table lists, so a folder narrowed by hand (map_tables cut, manifest left whole) loads as the narrowed set.
+    A stream with files resolves to the paths its map_table lists.
+    A stream without files (value-based, such as ProteinMPNN's ``sequences`` and ``designs``) keeps the declared ids its map_table lists, in declared order, and never gains an id the declaration does not name.
+    A map_table that lists none of a stream's declared ids belongs to another id space and is ignored, and one with zero rows means the step produced nothing.
+    Tools that declare their outputs from an input stream's ids (AlphaFold, Boltz2, ESMFold, DNAEncoder, Pool) therefore declare only what the batch holds.
+
     A folder with no completion marker at its original path is ``pending``: the
     step is queued or still running. Its declared ids and templates are passed
     downstream as-is and resolved against the map_table at execution time, so a
@@ -118,7 +124,7 @@ class Load(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Load"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -135,7 +141,8 @@ echo "=== Load ready ==="
         Args:
             path: Path to the tool's output folder (containing .expected_outputs.json)
             filter: Optional filter result (ToolOutput from Filter tool) to only load specific IDs
-            validate_files: Whether to validate that all referenced files exist
+            validate_files: Resolve every stream against its map_table, narrowing its ids to the rows the map lists (a stream with no files included), and check that the referenced files exist.
+                With False the ids propagate as declared.
             **kwargs: Additional parameters for BaseConfig
 
         Output:
@@ -610,11 +617,64 @@ echo "=== Load ready ==="
         print(f"Load: {stream_name} — {len(map_ids)} ids from map_table{note}")
         return reconciled
 
+    def _reconcile_value_stream(self, stream_name: str,
+                                ds_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Narrow a value-based stream (``files == []``) to the rows of its map_table.
+
+        Such a stream has no file to stat, so its map_table is the only record of what it holds, and a folder cut down by hand (map_table narrowed, manifest left whole) carries the cut there and nowhere else.
+        The new ids are the declared ids, expanded, that the map_table lists, in declared order: the declared ids are intersected with the map, never replaced by it, so a map row the declaration does not cover adds nothing.
+        A ``[...]`` id cannot be expanded, so it selects the map rows its pattern covers instead, in map order.
+        ``files`` stays empty, since a ``file`` column in the map names a source and not this stream's artifact.
+
+        Returns None, leaving the declared ids as they are, when there is no readable map_table and when the map has rows but lists none of the declared ids.
+        A map keyed in another id space says nothing about this stream, so it is named and ignored rather than allowed to empty it.
+        A readable map with zero rows is an answer, not a mismatch: the stream recovers nothing.
+        """
+        rows = self._read_map_table(ds_dict)
+        if rows is None:
+            return None
+
+        declared_ids = ds_dict['ids']
+        map_ids = [str(i) for i in rows['id'].tolist()]
+        try:
+            declared = DataStream.from_dict(ds_dict).ids_expanded
+        except Exception:
+            declared = list(declared_ids)
+
+        if any(id_patterns.is_lazy(i) for i in declared_ids):
+            # Selection tries every pattern against every row and get_output_files() runs several times per configuration.
+            memo = self.__dict__.setdefault('_lazy_selection', {})
+            key = (tuple(declared_ids), tuple(map_ids))
+            if key not in memo:
+                memo[key] = id_patterns.select_ids(declared_ids, map_ids, where=str(ds_dict.get('map_table')))
+            kept = memo[key]
+        else:
+            listed = set(map_ids)
+            kept = [i for i in declared if i in listed]
+        kept = list(dict.fromkeys(kept))
+
+        if map_ids and not kept:
+            self._warn_once(f"id_space:{stream_name}",
+                            f"Warning: Load: the map_table of '{stream_name}' shares no id with "
+                            f"the declared ids ({ds_dict.get('map_table')}); keeping the declared ids")
+            return None
+
+        self._record_recovery(stream_name, declared=len(declared), recovered=len(kept),
+                              source='map_table')
+        note = ""
+        if len(declared) != len(kept):
+            note = f" (declared {len(declared)} — {len(declared) - len(kept)} not produced)"
+        print(f"Load: {stream_name} — {len(kept)} ids from map_table{note}")
+        return {**ds_dict, 'ids': kept}
+
     def _resolve_file_paths(self, output_structure: Dict[str, Any]) -> Dict[str, Any]:
         """
         Resolve glob patterns and match IDs to actual file paths.
 
         Called at configuration time when validate_files=True.
+
+        A stream with files is resolved to the paths its map_table lists.
+        A stream without files (value-based, such as ProteinMPNN's ``sequences``) is narrowed to the ids its map_table lists, see ``_reconcile_value_stream``.
 
         Args:
             output_structure: The output structure to resolve
@@ -634,7 +694,13 @@ echo "=== Load ready ==="
             files = ds_dict.get('files', [])
             ids = ds_dict.get('ids', [])
 
-            if not files or not ids:
+            if not ids:
+                continue
+
+            if not files:
+                reconciled = self._reconcile_value_stream(file_type, ds_dict)
+                if reconciled is not None:
+                    resolved[file_type] = reconciled
                 continue
 
             # The map_table is the record of what the producer actually wrote —
@@ -1032,6 +1098,19 @@ echo "=== Load ready ==="
                 continue
             ids = ds_dict.get('ids', [])
             files = ds_dict.get('files', [])
+            if not files:
+                # A [...] id has no expansion to compare against the excused ids.
+                try:
+                    expanded, complete = id_patterns.try_expand_ids(ids)
+                except ValueError:
+                    continue
+                kept = [i for i in expanded if i not in missing_ids]
+                if complete and len(kept) < len(expanded):
+                    output_structure[stream_name] = {**ds_dict, 'ids': kept}
+                    if stream_name in self.recovery:
+                        self.recovery[stream_name]['recovered'] = len(kept)
+                    print(f"  - Filtered {stream_name}: {len(kept)}/{len(expanded)} kept")
+                continue
             if len(files) == len(ids):
                 filtered_files = []
                 filtered_ids = []
