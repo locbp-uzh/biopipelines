@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `Panda` 1.6 → 1.7 - a pooled stream keyed more coarsely than the table (BioEmu2's one trajectory per run, filtered through its per-conformer `physicality` table) is copied once per row it has, under its own id. It was copied once per surviving conformer under the conformer's name, so the declared `<run>.xtc` was never written and the step was marked FAILED. A run whose every conformer the filter removed is recorded in `missing`. Files sharing one source are stored once, the other names linking to it.
+
 - `node_embeddings` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-residue embedding of each id, one `.npy` of shape (residues, dimension), emitted by `Embedding`.
 
 - `IPSAE` 1.1 → 1.2 - a single-chain structure is reported as having fewer than two chains, not as lacking `binder_chain` (`chains: none`).

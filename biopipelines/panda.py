@@ -98,7 +98,7 @@ class Panda(BaseConfig):
     """
 
     TOOL_NAME = "Panda"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
 
     # Internal column name used to track which input table a row came from
     # when concat runs over multiple inputs. Auto-added before the operation
@@ -575,6 +575,7 @@ echo "=== Panda ready ==="
                   When using multiple pools with concat in the operation chain,
                   files are copied from the pool corresponding to each row's
                   origin (tracked implicitly via Panda.SOURCE).
+                  A stream keyed more coarsely than the table (a trajectory per run, a table of conformers) keeps its own ids and is copied once per row it has.
             rename: If provided, output IDs will be renamed to {rename}_1, {rename}_2, etc.
                     Useful after sorting to get ranked IDs (e.g., rename="best" -> best_1, best_2, ...)
             ignore_missing: If True (default), skip missing pool files with a warning instead

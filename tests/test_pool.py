@@ -742,3 +742,68 @@ def test_keep_ids_runs_end_to_end_through_pipe_pool_main(tmp_path):
     assert list(df["id"]) == ["a", "b", "c"]
     assert list(df["original.id"]) == ["a", "b", "c"]
     assert list(df["pool.path"]) == [1, 1, 2]
+
+
+def test_pool_over_rows_sharing_one_file_names_every_id_without_copying_per_row(tmp_path):
+    """Several ids of one run point at the same file; each pooled id still gets its own name, and the bytes are not repeated.
+
+    Panda used to write one copy per id for this shape and miss the file the stream declared; Pool reads each
+    row's own `file` and links it, so it was never affected. This pins that.
+    """
+    import json
+    import sys
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    cols = ["id", "file", "topology"]
+    maps = []
+    for i in (1, 2):
+        d = tmp_path / f"run{i}" / "trajectories"
+        d.mkdir(parents=True)
+        shared, own = d / "shared.xtc", d / "own.xtc"
+        shared.write_bytes(b"shared")
+        own.write_bytes(b"own")
+        csv = d / "trajectories_map.csv"
+        pd.DataFrame([
+            {"id": "a", "file": str(shared), "topology": "t.cif"},
+            {"id": "b", "file": str(shared), "topology": "t.cif"},
+            {"id": "c", "file": str(own), "topology": "t.cif"},
+        ], columns=cols).to_csv(csv, index=False)
+        maps.append(str(csv))
+
+    out = tmp_path / "out" / "trajectories"
+    out.mkdir(parents=True)
+    combined = str(out / "trajectories_map.csv")
+    config = {
+        "runs": [{"streams": [{"name": "trajectories", "stream_key": "trajectories", "format": "xtc",
+                               "ids": ["a", "b", "c"],
+                               "files": [str(tmp_path / f"run{i + 1}" / "trajectories" / "<id>.xtc")],
+                               "map_table": maps[i], "is_shared_file": False}],
+                  "tables": []} for i in range(2)],
+        "shared_streams": ["trajectories"], "shared_tables": [],
+        "out_streams": {"trajectories": {"stream_dir": str(out), "map_table": combined, "format": "xtc"}},
+        "out_tables": {}, "content_bearing_streams": [], "content_file_cols": {},
+        "output_folder": str(tmp_path / "out"), "recount_prefix": None,
+    }
+    config_json = tmp_path / "pool_config.json"
+    config_json.write_text(json.dumps(config))
+
+    sys.argv = ["pipe_pool.py", str(config_json)]
+    pipe_pool.main()
+
+    df = pd.read_csv(combined)
+    assert list(df["id"]) == ["a_1", "b_1", "c_1", "a_2", "b_2", "c_2"]
+    expected = [b"shared", b"shared", b"own"] * 2
+    for path, content in zip(df["file"], expected):
+        assert os.path.exists(path), path
+        with open(path, "rb") as handle:
+            assert handle.read() == content
+    assert list(df["topology"]) == ["t.cif"] * 6, "the extra columns of the upstream rows are carried"
+
+    probe = tmp_path / "probe"
+    try:
+        os.symlink(str(tmp_path / "run1"), str(probe))
+    except (OSError, NotImplementedError):
+        return
+    assert len({(os.stat(p).st_dev, os.stat(p).st_ino) for p in df["file"]}) == 4, (
+        "two runs of a shared and an own file are four files, not six")

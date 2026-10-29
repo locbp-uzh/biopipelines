@@ -1414,8 +1414,12 @@ Panda:
   files:
   - biopipelines/panda.py
   - pipe_scripts/pipe_panda.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-10-29'
+    note: >-
+      A pooled stream keyed more coarsely than the table is copied once per row it has, under the id it declares. Panda over a BioEmu2 step filtered the per-conformer `physicality` table, and the matcher resolved every surviving conformer to its run's single trajectory: the whole `.xtc` was copied once per conformer, named for the conformer, so the `<run>.xtc` the stream declares was never written and the step was marked FAILED. Without a rename a file now takes the stream's own id and several ids on one row share it; with a rename every new id still gets a name for it, linked to the first copy (relative symlink, else hard link, else a copy) so the per-id template the completion check expands holds. A stream row whose every table id the filter removed is recorded in missing.csv as a filter row, since no id the table lists names it. The stream map_table has one row per row the stream has, not one per table id.
   - version: '1.6'
     date: '2026-10-28'
     note: >-

@@ -695,6 +695,79 @@ def build_shared_streams_from_stream_jsons(stream_jsons: Dict[str, str]) -> Dict
     return shared
 
 
+def match_stream_id(lookup_id: str, id_to_file: Dict[str, str]) -> Optional[str]:
+    """The id a pooled stream declares for ``lookup_id``: the id itself, else the id matcher's answer."""
+    if lookup_id in id_to_file:
+        return lookup_id
+    matched = get_mapped_ids([lookup_id], list(id_to_file.keys()), unique=True).get(lookup_id)
+    return matched if matched and matched in id_to_file else None
+
+
+def link_to_staged_copy(first_dest: str, dest: str) -> None:
+    """Make ``dest`` another name for a copy already staged: relative symlink, else hard link, else a copy."""
+    if os.path.lexists(dest):
+        os.remove(dest)
+    try:
+        os.symlink(os.path.relpath(first_dest, os.path.dirname(dest)), dest)
+    except (OSError, NotImplementedError):
+        try:
+            os.link(first_dest, dest)
+        except OSError:
+            shutil.copy2(first_dest, dest)
+
+
+def stage_pool_file(stream_name: str, source: str, dest: str,
+                    staged: Dict[Tuple[str, str], str]) -> None:
+    """Copy ``source`` to ``dest``, once per distinct source file: a later id sharing it links to the first copy."""
+    key = (stream_name, os.path.realpath(source))
+    first_dest = staged.get(key)
+    if first_dest is None:
+        # A name an earlier run left as a link would otherwise be written through to what it shares.
+        if os.path.lexists(dest):
+            os.remove(dest)
+        shutil.copy2(source, dest)
+        staged[key] = dest
+    elif first_dest != dest:
+        link_to_staged_copy(first_dest, dest)
+
+
+def lost_stream_ids(original_ids: List[str], kept_ids: List[str],
+                    id_to_file: Dict[str, str]) -> List[str]:
+    """Stream ids that table ids resolve to but only dropped ones do: a coarser stream's rows the filter emptied.
+
+    A stream id that is itself a table id is already in the missing table through the ordinary route.
+    """
+    original = {str(i) for i in original_ids}
+    kept = {str(i) for i in kept_ids}
+
+    def resolved(ids):
+        found = set()
+        for i in ids:
+            matched = match_stream_id(i, id_to_file)
+            if matched is not None:
+                found.add(matched)
+        return found
+
+    return sorted(resolved(original - kept) - resolved(kept) - original)
+
+
+def lost_stream_rows(original_ids: List[List[str]], kept_ids: List[List[str]],
+                     file_maps: List[Dict[str, Dict[str, str]]],
+                     step_tool_name: str) -> List[Dict[str, str]]:
+    """Missing-table rows for the coarser stream rows (one list per pool) whose every table id was filtered."""
+    rows: List[Dict[str, str]] = []
+    seen = set()
+    for pool_idx, streams in enumerate(file_maps):
+        for stream_name, id_to_file in streams.items():
+            for stream_id in lost_stream_ids(original_ids[pool_idx], kept_ids[pool_idx], id_to_file):
+                if stream_id in seen:
+                    continue
+                seen.add(stream_id)
+                rows.append({'id': stream_id, 'removed_by': step_tool_name, 'kind': 'filter',
+                             'cause': f"Every id that resolves to this {stream_name} row was removed by this step"})
+    return rows
+
+
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
                                         output_folder: str,
                                         rename_map: Optional[Dict[str, str]] = None,
@@ -762,22 +835,19 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
     if file_map:
         # Use file map - iterate over all streams dynamically
         print(f"Using file map for direct lookup (streams: {list(file_map.keys())})")
+        staged: Dict[Tuple[str, str], str] = {}
 
         for stream_name, id_to_file in file_map.items():
             extracted_files[stream_name] = []
+            written = set()
+            dest_folder = (stream_folders or {}).get(stream_name, output_folder)
 
             for selected_id in filtered_ids:
-                if selected_id not in id_to_file:
-                    # Fallback: use ID matching to find the file
-                    match = get_mapped_ids([selected_id], list(id_to_file.keys()), unique=True)
-                    matched_id = match.get(selected_id)
-                    if not matched_id or matched_id not in id_to_file:
-                        continue
-                    selected_id_lookup = matched_id
-                else:
-                    selected_id_lookup = selected_id
+                matched_id = match_stream_id(selected_id, id_to_file)
+                if matched_id is None:
+                    continue
 
-                source = id_to_file[selected_id_lookup]
+                source = id_to_file[matched_id]
 
                 if not os.path.exists(source):
                     if ignore_missing:
@@ -789,12 +859,15 @@ def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str
                             f"Use ignore_missing=True to skip missing files."
                         )
 
-                output_id = rename_map.get(str(selected_id), selected_id) if rename_map else selected_id
+                # Without a rename the file takes the stream's own id, so ids on one coarser row share it.
+                output_id = rename_map.get(str(selected_id), selected_id) if rename_map else matched_id
                 ext = os.path.splitext(source)[1]
-                dest_folder = (stream_folders or {}).get(stream_name, output_folder)
                 dest = os.path.join(dest_folder, f"{output_id}{ext}")
+                if dest in written:
+                    continue
 
-                shutil.copy2(source, dest)
+                stage_pool_file(stream_name, source, dest, staged)
+                written.add(dest)
                 extracted_files[stream_name].append(dest)
                 print(f"Extracted {stream_name}: {source} -> {dest}")
     elif not shared_map:
@@ -913,6 +986,8 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
     if not file_maps:
         return extracted_files
 
+    staged: Dict[Tuple[str, str], str] = {}
+    written = set()
     for _, row in result_df.iterrows():
         # Use original_id for lookup if available (when rename was applied),
         # otherwise use id column
@@ -933,17 +1008,11 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
 
         # Extract from all streams in this pool's file map
         for stream_name, id_to_file in file_map.items():
-            if lookup_id not in id_to_file:
-                # Fallback: use ID matching to find the file
-                match = get_mapped_ids([lookup_id], list(id_to_file.keys()), unique=True)
-                matched_id = match.get(lookup_id)
-                if not matched_id or matched_id not in id_to_file:
-                    continue
-                actual_lookup_id = matched_id
-            else:
-                actual_lookup_id = lookup_id
+            matched_id = match_stream_id(lookup_id, id_to_file)
+            if matched_id is None:
+                continue
 
-            source = id_to_file[actual_lookup_id]
+            source = id_to_file[matched_id]
 
             if not os.path.exists(source):
                 if ignore_missing:
@@ -955,11 +1024,16 @@ def extract_from_multiple_pools(result_df: pd.DataFrame, pool_folders: List[str]
                         f"Use ignore_missing=True to skip missing files."
                     )
 
+            # Without a rename the file takes the stream's own id, so ids on one coarser row share it.
+            stream_id = output_id if rename_map else matched_id
             ext = os.path.splitext(source)[1]
             dest_folder = (stream_folders or {}).get(stream_name, output_folder)
-            dest = os.path.join(dest_folder, f"{output_id}{ext}")
+            dest = os.path.join(dest_folder, f"{stream_id}{ext}")
+            if (stream_name, dest) in written:
+                continue
 
-            shutil.copy2(source, dest)
+            stage_pool_file(stream_name, source, dest, staged)
+            written.add((stream_name, dest))
             extracted_files[stream_name].append(dest)
             print(f"Extracted {stream_name} from pool {source_idx}: {lookup_id} -> {dest}")
 
@@ -1118,7 +1192,8 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
                        removed_by_op: Optional[Dict[str, str]] = None,
                        missing_csv_path: Optional[str] = None,
                        declared_output_ids: Optional[List[str]] = None,
-                       produced_count: int = 0) -> None:
+                       produced_count: int = 0,
+                       extra_rows: Optional[List[Dict[str, str]]] = None) -> None:
     """
     Create missing.csv with IDs that were filtered out or renamed.
 
@@ -1132,6 +1207,7 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
         removed_by_op: Optional per-ID cause mapping from execution tracking
         declared_output_ids: The ids this step declared at configuration time
         produced_count: How many of them a surviving row actually filled
+        extra_rows: Ready-made missing rows, e.g. coarser stream rows the filter emptied
     """
     all_ids = set(str(i) for i in original_ids)
     passed_ids = set(str(i) for i in filtered_ids)
@@ -1156,6 +1232,7 @@ def create_missing_csv(original_ids: List[str], filtered_ids: List[str],
 
     missing_data.extend(unfilled_slot_rows(declared_output_ids or [], produced_count,
                                            step_tool_name, operations))
+    missing_data.extend(extra_rows or [])
 
     if missing_data:
         missing_df = pd.DataFrame(missing_data)
@@ -1378,6 +1455,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     # Load input dataframes
     dataframes = []
     original_ids = []
+    original_ids_by_table = []
 
     for csv_path in input_csvs:
         if not os.path.exists(csv_path):
@@ -1392,6 +1470,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
         # Collect original IDs for missing.csv
         if 'id' in df.columns:
             original_ids.extend(df['id'].tolist())
+        original_ids_by_table.append(df['id'].astype(str).tolist() if 'id' in df.columns else [])
 
     if not dataframes:
         raise ValueError("No valid input dataframes found")
@@ -1653,6 +1732,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                 else:
                     # (b) No content table — write a provenance-only map_table.
                     rows_out = []
+                    seen_rows = set()
                     has_source_table = PANDA_SOURCE in result_df.columns
                     for _, r in result_df.iterrows():
                         out_id = str(r['id'])
@@ -1661,10 +1741,20 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                             str(r['original_id']) if has_original else out_id
                         )
                         source_idx = int(r.get(PANDA_SOURCE, 0)) if has_source_table else 0
-                        file_val = (file_template.replace('<id>', out_id)
+                        # A stream coarser than the table keeps its own ids: one row per row it has, as extracted.
+                        if not rename and source_idx < len(pool_file_maps):
+                            stream_files = pool_file_maps[source_idx].get(stream_name)
+                            row_id = (match_stream_id(lookup_id, stream_files)
+                                      if stream_files else None) or out_id
+                        else:
+                            row_id = out_id
+                        if row_id in seen_rows:
+                            continue
+                        seen_rows.add(row_id)
+                        file_val = (file_template.replace('<id>', row_id)
                                     if '<id>' in file_template else file_template)
                         row = {
-                            'id': out_id,
+                            'id': row_id,
                             'file': file_val,
                         }
                         row.update(load_upstream_provenance_row(
@@ -1714,13 +1804,30 @@ def run_panda(config_data: Dict[str, Any]) -> None:
     if original_ids or declared_output_ids:
         output_dir = os.path.dirname(output_csv)
         step_tool_name = config_data.get('step_tool_name') or os.path.basename(output_dir)
+        lost_rows = []
+        if use_pool_mode and not rename and pool_file_maps:
+            multi = len(pool_file_maps) > 1 and PANDA_SOURCE in result_df.columns
+            pools = range(len(pool_file_maps)) if multi else range(1)
+            per_table = len(original_ids_by_table) == len(pool_file_maps)
+            kept_by_pool = []
+            for pool_idx in pools:
+                if multi:
+                    in_pool = result_df[PANDA_SOURCE].astype(int) == pool_idx
+                    id_column = 'original_id' if 'original_id' in result_df.columns else 'id'
+                    kept_by_pool.append(result_df.loc[in_pool, id_column].astype(str).tolist())
+                else:
+                    kept_by_pool.append(filtered_ids_for_lookup)
+            lost_rows = lost_stream_rows(
+                [original_ids_by_table[i] if per_table else original_ids for i in pools],
+                kept_by_pool, [pool_file_maps[i] for i in pools], step_tool_name)
         create_missing_csv(original_ids, filtered_ids_for_lookup, output_dir,
                            step_tool_name, operations,
                            rename_map=original_to_new_id if original_to_new_id else None,
                            removed_by_op=removed_by_op,
                            missing_csv_path=missing_csv_path,
                            declared_output_ids=declared_output_ids,
-                           produced_count=len(filtered_ids))
+                           produced_count=len(filtered_ids),
+                           extra_rows=lost_rows)
 
     # Merge upstream missing tables (from pool sources)
     upstream_missing_paths = config_data.get('upstream_missing_paths', [])

@@ -77,7 +77,7 @@ Unified pandas-style table transformations. Replaces Filter, Rank, SelectBest, M
 | `melt(id_vars)` | `Panda.melt(id_vars="id")` |
 | `average_by_source()` | `Panda.average_by_source()` |
 
-**Streams** (pool mode): `structures`, `sequences`, `compounds` (matching filtered IDs)
+**Streams** (pool mode): `structures`, `sequences`, `compounds` (matching filtered IDs). A stream keyed more coarsely than the table (one trajectory per run, a table of conformers) keeps its own ids and its file is copied once, not once per surviving id; with `rename` every new id still gets a name for it, linked to that one copy. A run whose every conformer the filter removed is recorded in `missing` as a filter row.
 
 **Tables**:
 - `result` — the transformed table. Its columns are whatever the operation chain leaves, so they are known only once the inputs are.
