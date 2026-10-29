@@ -13,6 +13,7 @@ RosettaCommons Chaperone framework.
 Reference: van Kempen et al., Nature Biotechnology, doi:10.1038/s41587-023-01773-0. https://github.com/steineggerlab/foldseek
 """
 
+import math
 import os
 from typing import Dict, List, Any, Optional, Union
 
@@ -31,6 +32,10 @@ except ImportError:
 DEFAULT_TM_THRESHOLDS = (0.5, 0.6, 0.7, 0.8)
 # Foldseek --alignment-type: 1 is TM-align, 2 is the 3Di+AA local alignment.
 ALIGNMENT_TYPES = (1, 2)
+# Foldseek --cov-mode: 0 query and target, 1 target, 2 query, 3-5 length-ratio modes.
+COV_MODES = (0, 1, 2, 3, 4, 5)
+# Foldseek-Multimer applies the complex TM-score filter in modes 0, 1 and 2 only.
+MULTIMER_COV_MODES = (0, 1, 2)
 DEFAULT_MULTIMER_TM_THRESHOLD = 0.65
 DEFAULT_INTERFACE_LDDT_THRESHOLD = 0.65
 
@@ -57,12 +62,15 @@ class Foldseek(BaseConfig):
     which families to look at; reach for Foldseek to report diversity at
     published TM-score cutoffs.
 
-    TM-SCORE THRESHOLD (read this before comparing counts across studies)
+    TM-SCORE THRESHOLD AND COVERAGE (read this before comparing counts across studies)
     Foldseek keeps an alignment when its TM-score exceeds the threshold
-    (`--tmscore-threshold`). Foldseek's default normalizes that TM-score by the
-    aligned region, and no coverage requirement is set, so a short well-aligned
-    segment can join two structures. Counts therefore tend to understate
-    diversity.
+    (`--tmscore-threshold`), normalized by the aligned region by default, and
+    when it passes the E-value and coverage filters. Left unset, `evalue` and
+    `coverage` are not passed and Foldseek applies its own defaults, which differ
+    by mode (read from its source): single-chain easy-cluster uses `-e 0.01` and
+    `-c 0.8` with cov-mode 0 (the alignment must cover 80% of both structures);
+    easy-multimercluster uses `-e 10` and `-c 0.0`, no coverage requirement.
+    Counts shift with these filters, so state them when you compare studies.
 
     MULTIMER MODE
     With `multimer=True` the structures are clustered as complexes with
@@ -84,6 +92,19 @@ class Foldseek(BaseConfig):
             alignment followed by the TM-score filter (default 1).
         min_seq_id: Foldseek `--min-seq-id`, the minimum sequence identity to
             cluster (default 0.0, no requirement). Single-chain mode only.
+        evalue: Foldseek `-e`, the E-value above which an alignment is dropped
+            (default None: not passed, Foldseek's own default applies). Must be
+            positive.
+        coverage: Foldseek `-c`, the fraction of residues the alignment must
+            cover, read through `cov_mode` (default None: not passed, Foldseek's
+            own default applies). In [0, 1]; 0 switches the requirement off.
+        cov_mode: Foldseek `--cov-mode` (default 0, as always passed). 0
+            coverage of query and target, 1 coverage of target, 2 coverage of
+            query, 3 target length at least `coverage` of query length, 4 query
+            length at least `coverage` of target length, 5 the shorter sequence
+            at least `coverage` of the other length. With `multimer=True` it also
+            picks which complex TM-score must pass `multimer_tm_threshold` (0
+            both, 1 target, 2 query), and only 0, 1 and 2 are allowed.
         multimer_tm_threshold: Foldseek `--multimer-tm-threshold` (default 0.65
             when `multimer=True`). Multimer mode only.
         interface_lddt_threshold: Foldseek `--interface-lddt-threshold` (default
@@ -113,13 +134,16 @@ class Foldseek(BaseConfig):
                      operations=[Panda.filter("id == representative_tm50")],
                      pool=folds)
 
+        # stricter filters: 90% coverage of both structures, E-value 1e-3
+        strict = Foldseek(structures=folds, evalue=1e-3, coverage=0.9, cov_mode=0)
+
     See Also:
         StructureCluster: distance-matrix triage clustering with per-family
             ranking, no external binary.
     """
 
     TOOL_NAME = "Foldseek"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
     ENV_NAME = "foldseek"
 
     @classmethod
@@ -163,6 +187,9 @@ fi
                  multimer: bool = False,
                  alignment_type: int = 1,
                  min_seq_id: float = 0.0,
+                 evalue: Optional[float] = None,
+                 coverage: Optional[float] = None,
+                 cov_mode: int = 0,
                  multimer_tm_threshold: Optional[float] = None,
                  interface_lddt_threshold: Optional[float] = None,
                  threads: int = 1,
@@ -179,6 +206,9 @@ fi
         self.multimer = bool(multimer)
         self.alignment_type = int(alignment_type)
         self.min_seq_id = float(min_seq_id)
+        self.evalue = None if evalue is None else float(evalue)
+        self.coverage = None if coverage is None else float(coverage)
+        self.cov_mode = int(cov_mode)
         self.multimer_tm_threshold = multimer_tm_threshold
         self.interface_lddt_threshold = interface_lddt_threshold
         if self.multimer:
@@ -206,9 +236,19 @@ fi
                 f"got {self.alignment_type}")
         if not 0.0 <= self.min_seq_id <= 1.0:
             raise ValueError(f"min_seq_id must lie in [0, 1], got {self.min_seq_id}")
+        if self.evalue is not None and not (0.0 < self.evalue < math.inf):
+            raise ValueError(f"evalue must be a positive number, got {self.evalue}")
+        if self.coverage is not None and not 0.0 <= self.coverage <= 1.0:
+            raise ValueError(f"coverage must lie in [0, 1], got {self.coverage}")
+        if self.cov_mode not in COV_MODES:
+            raise ValueError(f"cov_mode must be one of {COV_MODES}, got {self.cov_mode}")
         if self.threads < 1:
             raise ValueError("threads must be at least 1")
         if self.multimer:
+            if self.cov_mode not in MULTIMER_COV_MODES:
+                raise ValueError(
+                    f"cov_mode must be one of {MULTIMER_COV_MODES} with multimer=True "
+                    f"(Foldseek-Multimer applies multimer_tm_threshold in those modes only), got {self.cov_mode}")
             if self.min_seq_id > 0.0:
                 raise ValueError("min_seq_id applies to single-chain clustering only (multimer=False)")
             for name in ("multimer_tm_threshold", "interface_lddt_threshold"):
@@ -226,6 +266,8 @@ fi
         lines.append(f"TM THRESHOLDS: {', '.join(str(t) for t in self.tm_thresholds)}")
         lines.append(f"CLUSTERING: {'complexes (easy-multimercluster)' if self.multimer else 'single chains (easy-cluster)'}")
         lines.append(f"ALIGNMENT TYPE: {self.alignment_type}")
+        lines.append(f"E-VALUE: {'Foldseek default' if self.evalue is None else self.evalue}")
+        lines.append(f"COVERAGE: {'Foldseek default' if self.coverage is None else self.coverage} (cov-mode {self.cov_mode})")
         lines.append(f"THREADS: {self.threads}")
         return lines
 
@@ -260,6 +302,9 @@ python "{self.helper_py}" \\
                 "multimer": self.multimer,
                 "alignment_type": self.alignment_type,
                 "min_seq_id": self.min_seq_id,
+                "evalue": self.evalue,
+                "coverage": self.coverage,
+                "cov_mode": self.cov_mode,
                 "multimer_tm_threshold": self.multimer_tm_threshold,
                 "interface_lddt_threshold": self.interface_lddt_threshold,
                 "threads": self.threads,

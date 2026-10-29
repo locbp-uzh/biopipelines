@@ -46,8 +46,13 @@ def stage_structures(files: List[Tuple[str, str]], stage_dir: str) -> Dict[int, 
 
 def build_command(stage_dir: str, prefix: str, tmp_dir: str, tm: float, cfg: dict, container_prefix: str = "") -> List[str]:
     """The Foldseek argv for one threshold."""
-    common = ["--alignment-type", str(cfg["alignment_type"]), "--cov-mode", "0",
-              "--threads", str(cfg["threads"])]
+    common = ["--alignment-type", str(cfg["alignment_type"]),
+              "--cov-mode", str(cfg.get("cov_mode", 0)), "--threads", str(cfg["threads"])]
+    # Unset evalue and coverage keep Foldseek's own defaults.
+    if cfg.get("evalue") is not None:
+        common += ["-e", str(cfg["evalue"])]
+    if cfg.get("coverage") is not None:
+        common += ["-c", str(cfg["coverage"])]
     if cfg["multimer"]:
         cmd = ["foldseek", "easy-multimercluster", stage_dir, prefix, tmp_dir] + common + [
             "--multimer-tm-threshold", str(cfg["multimer_tm_threshold"]),

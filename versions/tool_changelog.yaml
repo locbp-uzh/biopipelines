@@ -737,8 +737,12 @@ Foldseek:
   files:
   - biopipelines/foldseek.py
   - pipe_scripts/pipe_foldseek.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-29'
+    note: >-
+      Adds `evalue` (`-e`), `coverage` (`-c`) and `cov_mode` (`--cov-mode`), passed to `easy-cluster` and to `easy-multimercluster`. Left unset, `evalue` and `coverage` emit no flag and `cov_mode` stays 0, so the command is the one 1.0 ran. Foldseek's own defaults differ by mode (single-chain `-e 0.01 -c 0.8`, multimer `-e 10 -c 0.0`), so 1.0's docs were wrong to say no coverage requirement was set for single chains. With `multimer=True`, `cov_mode` is limited to 0-2: Foldseek-Multimer applies `multimer_tm_threshold` in those modes only.
   - version: '1.0'
     date: '2026-10-27'
     note: >-

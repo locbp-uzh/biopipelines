@@ -654,7 +654,7 @@ Clusters structures at fixed TM-score thresholds with Foldseek and reports each 
 
 **Environment**: `foldseek` (bioconda binary; `Foldseek.install()` builds it from `environments/foldseek.yaml`). A BioContainers image is registered in `environments/_containers.yaml` and used when a `containers:` destination is set.
 
-**TM-score threshold.** Foldseek keeps an alignment when its TM-score exceeds the threshold (`--tmscore-threshold`). Foldseek's default normalizes that TM-score by the aligned region, and no coverage requirement is set, so a short well-aligned segment can join two structures; counts therefore tend to understate diversity. Each threshold is a separate Foldseek run, so the cost grows with the number of thresholds.
+**TM-score threshold and coverage.** Foldseek keeps an alignment when its TM-score exceeds the threshold (`--tmscore-threshold`), normalized by the aligned region by default, and when it passes the E-value and coverage filters. Left unset, `evalue` and `coverage` are not passed and Foldseek applies its own defaults, which differ by mode (read from its source): single-chain `easy-cluster` uses `-e 0.01` and `-c 0.8` with cov-mode 0, so the alignment must cover 80% of both structures; `easy-multimercluster` uses `-e 10` and `-c 0.0`, no coverage requirement. Counts shift with these filters, so state them when you compare studies. Each threshold is a separate Foldseek run, so the cost grows with the number of thresholds.
 
 **Parameters**:
 - `structures`: Union[DataStream, StandardizedOutput] (required) — PDB or mmCIF structures.
@@ -662,6 +662,9 @@ Clusters structures at fixed TM-score thresholds with Foldseek and reports each 
 - `multimer`: bool = False — cluster complexes with `easy-multimercluster` instead of single chains with `easy-cluster`. In this mode `tm_thresholds` sets `--chain-tm-threshold` (every chain must align above it), and the whole complex must also exceed `multimer_tm_threshold` with an interface above `interface_lddt_threshold`. Chain names must not contain underscores. Without it every structure must hold one protein chain; a file with several chains is recorded as a failure instead of being assigned to one of them by guess.
 - `alignment_type`: int = 1 — Foldseek `--alignment-type`: 1 is TM-align, 2 is the 3Di+AA local alignment followed by the TM-score filter.
 - `min_seq_id`: float = 0.0 — Foldseek `--min-seq-id`, the minimum sequence identity to cluster. Single-chain mode only.
+- `evalue`: float = None — Foldseek `-e`, the E-value above which an alignment is dropped. Must be positive. `None` passes no flag, so Foldseek's own default applies (0.01 for single chains, 10 for complexes).
+- `coverage`: float = None — Foldseek `-c`, the fraction of residues the alignment must cover, read through `cov_mode`. In [0, 1]; 0 switches the requirement off. `None` passes no flag, so Foldseek's own default applies (0.8 for single chains, 0.0 for complexes).
+- `cov_mode`: int = 0 — Foldseek `--cov-mode`, always passed. One of 0 to 5, as Foldseek defines them: 0 coverage of query and target, 1 coverage of target, 2 coverage of query, 3 target length at least `coverage` of query length, 4 query length at least `coverage` of target length, 5 the shorter sequence at least `coverage` of the other length. With `multimer=True` it also picks which complex TM-score must exceed `multimer_tm_threshold` (0 both, 1 target, 2 query), and only 0, 1 and 2 are accepted.
 - `multimer_tm_threshold`: float = 0.65 — Foldseek `--multimer-tm-threshold`. `multimer=True` only.
 - `interface_lddt_threshold`: float = 0.65 — Foldseek `--interface-lddt-threshold`. `multimer=True` only.
 - `threads`: int = 1 — CPU threads Foldseek uses (`--threads`); match the CPUs requested with `Resources(cpus=...)`.
@@ -684,9 +687,20 @@ reps = Panda(tables=diversity.tables.tm_clusters,
              operations=[Panda.filter("id == representative_tm50")],
              pool=folds)
 
+# stricter filters: alignments must cover 90% of both structures, E-value below 1e-3
+strict = Foldseek(structures=folds, evalue=1e-3, coverage=0.9, cov_mode=0)
+
+# no coverage requirement at all (single chains default to 0.8)
+loose = Foldseek(structures=folds, coverage=0.0)
+
 # complexes: every chain above TM 0.6, whole complex above 0.65
 complexes = Foldseek(structures=folds, tm_thresholds=[0.6], multimer=True)
+
+# complexes: at least 80% of the query complex must be covered by the alignment
+covered = Foldseek(structures=folds, multimer=True, coverage=0.8, cov_mode=2)
 ```
+
+The parameters are recorded in the step's `_configuration/config.yaml` (`evalue` and `coverage` are `null` when unset) and in the config display.
 
 **Reference**: van Kempen et al. Fast and accurate protein structure search with Foldseek. *Nature Biotechnology*, doi:10.1038/s41587-023-01773-0; Barrio-Hernandez et al. Clustering predicted structures at the scale of the known protein universe. *Nature*, doi:10.1038/s41586-023-06510-w; Kim et al. Rapid and sensitive protein complex alignment with Foldseek-Multimer. *Nature Methods*, doi:10.1038/s41592-025-02593-7. https://github.com/steineggerlab/foldseek
 

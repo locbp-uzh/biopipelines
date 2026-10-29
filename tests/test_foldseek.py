@@ -30,6 +30,7 @@ def pipe():
 
 
 CFG = {"tm_thresholds": [0.5, 0.8], "multimer": False, "alignment_type": 1, "min_seq_id": 0.0,
+       "evalue": None, "coverage": None, "cov_mode": 0,
        "multimer_tm_threshold": None, "interface_lddt_threshold": None, "threads": 1}
 
 
@@ -57,6 +58,50 @@ def test_the_single_chain_command_carries_the_threshold_and_no_default_min_seq_i
 def test_min_seq_id_is_passed_when_set(pipe):
     cmd = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, min_seq_id=0.3))
     assert cmd[cmd.index("--min-seq-id") + 1] == "0.3"
+
+
+def test_unset_evalue_and_coverage_emit_no_flag_and_cov_mode_zero_stays(pipe):
+    for multimer in (False, True):
+        cfg = dict(CFG, multimer=multimer, multimer_tm_threshold=0.65, interface_lddt_threshold=0.65)
+        cmd = pipe.build_command("in", "o/res", "o/tmp", 0.5, cfg)
+        assert "-e" not in cmd and "-c" not in cmd
+        assert cmd[cmd.index("--cov-mode") + 1] == "0"
+
+
+def test_evalue_and_coverage_are_passed_when_set(pipe):
+    cmd = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, evalue=1e-5, coverage=0.9))
+    assert cmd[cmd.index("-e") + 1] == "1e-05"
+    assert cmd[cmd.index("-c") + 1] == "0.9"
+
+
+def test_each_of_evalue_and_coverage_is_passed_alone(pipe):
+    only_e = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, evalue=0.01))
+    assert "-e" in only_e and "-c" not in only_e
+    only_c = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, coverage=0.0))
+    assert only_c[only_c.index("-c") + 1] == "0.0" and "-e" not in only_c
+
+
+def test_cov_mode_is_passed_as_set(pipe):
+    for mode in range(6):
+        cmd = pipe.build_command("in", "o/res", "o/tmp", 0.5, dict(CFG, cov_mode=mode))
+        assert cmd[cmd.index("--cov-mode") + 1] == str(mode)
+
+
+def test_the_new_flags_reach_the_multimer_command_beside_its_own_thresholds(pipe):
+    cfg = dict(CFG, multimer=True, multimer_tm_threshold=0.65, interface_lddt_threshold=0.65,
+               evalue=0.1, coverage=0.8, cov_mode=2)
+    cmd = pipe.build_command("in", "o/res", "o/tmp", 0.6, cfg)
+    assert cmd[1] == "easy-multimercluster"
+    assert cmd[cmd.index("-e") + 1] == "0.1" and cmd[cmd.index("-c") + 1] == "0.8"
+    assert cmd[cmd.index("--cov-mode") + 1] == "2"
+    assert cmd[cmd.index("--chain-tm-threshold") + 1] == "0.6"
+
+
+def test_a_config_written_before_the_new_keys_still_builds_the_old_command(pipe):
+    old = {k: v for k, v in CFG.items() if k not in ("evalue", "coverage", "cov_mode")}
+    cmd = pipe.build_command("in", "o/res", "o/tmp", 0.5, old)
+    assert cmd == pipe.build_command("in", "o/res", "o/tmp", 0.5, CFG)
+    assert cmd[cmd.index("--cov-mode") + 1] == "0" and "-e" not in cmd and "-c" not in cmd
 
 
 def test_the_multimer_command_sweeps_the_chain_threshold_and_pins_the_rest(pipe):
@@ -193,6 +238,22 @@ def test_every_threshold_failing_is_a_step_failure(pipe, monkeypatch, tmp_path):
     assert pd.read_csv(tmp_path / "tables" / "tm_clusters.csv")["id"].tolist() == ["a", "b"]
 
 
+def test_every_threshold_run_receives_the_alignment_filters(pipe, monkeypatch, tmp_path):
+    seen = []
+    write = _fake_cluster({0.5: [[0]], 0.8: [[0]]})
+
+    def fake(cmd):
+        seen.append(cmd)
+        write(cmd)
+
+    cfg = dict(CFG, evalue=0.5, coverage=0.7, cov_mode=2)
+    _run_main(pipe, monkeypatch, tmp_path, ["a"], fake, cfg)
+    assert len(seen) == 2
+    for cmd in seen:
+        assert cmd[cmd.index("-e") + 1] == "0.5" and cmd[cmd.index("-c") + 1] == "0.7"
+        assert cmd[cmd.index("--cov-mode") + 1] == "2"
+
+
 def test_the_raw_cluster_tsv_stays_in_the_execution_folder(pipe, monkeypatch, tmp_path):
     fake = _fake_cluster({0.5: [[0]], 0.8: [[0]]})
     _run_main(pipe, monkeypatch, tmp_path, ["a"], fake)
@@ -238,6 +299,17 @@ def test_the_output_columns_follow_the_thresholds(local_config, isolated_cwd, ne
     ({"alignment_type": 0}, "alignment_type"),
     ({"alignment_type": 3}, "alignment_type"),
     ({"min_seq_id": 1.5}, "min_seq_id"),
+    ({"evalue": 0}, "evalue"),
+    ({"evalue": -1e-3}, "evalue"),
+    ({"evalue": float("inf")}, "evalue"),
+    ({"evalue": float("nan")}, "evalue"),
+    ({"coverage": -0.1}, "coverage"),
+    ({"coverage": 1.1}, "coverage"),
+    ({"coverage": float("nan")}, "coverage"),
+    ({"cov_mode": -1}, "cov_mode"),
+    ({"cov_mode": 6}, "cov_mode"),
+    ({"multimer": True, "cov_mode": 3}, "cov_mode"),
+    ({"multimer": True, "cov_mode": 5}, "cov_mode"),
     ({"threads": 0}, "threads"),
     ({"multimer": True, "min_seq_id": 0.3}, "single-chain"),
     ({"multimer_tm_threshold": 0.7}, "multimer=True"),
@@ -250,6 +322,49 @@ def test_bad_parameters_are_refused_at_configuration(local_config, isolated_cwd,
     with new_pipeline("fs_bad"):
         with pytest.raises(ValueError, match=message):
             Foldseek(structures=_structures(), **kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {},
+    {"evalue": 1e-3, "coverage": 0.9, "cov_mode": 1},
+    {"evalue": 10, "coverage": 0.0},
+    {"coverage": 1.0, "cov_mode": 5},
+    {"multimer": True, "evalue": 0.1, "coverage": 0.8, "cov_mode": 2},
+    {"multimer": True, "cov_mode": 0},
+])
+def test_good_alignment_filters_are_accepted(local_config, isolated_cwd, new_pipeline, kwargs):
+    from biopipelines.foldseek import Foldseek
+
+    with new_pipeline("fs_good"):
+        Foldseek(structures=_structures(), **kwargs)
+
+
+def test_the_alignment_filters_default_to_nothing_new(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.foldseek import Foldseek
+
+    pipeline = new_pipeline("fs_filter_defaults")
+    with pipeline:
+        Foldseek(structures=_structures())
+    fs = pipeline.tools[-1]
+    assert fs.evalue is None and fs.coverage is None and fs.cov_mode == 0
+
+
+def test_the_filters_are_recorded_in_the_config_and_the_display(local_config, isolated_cwd, new_pipeline):
+    from biopipelines.foldseek import Foldseek
+
+    pipeline = new_pipeline("fs_filter_record")
+    with pipeline:
+        Foldseek(structures=_structures(), evalue=1e-3, coverage=0.9, cov_mode=1)
+        Foldseek(structures=_structures())
+        pipeline.save()
+    set_step, default_step = [t for t in pipeline.tools if t.TOOL_NAME == "Foldseek"]
+    config = yaml.safe_load(open(set_step.config_yaml))
+    assert (config["evalue"], config["coverage"], config["cov_mode"]) == (1e-3, 0.9, 1)
+    config = yaml.safe_load(open(default_step.config_yaml))
+    assert (config["evalue"], config["coverage"], config["cov_mode"]) == (None, None, 0)
+    shown = "\n".join(set_step.get_config_display())
+    assert "E-VALUE: 0.001" in shown and "COVERAGE: 0.9 (cov-mode 1)" in shown
+    assert "E-VALUE: Foldseek default" in "\n".join(default_step.get_config_display())
 
 
 def test_multimer_defaults_resolve_to_the_documented_values(local_config, isolated_cwd, new_pipeline):
