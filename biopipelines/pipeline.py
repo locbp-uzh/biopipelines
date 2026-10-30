@@ -555,7 +555,7 @@ class Pipeline:
 
         # Generate the tool script
         script_content = tool_config.generate_script(tool_script_path)
-        with open(tool_script_path, 'w') as f:
+        with open(tool_script_path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(script_content)
         os.chmod(tool_script_path, 0o755)
 
@@ -664,7 +664,7 @@ class Pipeline:
         )
 
         script_content = self._generate_pipeline_script()
-        with open(script_path, 'w') as f:
+        with open(script_path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(script_content)
         os.chmod(script_path, 0o755)
 
@@ -864,7 +864,7 @@ class Pipeline:
         
         # Create config script
         config_script = os.path.join(self.folders["runtime"], "config.sh")
-        with open(config_script, 'w') as f:
+        with open(config_script, 'w', encoding='utf-8', newline='\n') as f:
             f.write("#!/bin/bash\n")
             f.write("\n".join(config_lines))
         os.chmod(config_script, 0o755)
@@ -940,7 +940,7 @@ class Pipeline:
             tool_script_content = tool.generate_script(tool_script_path)
             
             # Write tool script
-            with open(tool_script_path, 'w') as f:
+            with open(tool_script_path, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(tool_script_content)
             os.chmod(tool_script_path, 0o755)
             
@@ -1588,7 +1588,7 @@ umask 002
         for batch_idx, (start_idx, end_idx) in enumerate(batch_ranges):
             batch_script_content = self._generate_batch_script(batch_idx, start_idx, end_idx)
             batch_script_path = os.path.join(self.folders["runtime"], f"pipeline_batch{batch_idx + 1}.sh")
-            with open(batch_script_path, 'w') as f:
+            with open(batch_script_path, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(batch_script_content)
             os.chmod(batch_script_path, 0o755)
 
@@ -1704,7 +1704,7 @@ umask 002
 
         # Create batch-specific config script
         config_script = os.path.join(self.folders["runtime"], f"config_batch{batch_idx + 1}.sh")
-        with open(config_script, 'w') as f:
+        with open(config_script, 'w', encoding='utf-8', newline='\n') as f:
             f.write("#!/bin/bash\n")
             f.write("\n".join(config_lines))
         os.chmod(config_script, 0o755)
