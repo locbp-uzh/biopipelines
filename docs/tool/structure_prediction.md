@@ -500,7 +500,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 - `protonate`: bool = True - Add hydrogens with OpenBabel before docking
 - `pH`: float = 7.4 - Protonation pH
 
-**Streams**: `structures` (combined protein+ligand PDB files; best poses in `docking` mode, the scored pose in `score`/`minimize` mode)
+**Streams**: `structures` (combined protein+ligand PDB files). In `docking` mode one entry per (protein, ligand) pair under the id `<protein>+<ligand>`, the best pose of the pair's best conformer, written as `<id>_best.pdb`; in `score`/`minimize` mode the scored pose under the complex's own id, written as `<id>_score.pdb` or `<id>_minimize.pdb`.
 
 **Tables** (`mode="docking"`):
 - `docking_results` - One row per accepted pose across all runs:
@@ -508,18 +508,21 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   | id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity |
   |----|---------------|--------------|--------------|-----|------|------------|-----------|--------------|
 
-  IDs are unique per pose: `{protein}_{ligand}_r{run}_p{pose}`.
+  IDs are unique per pose: `<protein>+<ligand>_conf<k>_r<run>_p<pose>`, the summary id of its conformer with the run and the pose appended. `structures.id`, `compounds.id`, `conformer_id`, `run` and `pose` carry the parts, so no consumer needs to split an id.
 
 - `docking_summary` - One row per (protein, ligand, conformer) group, aggregated across runs:
 
   | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
   |----|---------------|--------------|--------------|-----------|-----------|---------|----------------|-------------------|------------------|-----------------|------------------|-----------------------|----------------|
 
+  IDs are unique per (protein, ligand, conformer) group: `<protein>+<ligand>_conf<k>`, the pair's stream id with the conformer appended. A ligand id may contain `_` (`a_b`+`c` and `a`+`b_c` are `a_b+c` and `a+b_c`).
+
   - `mean_vina` / `std_vina`: mean and std of the best Vina score per run (not all poses — just the top pose from each independent run). Robust metric for ranking.
   - `mean_cnn_affinity` / `std_cnn_affinity`: same logic for CNN affinity.
   - `pose_consistency`: fraction of runs whose best pose clusters together by RMSD. Measures reproducibility (1.0 = all runs converge).
   - `conformer_energy`: MMFF94 relative strain energy (only with `generate_conformers=True`).
   - `pseudo_binding_energy`: `best_vina + conformer_energy`. Penalizes Vina score by conformer strain. Only populated when conformer generation is enabled.
+  - `best_pose_file`: the complex PDB of the group's best pose (lowest Vina score over its runs). The structures stream holds one file per pair, so among a pair's conformers the one with the lowest `pseudo_binding_energy` (lowest `best_vina` when a conformer has no energy) is written to `structures/<protein>+<ligand>_best.pdb`; the other conformers' files go to `execution/conformer_poses/<summary id>_best.pdb`.
 
 **Tables** (`mode="score"` / `"minimize"`):
 - `scores` - One row per scored complex; empty cells where GNINA did not emit that term for the chosen `cnn_scoring`:
@@ -592,11 +595,11 @@ Vina reads and writes PDBQT only, so the wrapper converts the receptor and ligan
 
 **Parameters**: as `Gnina`, except `cnn_scoring` / `cnn_score_threshold` are absent and `scoring: str = "vina"` is added.
 
-**Streams**: `structures` (combined protein+ligand PDB files; best poses in `docking` mode, the scored pose in `score`/`minimize` mode)
+**Streams**: `structures` (combined protein+ligand PDB files), under the same ids as [Gnina](#gnina): `<protein>+<ligand>` in `docking` mode, the complex's own id in `score`/`minimize` mode.
 
 **Tables** (`mode="docking"`):
-- `docking_results` — one row per accepted pose: | id | structures.id | compounds.id | conformer_id | run | pose | vina_score |
-- `docking_summary` — one row per (protein, ligand, conformer) group: | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
+- `docking_results` — one row per accepted pose, id `<protein>+<ligand>_conf<k>_r<run>_p<pose>`: | id | structures.id | compounds.id | conformer_id | run | pose | vina_score |
+- `docking_summary` — one row per (protein, ligand, conformer) group, id `<protein>+<ligand>_conf<k>`: | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
 
 **Tables** (`mode="score"` / `"minimize"`):
 - `scores` — one row per scored complex: | id | structures.id | compounds.id | vina_affinity |

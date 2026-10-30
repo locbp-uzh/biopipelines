@@ -41,6 +41,7 @@ from biopipelines.biopipelines_io import (
 from biopipelines.pdb_parser import field_atom_name, field_res_name
 from biopipelines.ligand_utils import write_ligand_sdf
 from biopipelines.id_map_utils import get_mapped_ids
+from biopipelines.combinatorics import generate_multiplied_ids, predict_single_output_id
 
 import pipe_vina_backend as vina_backend
 
@@ -59,6 +60,29 @@ def _allocated_cpus():
         return max(1, int(value))
     except ValueError:
         return None
+
+
+def _pair_id(protein_id, ligand_id):
+    """Id of a (protein, ligand) pair, composed by the shared axis rule the wrapper declares it with."""
+    return predict_single_output_id(
+        structures=("each", [protein_id], 0, [], False),
+        compounds=("each", [ligand_id], 0, [], False),
+    )
+
+
+def _group_id(protein_id, ligand_id, conformer_id):
+    """Id of a (protein, ligand, conformer) group, one row of docking_summary."""
+    return generate_multiplied_ids([_pair_id(protein_id, ligand_id)], [f"conf{conformer_id}"])[0][0]
+
+
+def _run_id(group_id, run_idx):
+    """Id of one independent docking run of a group, also the stem of its scratch files."""
+    return generate_multiplied_ids([group_id], [f"r{run_idx}"])[0][0]
+
+
+def _pose_id(run_id, pose_idx):
+    """Id of one pose of a run, one row of docking_results."""
+    return generate_multiplied_ids([run_id], [f"p{pose_idx}"])[0][0]
 
 
 @contextmanager
@@ -758,15 +782,12 @@ def run_docking(prepared_proteins, conformers, config):
             conformer_id = conf["conformer_id"]
             conf_sdf = conf["sdf_file"]
 
-            print(f"Docking pair {pair_idx}/{total_pairs}: "
-                  f"{protein_id} + {ligand_id}_conf{conformer_id}")
+            group_id = _group_id(protein_id, ligand_id, conformer_id)
+            print(f"Docking pair {pair_idx}/{total_pairs}: {group_id}")
 
             for run_idx in range(num_runs):
-                out_sdf = os.path.join(
-                    dock_dir,
-                    f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}.sdf"
-                )
-                label = f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run_idx}"
+                label = _run_id(group_id, run_idx)
+                out_sdf = os.path.join(dock_dir, f"{label}.sdf")
 
                 if backend == "vina":
                     try:
@@ -862,6 +883,9 @@ def _parse_gnina_output(sdf_path, protein_id, ligand_id, conformer_id,
     if not os.path.exists(sdf_path):
         return poses
 
+    group_id = _group_id(protein_id, ligand_id, conformer_id)
+    run_id = _run_id(group_id, run_idx)
+
     with _suppress_rdkit_warnings():
         suppl = Chem.SDMolSupplier(sdf_path, removeHs=False)
         mols = list(enumerate(suppl))
@@ -877,7 +901,9 @@ def _parse_gnina_output(sdf_path, protein_id, ligand_id, conformer_id,
             continue
 
         poses.append({
-            "id": f"{protein_id}_{ligand_id}_r{run_idx}_p{pose_idx}",
+            "id": _pose_id(run_id, pose_idx),
+            "group_id": group_id,
+            "sdf_file": sdf_path,
             "structures.id": protein_id,
             "compounds.id": ligand_id,
             "conformer_id": conformer_id,
@@ -916,20 +942,16 @@ def analyze_pose_consistency(all_poses, config):
     - pose_consistency = largest_cluster_size / num_runs
 
     Returns:
-        dict: (protein_id, ligand_id, conformer_id) -> consistency_score
+        dict: group id (the docking_summary id) -> consistency_score
     """
     rmsd_threshold = config["rmsd_threshold"]
-    dock_dir = os.path.join(config["output_folder"], "docking")
 
     groups = defaultdict(list)
     for pose in all_poses:
-        key = (pose["structures.id"], pose["compounds.id"], pose["conformer_id"])
-        groups[key].append(pose)
+        groups[pose["group_id"]].append(pose)
 
     consistency = {}
     for key, poses in groups.items():
-        protein_id, ligand_id, conformer_id = key
-
         best_per_run = {}
         for pose in poses:
             run = pose["run"]
@@ -946,10 +968,7 @@ def analyze_pose_consistency(all_poses, config):
         best_mols = {}
         with _suppress_rdkit_warnings():
             for run, pose in best_per_run.items():
-                sdf_file = os.path.join(
-                    dock_dir,
-                    f"{protein_id}_{ligand_id}_conf{conformer_id}_run{run}.sdf"
-                )
+                sdf_file = pose["sdf_file"]
                 if not os.path.exists(sdf_file):
                     continue
                 suppl = Chem.SDMolSupplier(sdf_file, removeHs=False)
@@ -1008,12 +1027,28 @@ def _single_linkage_cluster(rmsd_matrix, threshold):
 # 5. Results aggregation
 # ---------------------------------------------------------------------------
 
+def _pair_winners(summary_rows, best_poses):
+    """Per pair id, the group id whose best pose stands for the pair in the structures stream.
+
+    Groups are ranked by pseudo_binding_energy (best Vina plus conformer strain) when every posed group of the pair has one, else by best Vina score; the first group wins a tie.
+    """
+    posed = defaultdict(list)
+    for row in summary_rows:
+        if row["id"] in best_poses:
+            posed[_pair_id(row["structures.id"], row["compounds.id"])].append(row)
+    winners = {}
+    for pair_id, rows in posed.items():
+        column = ("pseudo_binding_energy"
+                  if all(r["pseudo_binding_energy"] != "" for r in rows) else "best_vina")
+        winners[pair_id] = min(rows, key=lambda r: r[column])["id"]
+    return winners
+
+
 def aggregate_results(all_poses, conformers, consistency, config, prepared_proteins):
     """
     Aggregate results into docking_results.csv and docking_summary.csv.
 
-    Also writes best poses as combined protein+ligand PDB files under
-    best_poses/ within the output folder.
+    Also writes each group's best pose as a combined protein+ligand PDB file: the pair's winning conformer into the structures folder as <pair id>_best.pdb, every other conformer under conformer_poses/.
     """
     output_folder = config["output_folder"]
     docking_results_csv = config["docking_results_csv"]
@@ -1038,16 +1073,18 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
 
     best_poses_dir = config.get("best_poses_dir") or os.path.join(output_folder, "best_poses")
     os.makedirs(best_poses_dir, exist_ok=True)
-    dock_dir = os.path.join(output_folder, "docking")
+    conformer_poses_dir = os.path.join(output_folder, "conformer_poses")
 
     groups = defaultdict(list)
     for pose in all_poses:
-        key = (pose["structures.id"], pose["compounds.id"], pose["conformer_id"])
-        groups[key].append(pose)
+        groups[pose["group_id"]].append(pose)
 
     summary_rows = []
-    for key, poses in groups.items():
-        protein_id, ligand_id, conformer_id = key
+    best_poses = {}
+    for group_id, poses in groups.items():
+        protein_id = poses[0]["structures.id"]
+        ligand_id = poses[0]["compounds.id"]
+        conformer_id = poses[0]["conformer_id"]
 
         vina_scores = [p["vina_score"] for p in poses if p["vina_score"] != ""]
         cnn_scores = [p["cnn_score"] for p in poses if p["cnn_score"] != ""]
@@ -1073,7 +1110,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
         best_cnn = max(cnn_scores) if cnn_scores else ""
         mean_cnn_affinity = float(np.mean(run_cnn_affinities)) if run_cnn_affinities else ""
         std_cnn_affinity = float(np.std(run_cnn_affinities)) if len(run_cnn_affinities) > 1 else ""
-        pose_cons = consistency.get(key, "")
+        pose_cons = consistency.get(group_id, "")
         conf_energy = energy_lookup.get((ligand_id, conformer_id), "")
 
         pseudo_be = ""
@@ -1083,28 +1120,14 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             except (ValueError, TypeError):
                 pass
 
-        best_pose_file = ""
         if vina_scores:
-            best_pose = min(
+            best_poses[group_id] = min(
                 [p for p in poses if p["vina_score"] != ""],
                 key=lambda p: p["vina_score"]
             )
-            src_sdf = os.path.join(
-                dock_dir,
-                f"{protein_id}_{ligand_id}_conf{conformer_id}_run{best_pose['run']}.sdf"
-            )
-            dst_pdb = os.path.join(
-                best_poses_dir,
-                f"{protein_id}_{ligand_id}_best.pdb"
-            )
-            prot_info = prepared_proteins.get(protein_id, {})
-            protein_pdb = prot_info.get("protein") if isinstance(prot_info, dict) else prot_info
-            if os.path.exists(src_sdf) and protein_pdb and os.path.exists(protein_pdb):
-                _write_complex_pdb(protein_pdb, src_sdf, best_pose["pose"], dst_pdb)
-                best_pose_file = dst_pdb
 
         row = {
-            "id": f"{protein_id}_{ligand_id}",
+            "id": group_id,
             "structures.id": protein_id,
             "compounds.id": ligand_id,
             "conformer_id": conformer_id,
@@ -1122,9 +1145,30 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             "pose_consistency": pose_cons,
             "conformer_energy": conf_energy,
             "pseudo_binding_energy": pseudo_be,
-            "best_pose_file": best_pose_file,
+            "best_pose_file": "",
         })
         summary_rows.append(row)
+
+    winners = _pair_winners(summary_rows, best_poses)
+    map_rows = []
+    for row in summary_rows:
+        best_pose = best_poses.get(row["id"])
+        if best_pose is None:
+            continue
+        pair_id = _pair_id(row["structures.id"], row["compounds.id"])
+        is_winner = winners[pair_id] == row["id"]
+        dst_pdb = (os.path.join(best_poses_dir, f"{pair_id}_best.pdb") if is_winner
+                   else os.path.join(conformer_poses_dir, f"{row['id']}_best.pdb"))
+        prot_info = prepared_proteins.get(row["structures.id"], {})
+        protein_pdb = prot_info.get("protein") if isinstance(prot_info, dict) else prot_info
+        if os.path.exists(best_pose["sdf_file"]) and protein_pdb and os.path.exists(protein_pdb):
+            os.makedirs(os.path.dirname(dst_pdb), exist_ok=True)
+            _write_complex_pdb(protein_pdb, best_pose["sdf_file"], best_pose["pose"], dst_pdb)
+            row["best_pose_file"] = dst_pdb
+            if is_winner:
+                map_rows.append({"id": pair_id, "file": dst_pdb,
+                                 "structures.id": row["structures.id"],
+                                 "compounds.id": row["compounds.id"]})
 
     summary_df = pd.DataFrame(summary_rows)
     if not summary_df.empty and "mean_vina" in summary_df.columns:
@@ -1139,11 +1183,6 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
     structures_map = config.get("structures_map")
     if structures_map:
         os.makedirs(os.path.dirname(structures_map), exist_ok=True)
-        map_rows = [
-            {"id": r["id"], "file": r["best_pose_file"],
-             "structures.id": r["structures.id"], "compounds.id": r["compounds.id"]}
-            for r in summary_rows if r.get("best_pose_file")
-        ]
         pd.DataFrame(map_rows, columns=["id", "file", "structures.id", "compounds.id"]).to_csv(
             structures_map, index=False
         )
@@ -1325,7 +1364,7 @@ def _parse_score_output(sdf_path):
 
 
 def _run_vina_score(vina_binary, clean_protein, lig_sdf, scratch, structure_id,
-                    mode, scoring, cpus, timeout, out_sdf, autobox_add=4.0):
+                    mode, scoring, cpus, timeout, out_sdf, autobox_add=4.0, extra_args=None):
     """Score or locally minimize an in-pocket pose with Vina.
 
     ``--score_only`` prints its affinity and writes no file, so the input pose is
@@ -1347,7 +1386,7 @@ def _run_vina_score(vina_binary, clean_protein, lig_sdf, scratch, structure_id,
         result = vina_backend.run(
             vina_binary, receptor, lig_pdbqt, out_pdbqt, box_args, scoring=scoring,
             cpu=cpus, mode=mode, timeout=timeout,
-            extra_args=config.get("extra_args"),
+            extra_args=extra_args,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"vina {mode} timed out (>{timeout}s)")
@@ -1449,7 +1488,7 @@ def run_score_mode(structures_ds, compounds_ds, config):
                 scores, out_sdf = _run_vina_score(
                     gnina_binary, clean_protein, lig_sdf, scratch, structure_id,
                     mode, scoring, cpus, dock_timeout, out_sdf,
-                    autobox_add=autobox_add,
+                    autobox_add=autobox_add, extra_args=config.get("extra_args"),
                 )
             else:
                 cmd = [

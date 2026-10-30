@@ -43,6 +43,7 @@ try:
     from .datastream import DataStream
     from .config_manager import ConfigManager
     from .biopipelines_io import Resolve
+    from .combinatorics import predict_output_ids
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -51,6 +52,7 @@ except ImportError:
     from datastream import DataStream
     from config_manager import ConfigManager
     from biopipelines_io import Resolve
+    from combinatorics import predict_output_ids
 
 
 class Gnina(BaseConfig):
@@ -73,7 +75,7 @@ class Gnina(BaseConfig):
           mean scores across runs, pose consistency (fraction of runs that
           converge to the same pose), and pseudo_binding_energy (best Vina +
           conformer strain energy).
-        - best_poses/: combined protein+ligand PDB files for each best pose.
+        - structures: one combined protein+ligand PDB per (protein, ligand) pair, id ``<protein>+<ligand>``.
 
     Usage:
         with Pipeline(...):
@@ -84,7 +86,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -309,11 +311,12 @@ fi
 
         Output:
             mode="docking":
-                Streams: structures (.pdb) — best-pose complexes.
+                Streams: structures (.pdb) — one best-pose complex per (protein, ligand) pair, id ``<protein>+<ligand>``.
                 Tables:
                     docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
                     missing: id | removed_by | kind | cause
+                Ids: docking_summary rows are ``<protein>+<ligand>_conf<k>``, docking_results rows ``<protein>+<ligand>_conf<k>_r<run>_p<pose>``.
             mode="score"/"minimize":
                 Streams: structures (.pdb) — the scored complex ("score" re-emits
                     the input pose unchanged; "minimize" emits the refined pose).
@@ -786,20 +789,17 @@ python {self.helper_py} {self.config_json}
             tables["missing"] = self.missing_table_info(self.missing_csv)
 
         best_poses_dir = self.stream_folder("structures")
-        protein_ids = list(self.structures_stream.ids)
 
         if self.mode == "docking":
-            # Docking poses every ligand into every protein -> prot × lig.
-            ligand_ids = list(self.compounds_stream.ids)
-            structure_ids = [
-                f"{prot}_{lig}"
-                for prot in protein_ids
-                for lig in ligand_ids
-            ]
+            # Docking poses every ligand into every protein, so the pair is the product of the two axes.
+            structure_ids = predict_output_ids(
+                structures=(self.structures_stream, "structures"),
+                compounds=(self.compounds_stream, "compounds"),
+            )
         else:
             # Score/minimize scores the one ligand each complex already carries,
             # so the output keys on the complex's own id (one row per complex).
-            structure_ids = protein_ids
+            structure_ids = list(self.structures_stream.ids)
         suffix = "_best.pdb" if self.mode == "docking" else f"_{self.mode}.pdb"
         structure_files = [os.path.join(best_poses_dir, f"<id>{suffix}")]
 
@@ -871,7 +871,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "vina"
     BACKEND = "vina"
 
@@ -944,11 +944,12 @@ fi
 
         Output:
             mode="docking":
-                Streams: structures (.pdb) — best-pose complexes.
+                Streams: structures (.pdb) — one best-pose complex per (protein, ligand) pair, id ``<protein>+<ligand>``.
                 Tables:
                     docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
                     missing: id | removed_by | kind | cause
+                Ids: docking_summary rows are ``<protein>+<ligand>_conf<k>``, docking_results rows ``<protein>+<ligand>_conf<k>_r<run>_p<pose>``.
             mode="score"/"minimize":
                 Streams: structures (.pdb) — the scored complex.
                 Tables:

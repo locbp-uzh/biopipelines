@@ -63,6 +63,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Gnina** 2.2 → 2.3. Every id is built by the shared axis composition instead of joining with `_`. A pair is `<protein>+<ligand>` as Boltz2 names its complexes, a `docking_summary` row appends `_conf<k>`, and a `docking_results` row appends `_r<run>_p<pose>`. Two pairs whose ids joined to the same string (`a_b`+`c` and `a`+`b_c`) shared one docking scratch SDF and one `<id>_best.pdb`, and two conformers of a pair shared the summary id and the best file, so the last conformer written won; a pose id did not carry its conformer, so two conformers repeated it. The pair's file is now the best conformer's pose (lowest `pseudo_binding_energy`, else lowest `best_vina`), and each other conformer keeps its own under `execution/conformer_poses/`. Score and minimize ids are unchanged: the complex's own id. The Vina branch of score and minimize raised NameError on `config`, so every complex became a `failure` row; forwarded kwargs now reach vina.
+
+- **Vina** 2.2 → 2.3. Same id shape as Gnina, whose wrapper and pipe script it shares: `<protein>+<ligand>` for a pair, `_conf<k>` for a summary row, `_r<run>_p<pose>` for a pose row, one `<id>_best.pdb` per pair. Score and minimize no longer raise NameError on `config`, which turned every complex into a `failure` row.
+
 - **Mock** 1.5 → 1.6. The provenance of a row comes from `predict_single_provenance` instead of a join of the pipe script's own, and `_rebuild_runtime_provenance`, which split the id on `+`, is removed: it could be reached only when it had nothing to rebuild. No id or provenance cell changes.
 
 - **BioEmu2** 1.6 → 1.7. A run's `ligands.id` for a ligand axis with a static companion, `Bundle(Each(ligands), cofactor)`, is the ligand id alone, as the wrapper declares it; it was the companion joined to the ligand (`cof+l1`), which is no id of the compounds stream, so a join on `ligands.id` matched nothing. The provenance of a run comes from `predict_single_provenance` and the conformer ids `<run>_<k>` from `generate_multiplied_ids`, so the pipe script builds neither by hand.
