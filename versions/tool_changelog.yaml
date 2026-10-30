@@ -2218,8 +2218,12 @@ RTMScore:
   files:
   - biopipelines/rtmscore.py
   - pipe_scripts/pipe_rtmscore.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      A pair that fails here is a `failure` row of `missing` whose `cause` is the error itself. The row stored the first 200 characters of the last 1500 characters of the upstream run's stderr, and the tail of a chained Python traceback starts in the middle of the stack, so the reason ("The graph of pocket cannot be generated") was cut off and the cause read as a fragment of a stack. The cause is now the last non-empty line of the error, cut to 200 characters. No id changes.
   - version: '2.1'
     date: '2026-09-04'
     note: >-

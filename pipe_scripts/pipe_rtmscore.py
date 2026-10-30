@@ -33,6 +33,12 @@ def compose_pair_id(prot_id, lig_id):
     return f"{prot_id}+{lig_id}"
 
 
+def failure_cause(error):
+    """The reason a pair failed: the last non-empty line of the error, where a failed upstream run states it."""
+    lines = [line.strip() for line in str(error).splitlines() if line.strip()]
+    return (lines[-1] if lines else type(error).__name__)[:200]
+
+
 def load_smiles_lookup(smiles_json):
     """Build {ligand_id: smiles} from the optional smiles stream."""
     if not smiles_json:
@@ -188,7 +194,7 @@ def main():
             print(f"  {pair_id}: {len(df)} pose(s), best={df['score'].max():.3f}")
         except Exception as e:
             print(f"WARNING: {pair_id} RTMScore failed: {e}", file=sys.stderr)
-            missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": str(e)[:200]})
+            missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": failure_cause(e)})
 
     all_missing = read_upstream_missing(args.upstream_missing) + missing
 

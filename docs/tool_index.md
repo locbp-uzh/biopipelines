@@ -74,7 +74,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 62 | Prodigy | Analysis                       | 2.0 | `biopipelines/prodigy.py` |
 | 63 | ProLIF | Analysis                       | 2.1 | `biopipelines/prolif.py` |
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |
-| 65 | RTMScore | Analysis                       | 2.1 | `biopipelines/rtmscore.py` |
+| 65 | RTMScore | Analysis                       | 2.2 | `biopipelines/rtmscore.py` |
 | 66 | SASA                      | Analysis                       | 1.0 | `biopipelines/sasa.py` |
 | 67 | SequenceIdentityGate      | Analysis                       | 1.0 | `biopipelines/sequence_identity_gate.py` |
 | 68 | StructureCluster          | Analysis                       | 1.1 | `biopipelines/structure_cluster.py` |

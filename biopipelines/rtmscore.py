@@ -63,7 +63,7 @@ class RTMScore(BaseConfig):
     """
 
     TOOL_NAME = "RTMScore"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "rtmscore"
 
     @classmethod
