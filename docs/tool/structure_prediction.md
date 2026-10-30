@@ -190,7 +190,7 @@ pip install boltz[cuda] -U
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
 
-  Beyond the declared columns above, `structures`, `confidence` and `affinity` each gain one `<axis>.id` provenance column per input axis (`sequences.id`, `compounds.id`, …), appended at runtime by the postprocessing step (`pipe_boltz_postprocessing.py`); the `pae` map carries the same ones. They track which protein and ligand produced each row, so filtering and joins need no ID-string parsing. The same step also writes an undeclared `value` column onto `structures` and `pae`; treat it as an implementation detail rather than part of the contract.
+  Beyond the declared columns above, `structures`, `confidence` and `affinity` each gain one `<axis>.id` provenance column per input axis, named after the parameter (`proteins.id`, `ligands.id`, …): the row `ubq+lig1+lig_2` has `proteins.id` = `ubq+lig1` and `ligands.id` = `lig_2`, appended at runtime by the postprocessing step (`pipe_boltz_postprocessing.py`); the `pae` map carries the same ones. They track which protein and ligand produced each row, so filtering and joins need no ID-string parsing. The same step also writes an undeclared `value` column onto `structures` and `pae`; treat it as an implementation detail rather than part of the contract.
 
 **Example**:
 ```python
