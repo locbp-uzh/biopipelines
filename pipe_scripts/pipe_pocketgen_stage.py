@@ -42,7 +42,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     iterate_values,
 )
 from biopipelines.combinatorics import predict_single_output_id, predict_single_provenance  # noqa: E402
-from biopipelines.ligand_utils import resolve_ligand_code, write_ligand_sdf  # noqa: E402
+from biopipelines.ligand_utils import ligand_chemistry, resolve_ligand_code, write_ligand_sdf  # noqa: E402
 from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
@@ -53,7 +53,7 @@ def load_template_smiles(ligand_json: str, ligand_code: str) -> str:
     ds = load_datastream(ligand_json)
     for _cid, values in iterate_values(ds, columns=["code", "smiles"]):
         if str(values.get("code", "") or "").strip().upper() == ligand_code.upper():
-            smi = str(values.get("smiles", "") or "").strip()
+            smi = ligand_chemistry(values)["smiles"]
             if not smi:
                 raise ValueError(
                     f"ligand stream has no SMILES for code {ligand_code!r}; "

@@ -21,7 +21,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values, read_upstream_missing, MISSING_COLUMNS, step_id_from_table_path  # noqa: E402
-from biopipelines.ligand_utils import resolve_ligand_code, templated_ligand_mol  # noqa: E402
+from biopipelines.ligand_utils import ligand_chemistry, resolve_ligand_code, templated_ligand_mol  # noqa: E402
 
 import MDAnalysis as mda  # noqa: E402
 import prolif as plf  # noqa: E402
@@ -38,7 +38,7 @@ def load_template_smiles(ligand_json: str, ligand_code: str) -> str:
     ds = load_datastream(ligand_json)
     for _cid, values in iterate_values(ds, columns=["code", "smiles"]):
         if str(values.get("code", "")).strip().upper() == ligand_code.upper():
-            smi = str(values.get("smiles", "")).strip()
+            smi = ligand_chemistry(values)["smiles"]
             if not smi:
                 raise ValueError(f"ligand stream has no SMILES for code {ligand_code}")
             return smi

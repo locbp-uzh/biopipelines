@@ -52,7 +52,7 @@ class ProLIF(BaseConfig):
     """
 
     TOOL_NAME = "ProLIF"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "prolif"
 
     @classmethod

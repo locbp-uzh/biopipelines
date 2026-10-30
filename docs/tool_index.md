@@ -11,7 +11,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | # | Tool | Category | Version | Source file |
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.6 | `biopipelines/boltzgen.py` |
-| 2 | PocketGen | Structure Generation           | 2.1 | `biopipelines/pocketgen.py` |
+| 2 | PocketGen | Structure Generation           | 2.2 | `biopipelines/pocketgen.py` |
 | 3 | RFdiffusion | Structure Generation           | 2.5 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.10 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFD4Proteina | Structure Generation           | 1.3 | `biopipelines/rfd4proteina.py` |
@@ -72,7 +72,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 60 | PoseChange                | Analysis                       | 1.1 | `biopipelines/pose_change.py` |
 | 61 | Peppr                     | Analysis                       | 1.2 | `biopipelines/peppr.py` |
 | 62 | Prodigy | Analysis                       | 2.0 | `biopipelines/prodigy.py` |
-| 63 | ProLIF | Analysis                       | 2.1 | `biopipelines/prolif.py` |
+| 63 | ProLIF | Analysis                       | 2.2 | `biopipelines/prolif.py` |
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |
 | 65 | RTMScore | Analysis                       | 2.3 | `biopipelines/rtmscore.py` |
 | 66 | SASA                      | Analysis                       | 1.0 | `biopipelines/sasa.py` |

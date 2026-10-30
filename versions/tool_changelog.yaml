@@ -1750,8 +1750,12 @@ PocketGen:
   - pipe_scripts/pipe_pocketgen_driver.py
   - pipe_scripts/pipe_pocketgen_postprocess.py
   - pipe_scripts/pipe_pocketgen_stage.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is reported as having no SMILES, not given the bond-order template "nan". The row of the matching `code` was read with `str(...)`, a blank cell comes back as NaN and `str(NaN)` is the non-empty string "nan", so the check for a missing SMILES passed and RDKit failed later on the template "nan" with a message that does not name the cause. The template is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, as GEMS 2.2 and RTMScore 2.3 do. No id changes.
   - version: '2.1'
     date: '2026-10-30'
     note: >-
@@ -1852,8 +1856,12 @@ ProLIF:
   files:
   - biopipelines/prolif.py
   - pipe_scripts/pipe_prolif.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is reported as having no SMILES, not given the bond-order template "nan". The row of the matching `code` was read with `str(...)`, a blank cell comes back as NaN and `str(NaN)` is the non-empty string "nan", so the check for a missing SMILES passed and RDKit failed later on the template "nan". The template is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, as GEMS 2.2, RTMScore 2.3 and PocketGen 2.2 do. No id changes.
   - version: '2.1'
     date: '2026-09-02'
     note: >-
