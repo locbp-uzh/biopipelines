@@ -1494,6 +1494,8 @@ All ID generation uses functions from `combinatorics.py`:
 | `predict_output_ids_with_provenance()` | Multi-axis tools (Boltz2) at configuration time |
 | `predict_output_ids()` | Same, without provenance |
 | `predict_single_output_id()` | Single-row ID at execution time (pipe scripts) |
+| `predict_single_provenance()` | Single-row provenance cells at execution time, from the same selections as `predict_single_output_id()` |
+| `join_axis_ids()` | One ID from the parts its axes contributed, for a tool whose axes are not input streams (Fuse) |
 | `generate_multiplied_ids()` | Multiplier tools (ProteinMPNN, Mutagenesis) |
 | `generate_multiplied_ids_pattern()` | Same, but keeps compact ID patterns |
 | `multiplied_id_parents()` | Runtime provenance of a multiplier tool: every concrete output id mapped to its parent, looked up by exact id |

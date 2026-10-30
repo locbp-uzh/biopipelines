@@ -968,6 +968,60 @@ def predict_single_output_id(
     return composed[0]
 
 
+def _idset_module():
+    """The idset module, imported on first use: a pipe script loads this one standalone, where a relative import has no package."""
+    try:
+        from . import idset
+    except ImportError:
+        import sys
+        sys.path.append(os.path.dirname(__file__))
+        import idset
+    return idset
+
+
+def join_axis_ids(parts: List[Any]) -> str:
+    """One output id from the ids its axes contributed, in axis order, joined by the axis separator.
+
+    For a tool whose axes are not input streams (Fuse: slots and junction lengths), where predict_single_output_id has no stream to select from. The config-time predictor and the runtime script both call this, so the separator is written once.
+
+    Example:
+        join_axis_ids(["donor", 3, "cam"]) -> "donor+3+cam"
+    """
+    if not parts:
+        raise ValueError("join_axis_ids requires at least one part")
+    return _idset_module().AXIS_SEPARATOR.join(str(part) for part in parts)
+
+
+def predict_single_provenance(
+    **axis_selections: Tuple[str, List[str], Optional[int], List[str], bool]
+) -> Dict[str, str]:
+    """Provenance of one output row, one value per axis, as predict_output_ids_with_provenance records it.
+
+    Takes the same (mode, all_ids, selected_idx, static_ids, static_first) tuples as predict_single_output_id, so a pipe script that composes a row's id from them gets that row's provenance from the same selections.
+    An iterated axis contributes the id it selected, without its static companions. A bundled axis contributes its ids joined by the axis separator and, when it holds more than one, each member under "<axis>.<position>" (1-based).
+
+    Example:
+        predict_single_provenance(
+            sequences=("each", ["p1", "p2"], 1, [], False),
+            ligands=("bundle", ["l1", "l2"], None, [], False)
+        )
+        -> {"sequences": "p2", "ligands": "l1+l2", "ligands.1": "l1", "ligands.2": "l2"}
+    """
+    axis_modes = _idset_module().AXIS_MODES
+    provenance = {}
+    for name, (mode, all_ids, idx, _static_ids, _static_first) in axis_selections.items():
+        if mode not in axis_modes:
+            raise ValueError(f"Axis {name!r} has unknown mode {mode!r}; expected one of {axis_modes}")
+        if mode == "bundle" and idx is None:
+            provenance[name] = join_axis_ids(all_ids)
+            if len(all_ids) > 1:
+                for position, member in enumerate(all_ids, start=1):
+                    provenance[f"{name}.{position}"] = member
+        else:
+            provenance[name] = all_ids[idx if idx is not None else 0]
+    return provenance
+
+
 def assemble_provenance_id(
     template_id: str,
     axis_source_ids: List[str],
