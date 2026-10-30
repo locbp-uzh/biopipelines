@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Vina** 2.3 → 2.4. A docking `failure` row's `removed_by` is the step's own id (`<order>_Vina`), not the literal `Gnina` the shared pipe script wrote. The completion check read that as a row an upstream tool had left behind, so a receptor whose PDBQT conversion failed excused its own missing pair file and the step passed with the pair silently absent.
+
+- **Gnina** 2.3 → 2.4. A docking `failure` row's `removed_by` is the step's own id (`<order>_Gnina`) instead of the literal `Gnina`. The completion check excuses any row naming neither this step nor its tool, which for a Vina step is every row stamped `Gnina`: a receptor whose PDBQT conversion failed was read as left behind by an upstream tool, so its missing pair file never failed the step.
+
 - **Pool** 1.3 → 1.4. A blank `<axis>.id` cell of a pooled table (the row of a failed id) stays blank. The default suffix was appended to every cell of those columns, so with pandas 2 the blank became the text `nan_<pool_idx>`, a provenance id that names nothing (the stream path already left it blank). The ids themselves are unchanged: `<orig_id>_<pool_idx>`, with the id before the rename in `original.id`.
 
 - **RFDAA_PrepareLigand** 2.4 → 2.5. A prepared ligand keeps the id of the ligand it was made from, and its file is `<id>.pdb`. Every input was named `prepared_ligand`, so the designs RFdiffusionAllAtom derives from it (`<pdb id>_<n>`) all carried that constant. Every ligand of the input stream is prepared now; only the first was, and the others were dropped without a word. The pipe script reads the input stream itself instead of one id and file resolved in the shell. Nothing in the framework depended on the literal id.

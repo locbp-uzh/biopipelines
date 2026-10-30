@@ -732,6 +732,7 @@ def run_docking(prepared_proteins, conformers, config):
     # Local drops, so a receptor or pair that failed here still leaves a row in
     # missing.csv instead of vanishing from every output table.
     dock_failures = []
+    step_id = step_id_from_table_path(config["docking_summary_csv"])
     total_pairs = len(prepared_proteins) * len(conformers)
     pair_idx = 0
 
@@ -755,7 +756,7 @@ def run_docking(prepared_proteins, conformers, config):
                 vina_backend.receptor_pdbqt(protein_file, receptor_input)
             except RuntimeError as e:
                 print(f"  Warning: receptor conversion failed for {protein_id}: {e}")
-                dock_failures.append({"id": protein_id, "removed_by": "Gnina",
+                dock_failures.append({"id": protein_id, "removed_by": step_id,
                                       "kind": "failure",
                                       "cause": f"receptor PDBQT conversion failed: {e}"})
                 continue

@@ -905,8 +905,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      A docking `failure` row's `removed_by` is the step's own id (`<order>_Gnina`) instead of the literal `Gnina`. The completion check excuses any row naming neither this step nor its tool, which for a Vina step is every row stamped `Gnina`: a receptor whose PDBQT conversion failed was read as left behind by an upstream tool, so its missing pair file never failed the step.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
@@ -961,8 +965,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      A docking `failure` row's `removed_by` is the step's own id (`<order>_Vina`), not the literal `Gnina` the shared pipe script wrote. The completion check read that as a row an upstream tool had left behind, so a receptor whose PDBQT conversion failed excused its own missing pair file and the step passed with the pair silently absent.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
