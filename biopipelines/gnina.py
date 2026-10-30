@@ -123,7 +123,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.8"
+    TOOL_VERSION = "2.9"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -975,7 +975,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.8"
+    TOOL_VERSION = "2.9"
     ENV_NAME = "vina"
     BACKEND = "vina"
 

@@ -18,6 +18,7 @@ Usage:
 """
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -284,17 +285,31 @@ def _clean_protein_pdb(input_pdb, output_pdb, crystal_ligand_pdb=None):
     return output_pdb
 
 
-def prepare_proteins(structures_ds, output_folder, protonate, pH):
+def _unparseable_atoms(pdb_path):
+    """How many ATOM lines of a cleaned receptor have coordinates that are not finite numbers."""
+    count = 0
+    with open(pdb_path, 'r') as f:
+        for line in f:
+            if line.startswith("ATOM"):
+                coords = _parse_pdb_coords(line)
+                if coords is None or not all(math.isfinite(c) for c in coords):
+                    count += 1
+    return count
+
+
+def prepare_proteins(structures_ds, output_folder, protonate, pH, failed=None):
     """
     Prepare protein structures for docking.
 
     For each protein:
     1. Clean: strip HETATM records, deduplicate homodimer chains.
-    2. Extract crystal ligand HETATM records for the kept chains (autobox).
-    3. Protonate with OpenBabel at the specified pH (if requested).
+    2. Refuse a receptor with an ATOM line whose coordinates are not numbers (Open Babel reads it as an atom at the origin).
+    3. Extract crystal ligand HETATM records for the kept chains (autobox).
+    4. Protonate with OpenBabel at the specified pH (if requested).
 
     Returns:
         dict: protein_id -> {"protein": path, "crystal_ligand": path_or_None}
+        A refused protein is absent from it, and `failed` (protein_id -> cause), when given, says why.
     """
     prep_dir = os.path.join(output_folder, "prepared_proteins")
     os.makedirs(prep_dir, exist_ok=True)
@@ -310,6 +325,13 @@ def prepare_proteins(structures_ds, output_folder, protonate, pH):
         crystal_lig = os.path.join(prep_dir, f"{protein_id}_crystal_ligand.pdb")
         _clean_protein_pdb(protein_file, cleaned_pdb, crystal_ligand_pdb=crystal_lig)
         crystal_lig = crystal_lig if os.path.exists(crystal_lig) else None
+
+        unreadable = _unparseable_atoms(cleaned_pdb)
+        if unreadable:
+            print(f"  Error: {unreadable} ATOM line(s) of {protein_id} have unparseable coordinates, skipping")
+            if failed is not None:
+                failed[protein_id] = f"the receptor has {unreadable} ATOM line(s) with unparseable coordinates"
+            continue
 
         if protonate:
             out_pdb = os.path.join(prep_dir, f"{protein_id}_h.pdb")
@@ -1216,14 +1238,16 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
     return written_pairs, rank_causes
 
 
-def unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers):
-    """{pair id: [why]} for the pairs that never reached the docking: a protein that was not prepared, or a ligand with no conformer."""
+def unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers, failed=None):
+    """{pair id: [why]} for the pairs that never reached the docking: a protein that was not prepared (`failed` says why), or a ligand with no conformer."""
     with_conformers = {conf["ligand_id"] for conf in conformers}
+    failed = failed or {}
     causes = defaultdict(list)
     for protein_id in protein_ids:
         for ligand_id in ligand_ids:
             if protein_id not in prepared_proteins:
-                causes[_pair_id(protein_id, ligand_id)].append("the protein could not be prepared")
+                causes[_pair_id(protein_id, ligand_id)].append(
+                    failed.get(protein_id, "the protein could not be prepared"))
             if ligand_id not in with_conformers:
                 causes[_pair_id(protein_id, ligand_id)].append("no conformer could be prepared for the ligand")
     return dict(causes)
@@ -1526,6 +1550,7 @@ def run_score_mode(structures_ds, compounds_ds, config):
 
     rows, map_rows, failed = [], [], []
     for structure_id, complex_pdb in iterate_files(structures_ds):
+        compound_id = None
         try:
             compound_id = structure_to_compound.get(structure_id)
             if compound_id is None:
@@ -1594,11 +1619,14 @@ def run_score_mode(structures_ds, compounds_ds, config):
             print(f"WARNING: {structure_id} {mode} failed: {e}", file=sys.stderr)
             failed.append({"id": structure_id, "removed_by": step_id, "kind": "failure",
                            "cause": str(e)[:200]})
+            # A result table keeps a row for every id that entered; nothing was measured, so every score is NaN.
+            rows.append({"id": structure_id, "structures.id": structure_id, "compounds.id": compound_id or "",
+                         **{col: float("nan") for col in score_terms}})
 
     score_cols = ["id", "structures.id", "compounds.id"] + list(score_terms)
     os.makedirs(os.path.dirname(scores_csv), exist_ok=True)
     pd.DataFrame(rows, columns=score_cols).to_csv(scores_csv, index=False)
-    print(f"Wrote {len(rows)} scores to {scores_csv}")
+    print(f"Wrote {len(rows)} scores to {scores_csv} ({len(failed)} of them NaN rows of failed complexes)")
 
     if structures_map:
         os.makedirs(os.path.dirname(structures_map), exist_ok=True)
@@ -1665,15 +1693,16 @@ def main():
     protein_ids = [protein_id for protein_id, _file in iterate_files(structures_ds)]
     ligand_ids = list(compounds_ds.ids_expanded)
     refuse_shared_pair_ids(protein_ids, ligand_ids)
+    protein_failures = {}
     prepared_proteins = prepare_proteins(
         structures_ds, config["output_folder"],
-        config["protonate"], config["pH"]
+        config["protonate"], config["pH"], failed=protein_failures
     )
 
     print("\n--- Step 2: Conformer Preparation ---")
     conformers = prepare_conformers(compounds_ds, config["output_folder"], config)
     causes = defaultdict(list)
-    for pair_id, why in unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers).items():
+    for pair_id, why in unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers, protein_failures).items():
         causes[pair_id] += why
 
     written_pairs = set()

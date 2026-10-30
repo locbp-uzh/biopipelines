@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Vina** 2.8 → 2.9. Same two changes as Gnina, whose pipe script it shares: a receptor with unparseable coordinates is a `failure` row of `missing` instead of a docked one-point receptor, and a complex that fails in `score` or `minimize` keeps a NaN row of `scores`.
+
+- **Gnina** 2.8 → 2.9. A receptor with an ATOM line whose coordinates are not numbers is refused before it is protonated, boxed or docked: its pairs are `failure` rows of `missing` whose cause says the coordinates are unparseable. Open Babel reads such a line as an atom at the origin, so Vina boxed on the origin-centred conformer, found the box inside that one-point receptor and docked into it (about -1 kcal/mol, no failure row), while GNINA stopped for lack of a box. In `score` and `minimize` a complex that fails keeps a row of `scores` with every score NaN, besides its `missing` row, as a result table keeps one row per id that entered.
+
 - **DiffDock** 2.2 → 2.3. A ligand whose `smiles` cell is blank is refused by name, not handed to DiffDock as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: the string "nan" was written as the ligand of the table DiffDock reads. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
 
 - **DynamicBind** 2.3 → 2.4. A ligand whose `smiles` cell is blank is refused by name, not handed to DynamicBind as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: the string "nan" was written as the ligand of the table DynamicBind reads. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.

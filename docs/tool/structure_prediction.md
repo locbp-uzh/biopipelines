@@ -527,7 +527,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   - `best_pose_file`: the complex PDB of the group's best pose (lowest Vina score over its runs). With `top_only=True` the structures stream holds one file per pair, so among a pair's conformers the one `rank_conformers_by` picks (by default the lowest `pseudo_binding_energy`, the lowest `best_vina` when a conformer has no energy) is written to `structures/<protein>+<ligand>_best.pdb`; the other conformers' files go to `execution/conformer_poses/<summary id>_best.pdb`. With `top_only=False` every conformer's file is `structures/<summary id>_best.pdb` and `conformer_poses/` is not written.
 
 **Tables** (`mode="score"` / `"minimize"`):
-- `scores` - One row per scored complex; empty cells where GNINA did not emit that term for the chosen `cnn_scoring`:
+- `scores` - One row per complex that entered, whether or not it could be scored; a complex that failed keeps its row with every score empty (NaN) and its reason in `missing`. Empty cells also where GNINA did not emit that term for the chosen `cnn_scoring`:
 
   | id | structures.id | compounds.id | vina_affinity | cnn_score | cnn_affinity | cnn_vs | cnn_affinity_variance |
   |----|---------------|--------------|---------------|-----------|--------------|--------|-----------------------|
@@ -538,7 +538,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   - `cnn_vs`: CNN virtual-screening score (`cnn_score × cnn_affinity`).
 
 **Tables** (all modes):
-- `missing` - IDs removed upstream, and this step's own failures as `failure` rows with `removed_by` the step id and the reason in `cause`. In `docking` mode one row per (protein, ligand) pair that has no entry in the structures stream: a receptor or ligand that could not be prepared, a binary that failed or timed out, a run that gave no accepted pose, or a `rank_conformers_by` metric a posed conformer lacks. In `score`/`minimize` mode one row per complex (no HETATM with the ligand code, SMILES that doesn't match the extracted skeleton, a binary failure). In `docking` mode the step itself exits non-zero only when no pair gave a structure. | id | removed_by | kind | cause |
+- `missing` - IDs removed upstream, and this step's own failures as `failure` rows with `removed_by` the step id and the reason in `cause`. In `docking` mode one row per (protein, ligand) pair that has no entry in the structures stream: a receptor with unparseable coordinates or a ligand that could not be prepared, a binary that failed or timed out, a run that gave no accepted pose, or a `rank_conformers_by` metric a posed conformer lacks. In `score`/`minimize` mode one row per complex (no HETATM with the ligand code, SMILES that doesn't match the extracted skeleton, a binary failure). In `docking` mode the step itself exits non-zero only when no pair gave a structure. | id | removed_by | kind | cause |
 
 **Example**:
 ```python
@@ -610,7 +610,7 @@ Vina reads and writes PDBQT only, so the wrapper converts the receptor and ligan
 - `docking_summary` — one row per (protein, ligand, conformer) group, id `<protein>+<ligand>_conf<k>`: | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
 
 **Tables** (`mode="score"` / `"minimize"`):
-- `scores` — one row per scored complex: | id | structures.id | compounds.id | vina_affinity |
+- `scores` — one row per complex that entered (a complex that failed keeps its row, every score NaN): | id | structures.id | compounds.id | vina_affinity |
 
 **Tables** (all modes):
 - `missing` — IDs removed upstream or that failed locally: | id | removed_by | kind | cause |

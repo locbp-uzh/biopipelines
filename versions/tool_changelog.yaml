@@ -921,8 +921,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.8"
+  current: "2.9"
   history:
+  - version: '2.9'
+    date: '2026-10-30'
+    note: >-
+      A receptor with an ATOM line whose coordinates are not numbers is refused before it is protonated, boxed or docked: its pairs are `failure` rows of `missing` whose cause says the coordinates are unparseable. Open Babel reads such a line as an atom at the origin, so Vina boxed on the origin-centred conformer, found the box inside that one-point receptor and docked into it (about -1 kcal/mol, no failure row), while GNINA stopped for lack of a box. In `score` and `minimize` a complex that fails keeps a row of `scores` with every score NaN, besides its `missing` row, as a result table keeps one row per id that entered.
   - version: '2.8'
     date: '2026-10-30'
     note: >-
@@ -997,8 +1001,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.8"
+  current: "2.9"
   history:
+  - version: '2.9'
+    date: '2026-10-30'
+    note: >-
+      Same two changes as Gnina, whose pipe script it shares: a receptor with unparseable coordinates is a `failure` row of `missing` instead of a docked one-point receptor, and a complex that fails in `score` or `minimize` keeps a NaN row of `scores`.
   - version: '2.8'
     date: '2026-10-30'
     note: >-
