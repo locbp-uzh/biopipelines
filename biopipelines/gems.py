@@ -58,7 +58,7 @@ class GEMS(BaseConfig):
     """
 
     TOOL_NAME = "GEMS"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "gems"
 
     @classmethod

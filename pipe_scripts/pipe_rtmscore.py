@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values, read_upstream_missing, step_id_from_table_path, container_argv_prefix  # noqa: E402
 # Shared coordinate-ligand -> sanitized SDF (bond-order template) — single
 # implementation, also used by OpenBabel and the other ligand-consuming tools.
-from biopipelines.ligand_utils import write_ligand_sdf  # noqa: E402
+from biopipelines.ligand_utils import ligand_chemistry, write_ligand_sdf  # noqa: E402
 
 
 SCORE_COLS = ["id", "structures.id", "ligands.id", "pose", "rtmscore"]
@@ -40,13 +40,13 @@ def failure_cause(error):
 
 
 def load_smiles_lookup(smiles_json):
-    """Build {ligand_id: smiles} from the optional smiles stream."""
+    """Build {ligand_id: smiles} from the optional smiles stream; a blank cell is no template."""
     if not smiles_json:
         return {}
     ds = load_datastream(smiles_json)
     out = {}
     for cid, values in iterate_values(ds, columns=["smiles"]):
-        smi = str(values.get("smiles", "")).strip()
+        smi = ligand_chemistry(values)["smiles"]
         if smi:
             out[cid] = smi
     return out

@@ -889,8 +889,12 @@ GEMS:
   files:
   - biopipelines/gems.py
   - pipe_scripts/pipe_gems.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is a ligand without a template, not a ligand with the template "nan". `Ligand(codes=..., structures=...)` without `template_smiles` carves a ligand whose `smiles` is stored empty and read back as NaN; the pipe script turned that into the string "nan" and passed it to RDKit as the bond-order template, so the whole step stopped on the first carved ligand ("RDKit failed to parse template SMILES: 'nan'") instead of perceiving the bonds from the coordinates. The template now comes from `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty. No id changes.
   - version: '2.1'
     date: '2026-10-30'
     note: >-
@@ -2222,8 +2226,12 @@ RTMScore:
   files:
   - biopipelines/rtmscore.py
   - pipe_scripts/pipe_rtmscore.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is a ligand without a template, not a ligand with the template "nan". `Ligand(codes=..., structures=...)` without `template_smiles` carves a ligand whose `smiles` is stored empty and read back as NaN; the pipe script turned that into the string "nan" and passed it to RDKit as the bond-order template, so the whole step stopped on the first carved ligand ("RDKit failed to parse template SMILES: 'nan'") instead of perceiving the bonds from the coordinates. The template now comes from `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-

@@ -59,7 +59,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 47 | EnsembleAnalysis          | Analysis                       | 1.0 | `biopipelines/ensemble_analysis.py` |
 | 48 | Foldseek | Analysis                       | 1.4 | `biopipelines/foldseek.py` |
 | 49 | FPocket | Analysis                       | 2.1 | `biopipelines/fpocket.py` |
-| 50 | GEMS | Analysis                       | 2.1 | `biopipelines/gems.py` |
+| 50 | GEMS | Analysis                       | 2.2 | `biopipelines/gems.py` |
 | 51 | IPSAE                     | Analysis                       | 1.4 | `biopipelines/ipsae.py` |
 | 52 | LigandAtomSelector        | Analysis                       | 1.2 | `biopipelines/ligand_atom_selector.py` |
 | 53 | LigandDdG                 | Analysis                       | 1.2 | `biopipelines/ligand_ddg.py` |
@@ -74,7 +74,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 62 | Prodigy | Analysis                       | 2.0 | `biopipelines/prodigy.py` |
 | 63 | ProLIF | Analysis                       | 2.1 | `biopipelines/prolif.py` |
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |
-| 65 | RTMScore | Analysis                       | 2.2 | `biopipelines/rtmscore.py` |
+| 65 | RTMScore | Analysis                       | 2.3 | `biopipelines/rtmscore.py` |
 | 66 | SASA                      | Analysis                       | 1.0 | `biopipelines/sasa.py` |
 | 67 | SequenceIdentityGate      | Analysis                       | 1.0 | `biopipelines/sequence_identity_gate.py` |
 | 68 | StructureCluster          | Analysis                       | 1.1 | `biopipelines/structure_cluster.py` |
