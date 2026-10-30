@@ -98,7 +98,19 @@ class TestTheScript:
         assert "pipe_rfdiffusion3_pending.py" in retry
         assert 'tee "' in retry and '/$KEY.stderr" >&2' in retry
         assert body.index("run_rfd3 ") < body.index("for KEY in")
-        assert "RERUN_FAILS" in retry and "break" in retry, "a failing environment must not reload the model for every input"
+        assert "RERUN_FAILS" in retry and "-ge 3" in retry, "a failing environment must not reload the model for every input"
+
+    def test_an_input_the_reruns_stopped_before_says_so_instead_of_naming_no_error(self, local_config, isolated_cwd,
+                                                                                    new_pipeline, tmp_path):
+        """A good input that follows three crashes is not run; its row must say that, not 'no error was captured'."""
+        _, body = self._body(new_pipeline, tmp_path)
+        retry = body[body.index("for KEY in"):]
+        retry = retry[:retry.index("\ndone")]
+        check = retry.index("-ge 3")
+        skipped = retry[check:retry.index("continue", check)]
+        assert "not rerun" in skipped and "/$KEY.stderr" in skipped, "the skipped input needs a stderr file stating why"
+        assert check < retry.index("run_rfd3 ", check), "the check comes before the input is run"
+        assert "break" not in retry, "every skipped input is named, so the loop goes on"
 
     def test_the_rerun_uses_the_command_of_the_batch(self, local_config, isolated_cwd, new_pipeline, tmp_path):
         _, body = self._body(new_pipeline, tmp_path, seed=3)

@@ -2225,8 +2225,12 @@ RFdiffusion3:
   - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
   - pipe_scripts/pipe_rfdiffusion3_postprocess.py
   - pipe_scripts/pipe_rfdiffusion3_table.py
-  current: "3.11"
+  current: "3.12"
   history:
+  - version: '3.12'
+    date: '2026-10-30'
+    note: >-
+      An input the reruns stopped before is named as such. After three inputs in a row failed alone the remaining pending inputs were skipped with no stderr, so their `failure` rows read "no design was produced and no error was captured for this input" although the input was never run, and a good input that followed three crashed ones looked like a failure of its own. Each skipped input now gets a stderr file stating `not rerun, because three inputs in a row failed alone before it`, which becomes its `cause`. The reruns, the ids and the rows of the crashed inputs are unchanged.
   - version: '3.11'
     date: '2026-10-30'
     note: >-

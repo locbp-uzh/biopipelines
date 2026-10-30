@@ -213,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.11"
+    TOOL_VERSION = "3.12"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -881,16 +881,17 @@ run_rfd3 "{self.json_file}"
 mkdir -p "{self.stderr_folder}"
 RERUN_FAILS=0
 for KEY in $(python "{self.pending_py}" --json "{self.json_file}" --raw-folder "{self.raw_output_folder}"); do
+    # Three in a row failing alone is the environment, not the inputs: the rest are named as not rerun instead of reloading the model for each.
+    if [ "$RERUN_FAILS" -ge 3 ]; then
+        echo "Error: not rerun, because three inputs in a row failed alone before it" > "{self.stderr_folder}/$KEY.stderr"
+        echo "Skipping $KEY: three inputs in a row failed alone"
+        continue
+    fi
     python "{self.pending_py}" --json "{self.json_file}" --key "$KEY" --single-json "{self.configuration_path('single_$KEY.json')}"
     if run_rfd3 "{self.configuration_path('single_$KEY.json')}" 2> >(tee "{self.stderr_folder}/$KEY.stderr" >&2); then
         RERUN_FAILS=0
     else
         RERUN_FAILS=$((RERUN_FAILS + 1))
-    fi
-    # Three in a row failing alone is the environment, not the inputs: stop rather than reload the model for every one.
-    if [ "$RERUN_FAILS" -ge 3 ]; then
-        echo "Three inputs in a row failed alone; the remaining ones are not rerun"
-        break
     fi
 done
 
