@@ -1474,6 +1474,8 @@ struct1_2,struct1,AETGFT...,0.91,...
 struct2_1,struct2,MKTVRQ...,0.88,...
 ```
 
+A producer writes that column from the parents it was given and never by stripping a suffix off the output id. `combinatorics.multiplied_id_parents(parent_ids, suffix_pattern)` returns the `{output id: parent}` map from the same suffix pattern `get_output_files()` declares, and `pipe_update_structures_map.py --parents-json <input stream json> --suffix-pattern <pattern> --parent-column structures.id` applies it by exact id to the files found, with the input stream's real ids at runtime (a lazy bracket resolves against the upstream map). A file that is no input's output keeps a blank parent and is named on stderr, and a folder in which none matches fails the step.
+
 Downstream tools can join on any provenance column:
 ```python
 # Find all outputs for a specific protein
@@ -1494,6 +1496,7 @@ All ID generation uses functions from `combinatorics.py`:
 | `predict_single_output_id()` | Single-row ID at execution time (pipe scripts) |
 | `generate_multiplied_ids()` | Multiplier tools (ProteinMPNN, Mutagenesis) |
 | `generate_multiplied_ids_pattern()` | Same, but keeps compact ID patterns |
+| `multiplied_id_parents()` | Runtime provenance of a multiplier tool: every concrete output id mapped to its parent, looked up by exact id |
 
 #### Using `predict_output_ids_with_provenance` (multi-axis tools)
 

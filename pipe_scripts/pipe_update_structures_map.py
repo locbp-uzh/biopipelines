@@ -10,10 +10,11 @@ Tools no longer write a per-design map_table at configuration time (only the
 ``map_table`` *path* is declared). After the tool runs, this script scans the
 output folder, builds one row per produced file, and writes the map. A
 constant provenance column (e.g. every design's parent PDB id) can be set via
-``--set-provenance``; fan-out provenance (``design_i_1`` ← ``design_i``) is
-recoverable from the id suffix and needs no column. If a config-time map
-happens to exist (legacy tools), its non-id/file/value columns are carried
-forward by exact id match.
+``--set-provenance``. A per-design parent column is filled by exact id from
+the inputs that exist at runtime (``--parents-json`` + ``--suffix-pattern``,
+through ``combinatorics.multiplied_id_parents``), never by stripping a suffix
+off the file id. If a config-time map happens to exist (legacy tools), its
+non-id/file/value columns are carried forward by exact id match.
 
 Usage:
     python pipe_update_structures_map.py \\
@@ -21,19 +22,22 @@ Usage:
         --output-folder /path/to/output \\
         --extension pdb \\
         [--best-poses-dir /path/to/best_poses] \\
-        [--set-provenance structures.id=4AKE]
+        [--set-provenance structures.id=4AKE] \\
+        [--parents-json /path/to/input_structures.json \\
+         --suffix-pattern "<1..5>" --parent-column structures.id \\
+         [--key-prefix op7]]
 """
 
 import argparse
 import os
 import glob
+import sys
 import pandas as pd
 
 
 def update_map_from_folder(structures_map, output_folder, extension="pdb",
                            best_poses_dir=None, set_provenance=None,
-                           provenance_from_suffix=None,
-                           suffix_regex=r"_\d+$"):
+                           parent_column=None, parent_of=None):
     """Write structures_map.csv based on the actual files in output_folder.
 
     Args:
@@ -43,15 +47,11 @@ def update_map_from_folder(structures_map, output_folder, extension="pdb",
         best_poses_dir: If set, scan this directory instead (for Gnina best_poses).
         set_provenance: Optional dict {column_name: constant_value} of provenance
             columns to add to every row (e.g. {"structures.id": "4AKE"}).
-        provenance_from_suffix: Optional column name. When set, that column is
-            filled per-row with the parent id derived by stripping ``suffix_regex``
-            from each file id. This recovers parent-PDB provenance when a tool
-            fans out N derived structures per input PDB across one or many parents.
-        suffix_regex: The trailing-suffix pattern the *caller* knows its ids use
-            (default ``_<digits>$``). The caller passes its own id shape so this
-            helper stays tool-agnostic — it just strips whatever regex it is given.
+        parent_column: Optional column name for the per-row parent id.
+        parent_of: {output id: parent id} for every id the step can produce. The
+            parent column is looked up by exact id; a file whose id is not a key
+            gets a blank parent and is named on stderr.
     """
-    import re
     scan_dir = best_poses_dir or output_folder
     pattern = os.path.join(scan_dir, f"*.{extension}")
     found_files = sorted(glob.glob(pattern))
@@ -77,13 +77,16 @@ def update_map_from_folder(structures_map, output_folder, extension="pdb",
         for col, value in set_provenance.items():
             new_df[col] = value
 
-    # Per-row provenance: parent id = file id with the caller-supplied
-    # suffix_regex stripped. The pattern is the caller's id-shape, kept out of
-    # this shared, tool-agnostic helper.
-    if provenance_from_suffix:
-        new_df[provenance_from_suffix] = new_df["id"].map(
-            lambda x: re.sub(suffix_regex, "", str(x))
-        )
+    # Per-row parent id by exact lookup; an id outside the map is no input's output.
+    if parent_column and parent_of is not None:
+        new_df[parent_column] = new_df["id"].map(parent_of).fillna("")
+        strays = new_df.loc[new_df[parent_column] == "", "id"].tolist()
+        if strays:
+            print(f"WARNING: {len(strays)} of {len(new_df)} file(s) in {scan_dir} are no input's "
+                  f"output and carry no {parent_column}: {strays[:10]}", file=sys.stderr)
+        if len(strays) == len(new_df):
+            raise ValueError(f"No file in {scan_dir} matches an id the inputs and the suffix "
+                             f"pattern produce (found: {strays[:10]}); {structures_map} not written")
 
     # Carry forward any provenance columns from a pre-existing (legacy) map by
     # exact id match. No-op when the config-time map was not written.
@@ -123,6 +126,15 @@ def _parse_set_provenance(spec):
     return out or None
 
 
+def _parents_from_stream(parents_json, suffix_pattern, key_prefix):
+    """{output id: parent id} from the input stream's real ids at runtime."""
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from biopipelines.biopipelines_io import load_datastream
+    from biopipelines.combinatorics import multiplied_id_parents
+    parent_ids = load_datastream(parents_json).ids_expanded
+    return multiplied_id_parents(parent_ids, suffix_pattern, key_prefix or "")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Write structures_map.csv from actual runtime output files"
@@ -138,15 +150,22 @@ def main():
     parser.add_argument("--set-provenance", default=None,
                         help="Constant provenance columns, 'col=value[,col2=value2]' "
                              "(e.g. 'structures.id=4AKE')")
-    parser.add_argument("--provenance-from-suffix", default=None,
-                        help="Column name to fill per-row with the parent id "
-                             "(file id minus the --suffix-regex match), "
-                             "e.g. 'structures.id' turns '4AKE_3' into '4AKE'")
-    parser.add_argument("--suffix-regex", default=r"_\d+$",
-                        help="Trailing-suffix regex the caller's ids use "
-                             "(default '_<digits>$'); stripped to get the parent id")
+    parser.add_argument("--parents-json", default=None,
+                        help="Input DataStream JSON whose ids are the parents; fills "
+                             "--parent-column by exact id (needs --suffix-pattern)")
+    parser.add_argument("--suffix-pattern", default=None,
+                        help="Suffix pattern appended to each parent id, e.g. '<1..5>'")
+    parser.add_argument("--parent-column", default=None,
+                        help="Column to fill with the parent id, e.g. 'structures.id'")
+    parser.add_argument("--key-prefix", default=None,
+                        help="Prefix a tool puts in front of the parent in its output "
+                             "ids ('<prefix>_<parent>_<n>'); the parent stays bare")
 
     args = parser.parse_args()
+    if args.parents_json and not (args.suffix_pattern and args.parent_column):
+        parser.error("--parents-json needs --suffix-pattern and --parent-column")
+    parent_of = (_parents_from_stream(args.parents_json, args.suffix_pattern, args.key_prefix)
+                 if args.parents_json else None)
 
     update_map_from_folder(
         structures_map=args.structures_map,
@@ -154,8 +173,8 @@ def main():
         extension=args.extension,
         best_poses_dir=args.best_poses_dir,
         set_provenance=_parse_set_provenance(args.set_provenance),
-        provenance_from_suffix=args.provenance_from_suffix,
-        suffix_regex=args.suffix_regex,
+        parent_column=args.parent_column,
+        parent_of=parent_of,
     )
 
 

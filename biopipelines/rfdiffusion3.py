@@ -213,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.9"
+    TOOL_VERSION = "3.10"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -969,20 +969,25 @@ python "{self.table_py_file}" \\
 
         return script_content
 
+    def _suffix_pattern(self) -> str:
+        """Design (and model) suffix of every output id, for the declared ids and the provenance command alike."""
+        d_start = self.design_startnum
+        d_end = self.design_startnum + self.num_designs - 1
+        if self.num_models > 1:
+            m_end = self.design_startnum + self.num_models - 1
+            return f"d<{d_start}..{d_end}>_m<{d_start}..{m_end}>"
+        return f"<{d_start}..{d_end}>"
+
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # Each id is "<pdb_id>_d<D>_m<M>" (num_models>1) or "<pdb_id>_<D>";
-        # strip that design/model suffix to recover the parent `structures.id`.
-        # The regex is RFd3's id shape, passed to the tool-agnostic helper.
+        # Parents come from the input stream by exact id; the prefix names the output and leaves the parent bare.
         if self.pdb_stream:
-            suffix_re = r"_d\d+_m\d+$" if self.num_models > 1 else r"_\d+$"
-            # The prefix sits in front of the parent id, so it has to come off too.
+            prov_arg = (f' --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}"'
+                        ' --parent-column "structures.id"')
             if self.prefix:
-                suffix_re = f"^{re.escape(self.prefix)}_|" + suffix_re
-            prov_arg = (f' --provenance-from-suffix "structures.id"'
-                        f' --suffix-regex "{suffix_re}"')
+                prov_arg += f' --key-prefix "{self.prefix}"'
         else:
             prov_arg = ""
         return f"""echo "Writing structures map from actual output files"
@@ -1006,17 +1011,8 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         """
         # Generate pattern-based IDs. The base is each design key — the input
         # pdb id(s), prefixed when `prefix` was given, or the de-novo prefix.
-        d_start = self.design_startnum
-        d_end = self.design_startnum + self.num_designs - 1
-        m_start = self.design_startnum
-        m_end = self.design_startnum + self.num_models - 1
-
-        # Suffix appended after the helper's "_" separator. Keep parent ids
-        # compact (no config-time expansion) via generate_multiplied_ids_pattern.
-        if self.num_models > 1:
-            suffix_pattern = f"d<{d_start}..{d_end}>_m<{m_start}..{m_end}>"
-        else:
-            suffix_pattern = f"<{d_start}..{d_end}>"
+        # Keep parent ids compact (no config-time expansion) via generate_multiplied_ids_pattern.
+        suffix_pattern = self._suffix_pattern()
 
         if self.pdb_stream:
             base_keys = ([f"{self.prefix}_{i}" for i in self.pdb_stream.ids]

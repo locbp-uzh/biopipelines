@@ -143,7 +143,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     # RFdiffusion's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -902,15 +902,19 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
 
 """
 
+    def _suffix_pattern(self) -> str:
+        """Design-number suffix of every output id, for the declared ids and the provenance command alike."""
+        start = self.design_startnum
+        return f"<{start}..{start + self.num_designs - 1}>"
+
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # Each design id is "<pdb_id>_<n>"; its parent PDB is the id minus the
-        # trailing "_<n>" suffix. Derive the `structures.id` provenance column
-        # from that suffix at runtime (works for one or many parent PDBs). With
-        # no PDB input there is no parent, so no provenance column.
-        prov_arg = ' --provenance-from-suffix "structures.id"' if self.pdb_stream else ""
+        # Parents come from the input stream by exact id; with no PDB, or under fold conditioning, there are none.
+        has_parents = self.pdb_stream and not self._scaffold_guided
+        prov_arg = (f' --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}"'
+                    ' --parent-column "structures.id"') if has_parents else ""
         return f"""echo "Writing structures map from actual output files"
 python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
 
@@ -922,9 +926,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         # The per-design map_table is written at runtime by
         # _generate_script_update_structures_map(); here we only declare the
         # stream and its map_table path.
-        start = self.design_startnum
-        end = self.design_startnum + self.num_designs - 1
-        suffix_pattern = f"<{start}..{end}>"
+        suffix_pattern = self._suffix_pattern()
         if self.pdb_stream:
             # One <pdb_id>_<n> fan-out per input PDB. Keep parent ids compact /
             # lazy-safe via the shared multiplier helper.

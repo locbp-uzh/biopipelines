@@ -73,7 +73,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     # RFdiffusion-AllAtom's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -618,13 +618,18 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
 
 """
 
+    def _suffix_pattern(self) -> str:
+        """Design-number suffix of every output id, for the declared ids and the provenance command alike."""
+        start = self.design_startnum
+        return f"<{start}..{start + self.num_designs - 1}>"
+
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # Each design id is "<pdb_id>_<n>"; derive the `structures.id` parent
-        # provenance from that suffix at runtime (one or many parent PDBs).
-        prov_arg = ' --provenance-from-suffix "structures.id"' if self.pdb_stream else ""
+        # Parents come from the input stream by exact id; with no PDB there are none.
+        prov_arg = (f' --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}"'
+                    ' --parent-column "structures.id"') if self.pdb_stream else ""
         return f"""echo "Writing structures map from actual output files"
 python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
 
@@ -632,9 +637,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after RFdiffusion-AllAtom execution."""
-        start = self.design_startnum
-        end = self.design_startnum + self.num_designs - 1
-        suffix_pattern = f"<{start}..{end}>"
+        suffix_pattern = self._suffix_pattern()
         if self.pdb_stream:
             structure_ids = generate_multiplied_ids_pattern(
                 self.pdb_stream.ids, suffix_pattern,
@@ -714,7 +717,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
 
     # Lazy path descriptors
     #   prepared_pdb    — the single output PDB, lives in structures/.

@@ -106,7 +106,7 @@ class HBDesigner(BaseConfig):
     """
 
     TOOL_NAME = "HBDesigner"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "hbdesigner"
 
     DESIGN_MODELS = ("design_002", "design_020")
@@ -428,15 +428,16 @@ python {self.collect_py} \\
 
 """
 
-    def _generate_script_update_structures_map(self) -> str:
-        """Write structures_map.csv from the actual designed PDBs.
+    def _suffix_pattern(self) -> str:
+        """Rank suffix of every output id, for the declared ids and the provenance command alike."""
+        return f"<1..{self.top_k}>"
 
-        Each id is ``<parent>_<n>``; recover the ``structures.id`` parent from
-        the suffix.
-        """
+    def _generate_script_update_structures_map(self) -> str:
+        """Write structures_map.csv from the actual designed PDBs, each parent looked up by exact id."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        prov_arg = ' --provenance-from-suffix "structures.id"'
+        prov_arg = (f' --parents-json "{self.structures_json}" --suffix-pattern "{self._suffix_pattern()}"'
+                    ' --parent-column "structures.id"')
         return f"""echo "Writing structures map from actual output files"
 python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
 
@@ -445,9 +446,8 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after HBDesigner execution."""
         # <parent>_<1..top_k> fan-out via the shared multiplier helper (compact, lazy-safe).
-        suffix_pattern = f"<1..{self.top_k}>"
         structure_ids = generate_multiplied_ids_pattern(
-            self.structures_stream.ids, suffix_pattern,
+            self.structures_stream.ids, self._suffix_pattern(),
             input_stream_name="structures"
         )
         structures_dir = self.stream_folder("structures")

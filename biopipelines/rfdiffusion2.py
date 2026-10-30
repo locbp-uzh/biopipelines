@@ -107,7 +107,7 @@ class RFdiffusion2(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion2"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     # RFdiffusion2's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
 
@@ -491,24 +491,25 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
 
 """
 
+    def _suffix_pattern(self) -> str:
+        """Design-number suffix of every output id, for the declared ids and the provenance command alike."""
+        start = self.design_startnum
+        return f"<{start}..{start + self.num_designs - 1}>"
+
     def _generate_script_update_structures_map(self) -> str:
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # Each design id is "<pdb_id>_<n>"; derive the `structures.id` parent
-        # provenance from that suffix at runtime.
+        # Parents come from the input stream by exact id, with the suffix pattern get_output_files declares.
         return f"""echo "Writing structures map from actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}" --provenance-from-suffix "structures.id"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}" --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}" --parent-column "structures.id"
 
 """
 
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after RFdiffusion2 execution."""
-        start = self.design_startnum
-        end = self.design_startnum + self.num_designs - 1
-        suffix_pattern = f"<{start}..{end}>"
         structure_ids = generate_multiplied_ids_pattern(
-            self.pdb_stream.ids, suffix_pattern,
+            self.pdb_stream.ids, self._suffix_pattern(),
             input_stream_name="structures"
         )
         file_template = [self.stream_path("structures", "<id>.pdb")]

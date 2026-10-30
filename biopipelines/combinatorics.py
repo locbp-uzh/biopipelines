@@ -1054,3 +1054,40 @@ def generate_multiplied_ids_pattern(
         -> ["5HG6_<0..4>_<1..3>"]
     """
     return [f"{parent}_{suffix_pattern}" for parent in input_ids]
+
+
+def multiplied_id_parents(
+    parent_ids: List[str],
+    suffix_pattern: str,
+    key_prefix: str = ""
+) -> Dict[str, str]:
+    """
+    Map every concrete id a multiplier tool makes to the parent it was made from.
+
+    The ids are exactly those ``generate_multiplied_ids_pattern`` declares at
+    configuration time, expanded, so a pipe script that calls this with the
+    parents that really exist at runtime cannot drift from the declared ids.
+    Provenance is then looked up by exact id, never recovered by stripping a
+    suffix off the output id.
+
+    Args:
+        parent_ids: Concrete parent ids (a lazy parent must be resolved first).
+        suffix_pattern: Suffix pattern appended to each parent (e.g., "<1..3>").
+        key_prefix: For a tool that names its outputs ``<key_prefix>_<parent>_<n>``
+            while the parent stays the bare input id.
+
+    Example:
+        multiplied_id_parents(["5HG6_1"], "<1..2>")
+        -> {"5HG6_1_1": "5HG6_1", "5HG6_1_2": "5HG6_1"}
+    """
+    try:
+        from . import id_patterns
+    except ImportError:
+        import id_patterns
+
+    parents = {}
+    for parent in parent_ids:
+        key = f"{key_prefix}_{parent}" if key_prefix else parent
+        for output_id in id_patterns.expand_ids(generate_multiplied_ids_pattern([key], suffix_pattern)):
+            parents[output_id] = parent
+    return parents

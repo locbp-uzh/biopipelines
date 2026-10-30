@@ -2,12 +2,11 @@
 
 With a PDB input the design key was the input pdb id alone and `prefix` was consulted only in the de-novo branch, so a packed run with one step per design target -- same parent PDB, different contigs -- had every step emit `<pdb>_1 ... <pdb>_N`. Nothing failed: each step writes its own folder, so the collision only appears once the steps are pooled, where N steps land on N ids and the rest are lost. One real run put 3,700 designs onto 100 ids.
 
-The key is now `<prefix>_<pdb id>`, which the declared ids, the runtime inputs JSON and the provenance regex all have to agree on.
+The key is now `<prefix>_<pdb id>`, which the declared ids, the runtime inputs JSON and the provenance lookup all have to agree on.
 """
 
 import csv
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -75,32 +74,27 @@ class TestTheRuntimeKeysMatchTheDeclaredIds:
 
 
 class TestProvenanceStillRecoversTheParent:
-    """structures_map.csv joins each design back to the PDB it came from; the prefix sits in front of that id, so the regex has to take it off as well as the design suffix."""
+    """structures_map.csv joins each design back to the PDB it came from; the prefix sits in front of that id, so the helper is told the prefix and looks the parent up by exact id."""
 
-    def _regex(self, rfd3, prefix):
-        script = rfd3(prefix=prefix)._generate_script_update_structures_map()
-        return re.search(r'--suffix-regex "([^"]+)"', script).group(1)
+    def _rows(self, rfd3, prefix, file_ids):
+        """Run the command the wrapper generates over a folder holding `file_ids`."""
+        cfg = rfd3(prefix=prefix)
+        cfg.generate_script("unused.sh")
+        folder = Path(cfg.stream_folder("structures"))
+        folder.mkdir(parents=True, exist_ok=True)
+        for file_id in file_ids:
+            (folder / f"{file_id}.pdb").write_text("ATOM\n")
+        line = next(l for l in cfg._generate_script_update_structures_map().splitlines()
+                    if l.startswith("python "))
+        # The prefix is interpolated into a double-quoted shell argument.
+        subprocess.run(f'"{sys.executable}" ' + line[len("python "):],
+                       shell=True, check=True, capture_output=True)
+        return {r["id"]: r["structures.id"] for r in csv.DictReader(open(cfg.stream_map_path("structures")))}
 
     def test_the_parent_id_survives_a_prefix(self, rfd3):
-        pattern = self._regex(rfd3, "op7")
-        assert re.sub(pattern, "", "op7_4AKE_3") == "4AKE"
+        rows = self._rows(rfd3, "op7", ["op7_4AKE_3"])
+        assert rows == {"op7_4AKE_3": "4AKE"}
 
     def test_a_prefix_with_a_regex_metacharacter_is_taken_literally(self, rfd3):
-        pattern = self._regex(rfd3, "38-40.55-59")
-        assert re.sub(pattern, "", "38-40.55-59_4AKE_3") == "4AKE"
-        assert re.sub(pattern, "", "38-40X55-59_4AKE_3") == "38-40X55-59_4AKE"
-
-    def test_the_regex_reaches_the_helper_intact_through_bash(self, rfd3, tmp_path):
-        """The pattern is interpolated into a double-quoted shell argument."""
-        pattern = self._regex(rfd3, "op7")
-        folder = tmp_path / "structures"
-        folder.mkdir()
-        (folder / "op7_4AKE_1.pdb").write_text("ATOM\n")
-        out = tmp_path / "structures_map.csv"
-        subprocess.run(
-            f'{sys.executable} "{REPO / "pipe_scripts" / "pipe_update_structures_map.py"}"'
-            f' --structures-map "{out}" --output-folder "{folder}"'
-            f' --provenance-from-suffix "structures.id" --suffix-regex "{pattern}"',
-            shell=True, check=True, capture_output=True)
-        rows = list(csv.DictReader(out.open()))
-        assert rows[0]["structures.id"] == "4AKE", rows
+        rows = self._rows(rfd3, "38-40.55-59", ["38-40.55-59_4AKE_3", "38-40X55-59_4AKE_3"])
+        assert rows == {"38-40.55-59_4AKE_3": "4AKE", "38-40X55-59_4AKE_3": ""}
