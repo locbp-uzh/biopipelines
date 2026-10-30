@@ -84,7 +84,7 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     # run_single_protein_inference.py is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "dynamicbind"
@@ -190,6 +190,7 @@ fi
     movies_map = Path(lambda self: self.stream_map_path("movies"))
     affinity_csv = Path(lambda self: self.table_path("affinity"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     movie_jobs_csv = Path(lambda self: self.configuration_path("movie_jobs.csv"))
     build_csv_py = Path(lambda self: self.pipe_script_path("pipe_dynamicbind_build_csv.py"))
@@ -396,7 +397,7 @@ done
     --structures-folder "{self.stream_folder("structures")}" \\
     --structures-map "{self.structures_map}" \\
     --affinity-csv "{self.affinity_csv}" \\
-    --missing-csv "{self.missing_csv}" \\
+    --missing-csv "{self.local_missing_csv}" \\
     --num-saved {self.num_saved}{movie_jobs_arg}
 
 if [ $? -ne 0 ]; then
@@ -406,6 +407,10 @@ fi
 
 """
 
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.structures_input, self.compounds_input,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         # Phase 4 (optional): render a movie per kept pose with PyMOL (ProteinEnv).
         if self.make_movie:
             script += "# --- Movie rendering (ProteinEnv / PyMOL) ---\n"

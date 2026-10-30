@@ -144,9 +144,8 @@ def test_an_unfiltered_input_gets_no_manifest(sources, by_stream, record_case):
     "DSSP", "Prodigy", "FPocket", "ProteinMPNN",
     # Re-keys each upstream row into its own id space, so a rename via `ids=` still excuses.
     "PDB",
-    # Record only their OWN failures and read no upstream manifest, so they signal nothing
-    # about which helper they use -- the declaration is the only thing that marks them.
-    "ThermoMPNN", "PLM_Sol", "Frame2Seq", "VespaG", "LASErMPNN", "HBDesigner",
+    # Merges the upstream manifests inside its collector (see test_upstream_missing_owners.py for the tools that merge through `local_missing`).
+    "HBDesigner",
 ])
 def test_a_tool_that_writes_its_own_manifest_gets_no_central_block(sources, tool_name):
     """`pipe_propagate_missing.py` rewrites its destination, so a central block would erase these.
@@ -157,15 +156,10 @@ def test_a_tool_that_writes_its_own_manifest_gets_no_central_block(sources, tool
     """
     from biopipelines.dssp import DSSP
     from biopipelines.fpocket import FPocket
-    from biopipelines.frame2seq import Frame2Seq
     from biopipelines.hbdesigner import HBDesigner
-    from biopipelines.lasermpnn import LASErMPNN
     from biopipelines.pdb import PDB
-    from biopipelines.plm_sol import PLM_Sol
     from biopipelines.prodigy import Prodigy
     from biopipelines.protein_mpnn import ProteinMPNN
-    from biopipelines.thermompnn import ThermoMPNN
-    from biopipelines.vespag import VespaG
 
     _generator, filtered = sources
     build = {
@@ -174,11 +168,6 @@ def test_a_tool_that_writes_its_own_manifest_gets_no_central_block(sources, tool
         "FPocket": lambda: FPocket(structures=filtered),
         "ProteinMPNN": lambda: ProteinMPNN(structures=filtered),
         "PDB": lambda: PDB(pdbs=filtered, keep_chains="A"),
-        "ThermoMPNN": lambda: ThermoMPNN(structures=filtered),
-        "PLM_Sol": lambda: PLM_Sol(sequences=filtered),
-        "Frame2Seq": lambda: Frame2Seq(structures=filtered),
-        "VespaG": lambda: VespaG(sequences=filtered),
-        "LASErMPNN": lambda: LASErMPNN(structures=filtered),
         "HBDesigner": lambda: HBDesigner(structures=filtered),
     }[tool_name]
     script, declared = _generate(build())

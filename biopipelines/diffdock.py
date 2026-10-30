@@ -67,7 +67,7 @@ class DiffDock(BaseConfig):
     """
 
     TOOL_NAME = "DiffDock"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "diffdock"
 
     # ------------------------------------------------------------------
@@ -183,6 +183,7 @@ fi
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     build_csv_py = Path(lambda self: self.pipe_script_path("pipe_diffdock_build_csv.py"))
     postprocess_py = Path(lambda self: self.pipe_script_path("pipe_diffdock_postprocess.py"))
     diffdock_inference_py = Path(lambda self: os.path.join(self.folders["DiffDock"], "inference.py"))
@@ -393,7 +394,7 @@ unset _BP_DIFFDOCK_ORIG_HOME
     --structures-folder "{self.stream_folder("structures")}" \\
     --structures-map "{self.structures_map}" \\
     --confidence-csv "{self.confidence_csv}" \\
-    --missing-csv "{self.missing_csv}" \\
+    --missing-csv "{self.local_missing_csv}" \\
     --samples-per-complex {self.samples_per_complex}
 
 if [ $? -ne 0 ]; then
@@ -402,6 +403,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.structures_input, self.compounds_input,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

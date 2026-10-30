@@ -78,7 +78,7 @@ class Frame2Seq(BaseConfig):
     """
 
     TOOL_NAME = "Frame2Seq"
-    TOOL_VERSION = "2.0"
+    TOOL_VERSION = "2.1"
     ENV_NAME = "frame2seq"
 
     # ------------------------------------------------------------------
@@ -134,6 +134,7 @@ fi
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     sequences_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     design_py = Path(lambda self: self.pipe_script_path("pipe_frame2seq.py"))
 
     # ------------------------------------------------------------------
@@ -257,7 +258,7 @@ python "{self.design_py}" \\
     --output-folder "{self.frame2seq_out_folder}" \\
     --sequences-csv "{self.sequences_csv}" \\
     --sequences-fasta "{self.sequences_fasta}" \\
-    --missing-csv "{self.missing_csv}" \\
+    --missing-csv "{self.local_missing_csv}" \\
     --num-sequences {self.num_sequences} \\
     --temperature {self.temperature} \\
     --chain "{self.chain}" \\
@@ -270,6 +271,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.structures_stream,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

@@ -55,7 +55,7 @@ class PLM_Sol(BaseConfig):
     """
 
     TOOL_NAME = "PLM_Sol"
-    TOOL_VERSION = "2.0"
+    TOOL_VERSION = "2.1"
     ENV_NAME = "plm_sol"
 
     # ------------------------------------------------------------------
@@ -118,6 +118,7 @@ fi
     sequences_csv_path = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     solubility_csv = Path(lambda self: self.table_path("solubility"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     helper_py = Path(lambda self: self.pipe_script_path("pipe_plm_sol.py"))
 
     # ------------------------------------------------------------------
@@ -189,7 +190,7 @@ python "{self.helper_py}" \\
     --repo-dir "{repo_dir}" \\
     --work-dir "{self.execution_folder}" \\
     --solubility-csv "{self.solubility_csv}" \\
-    --missing-csv "{self.missing_csv}"
+    --missing-csv "{self.local_missing_csv}"
 
 if [ $? -ne 0 ]; then
     echo "Error: PLM_Sol scoring failed"
@@ -197,6 +198,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.sequences_stream,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

@@ -78,7 +78,7 @@ class LASErMPNN(BaseConfig):
     """LASErMPNN: ligand-conditioned inverse folding + all-atom packing."""
 
     TOOL_NAME = "LASErMPNN"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     # run_batch_inference is argparse and takes far more flags than the wrapper types; an untyped kwarg joins the free-form --run-options string.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "lasermpnn"
@@ -178,6 +178,7 @@ fi
     #   positions_py     — resolver (one pass over all ids -> positions JSON).
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     structures_json = Path(lambda self: self.configuration_path("input_structures.json"))
     positions_json = Path(lambda self: self.configuration_path("positions.json"))
     positions_args_json = Path(lambda self: self.configuration_path("positions_args.json"))
@@ -369,6 +370,10 @@ fi
         if has_positions:
             script_content += self._generate_resolve_positions()
         script_content += self._generate_run_and_collect(has_positions)
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script_content += self.generate_missing_propagation(
+            self.structures_stream,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script_content += self.generate_completion_check_footer()
         return script_content
 
@@ -462,7 +467,7 @@ python {self.run_py} \\
     --structures-dir "{structures_dir}" \\
     --structures-map "{structures_map}" \\
     --sequences-csv "{self.sequences_csv}" \\
-    --missing-csv "{self.missing_csv}" \\
+    --missing-csv "{self.local_missing_csv}" \\
     --num-sequences {self.num_sequences} \\
     --device "$LASER_DEVICE" \\
     --run-options {self._quote(self._run_options())}{positions_arg}{fix_beta_flag}

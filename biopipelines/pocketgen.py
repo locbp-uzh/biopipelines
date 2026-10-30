@@ -82,7 +82,7 @@ class PocketGen(BaseConfig):
     """
 
     TOOL_NAME = "PocketGen"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "pocketgen"
 
     # ------------------------------------------------------------------
@@ -167,6 +167,7 @@ fi
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     stage_py = Path(lambda self: self.pipe_script_path("pipe_pocketgen_stage.py"))
     driver_py = Path(lambda self: self.pipe_script_path("pipe_pocketgen_driver.py"))
     postprocess_py = Path(lambda self: self.pipe_script_path("pipe_pocketgen_postprocess.py"))
@@ -295,7 +296,7 @@ fi
     --sequences-folder "{self.stream_folder("sequences")}" \\
     --structures-map "{self.structures_map}" \\
     --sequences-csv "{self.sequences_csv}" \\
-    --missing-csv "{self.missing_csv}"
+    --missing-csv "{self.local_missing_csv}"
 
 if [ $? -ne 0 ]; then
     echo "Error: PocketGen post-processing failed"
@@ -303,6 +304,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.structures_input, self.ligand_input,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

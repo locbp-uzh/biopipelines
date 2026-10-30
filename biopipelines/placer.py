@@ -111,7 +111,7 @@ class PLACER(BaseConfig):
     """
 
     TOOL_NAME = "PLACER"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "placer"
 
     RERANK_CHOICES = ("prmsd", "plddt", "plddt_pde")
@@ -200,6 +200,7 @@ fi
     compounds_map = Path(lambda self: self.stream_map_path("compounds"))
     scores_csv = Path(lambda self: self.table_path("scores"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     driver_py = Path(lambda self: self.pipe_script_path("pipe_placer_driver.py"))
     postprocess_py = Path(lambda self: self.pipe_script_path("pipe_placer_postprocess.py"))
 
@@ -408,7 +409,7 @@ fi
     --structures-folder "{self.stream_folder("structures")}" \\
     --structures-map "{self.structures_map}" \\
     --scores-csv "{self.scores_csv}" \\
-    --missing-csv "{self.missing_csv}"{compounds_args}
+    --missing-csv "{self.local_missing_csv}"{compounds_args}
 
 if [ $? -ne 0 ]; then
     echo "Error: PLACER post-processing failed (the driver exited with status $PLACER_RC)"
@@ -416,6 +417,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.structures_input, self.ligand_input,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

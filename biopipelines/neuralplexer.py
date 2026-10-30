@@ -67,7 +67,7 @@ class NeuralPLexer(BaseConfig):
     """
 
     TOOL_NAME = "NeuralPLexer"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     # neuralplexer-inference is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "neuralplexer"
@@ -247,6 +247,7 @@ fi
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     stage_py = Path(lambda self: self.pipe_script_path("pipe_neuralplexer_stage.py"))
     postprocess_py = Path(lambda self: self.pipe_script_path("pipe_neuralplexer_postprocess.py"))
@@ -441,7 +442,7 @@ done
     --structures-folder "{self.stream_folder("structures")}" \\
     --structures-map "{self.structures_map}" \\
     --confidence-csv "{self.confidence_csv}" \\
-    --missing-csv "{self.missing_csv}" \\
+    --missing-csv "{self.local_missing_csv}" \\
     --n-samples {self.n_samples}
 
 if [ $? -ne 0 ]; then
@@ -450,6 +451,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.structures_input, self.compounds_input,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

@@ -74,7 +74,7 @@ class VespaG(BaseConfig):
     """
 
     TOOL_NAME = "VespaG"
-    TOOL_VERSION = "2.0"
+    TOOL_VERSION = "2.1"
     ENV_NAME = "vespag"
 
     # ------------------------------------------------------------------
@@ -138,6 +138,7 @@ fi
     sequences_csv_path = Path(lambda self: self.configuration_path(".input_sequences.csv"))
     fitness_csv = Path(lambda self: self.table_path("fitness"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     helper_py = Path(lambda self: self.pipe_script_path("pipe_vespag.py"))
 
     # ------------------------------------------------------------------
@@ -220,7 +221,7 @@ python "{self.helper_py}" \\
     --repo-dir "{repo_dir}" \\
     --fitness-csv "{self.fitness_csv}" \\
     --container-prefix "{self.container_prefix()}" \\
-    --missing-csv "{self.missing_csv}"
+    --missing-csv "{self.local_missing_csv}"
 
 if [ $? -ne 0 ]; then
     echo "Error: VespaG scoring failed"
@@ -228,6 +229,10 @@ if [ $? -ne 0 ]; then
 fi
 
 """
+        # The pipe writes only its own rows; the merge adds every upstream manifest to them.
+        script += self.generate_missing_propagation(
+            self.sequences_stream,
+            local_missing=self.local_missing_csv, missing_csv=self.missing_csv)
         script += self.generate_completion_check_footer()
         return script
 

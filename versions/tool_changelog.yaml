@@ -565,8 +565,12 @@ DiffDock:
   - biopipelines/diffdock.py
   - pipe_scripts/pipe_diffdock_build_csv.py
   - pipe_scripts/pipe_diffdock_postprocess.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
@@ -656,8 +660,12 @@ DynamicBind:
   - pipe_scripts/pipe_dynamicbind_build_csv.py
   - pipe_scripts/pipe_dynamicbind_movie.py
   - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
   - version: '2.4'
     date: '2026-10-30'
     note: >-
@@ -855,8 +863,12 @@ Frame2Seq:
   files:
   - biopipelines/frame2seq.py
   - pipe_scripts/pipe_frame2seq.py
-  current: "2.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` was absent from this step's `missing.csv`, so a downstream step could not tell it was dropped. The dropped id's row is now there. No id changes.
   - version: '2.0'
     date: '2026-09-02'
     note: >-
@@ -1077,8 +1089,12 @@ LASErMPNN:
   - biopipelines/lasermpnn.py
   - pipe_scripts/pipe_lasermpnn.py
   - pipe_scripts/pipe_lasermpnn_bfactor.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
   - version: '2.2'
     date: '2026-09-23'
     note: >-
@@ -1481,8 +1497,12 @@ NeuralPLexer:
   - biopipelines/neuralplexer.py
   - pipe_scripts/pipe_neuralplexer_postprocess.py
   - pipe_scripts/pipe_neuralplexer_stage.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
@@ -1712,8 +1732,12 @@ PLACER:
   - biopipelines/placer.py
   - pipe_scripts/pipe_placer_driver.py
   - pipe_scripts/pipe_placer_postprocess.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
@@ -1758,8 +1782,12 @@ PLM_Sol:
   files:
   - biopipelines/plm_sol.py
   - pipe_scripts/pipe_plm_sol.py
-  current: "2.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` was absent from this step's `missing.csv`, so a downstream step could not tell it was dropped. The dropped id's row is now there. No id changes.
   - version: '2.0'
     date: '2026-09-02'
     note: >-
@@ -1786,8 +1814,12 @@ PocketGen:
   - pipe_scripts/pipe_pocketgen_driver.py
   - pipe_scripts/pipe_pocketgen_postprocess.py
   - pipe_scripts/pipe_pocketgen_stage.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-
@@ -2436,8 +2468,12 @@ ThermoMPNN:
   files:
   - biopipelines/thermompnn.py
   - pipe_scripts/pipe_thermompnn.py
-  current: "2.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` was absent from this step's `missing.csv`, so a downstream step could not tell it was dropped. The dropped id's row is now there. No id changes.
   - version: '2.0'
     date: '2026-09-02'
     note: >-
@@ -2462,8 +2498,12 @@ VespaG:
   files:
   - biopipelines/vespag.py
   - pipe_scripts/pipe_vespag.py
-  current: "2.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-10-30'
+    note: >-
+      Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` was absent from this step's `missing.csv`, so a downstream step could not tell it was dropped. The dropped id's row is now there. No id changes.
   - version: '2.0'
     date: '2026-09-02'
     note: >-

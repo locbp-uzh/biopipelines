@@ -11,7 +11,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | # | Tool | Category | Version | Source file |
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.6 | `biopipelines/boltzgen.py` |
-| 2 | PocketGen | Structure Generation           | 2.2 | `biopipelines/pocketgen.py` |
+| 2 | PocketGen | Structure Generation           | 2.3 | `biopipelines/pocketgen.py` |
 | 3 | RFdiffusion | Structure Generation           | 2.5 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.10 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFD4Proteina | Structure Generation           | 1.3 | `biopipelines/rfd4proteina.py` |
@@ -20,10 +20,10 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 8 | HBDesigner | Structure Generation           | 2.4 | `biopipelines/hbdesigner.py` |
 | 9 | FLOWR | Structure Generation           | 1.2 | `biopipelines/flowr.py` |
 | 10 | DNAEncoder                | Sequence Design                | 1.3 | `biopipelines/dna_encoder.py` |
-| 11 | Frame2Seq | Sequence Design                | 2.0 | `biopipelines/frame2seq.py` |
+| 11 | Frame2Seq | Sequence Design                | 2.1 | `biopipelines/frame2seq.py` |
 | 12 | Fuse | Sequence Design                | 1.5 | `biopipelines/fuse.py` |
 | 13 | LigandMPNN | Sequence Design                | 3.4 | `biopipelines/ligand_mpnn.py` |
-| 14 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
+| 14 | LASErMPNN | Sequence Design                | 2.3 | `biopipelines/lasermpnn.py` |
 | 15 | Mutagenesis               | Sequence Design                | 1.4 | `biopipelines/mutagenesis.py` |
 | 16 | MutationComposer          | Sequence Design                | 1.2 | `biopipelines/mutation_composer.py` |
 | 17 | ProteinMPNN | Sequence Design                | 2.10 | `biopipelines/protein_mpnn.py` |
@@ -31,15 +31,15 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 19 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
 | 20 | AlphaFold                 | Structure Prediction & Docking | 1.15 | `biopipelines/alphafold.py` |
 | 21 | Boltz2 | Structure Prediction & Docking | 2.13 | `biopipelines/boltz2.py` |
-| 22 | DiffDock | Structure Prediction & Docking | 2.3 | `biopipelines/diffdock.py` |
-| 23 | DynamicBind | Structure Prediction & Docking | 2.4 | `biopipelines/dynamicbind.py` |
+| 22 | DiffDock | Structure Prediction & Docking | 2.4 | `biopipelines/diffdock.py` |
+| 23 | DynamicBind | Structure Prediction & Docking | 2.5 | `biopipelines/dynamicbind.py` |
 | 24 | ESMFold | Structure Prediction & Docking | 2.1 | `biopipelines/esmfold.py` |
 | 25 | ESMFold2 | Structure Prediction & Docking | 2.10 | `biopipelines/esmfold2.py` |
 | 26 | Gnina | Structure Prediction & Docking | 2.9 | `biopipelines/gnina.py` |
 | 27 | Vina | Structure Prediction & Docking | 2.9 | `biopipelines/gnina.py` |
-| 28 | NeuralPLexer | Structure Prediction & Docking | 2.3 | `biopipelines/neuralplexer.py` |
+| 28 | NeuralPLexer | Structure Prediction & Docking | 2.4 | `biopipelines/neuralplexer.py` |
 | 29 | OpenFold3 | Structure Prediction & Docking | 1.7 | `biopipelines/openfold3.py` |
-| 30 | PLACER | Structure Prediction & Docking | 2.3 | `biopipelines/placer.py` |
+| 30 | PLACER | Structure Prediction & Docking | 2.4 | `biopipelines/placer.py` |
 | 31 | Protenix | Structure Prediction & Docking | 1.6 | `biopipelines/protenix.py` |
 | 32 | ADMETAI | Analysis                       | 2.0 | `biopipelines/admet_ai.py` |
 | 33 | AF2BIND | Analysis                       | 2.0 | `biopipelines/af2bind.py` |
@@ -67,7 +67,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 55 | P2Rank | Analysis                       | 2.0 | `biopipelines/p2rank.py` |
 | 56 | PPIDdG                    | Analysis                       | 1.1 | `biopipelines/ppi_ddg.py` |
 | 57 | PLIP | Analysis                       | 2.2 | `biopipelines/plip.py` |
-| 58 | PLM_Sol | Analysis                       | 2.0 | `biopipelines/plm_sol.py` |
+| 58 | PLM_Sol | Analysis                       | 2.1 | `biopipelines/plm_sol.py` |
 | 59 | PoseBusters | Analysis                       | 2.3 | `biopipelines/posebusters.py` |
 | 60 | PoseChange                | Analysis                       | 1.1 | `biopipelines/pose_change.py` |
 | 61 | Peppr                     | Analysis                       | 1.2 | `biopipelines/peppr.py` |
@@ -78,8 +78,8 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 66 | SASA                      | Analysis                       | 1.0 | `biopipelines/sasa.py` |
 | 67 | SequenceIdentityGate      | Analysis                       | 1.0 | `biopipelines/sequence_identity_gate.py` |
 | 68 | StructureCluster          | Analysis                       | 1.1 | `biopipelines/structure_cluster.py` |
-| 69 | ThermoMPNN | Analysis                       | 2.0 | `biopipelines/thermompnn.py` |
-| 70 | VespaG | Analysis                       | 2.0 | `biopipelines/vespag.py` |
+| 69 | ThermoMPNN | Analysis                       | 2.1 | `biopipelines/thermompnn.py` |
+| 70 | VespaG | Analysis                       | 2.1 | `biopipelines/vespag.py` |
 | 71 | XTB | Analysis                       | 2.1 | `biopipelines/xtb.py` |
 | 72 | TMalign                   | Analysis                       | 1.2 | `biopipelines/tmalign.py` |
 | 73 | USalign                   | Analysis                       | 1.2 | `biopipelines/usalign.py` |
