@@ -66,6 +66,11 @@ class DynamicBind(BaseConfig):
                               ProteinEnv and adds GPU/time cost)
         seed:                 random seed (default 42)
 
+    GPU: request ``Resources(gpu="A100")``. The environment's torch (2.0.1+cu117)
+    has kernels up to sm_86 only, so on an H100 (sm_90) the run stops with
+    "CUDA error: no kernel image is available" and every pair is a failure row
+    of missing. ``gpu="any"`` can land on an H100.
+
     Outputs:
         Streams:
             structures:  ranked pose SDF per (protein, ligand, rank)
@@ -84,7 +89,7 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     # run_single_protein_inference.py is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "dynamicbind"

@@ -63,6 +63,10 @@ class PocketGen(BaseConfig):
     coordinates. Pre-docked SDFs (e.g. DiffDock output as the ligand stream)
     are passed through verbatim.
 
+    GPU: request ``Resources(gpu="A100")``. The environment's torch (1.13.1+cu117)
+    lists kernels up to sm_86 only and warns that an H100 (sm_90) is not
+    compatible. ``gpu="any"`` can land on an H100.
+
     Outputs:
         Streams:
             structures:  relaxed PDB per pair (designed pocket grafted into the scaffold)
@@ -82,7 +86,7 @@ class PocketGen(BaseConfig):
     """
 
     TOOL_NAME = "PocketGen"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "pocketgen"
 
     # ------------------------------------------------------------------

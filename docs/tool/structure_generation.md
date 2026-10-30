@@ -152,7 +152,7 @@ The scaffold must have the **ligand bound as HETATM** in the binding site — th
 
 **References**: https://github.com/zaixizhang/PocketGen · https://www.nature.com/articles/s42256-024-00920-9
 
-**Resources**: GPU.
+**Resources**: GPU. Request `Resources(gpu="A100")`. The environment's torch (1.13.1+cu117) lists kernels up to sm_86 only and warns that an H100 (sm_90) is not compatible. `gpu="any"` can land on an H100.
 
 **Environment**: `pocketgen`
 

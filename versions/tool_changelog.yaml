@@ -660,8 +660,12 @@ DynamicBind:
   - pipe_scripts/pipe_dynamicbind_build_csv.py
   - pipe_scripts/pipe_dynamicbind_movie.py
   - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-30'
+    note: >-
+      Documentation: the class docstring and the `docs/tool` section state that the tool needs `Resources(gpu="A100")`. The environment's torch (2.0.1+cu117) has kernels up to sm_86 only, so on an H100 (sm_90) the run stops with "CUDA error: no kernel image is available" and every pair is a `failure` row of `missing`; `gpu="any"` can land on an H100. No code change.
   - version: '2.5'
     date: '2026-10-30'
     note: >-
@@ -1814,8 +1818,12 @@ PocketGen:
   - pipe_scripts/pipe_pocketgen_driver.py
   - pipe_scripts/pipe_pocketgen_postprocess.py
   - pipe_scripts/pipe_pocketgen_stage.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      Documentation: the class docstring and the `docs/tool` section state that the tool needs `Resources(gpu="A100")`. The environment's torch (1.13.1+cu117) lists kernels up to sm_86 only and warns that an H100 (sm_90) is not compatible; `gpu="any"` can land on an H100. No code change.
   - version: '2.3'
     date: '2026-10-30'
     note: >-

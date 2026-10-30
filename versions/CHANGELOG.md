@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **DynamicBind** 2.5 → 2.6. Documentation: the class docstring and the `docs/tool` section state that the tool needs `Resources(gpu="A100")`. The environment's torch (2.0.1+cu117) has kernels up to sm_86 only, so on an H100 (sm_90) the run stops with "CUDA error: no kernel image is available" and every pair is a `failure` row of `missing`; `gpu="any"` can land on an H100. No code change.
+
+- **PocketGen** 2.3 → 2.4. Documentation: the class docstring and the `docs/tool` section state that the tool needs `Resources(gpu="A100")`. The environment's torch (1.13.1+cu117) lists kernels up to sm_86 only and warns that an H100 (sm_90) is not compatible; `gpu="any"` can land on an H100. No code change.
+
 - **DiffDock** 2.3 → 2.4. Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
 
 - **DynamicBind** 2.4 → 2.5. Its own failure rows go to `_execution/local_missing.csv` and `generate_missing_propagation` merges them with every upstream `missing` manifest into `tables/missing.csv`. The step owns its manifest, so the footer's central propagation stands down, and the pipe read no upstream manifest: an input dropped by `Panda.filter` left the outputs declared for it unexcused, and the step was marked FAILED with every surviving output on disk. The dropped id's row is now in this step's `missing.csv`, so the step passes and a downstream step sees it. No id changes.
