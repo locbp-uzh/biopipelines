@@ -4,9 +4,9 @@
 
 """What NeuralPLexer declares it will produce is what its staging produces.
 
-`get_output_files` predicts pair ids through `predict_output_ids_with_provenance`, which honors `Bundle` and `Each`; `pipe_neuralplexer_stage.py` re-composes them by hand as `f"{prot_id}+{lig_id}"` in a nested loop, and `pipe_neuralplexer_postprocess.py` splits them back apart on the first `+`. A hand-rolled two-axis join has no notion of bundle versus each, so the two sides can only be trusted to agree while every axis is iterated.
+`get_output_files` predicts pair ids through `predict_output_ids_with_provenance`, which honors `Bundle` and `Each`; `pipe_neuralplexer_stage.py` composes the same ids through `predict_single_output_id` and records the protein and the ligand of every pair in a pair table, which `pipe_neuralplexer_postprocess.py` reads back instead of splitting the pair id.
 
-They do agree, because the constructor refuses a `Bundle` (and a bare `Each`) on either axis: `structures` and `compounds` accept a `DataStream` or a `StandardizedOutput` and nothing else. That refusal is the whole reason the flat product at runtime is correct, so it is pinned here alongside the predict-equals-produce comparison. Widen the constructor to accept a wrapper and these tests fail together, which is the signal to move the runtime onto `predict_single_output_id` the way `pipe_mock.py` does.
+The constructor refuses a `Bundle` (and a bare `Each`) on either axis: `structures` and `compounds` accept a `DataStream` or a `StandardizedOutput` and nothing else, so both axes always iterate. That refusal is pinned here alongside the predict-equals-produce comparison. The full pose ids, ranks included, are compared in `test_docking_pose_ids.py`.
 """
 
 import importlib.util
@@ -93,7 +93,8 @@ def _staged_pair_ids(tmp_path, structures, compounds):
         [sys.executable, STAGE_SCRIPT,
          "--structures-json", str(structures_json),
          "--compounds-json", str(compounds_json),
-         "--staging-folder", str(staging)],
+         "--staging-folder", str(staging),
+         "--pairs-csv", str(tmp_path / "pairs.csv")],
         capture_output=True, text=True,
     )
     assert result.returncode == 0, f"staging failed: {result.stderr}"
@@ -125,16 +126,21 @@ def test_predict_equals_produce_for_iterated_axes(tmp_path, record_case):
     assert staged == sorted(declared)
 
 
-def test_postprocess_recovers_both_axis_ids_from_every_pair_id(tmp_path):
-    """The pair id must survive the round trip: staging joins on '+', post-processing splits on it."""
+def test_the_pair_table_names_both_axis_ids_of_every_pair_id(tmp_path):
+    """Staging records the protein and the ligand of each pair; nothing parses the pair id."""
+    import csv
+
     structures = _structures_stream(tmp_path)
     compounds = _compounds_stream(tmp_path)
-    parse_pair_id = _postprocess().parse_pair_id
+    staged = _staged_pair_ids(tmp_path, structures, compounds)
 
-    for pair_id in _staged_pair_ids(tmp_path, structures, compounds):
-        prot_id, lig_id = parse_pair_id(pair_id)
-        assert prot_id in PROTEINS
-        assert lig_id in LIGANDS
+    with open(tmp_path / "pairs.csv", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert sorted(r["id"] for r in rows) == staged
+    for row in rows:
+        assert row["structures.id"] in PROTEINS
+        assert row["compounds.id"] in LIGANDS
+        assert row["id"] == f"{row['structures.id']}+{row['compounds.id']}"
 
 
 # ── every axis-mode combination ───────────────────────────────────────────────

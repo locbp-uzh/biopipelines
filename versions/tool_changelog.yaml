@@ -561,8 +561,12 @@ DiffDock:
   - biopipelines/diffdock.py
   - pipe_scripts/pipe_diffdock_build_csv.py
   - pipe_scripts/pipe_diffdock_postprocess.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      The protein and the ligand of each pose are read from `structures.id` and `compounds.id` columns that the input CSV carries beside each pair id, where post-processing split the pair id on its first `+`. The pair id is composed by `predict_single_output_id` and the rank suffix by `combinatorics.ranked_id`, the function that declares the ids. Ids are unchanged.
   - version: '2.1'
     date: '2026-09-04'
     note: >-
@@ -644,8 +648,12 @@ DynamicBind:
   - pipe_scripts/pipe_dynamicbind_build_csv.py
   - pipe_scripts/pipe_dynamicbind_movie.py
   - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      The pair id is composed by `predict_single_output_id` and the rank suffix by `combinatorics.ranked_id`, the function that declares the ids, where post-processing spelled both by hand. Ids are unchanged.
   - version: '2.2'
     date: '2026-09-04'
     note: >-
@@ -1393,8 +1401,12 @@ NeuralPLexer:
   - biopipelines/neuralplexer.py
   - pipe_scripts/pipe_neuralplexer_postprocess.py
   - pipe_scripts/pipe_neuralplexer_stage.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      Staging records the protein and the ligand of each pair in `_configuration/pairs.csv`, which post-processing reads, where it split the pair folder name on its first `+`. The pair id is composed by `predict_single_output_id` and the rank suffix by `combinatorics.ranked_id`, the function that declares the ids. Ids are unchanged.
   - version: '2.1'
     date: '2026-09-04'
     note: >-

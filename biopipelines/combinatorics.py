@@ -1083,6 +1083,17 @@ def generate_multiplied_ids(
     return output_ids, provenance
 
 
+def ranked_id(parent_id: str, rank: int) -> str:
+    """The id of the ``rank``-th pose of ``parent_id``: ``<parent>_rank<rank>``, ranks counted from 1.
+
+    Docking tools multiply each pair id by a rank suffix. The declared ids and the ids written at execution time both come from here, so they cannot drift. The parent is the whole pair id (``prot+lig``); the suffix is appended and never parsed back.
+    """
+    if rank < 1:
+        raise ValueError(f"rank must be at least 1, got {rank}")
+    ids, _ = generate_multiplied_ids([parent_id], [f"rank{rank}"])
+    return ids[0]
+
+
 def generate_multiplied_ids_pattern(
     input_ids: List[str],
     suffix_pattern: str,

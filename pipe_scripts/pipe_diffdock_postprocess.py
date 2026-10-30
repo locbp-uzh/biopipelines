@@ -39,6 +39,7 @@ from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import step_id_from_table_path  # noqa: E402
+from biopipelines.combinatorics import ranked_id  # noqa: E402
 
 
 RANK_RE = re.compile(r"^rank(?P<rank>\d+)(?:_confidence(?P<conf>-?\d+(?:\.\d+)?))?\.sdf$")
@@ -46,20 +47,18 @@ INDEX_DIR_RE = re.compile(r"^index(?P<idx>\d+)_")
 
 
 def parse_input_csv(path: str) -> List[Tuple[str, str, str]]:
-    """Return [(complex_name, protein_id, ligand_id), ...] from the DiffDock
-    input CSV (complex_name is `<protein>+<ligand>` by construction).
-    """
+    """Return [(complex_name, protein_id, ligand_id), ...] from the DiffDock input CSV, whose `structures.id` and `compounds.id` columns the build step wrote."""
     out = []
     with open(path, newline="") as f:
-        for row in csv.DictReader(f):
-            complex_name = row["complex_name"]
-            if "+" not in complex_name:
-                raise ValueError(
-                    f"complex_name {complex_name!r} does not contain '+'; the input CSV "
-                    "must be the one written by pipe_diffdock_build_csv.py."
-                )
-            prot, lig = complex_name.split("+", 1)
-            out.append((complex_name, prot, lig))
+        reader = csv.DictReader(f)
+        absent = [c for c in ("structures.id", "compounds.id") if c not in (reader.fieldnames or [])]
+        if absent:
+            raise ValueError(
+                f"{path} has no {', '.join(absent)} column; the input CSV must be the one "
+                "written by pipe_diffdock_build_csv.py."
+            )
+        for row in reader:
+            out.append((row["complex_name"], row["structures.id"], row["compounds.id"]))
     return out
 
 
@@ -142,7 +141,7 @@ def main():
             })
 
         for rank, conf, src in ranks:
-            out_id = f"{complex_name}_rank{rank}"
+            out_id = ranked_id(complex_name, rank)
             dst = os.path.join(args.structures_folder, f"{out_id}.sdf")
             shutil.copyfile(src, dst)
             map_rows.append({

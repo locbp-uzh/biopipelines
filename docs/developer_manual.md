@@ -1447,6 +1447,9 @@ When a tool multiplies inputs by a suffix (e.g., ProteinMPNN generates N sequenc
 | ProteinMPNN | `_{seq_num}` | `prot1_1`, `prot1_2` |
 | LigandMPNN | `_{seq_num}` | `prot1_1`, `prot1_2` |
 | Mutagenesis | `_{position}{aa}` | `prot1_50A`, `prot1_50V` |
+| DiffDock, DynamicBind, NeuralPLexer | `_rank{n}` | `prot1+lig1_rank1`, `prot1+lig1_rank2` |
+
+When a multiplier tool also combines several axes, the parent is the whole `+`-joined id (`prot1+lig1_rank1` is a child of `prot1+lig1`), and the producer writes each axis's `<param>.id` column next to the id. A consumer reads those columns; it never splits the id on `+` or `_`, which is wrong as soon as an input id already carries one (a Boltz2 complex `prot+lig0` is itself a joined id).
 
 A stream that is 1:1 with its input keeps the input's id: one `msas` row per sequence is `prot1`, not `prot1_msa`, and a table row per structure is that structure's id. A tool never invents a suffix for such a stream, because a name that spells the parent in another form makes every consumer re-derive the parent, each in its own way. A plain `<axis>.id` provenance column that repeats the id carries nothing, so it is not written (see `prune_redundant_provenance_columns`); it stays only where the id does not spell the parent.
 
@@ -1499,6 +1502,7 @@ All ID generation uses functions from `combinatorics.py`:
 | `generate_multiplied_ids()` | Multiplier tools (ProteinMPNN, Mutagenesis) |
 | `generate_multiplied_ids_pattern()` | Same, but keeps compact ID patterns |
 | `multiplied_id_parents()` | Runtime provenance of a multiplier tool: every concrete output id mapped to its parent, looked up by exact id |
+| `ranked_id()` | The `<parent>_rank<n>` id of a docking pose, at configuration time and in the pipe script alike |
 
 #### Using `predict_output_ids_with_provenance` (multi-axis tools)
 

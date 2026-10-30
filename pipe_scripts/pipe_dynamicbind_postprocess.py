@@ -20,7 +20,7 @@ into the structures stream folder, and build the affinity table by combining
 the parsed lDDT/affinity from each SDF filename with the ligand mapping in
 each protein's input CSV.
 
-`<prot>+<lig>` is the pair-ID rule in full because DynamicBind predicts exactly one complex per ligand-CSV row: the wrapper accepts only a bare DataStream or StandardizedOutput per axis and refuses Bundle/Each, so both axes always iterate and no axis can collapse to a bundled prefix. Should a bundled axis ever become meaningful here, this join has to go through `biopipelines.combinatorics.predict_single_output_id` instead — see `pipe_mock.py` for the pattern.
+The pair id `<prot>+<lig>` comes from `biopipelines.combinatorics.predict_single_output_id` and the rank suffix from `combinatorics.ranked_id`, the two functions the wrapper's declared ids use.
 """
 
 import argparse
@@ -33,6 +33,7 @@ from typing import Dict, List, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import step_id_from_table_path  # noqa: E402
+from biopipelines.combinatorics import predict_single_output_id, ranked_id  # noqa: E402
 
 
 POSE_RE = re.compile(
@@ -133,7 +134,10 @@ def main():
         poses_by_idx = collect_protein_poses(prot_dir)
 
         for lig_idx, lig_id in enumerate(ligand_ids):
-            pair_id = f"{prot_id}+{lig_id}"
+            pair_id = predict_single_output_id(
+                structures=("each", [prot_id], 0, [], False),
+                compounds=("each", ligand_ids, lig_idx, [], False),
+            )
             poses = poses_by_idx.get(lig_idx, [])
             if not poses:
                 missing_rows.append({
@@ -152,7 +156,7 @@ def main():
                 })
 
             for rank, lddt, affinity, src, receptor_pdb in poses:
-                out_id = f"{pair_id}_rank{rank}"
+                out_id = ranked_id(pair_id, rank)
                 dst = os.path.join(args.structures_folder, f"{out_id}.sdf")
                 shutil.copyfile(src, dst)
 

@@ -10,12 +10,15 @@ For each (protein, ligand) pair, materialise:
     {staging}/{pair_id}/receptor.pdb
     {staging}/{pair_id}/ligand.sdf
 
+The pair id is composed by `biopipelines.combinatorics.predict_single_output_id`, and `--pairs-csv` records the protein and the ligand of each pair (`id | structures.id | compounds.id`) so post-processing reads them back instead of splitting the pair id.
+
 When the ligand stream is value-based (SMILES only), embed to 3D with RDKit.
 The wrapper bash then iterates the staging folder and invokes
 neuralplexer-inference per pair.
 """
 
 import argparse
+import csv
 import os
 import shutil
 import sys
@@ -26,6 +29,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     iterate_files,
     iterate_values,
 )
+from biopipelines.combinatorics import predict_single_output_id  # noqa: E402
 
 
 def materialise_ligand_sdf(lig_id: str, smiles: str, dst_sdf: str) -> None:
@@ -74,6 +78,7 @@ def main():
     ap.add_argument("--structures-json", required=True)
     ap.add_argument("--compounds-json", required=True)
     ap.add_argument("--staging-folder", required=True)
+    ap.add_argument("--pairs-csv", required=True, help="Where each pair's protein and ligand ids are recorded")
     args = ap.parse_args()
 
     proteins = list(iterate_files(load_datastream(args.structures_json)))
@@ -90,10 +95,15 @@ def main():
         shutil.rmtree(args.staging_folder)
     os.makedirs(args.staging_folder, exist_ok=True)
 
-    n = 0
-    for prot_id, prot_path in proteins:
-        for lig_id, lig_path, lig_smiles in ligands:
-            pair_id = f"{prot_id}+{lig_id}"
+    protein_ids = [pid for pid, _ in proteins]
+    ligand_ids = [lid for lid, _, _ in ligands]
+    pair_rows = []
+    for i, (prot_id, prot_path) in enumerate(proteins):
+        for j, (lig_id, lig_path, lig_smiles) in enumerate(ligands):
+            pair_id = predict_single_output_id(
+                structures=("each", protein_ids, i, [], False),
+                compounds=("each", ligand_ids, j, [], False),
+            )
             pair_dir = os.path.join(args.staging_folder, pair_id)
             os.makedirs(pair_dir, exist_ok=True)
 
@@ -103,9 +113,15 @@ def main():
                 shutil.copyfile(lig_path, dst_sdf)
             else:
                 materialise_ligand_sdf(lig_id, lig_smiles, dst_sdf)
-            n += 1
+            pair_rows.append({"id": pair_id, "structures.id": prot_id, "compounds.id": lig_id})
 
-    print(f"Staged {n} (protein, ligand) pair(s) under {args.staging_folder}")
+    os.makedirs(os.path.dirname(args.pairs_csv), exist_ok=True)
+    with open(args.pairs_csv, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["id", "structures.id", "compounds.id"])
+        w.writeheader()
+        w.writerows(pair_rows)
+
+    print(f"Staged {len(pair_rows)} (protein, ligand) pair(s) under {args.staging_folder}")
 
 
 if __name__ == "__main__":

@@ -22,14 +22,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import predict_output_ids_with_provenance, generate_multiplied_ids_pattern
+    from .combinatorics import predict_output_ids_with_provenance, ranked_id
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import predict_output_ids_with_provenance, generate_multiplied_ids_pattern
+    from combinatorics import predict_output_ids_with_provenance, ranked_id
 
 
 class DiffDock(BaseConfig):
@@ -67,7 +67,7 @@ class DiffDock(BaseConfig):
     """
 
     TOOL_NAME = "DiffDock"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "diffdock"
 
     # ------------------------------------------------------------------
@@ -418,10 +418,9 @@ fi
             compounds=(self.compounds_input, "compounds"),
         )
 
-        ranked_ids: List[str] = []
-        for pair_id in pair_ids:
-            for n in range(1, self.samples_per_complex + 1):
-                ranked_ids.append(f"{pair_id}_rank{n}")
+        ranked_ids = [ranked_id(pair_id, n)
+                      for pair_id in pair_ids
+                      for n in range(1, self.samples_per_complex + 1)]
 
         structures = DataStream(
             name="structures",

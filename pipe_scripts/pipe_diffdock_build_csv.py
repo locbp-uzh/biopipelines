@@ -12,7 +12,7 @@ and runs one prediction per row. This script materialises the
 cartesian product of the upstream structures and compounds streams into
 that CSV.
 
-The `complex_name` we emit is the `{protein_id}+{ligand_id}` pair-ID the BioPipelines wrapper predicts, so post-processing can map per-complex folders back to BioPipelines IDs without any extra bookkeeping. The flat product below is that rule in full because DiffDock docks exactly one pair per CSV row: the wrapper accepts only a bare DataStream or StandardizedOutput per axis and refuses Bundle/Each, so both axes always iterate and no axis can collapse to a bundled prefix. Should a bundled axis ever become meaningful here, this join has to go through `biopipelines.combinatorics.predict_single_output_id` instead — see `pipe_mock.py` for the pattern.
+The `complex_name` we emit is the pair id, composed by `biopipelines.combinatorics.predict_single_output_id` exactly as the wrapper's `predict_output_ids_with_provenance` declares it, and the CSV carries the two axes of each pair in `structures.id` and `compounds.id` columns, so post-processing reads the protein and the ligand of a pose instead of splitting the pair id.
 
 `ligand_description` is the SMILES when the compound stream is value-based
 (map_table has a `smiles` column) and the absolute SDF path otherwise.
@@ -25,6 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values  # noqa: E402
+from biopipelines.combinatorics import predict_single_output_id  # noqa: E402
 
 
 def collect_proteins(ds_json: str):
@@ -88,21 +89,28 @@ def main():
     # `ligand_description`/`complex_name`/`protein_sequence` columns belong
     # to later upstream revisions and are silently ignored here, but the
     # legacy `ligand` column is required.
+    protein_ids = [pid for pid, _ in proteins]
+    ligand_ids = [lid for lid, _ in ligands]
     rows = []
-    for prot_id, prot_path in proteins:
-        for lig_id, lig_desc in ligands:
+    for i, (prot_id, prot_path) in enumerate(proteins):
+        for j, (lig_id, lig_desc) in enumerate(ligands):
             rows.append(
                 {
-                    "complex_name": f"{prot_id}+{lig_id}",
+                    "complex_name": predict_single_output_id(
+                        structures=("each", protein_ids, i, [], False),
+                        compounds=("each", ligand_ids, j, [], False),
+                    ),
                     "protein_path": prot_path,
                     "ligand": lig_desc,
+                    "structures.id": prot_id,
+                    "compounds.id": lig_id,
                 }
             )
 
     with open(args.output_csv, "w", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["complex_name", "protein_path", "ligand"],
+            fieldnames=["complex_name", "protein_path", "ligand", "structures.id", "compounds.id"],
         )
         writer.writeheader()
         writer.writerows(rows)

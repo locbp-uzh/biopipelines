@@ -23,7 +23,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import predict_output_ids_with_provenance
+    from .combinatorics import predict_output_ids_with_provenance, ranked_id
     from .biopipelines_io import Resolve
     from .config_manager import ConfigManager
 except ImportError:
@@ -32,7 +32,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import predict_output_ids_with_provenance
+    from combinatorics import predict_output_ids_with_provenance, ranked_id
     from biopipelines_io import Resolve
     from config_manager import ConfigManager
 
@@ -84,7 +84,7 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     # run_single_protein_inference.py is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "dynamicbind"
@@ -433,10 +433,9 @@ fi
             compounds=(self.compounds_input, "compounds"),
         )
 
-        ranked_ids: List[str] = []
-        for pair_id in pair_ids:
-            for n in range(1, self.num_saved + 1):
-                ranked_ids.append(f"{pair_id}_rank{n}")
+        ranked_ids = [ranked_id(pair_id, n)
+                      for pair_id in pair_ids
+                      for n in range(1, self.num_saved + 1)]
 
         structures = DataStream(
             name="structures",

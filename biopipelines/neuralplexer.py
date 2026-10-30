@@ -20,7 +20,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import predict_output_ids_with_provenance
+    from .combinatorics import predict_output_ids_with_provenance, ranked_id
     from .biopipelines_io import Resolve
 except ImportError:
     import sys
@@ -28,7 +28,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import predict_output_ids_with_provenance
+    from combinatorics import predict_output_ids_with_provenance, ranked_id
     from biopipelines_io import Resolve
 
 
@@ -67,7 +67,7 @@ class NeuralPLexer(BaseConfig):
     """
 
     TOOL_NAME = "NeuralPLexer"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     # neuralplexer-inference is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "neuralplexer"
@@ -242,6 +242,7 @@ fi
     structures_json = Path(lambda self: self.configuration_path(".input_structures.json"))
     compounds_json = Path(lambda self: self.configuration_path(".input_compounds.json"))
     staging_folder = Path(lambda self: self.configuration_path("staging"))
+    pairs_csv = Path(lambda self: self.configuration_path("pairs.csv"))
     raw_out_folder = Path(lambda self: self.execution_folder)
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     confidence_csv = Path(lambda self: self.table_path("confidence"))
@@ -374,7 +375,8 @@ fi
         script += f"""python "{self.stage_py}" \\
     --structures-json "{self.structures_json}" \\
     --compounds-json "{self.compounds_json}" \\
-    --staging-folder "{self.staging_folder}"
+    --staging-folder "{self.staging_folder}" \\
+    --pairs-csv "{self.pairs_csv}"
 
 if [ $? -ne 0 ]; then
     echo "Error: NeuralPLexer staging failed"
@@ -435,6 +437,7 @@ done
         script += self.activate_environment(name="biopipelines")
         script += f"""python "{self.postprocess_py}" \\
     --raw-out "{self.raw_out_folder}" \\
+    --pairs-csv "{self.pairs_csv}" \\
     --structures-folder "{self.stream_folder("structures")}" \\
     --structures-map "{self.structures_map}" \\
     --confidence-csv "{self.confidence_csv}" \\
@@ -460,10 +463,9 @@ fi
             compounds=(self.compounds_input, "compounds"),
         )
 
-        ranked_ids: List[str] = []
-        for pair_id in pair_ids:
-            for n in range(1, self.n_samples + 1):
-                ranked_ids.append(f"{pair_id}_rank{n}")
+        ranked_ids = [ranked_id(pair_id, n)
+                      for pair_id in pair_ids
+                      for n in range(1, self.n_samples + 1)]
 
         structures = DataStream(
             name="structures",

@@ -4,11 +4,11 @@
 
 """What DynamicBind declares it will produce is what DynamicBind produces.
 
-DynamicBind predicts its pair ids at configuration time through `predict_output_ids_with_provenance`, which honors Bundle and Each, while `pipe_dynamicbind_postprocess.py` composes `pair_id = f"{prot_id}+{lig_id}"` itself over the per-protein ligand CSVs. A hand-rolled two-axis join has no notion of bundle versus each, so on paper the two sides can drift: a bundled axis should contribute one collapsed prefix (`LIG1+LIG2+prot1`) where a flat product iterates it.
+DynamicBind predicts its pair ids at configuration time through `predict_output_ids_with_provenance`, which honors Bundle and Each, while `pipe_dynamicbind_postprocess.py` composes each pair id through `predict_single_output_id`, the runtime twin of that rule, over the per-protein ligand CSVs.
 
-Measured, they cannot drift here. DynamicBind's constructor accepts only a DataStream or a StandardizedOutput and raises on anything else, so a Bundle never reaches `get_output_files`, both axes are always iterated, and a flat product is exactly the pair-ID rule for that case. That is a contract rather than an accident: `run_single_protein_inference.py` takes one protein and one ligand CSV per invocation and predicts one complex per row, so a bundled axis has no meaning to express.
+DynamicBind's constructor accepts only a DataStream or a StandardizedOutput and raises on anything else, so a Bundle never reaches `get_output_files` and both axes are always iterated. That is a contract rather than an accident: `run_single_protein_inference.py` takes one protein and one ligand CSV per invocation and predicts one complex per row, so a bundled axis has no meaning to express.
 
-These cases pin the whole invariant, not just today's behavior. `test_predict_equals_produce_for_every_axis_mode` compares for real whenever the tool accepts the input, so the day someone lets a Bundle through without routing the runtime via `biopipelines.combinatorics.predict_single_output_id`, the bundled cases start comparing and fail.
+These cases pin the whole invariant. `test_predict_equals_produce_for_every_axis_mode` compares for real whenever the tool accepts the input, so the day someone lets a Bundle through, the bundled cases start comparing. The full pose ids and the provenance columns are checked in `test_docking_pose_ids.py`.
 """
 
 import csv
@@ -155,8 +155,8 @@ def test_predict_equals_produce_for_every_axis_mode(
     produced = _produce(config, monkeypatch)
     # Compared as sets: post-processing walks the ligand-CSV directory in name order rather than stream order, so row order is its own question.
     assert sorted(produced) == sorted(declared), (
-        "DynamicBind declared pair ids its runtime does not compose; route "
-        "pipe_dynamicbind_postprocess through combinatorics.predict_single_output_id")
+        "DynamicBind declared pair ids its runtime does not compose; "
+        "pipe_dynamicbind_postprocess composes them with combinatorics.predict_single_output_id")
     assert len(produced) == len(declared)
 
 
@@ -176,7 +176,7 @@ def test_the_wrapper_refuses_a_combinatorics_wrapper(local_config, tmp_path, axi
 
 
 def test_a_flat_product_could_not_express_a_bundled_axis(tmp_path):
-    """The counterfactual, kept as measured evidence: were a Bundle to get through, the hand-rolled join would be wrong."""
+    """The counterfactual, kept as measured evidence: were a Bundle to get through, a flat product would be wrong."""
     proteins = _protein_stream(tmp_path)
     ligands = _ligand_stream(tmp_path)
 

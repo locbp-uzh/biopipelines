@@ -16,6 +16,8 @@ For each pair folder under --raw-out, NeuralPLexer (with --separate-pdb +
 We merge prot_<k>.pdb + lig_<k>.sdf into a single PDB per rank, copy to
 <structures_folder>/<pair_id>_rank<N>.pdb, and parse the confidence CSV
 into our standard table.
+
+The rank suffix comes from combinatorics.ranked_id, and the protein and ligand of each pair come from the pair table the staging step wrote.
 """
 
 import argparse
@@ -27,6 +29,7 @@ from typing import Dict, List
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import step_id_from_table_path  # noqa: E402
+from biopipelines.combinatorics import ranked_id  # noqa: E402
 
 
 def merge_protein_ligand_pdb(prot_pdb: str, lig_sdf: str, out_pdb: str) -> None:
@@ -80,15 +83,16 @@ def parse_confidence_csv(path: str) -> Dict[int, float]:
     return out
 
 
-def parse_pair_id(name: str):
-    if "+" not in name:
-        raise ValueError(f"folder {name!r} is not a '<prot>+<lig>' pair")
-    return name.split("+", 1)
+def load_pairs(path: str) -> Dict[str, tuple]:
+    """Return {pair_id: (protein_id, ligand_id)} from the table the staging step wrote."""
+    with open(path, newline="") as f:
+        return {row["id"]: (row["structures.id"], row["compounds.id"]) for row in csv.DictReader(f)}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw-out", required=True)
+    ap.add_argument("--pairs-csv", required=True, help="Pair table written by pipe_neuralplexer_stage.py")
     ap.add_argument("--structures-folder", required=True)
     ap.add_argument("--structures-map", required=True)
     ap.add_argument("--confidence-csv", required=True)
@@ -115,9 +119,12 @@ def main():
         if os.path.isdir(os.path.join(args.raw_out, d))
     )
 
+    pairs = load_pairs(args.pairs_csv)
     for pair_id in pair_names:
         pair_dir = os.path.join(args.raw_out, pair_id)
-        prot_id, lig_id = parse_pair_id(pair_id)
+        if pair_id not in pairs:
+            raise ValueError(f"folder {pair_id!r} under {args.raw_out} is not a pair staged in {args.pairs_csv}")
+        prot_id, lig_id = pairs[pair_id]
 
         # Discover per-rank files. With --rank-outputs-by-confidence (which the
         # wrapper passes) upstream writes prot_rank<N>_plddt<score>.pdb +
@@ -162,7 +169,7 @@ def main():
             })
 
         for rank, conf_val, prot_pdb, lig_sdf in prot_entries:
-            out_id = f"{pair_id}_rank{rank}"
+            out_id = ranked_id(pair_id, rank)
             dst = os.path.join(args.structures_folder, f"{out_id}.pdb")
             try:
                 merge_protein_ligand_pdb(prot_pdb, lig_sdf, dst)
