@@ -1985,8 +1985,12 @@ RFDAA_PrepareLigand:
   files:
   - biopipelines/rfdiffusion_allatom.py
   - pipe_scripts/pipe_rfdaa_prepare_ligand.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-10-30'
+    note: >-
+      A prepared ligand keeps the id of the ligand it was made from (`<id>.pdb` in `structures/`), where every input was named `prepared_ligand`. Every ligand of the input stream is prepared, where only the first was and the others were dropped without a word. The pipe script reads the input stream itself, replacing the shell resolution of the first id.
   - version: '2.4'
     date: '2026-10-30'
     note: >-
@@ -2131,8 +2135,12 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
   - biopipelines/rfdiffusion_allatom.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-10-30'
+    note: >-
+      No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. See the RFDAA_PrepareLigand 2.4 entry: a design made from a prepared ligand is now named after the ligand, not `prepared_ligand_<n>`.
   - version: '2.4'
     date: '2026-10-30'
     note: >-

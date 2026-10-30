@@ -73,7 +73,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     # RFdiffusion-AllAtom's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -717,13 +717,11 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
 
     # Lazy path descriptors
-    #   prepared_pdb    — the single output PDB, lives in structures/.
     #   structures_csv  — standalone TableInfo (tables/structures.csv).
     #   ligand_ds_json  — config-time input DataStream serialization.
-    prepared_pdb = Path(lambda self: self.stream_path("structures", "prepared_ligand.pdb"))
     structures_csv = Path(lambda self: self.table_path("structures"))
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     helper_script = Path(lambda self: self.pipe_script_path("pipe_rfdaa_prepare_ligand.py"))
@@ -751,8 +749,7 @@ class RFDAA_PrepareLigand(BaseConfig):
             self.ligand_stream = ligand
         else:
             raise ValueError(f"ligand must be DataStream or StandardizedOutput, got {type(ligand)}")
-        # The ligand file is resolved at runtime via Resolve.stream_ids(index=0)
-        # in generate_script — never index ids[0] at config time (lazy IDs).
+        # The pipe script iterates the ligand stream at runtime, since lazy IDs cannot be indexed at config time.
 
         super().__init__(**kwargs)
 
@@ -780,16 +777,12 @@ class RFDAA_PrepareLigand(BaseConfig):
         script_content += "# RFDAA_PrepareLigand execution script\n"
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
-        script_content += f"""LIGAND_ID={Resolve.stream_ids(self.ligand_ds_json, index=0, valid_set=True)}
-LIGAND_FILE={Resolve.stream_item(self.ligand_ds_json, '$LIGAND_ID')}
-
-echo "Preparing ligand structure for RFdiffusion-AllAtom"
-echo "Input ligand: $LIGAND_FILE"
-echo "Output: {self.prepared_pdb}"
+        script_content += f"""echo "Preparing ligand structures for RFdiffusion-AllAtom"
+echo "Output: {self.stream_folder("structures")}"
 
 python "{self.helper_script}" \\
-  --ligand_pdb "$LIGAND_FILE" \\
-  --output_pdb "{self.prepared_pdb}" \\
+  --ligand_json "{self.ligand_ds_json}" \\
+  --structures_folder "{self.stream_folder("structures")}" \\
   --output_csv "{self.structures_csv}" \\
   --structures_map "{self.structures_map}" \\
   --pdbs_folder "{self.folders['pdbs']}"
@@ -807,14 +800,11 @@ fi
         return script_content
 
     def get_output_files(self) -> Dict[str, Any]:
-        """Get expected output files."""
-        structure_ids = ["prepared_ligand"]
-        structure_files = [self.prepared_pdb]
-
+        """Get expected output files: one prepared PDB per ligand, under the ligand's own id."""
         structures = DataStream(
             name="structures",
-            ids=structure_ids,
-            files=structure_files,
+            ids=list(self.ligand_stream.ids),
+            files=[self.stream_path("structures", "<id>.pdb")],
             map_table=self.structures_map,
             format="pdb"
         )

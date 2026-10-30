@@ -9,6 +9,8 @@ Helper script for RFDAA_PrepareLigand tool.
 Adds a dummy peptide (1PEF) to ligand-only PDB files to satisfy RFdiffusion-AllAtom's
 requirement for protein atoms in the input structure. The peptide is positioned away
 from the ligand and assigned to chain A with residue numbers starting from 3.
+
+Each input ligand is prepared under its own id (<structures_folder>/<id>.pdb), so the output stream is 1:1 with the input stream and keeps its ids.
 """
 
 import os
@@ -16,6 +18,9 @@ import sys
 import argparse
 import pandas as pd
 from typing import List, Tuple
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from biopipelines.biopipelines_io import load_datastream, iterate_files  # noqa: E402
 
 
 def download_1pef(pdbs_folder: str) -> str:
@@ -213,25 +218,25 @@ def combine_structures(ligand_pdb: str, peptide_pdb: str, output_pdb: str):
     print(f"Successfully created combined structure with {len(ligand_lines) + len(peptide_translated)} atoms")
 
 
-def create_output_table(output_pdb: str, output_csv: str):
+def create_output_table(prepared: List[Tuple[str, str]], output_csv: str):
     """
     Create structures.csv output table.
 
     Args:
-        output_pdb: Path to prepared PDB file
+        prepared: (id, prepared PDB path) of every ligand
         output_csv: Path to output CSV file
     """
     df = pd.DataFrame({
-        'id': ['prepared_ligand'],
-        'file_path': [output_pdb]
+        'id': [pid for pid, _ in prepared],
+        'file_path': [path for _, path in prepared]
     })
     df.to_csv(output_csv, index=False)
     print(f"Created output table: {output_csv}")
 
 
-def create_structures_map(output_pdb: str, structures_map: str):
+def create_structures_map(prepared: List[Tuple[str, str]], structures_map: str):
     """Write the structures stream map_table (id | file)."""
-    pd.DataFrame({'id': ['prepared_ligand'], 'file': [output_pdb]}).to_csv(structures_map, index=False)
+    pd.DataFrame({'id': [pid for pid, _ in prepared], 'file': [path for _, path in prepared]}).to_csv(structures_map, index=False)
     print(f"Created structures map: {structures_map}")
 
 
@@ -239,29 +244,38 @@ def main():
     parser = argparse.ArgumentParser(
         description='Prepare ligand structure for RFdiffusion-AllAtom by adding dummy peptide'
     )
-    parser.add_argument('--ligand_pdb', required=True, help='Input ligand PDB file')
-    parser.add_argument('--output_pdb', required=True, help='Output combined PDB file')
+    parser.add_argument('--ligand_json', required=True, help='Input ligand structures DataStream JSON')
+    parser.add_argument('--structures_folder', required=True, help='Folder receiving <id>.pdb for every ligand')
     parser.add_argument('--output_csv', required=True, help='Output structures CSV file')
     parser.add_argument('--structures_map', required=True, help='Output structures map_table CSV')
     parser.add_argument('--pdbs_folder', required=True, help='PDBs folder for caching 1PEF')
 
     args = parser.parse_args()
 
-    # Validate input
-    if not os.path.exists(args.ligand_pdb):
-        print(f"Error: Ligand PDB file not found: {args.ligand_pdb}")
+    ligands = list(iterate_files(load_datastream(args.ligand_json)))
+    if not ligands:
+        print("Error: no ligand structures to prepare")
+        sys.exit(1)
+    absent = [path for _, path in ligands if not os.path.exists(path)]
+    if absent:
+        print(f"Error: Ligand PDB file not found: {absent[0]}")
         sys.exit(1)
 
     try:
         # Download/get 1PEF
         peptide_pdb = download_1pef(args.pdbs_folder)
 
-        # Combine structures
-        combine_structures(args.ligand_pdb, peptide_pdb, args.output_pdb)
+        # Combine structures, one output per input id
+        os.makedirs(args.structures_folder, exist_ok=True)
+        prepared = []
+        for ligand_id, ligand_pdb in ligands:
+            output_pdb = os.path.join(args.structures_folder, f"{ligand_id}.pdb")
+            combine_structures(ligand_pdb, peptide_pdb, output_pdb)
+            prepared.append((ligand_id, output_pdb))
 
         # Create output table + stream map_table
-        create_output_table(args.output_pdb, args.output_csv)
-        create_structures_map(args.output_pdb, args.structures_map)
+        create_output_table(prepared, args.output_csv)
+        create_structures_map(prepared, args.structures_map)
 
         print("\nSuccess! Ligand prepared for RFdiffusion-AllAtom")
 
