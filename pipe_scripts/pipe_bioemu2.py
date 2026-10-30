@@ -35,7 +35,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import yaml
 
-from combinatorics import CombinatoricsConfig, predict_single_output_id
+from combinatorics import (CombinatoricsConfig, generate_multiplied_ids, predict_single_output_id,
+                           predict_single_provenance)
 from ligand_utils import auth_ligand_field, ligand_chemistry
 from pipe_axis_data import load_axis_data
 from biopipelines.biopipelines_io import container_argv_prefix, step_id_from_table_path  # noqa: E402
@@ -114,9 +115,15 @@ def build_runs(elements: Dict[str, Dict]) -> List[Dict]:
         runs.append({
             "id": predict_single_output_id(**selections),
             "records": records,
-            "provenance": {name: "+".join(str(r.get("id", "?")) for r in recs) for name, recs in records.items()},
+            "provenance": predict_single_provenance(**selections),
         })
     return runs
+
+
+def frame_ids(run_id: str, count: int) -> List[str]:
+    """The ids of the conformers of one run, `<run>_1` to `<run>_<count>`, as the wrapper declares them."""
+    ids, _ = generate_multiplied_ids([run_id], [str(index) for index in range(1, count + 1)])
+    return ids
 
 
 def polymer_sequence(record: Dict) -> str:
@@ -329,8 +336,7 @@ def split_trajectory(topology_cif: str, samples_xtc: str, run_id: str,
     number_atoms(trajectory.topology)
     os.makedirs(structures_dir, exist_ok=True)
     frames = []
-    for index in range(trajectory.n_frames):
-        frame_id = f"{run_id}_{index + 1}"
+    for index, frame_id in enumerate(frame_ids(run_id, trajectory.n_frames)):
         path = os.path.join(structures_dir, f"{frame_id}.pdb")
         trajectory[index].save_pdb(path)
         frames.append((frame_id, path))

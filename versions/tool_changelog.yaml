@@ -252,8 +252,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-10-30'
+    note: >-
+      A run's `ligands.id` for a ligand axis with a static companion, `Bundle(Each(ligands), cofactor)`, is the ligand id alone, as the wrapper declares it. It was the companion joined to the ligand (`cof+l1`), which is no id of the compounds stream, so a join on `ligands.id` matched nothing. The provenance of a run comes from `combinatorics.predict_single_provenance` and the conformer ids `<run>_<k>` from `generate_multiplied_ids`, so the pipe script builds neither by hand.
   - version: '1.6'
     date: '2026-10-29'
     note: >-

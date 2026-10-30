@@ -63,6 +63,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **BioEmu2** 1.6 → 1.7. A run's `ligands.id` for a ligand axis with a static companion, `Bundle(Each(ligands), cofactor)`, is the ligand id alone, as the wrapper declares it; it was the companion joined to the ligand (`cof+l1`), which is no id of the compounds stream, so a join on `ligands.id` matched nothing. The provenance of a run comes from `predict_single_provenance` and the conformer ids `<run>_<k>` from `generate_multiplied_ids`, so the pipe script builds neither by hand.
+
 - **Fuse** 1.3 → 1.4. The id of a fusion, `<slot>+<length>+<slot>...`, is joined by `join_axis_ids` in both the wrapper and the pipe script, which each carried their own copy of the join. No id changes; the docstring that described the ids with `_` now describes the `+` they have always had.
 
 - **RFdiffusion** 2.4 → 2.5. The `structures.id` column of `structures_map.csv` is written from the input stream's own ids and the suffix pattern the declared ids use (`combinatorics.multiplied_id_parents`), looked up by exact id. It was recovered by stripping a regex off each file id, so a file that is no input's output (a leftover `<id>.pdb`) got a parent that was merely its name with the last number cut off. Such a file now has a blank parent and is named in the step log, and a folder in which no file matches fails the step instead of writing a column of blanks. The declared ids and the column for every design the step makes are unchanged. Fold conditioning (`scaffold_dir`, `target_ss`, `target_adj`) never reads `pdb`, so it writes no parent column.

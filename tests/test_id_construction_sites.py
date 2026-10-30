@@ -19,14 +19,20 @@ import pandas as pd
 import pytest
 
 from biopipelines import combinatorics as cb
-from biopipelines.combinatorics import Bundle, Each, predict_output_ids_with_provenance
+from biopipelines import id_patterns
+from biopipelines.combinatorics import (Bundle, CombinatoricsConfig, Each, generate_combinatorics_config,
+                                        predict_output_ids_with_provenance)
+from biopipelines.datastream import DataStream
 from biopipelines.fuse import Fuse
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
 sys.path.insert(0, SCRIPTS)
 
+import pipe_bioemu2 as bioemu2_pipe  # noqa: E402
 import pipe_fuse_queries as fuse_pipe  # noqa: E402
+
+PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
 
 
 def _script_text(name):
@@ -173,3 +179,47 @@ class TestFuse:
         assert not re.search(r"""['"]\+['"]\.join""", _script_text("pipe_fuse_queries.py"))
         with open(os.path.join(REPO_ROOT, "biopipelines", "fuse.py")) as handle:
             assert not re.search(r"""['"]\+['"]\.join""", handle.read())
+
+
+# ── BioEmu2 ───────────────────────────────────────────────────────────────────
+
+def _bioemu2_streams(tmp_path):
+    pd.DataFrame({"id": ["p1", "p2"], "sequence": [PROTEIN, PROTEIN]}).to_csv(tmp_path / "s.csv", index=False)
+    pd.DataFrame({"id": ["l1", "l2"], "smiles": ["CCO", "CCN"]}).to_csv(tmp_path / "l.csv", index=False)
+    pd.DataFrame({"id": ["cof"], "smiles": ["CC"]}).to_csv(tmp_path / "c.csv", index=False)
+    return (DataStream(name="sequences", ids=["p1", "p2"], map_table=str(tmp_path / "s.csv"), format="csv"),
+            DataStream(name="compounds", ids=["l1", "l2"], map_table=str(tmp_path / "l.csv"), format="csv"),
+            DataStream(name="compounds", ids=["cof"], map_table=str(tmp_path / "c.csv"), format="csv"))
+
+
+class TestBioEmu2:
+
+    @pytest.mark.parametrize("shape", ["each", "bundle", "static after", "static first"])
+    def test_a_runs_provenance_is_what_the_wrapper_declares_for_that_row(self, tmp_path, shape):
+        """A ligand axis with a static companion, `Bundle(Each(ligands), cofactor)`, was recorded as the companion joined to the ligand (`cof+l1`), which is no id of the compounds stream and so joins to nothing."""
+        seqs, ligs, cof = _bioemu2_streams(tmp_path)
+        ligands = {"each": ligs, "bundle": Bundle(ligs), "static after": Bundle(Each(ligs), cof),
+                   "static first": Bundle(cof, Each(ligs))}[shape]
+        path = str(tmp_path / "c.json")
+        declared = generate_combinatorics_config(
+            path, sequences=(seqs, "sequences", "protein"), ligands=(ligands, "compounds", "ligand"))
+        runs = bioemu2_pipe.build_runs(bioemu2_pipe.axis_elements(CombinatoricsConfig.load(path)))
+        assert [run["id"] for run in runs] == declared.predicted_ids
+        for position, run in enumerate(runs):
+            for column, values in declared.provenance.items():
+                assert run["provenance"][column] == values[position], (run["id"], column)
+
+    def test_a_conformer_is_named_by_its_run_and_its_one_based_index(self):
+        assert bioemu2_pipe.frame_ids("p1+l1", 3) == ["p1+l1_1", "p1+l1_2", "p1+l1_3"]
+
+    @pytest.mark.parametrize("count", [1, 4, 12])
+    def test_the_conformer_ids_are_the_ones_the_wrapper_declares_as_a_pattern(self, count):
+        declared = id_patterns.expand_ids(
+            cb.generate_multiplied_ids_pattern(["p1+l1"], f"<1..{count}>"))
+        assert bioemu2_pipe.frame_ids("p1+l1", count) == declared
+
+    def test_the_pipe_script_joins_and_splits_no_id_itself(self):
+        text = _script_text("pipe_bioemu2.py")
+        assert not re.search(r"""['"]\+['"]\.join""", text)
+        assert not re.search(r"""split\(['"]\+['"]""", text)
+        assert not re.search(r"""f['"]\{run_id\}_\{""", text)

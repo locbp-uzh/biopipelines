@@ -96,7 +96,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}
