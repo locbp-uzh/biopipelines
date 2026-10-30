@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Vina** 2.6 → 2.7. The receptor PDBQT keeps only the records Vina's rigid-receptor parser accepts (ATOM, HETATM, REMARK, TER, END, WARNING). Open Babel 3.2, which a fresh conda-forge env resolves to, copies the input's COMPND and AUTHOR records into the PDBQT, and every receptor protonated by `obabel` carries both, so Vina stopped with "Unknown or inappropriate tag found in rigid receptor" and every docking pair became a `failure` row. Score and minimize, which do not protonate, were unaffected.
+
+- **Gnina** 2.6 → 2.7. No change to Gnina's own behaviour; the version moves because the shared pipe_vina_backend.py did. See the Vina entry.
+
 - **PocketGen** 2.1 → 2.2. A ligand whose `smiles` cell is blank is reported as having no SMILES, not given the bond-order template "nan". The row of the matching `code` was read with `str(...)`, a blank cell comes back as NaN and `str(NaN)` is the non-empty string "nan", so the check for a missing SMILES passed and RDKit failed later on the template "nan" with a message that does not name the cause. The template is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, as GEMS 2.2 and RTMScore 2.3 do. No id changes.
 
 - **ProLIF** 2.1 → 2.2. A ligand whose `smiles` cell is blank is reported as having no SMILES, not given the bond-order template "nan". The row of the matching `code` was read with `str(...)`, a blank cell comes back as NaN and `str(NaN)` is the non-empty string "nan", so the check for a missing SMILES passed and RDKit failed later on the template "nan". The template is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, as GEMS 2.2, RTMScore 2.3 and PocketGen 2.2 do. No id changes.

@@ -913,8 +913,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.6"
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-10-30'
+    note: >-
+      No change to Gnina's own behaviour; the version moves because the shared pipe_vina_backend.py did. See the Vina entry.
   - version: '2.6'
     date: '2026-10-30'
     note: >-
@@ -981,8 +985,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.6"
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-10-30'
+    note: >-
+      The receptor PDBQT keeps only the records Vina's rigid-receptor parser accepts (ATOM, HETATM, REMARK, TER, END, WARNING). Open Babel 3.2, which a fresh conda-forge env resolves to, copies the input's COMPND and AUTHOR records into the PDBQT, and every receptor protonated by `obabel` carries both, so Vina stopped with "Unknown or inappropriate tag found in rigid receptor" and every docking pair became a `failure` row. Score and minimize, which do not protonate, were unaffected.
   - version: '2.6'
     date: '2026-10-30'
     note: >-

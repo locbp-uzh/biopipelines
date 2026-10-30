@@ -49,13 +49,24 @@ def convert(src, dst, extra_args=None):
     return dst
 
 
+# The records Vina's rigid-receptor parser accepts; any other line makes it raise.
+_RECEPTOR_RECORDS = ("ATOM  ", "HETATM", "REMARK", "TER", "END", "WARNING")
+
+
 def receptor_pdbqt(protein_pdb, dst):
     """Convert a prepared receptor PDB to PDBQT.
 
     ``-xr`` marks the receptor rigid, which suppresses the ROOT/BRANCH torsion
-    tree Vina rejects on a receptor.
+    tree Vina rejects on a receptor. Open Babel 3.2 also copies the input's
+    COMPND and AUTHOR records, which Vina rejects, so only the records Vina
+    parses are kept.
     """
-    return convert(protein_pdb, dst, ["-xr"])
+    convert(protein_pdb, dst, ["-xr"])
+    with open(dst) as f:
+        lines = [line for line in f if not line.strip() or line.startswith(_RECEPTOR_RECORDS)]
+    with open(dst, "w") as f:
+        f.writelines(lines)
+    return dst
 
 
 def ligand_pdbqt(ligand_sdf, dst):
