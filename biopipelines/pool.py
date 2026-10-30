@@ -105,7 +105,7 @@ class Pool(BaseConfig):
     """
 
     TOOL_NAME = "Pool"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

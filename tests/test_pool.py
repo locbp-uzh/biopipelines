@@ -815,3 +815,20 @@ def test_pool_over_rows_sharing_one_file_names_every_id_without_copying_per_row(
         return
     assert len({(os.stat(p).st_dev, os.stat(p).st_ino) for p in df["file"]}) == 4, (
         "two runs of a shared and an own file are four files, not six")
+
+
+def test_renumber_ids_leaves_a_blank_provenance_cell_blank():
+    """A failed id keeps a blank row in a result table; its empty `<axis>.id` cell stays empty instead of becoming `nan_2`.
+
+    Object dtype is pinned because that is what pandas 2 reads a column with a blank cell as, and what `astype(str)` turns into the text `nan`.
+    """
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    with pd.option_context("future.infer_string", False):
+        frame = pd.DataFrame({"id": ["a", "b"], "sequences.id": ["s", None]})
+        out = pipe_pool._renumber_ids(frame, 2)
+
+    assert list(out["id"]) == ["a_2", "b_2"]
+    assert out["sequences.id"].iloc[0] == "s_2"
+    assert pd.isna(out["sequences.id"].iloc[1])

@@ -104,7 +104,9 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
         for col in df.columns:
             if col == "id" or not col.endswith(".id"):
                 continue
-            df[col] = df[col].astype(str) + f"_{pool_idx}"
+            # a blank cell (the row of a failed id) stays blank, as in _gather_stream
+            named = df[col].notna() & (df[col].astype(str) != "")
+            df[col] = df[col].where(~named, df[col].astype(str) + f"_{pool_idx}")
     if not carried:
         df["original.id"] = original
     return df

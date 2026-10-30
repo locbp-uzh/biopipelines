@@ -67,6 +67,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Pool** 1.3 → 1.4. A blank `<axis>.id` cell of a pooled table (the row of a failed id) stays blank. The default suffix was appended to every cell of those columns, so with pandas 2 the blank became the text `nan_<pool_idx>`, a provenance id that names nothing (the stream path already left it blank). The ids themselves are unchanged: `<orig_id>_<pool_idx>`, with the id before the rename in `original.id`.
+
 - **RFDAA_PrepareLigand** 2.4 → 2.5. A prepared ligand keeps the id of the ligand it was made from, and its file is `<id>.pdb`. Every input was named `prepared_ligand`, so the designs RFdiffusionAllAtom derives from it (`<pdb id>_<n>`) all carried that constant. Every ligand of the input stream is prepared now; only the first was, and the others were dropped without a word. The pipe script reads the input stream itself instead of one id and file resolved in the shell. Nothing in the framework depended on the literal id.
 
 - **RFdiffusionAllAtom** 2.4 → 2.5. No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. A design made from a prepared ligand is named after the ligand (`<ligand id>_<n>`), not `prepared_ligand_<n>`.
