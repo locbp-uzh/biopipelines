@@ -1668,8 +1668,12 @@ PLACER:
   - biopipelines/placer.py
   - pipe_scripts/pipe_placer_driver.py
   - pipe_scripts/pipe_placer_postprocess.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      A structure that holds no residue of the ligand's code is no longer given to PLACER, and a run that gives no model is a `failure` row of `missing`. On the cluster `predict_ligand` segfaulted on such a structure; the driver, which runs every run in one process, died with it, the wrapper stopped before the post-processing, and the step wrote no stream, no scores and no `missing.csv`, although the runs before it had finished. A run that raised a Python error was only printed, and the post-processing found its runs from the model files, so an id with no file was in no table. The driver now refuses the structure without the code before starting PLACER and writes the error of every run that raised to `failures.json`; the post-processing names every run of `units.json` without a model as a `failure` row with that error (or a note that the driver never reached it); and the wrapper runs the post-processing whatever the driver's status was, so what finished is collected. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-

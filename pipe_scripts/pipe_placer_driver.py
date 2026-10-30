@@ -15,8 +15,9 @@ Two modes (selected by --mode):
 
   ligand    — resolve the single `code` from the compounds stream and predict
               every copy of that ligand (predict_ligand([code]) + predict_multi).
-              Output IDs are <structure>+<ligand>. PLACER errors (and the pair is
-              recorded as failed) if the structure has no HETATM for `code`.
+              Output IDs are <structure>+<ligand>. A structure with no HETATM for
+              `code` is not given to PLACER, which segfaults on it, and is recorded
+              as failed.
 
   sidechain — apo / sidechain repacking. No ligand is predicted; `--target-res`
               (chain-resno) is the crop center (target_res). Output IDs are just
@@ -37,7 +38,8 @@ Common flow per input::
     {runs}/{out_id}.csv         — per-model scores
 
 The driver also writes {runs}/units.json, the parents of every out_id, which the
-post-processing reads by exact id.
+post-processing reads by exact id, and {runs}/failures.json, the error of every
+run that raised, which it turns into a failure row of the missing table.
 
 The post-processing step (biopipelines env) splits the multi-model PDB into
 per-sample files and builds the BioPipelines streams.
@@ -158,6 +160,12 @@ def unit_manifest(structure_ids, ligand_ids):
     return manifest
 
 
+def write_failures(runs_folder, failed):
+    """{run id: error} of every run that raised, for the post-processing to turn into failure rows."""
+    with open(os.path.join(runs_folder, "failures.json"), "w") as handle:
+        json.dump(failed, handle)
+
+
 def parse_target_res(s):
     """Parse a "chain-resno" or "chain-resno-name3" crop-center string into the
     tuple PLACERinput.target_res expects, matching upstream run_PLACER.py."""
@@ -236,7 +244,7 @@ def main():
     # Load the model once; reuse across inputs.
     placer = PLACER.PLACER()
 
-    failed = []
+    failed = {}
     n_ok = 0
     for struct_id, struct_path in structures:
         ext = os.path.splitext(struct_path)[1].lower()
@@ -251,6 +259,9 @@ def main():
                 pl.name(out_id)
 
                 if args.mode == "ligand":
+                    copies = _count_ligand_copies(struct_path, ligand_code)
+                    if copies == 0:
+                        raise ValueError(f"the structure has no residue {ligand_code!r} to predict")
                     # name3 selector: predict every copy of `ligand_code`.
                     pl.predict_ligand([ligand_code])
                     # predict_multi(True) scores all matched copies, but upstream
@@ -258,7 +269,7 @@ def main():
                     # enabled when the structure actually holds >1 copy of the code.
                     # A single docked ligand (the common case here) uses the plain
                     # single-ligand path.
-                    if _count_ligand_copies(struct_path, ligand_code) > 1:
+                    if copies > 1:
                         pl.predict_multi(True)
                     # Enforce any covalent bonds (resolve name3/resnum per structure).
                     if bond_specs:
@@ -285,12 +296,14 @@ def main():
                 n_ok += 1
             except Exception as exc:
                 print(f"  [fail] {out_id}: {type(exc).__name__}: {exc}", file=sys.stderr)
-                failed.append((out_id, f"{type(exc).__name__}: {exc}"))
+                failed[out_id] = f"{type(exc).__name__}: {exc}"
+                # written at once: a later crash of this process must not lose it
+                write_failures(args.runs_folder, failed)
 
+    write_failures(args.runs_folder, failed)
     print(f"PLACER: {n_ok} input(s) succeeded, {len(failed)} failed")
-    if failed:
-        for out_id, msg in failed:
-            print(f"  - {out_id}: {msg}", file=sys.stderr)
+    for out_id, msg in failed.items():
+        print(f"  - {out_id}: {msg}", file=sys.stderr)
 
     # Exit non-zero only if every input failed — partial success is still useful.
     if n_ok == 0:

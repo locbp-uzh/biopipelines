@@ -28,7 +28,8 @@ This script flattens those into BioPipelines streams:
   - emits the scores table (one row per sample, with provenance columns);
   - (ligand mode) passes the input ligand chemistry through unchanged into the
     compounds map_table — PLACER refines the pose, not the identity;
-  - records inputs that produced no models in the missing table.
+  - records every run of `units.json` that gave no model in the missing table, with
+    the error `failures.json` holds for it, or a note that the driver never reached it.
 """
 
 import argparse
@@ -84,6 +85,15 @@ def split_multimodel_pdb(path):
 def load_units(runs_folder):
     """{unit id: {"structures.id": ..., "compounds.id": ...}} as the driver wrote it."""
     with open(os.path.join(runs_folder, "units.json")) as handle:
+        return json.load(handle)
+
+
+def load_failures(runs_folder):
+    """{run id: error} the driver recorded for the runs that raised; empty when it wrote none."""
+    path = os.path.join(runs_folder, "failures.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as handle:
         return json.load(handle)
 
 
@@ -208,6 +218,18 @@ def main():
                 "cause": "no models in _model.pdb",
             })
 
+    failures = load_failures(args.runs_folder)
+    modeled = {fname[: -len("_model.pdb")] for fname in model_pdbs}
+    for unit_id in units:
+        if unit_id not in modeled:
+            cause = failures.get(unit_id, "PLACER wrote no model for this run")
+            missing_rows.append({
+                "id": unit_id,
+                "removed_by": step_id,
+                "kind": "failure",
+                "cause": " ".join(str(cause).split()),
+            })
+
     with open(args.structures_map, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["id", "file"] + prov_cols)
         w.writeheader()
@@ -226,10 +248,10 @@ def main():
         w.writeheader()
         w.writerows(missing_rows)
 
+    with_models = len(modeled) - sum(1 for row in missing_rows if row["id"] in modeled)
     print(
         f"PLACER post-process ({args.mode}): {len(map_rows)} model(s) from "
-        f"{len(model_pdbs) - len(missing_rows)}/{len(model_pdbs)} input(s); "
-        f"{len(missing_rows)} input(s) empty"
+        f"{with_models}/{len(units)} run(s); {len(missing_rows)} run(s) without a model"
     )
 
     if not map_rows:

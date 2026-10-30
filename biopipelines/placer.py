@@ -111,7 +111,7 @@ class PLACER(BaseConfig):
     """
 
     TOOL_NAME = "PLACER"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "placer"
 
     RERANK_CHOICES = ("prmsd", "plddt", "plddt_pde")
@@ -387,9 +387,9 @@ fi
     --runs-folder "{self.runs_folder}" \\
     --nsamples {self.nsamples}{rerank_arg}{exclude_sm_arg}{mode_args}{bonds_arg}
 
-if [ $? -ne 0 ]; then
-    echo "Error: PLACER inference failed"
-    exit 1
+PLACER_RC=$?
+if [ $PLACER_RC -ne 0 ]; then
+    echo "Warning: the PLACER driver exited with status $PLACER_RC; the runs that finished are collected below, the others are listed in missing"
 fi
 
 """
@@ -411,7 +411,7 @@ fi
     --missing-csv "{self.missing_csv}"{compounds_args}
 
 if [ $? -ne 0 ]; then
-    echo "Error: PLACER post-processing failed"
+    echo "Error: PLACER post-processing failed (the driver exited with status $PLACER_RC)"
     exit 1
 fi
 
