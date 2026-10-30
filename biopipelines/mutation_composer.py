@@ -16,12 +16,22 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .combinatorics import numbered_id
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from combinatorics import numbered_id
+
+# The prefix of the sequence ids when the user gives none.
+DEFAULT_PREFIXES = {
+    "single_point": "mut",
+    "weighted_random": "rand",
+    "hotspot_focused": "hotspot",
+    "top_mutations": "top",
+}
 
 
 class MutationComposer(BaseConfig):
@@ -40,7 +50,7 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -85,7 +95,7 @@ echo "=== MutationComposer ready ==="
             min_frequency: Minimum frequency threshold to consider mutations (default: 0.01)
             max_mutations: Maximum mutations per sequence (None = unlimited)
             random_seed: Random seed for reproducible generation (None = random)
-            prefix: Prefix for sequence IDs (e.g., "single_point" -> "single_point_001")
+            prefix: Prefix for sequence IDs (e.g., "single_point" -> "single_point_001"). Empty uses the mode's own: mut, rand, hotspot or top
             hotspot_count: Number of top hotspot positions to consider for hotspot_focused mode (default: 10)
             combination_strategy: Strategy for combining multiple frequency tables:
                 - "average": Average frequencies across tables, then single mutations
@@ -185,6 +195,10 @@ echo "=== MutationComposer ready ==="
         
         return config_lines
     
+    def _sequence_prefix(self) -> str:
+        """The prefix of every sequence id: the user's, else the mode's. Declared ids and the script both use this one."""
+        return self.prefix or DEFAULT_PREFIXES[self.mode]
+
     def generate_script(self, script_path: str) -> str:
         """Generate MutationComposer execution script."""
         script_content = "#!/bin/bash\n"
@@ -209,7 +223,7 @@ echo "=== MutationComposer ready ==="
             "min_frequency": self.min_frequency,
             "max_mutations": self.max_mutations,
             "random_seed": self.random_seed,
-            "prefix": self.prefix,
+            "prefix": self._sequence_prefix(),
             "hotspot_count": self.hotspot_count,
             "sequences_output": self.sequences_csv,
             "sequences_fasta": self.sequences_fasta
@@ -231,18 +245,8 @@ python "{self.composer_py}" --config "{self.config_file}"
     
     def get_output_files(self) -> Dict[str, Any]:
         """Get expected output files after sequence generation."""
-        # Generate sequence IDs based on prefix or mode
-        if self.prefix:
-            sequence_ids = [f"{self.prefix}_{i:03d}" for i in range(1, self.num_sequences + 1)]
-        else:
-            mode_prefixes = {
-                "single_point": "mut",
-                "weighted_random": "rand",
-                "hotspot_focused": "hotspot",
-                "top_mutations": "top"
-            }
-            prefix = mode_prefixes.get(self.mode, "seq")
-            sequence_ids = [f"{prefix}_{i:03d}" for i in range(1, self.num_sequences + 1)]
+        prefix = self._sequence_prefix()
+        sequence_ids = [numbered_id(prefix, i) for i in range(1, self.num_sequences + 1)]
 
         sequences = DataStream(
             name="sequences",

@@ -1094,6 +1094,17 @@ def ranked_id(parent_id: str, rank: int) -> str:
     return ids[0]
 
 
+def numbered_id(prefix: str, number: int, width: int = 3) -> str:
+    """The id of the ``number``-th member of a generated set: ``<prefix>_<number>``, zero-padded to ``width`` digits.
+
+    A tool that invents its sequences from tables rather than from a parent stream names them by a prefix and a running number. The declared ids and the ids written at execution time both come from here, so they cannot drift. The prefix is never empty: a default has to be chosen once, where it can be declared.
+    """
+    if not prefix:
+        raise ValueError("numbered_id needs a prefix; the caller resolves its default")
+    ids, _ = generate_multiplied_ids([prefix], [f"{number:0{width}d}"])
+    return ids[0]
+
+
 def generate_multiplied_ids_pattern(
     input_ids: List[str],
     suffix_pattern: str,

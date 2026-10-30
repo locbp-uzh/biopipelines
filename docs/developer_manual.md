@@ -1503,6 +1503,7 @@ All ID generation uses functions from `combinatorics.py`:
 | `generate_multiplied_ids_pattern()` | Same, but keeps compact ID patterns |
 | `multiplied_id_parents()` | Runtime provenance of a multiplier tool: every concrete output id mapped to its parent, looked up by exact id |
 | `ranked_id()` | The `<parent>_rank<n>` id of a docking pose, at configuration time and in the pipe script alike |
+| `numbered_id()` | The `<prefix>_<nnn>` id of a sequence a tool generates from tables, at configuration time and in the pipe script alike |
 
 #### Using `predict_output_ids_with_provenance` (multi-axis tools)
 

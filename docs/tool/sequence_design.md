@@ -447,7 +447,7 @@ Generates new protein sequences by composing mutations based on frequency analys
 - `min_frequency`: float = 0.01 - Minimum frequency threshold for mutations
 - `max_mutations`: int = None - Maximum mutations per sequence
 - `random_seed`: int = None - Random seed for reproducibility
-- `prefix`: str = "" - Prefix for sequence IDs
+- `prefix`: str = "" - Prefix for sequence IDs, which are `<prefix>_001`, `<prefix>_002`, ... Empty uses the mode's own (`mut`, `rand`, `hotspot`, `top`), whatever the `combination_strategy`
 - `hotspot_count`: int = 10 - Number of top hotspot positions (for hotspot_focused mode)
 - `combination_strategy`: str = "average" - Strategy for combining multiple tables (average, maximum, stack, round_robin)
 

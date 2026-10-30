@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `combinatorics.numbered_id(prefix, number)` is the one place a generated sequence id `<prefix>_<nnn>` is spelled. `MutationComposer` declares its ids and writes them through it, with the prefix resolved once in the wrapper. `tests/test_mutation_composer_ids.py` runs the script for every mode and combination strategy and compares what it wrote with what the wrapper declared.
+
 - `combinatorics.ranked_id(parent_id, rank)` is the one place a docking pose id `<pair>_rank<n>` is spelled. DiffDock, DynamicBind and NeuralPLexer declare their ids and write them through it, and read the protein and the ligand of a pose from provenance columns their producer wrote instead of splitting the pair id. `tests/test_docking_pose_ids.py` pins the full pose ids, ranks included, against the declared ones, with a protein id that already carries a `+`, and a lint that none of the six sources spells the suffix or splits a pair.
 
 - `combinatorics.join_axis_ids` and `combinatorics.predict_single_provenance` are the shared answers to two questions a pipe script used to answer with a `+` join of its own: the id of a row whose axes are not input streams (Fuse's slots and junction lengths), and the provenance cell each axis contributes to a row (an iterated axis gives the id it selected, a bundled axis its ids joined, with `<axis>.<n>` members). The configuration-time predictor and the runtime now call the same functions, so they cannot drift. `tests/test_id_construction_sites.py` pins both against `predict_output_ids_with_provenance` row for row.
@@ -64,6 +66,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 - `pae` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-id predicted aligned error matrix a structure predictor can emit for a downstream scorer to read.
 
 ### Tools
+
+- **MutationComposer** 1.0 → 1.1. With no `prefix`, the ids a pipeline is wired against are the ids the step writes, for every mode and combination strategy. The wrapper declared `mut_001`, `rand_001`, `hotspot_001` or `top_001` from the mode alone, while the script chose a prefix of its own per strategy and wrote `stack_001`, `rr_001`, `wr_stack_001`, `wr_rr_001`, `hs_stack_001`, `hs_rr_001`, `top_stack_001` or `top_rr_001` whenever two or more tables were combined with `stack` or `round_robin`, so nothing downstream found the sequences. The wrapper resolves the prefix once, the script takes it verbatim, and both build the id through the new `combinatorics.numbered_id`; the mode's name is the default for every strategy. A given `prefix` is unchanged.
 
 - **GEMS** 2.0 → 2.1. A row of `affinity` and of `missing` is named `<structure>+<ligand>`, the id rule for two axes, where it was `<structure>__<ligand>` (`prot1+lig1`, not `prot1__lig1`); `structures.id` and `ligands.id` are unchanged. The files handed to GEMS are named by a positional staging name, which is never an id, and its predictions are mapped back by exact lookup, so two pairs whose ids spell the same joined string can no longer overwrite each other's file. The pair id comes from `predict_single_output_id`. Anything that joined a GEMS table on the old `__` id has to join on `structures.id` and `ligands.id` or on the new id.
 

@@ -12,6 +12,7 @@ composition strategies.
 
 import argparse
 import json
+import os
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -19,6 +20,9 @@ import logging
 from typing import Dict, List, Tuple, Optional
 import sys
 import random
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines'))
+from combinatorics import numbered_id  # noqa: E402
 
 # Standard amino acids
 AMINO_ACIDS = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
@@ -229,7 +233,7 @@ def get_reference_sequence(freq_df: pd.DataFrame) -> str:
 
 
 def generate_single_point_mutations(freq_df: pd.DataFrame, num_sequences: int,
-                                   min_frequency: float, prefix: str = "", combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
+                                   min_frequency: float, prefix: str, combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
     """
     Generate single-point mutations ordered by frequency.
     Each sequence contains exactly one mutation from the original sequence.
@@ -287,7 +291,7 @@ def generate_single_point_mutations(freq_df: pd.DataFrame, num_sequences: int,
         seq_list[pos] = mut_aa
         mutated_seq = ''.join(seq_list)
         
-        sequence_id = f"{prefix}_{i+1:03d}" if prefix else f"mut_{i+1:03d}"
+        sequence_id = numbered_id(prefix, i+1)
         mutation_desc = f"{orig_aa}{pos+1}{mut_aa}"
         mutation_positions = [pos + 1]  # 1-indexed for output
         
@@ -390,7 +394,7 @@ def generate_multi_table_single_point_mutations(source_dfs: List[pd.DataFrame], 
             # Create sequence only if we have mutations
             if mutations_made:
                 mutated_seq = ''.join(seq_list)
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"stack_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = ",".join(mutations_made)
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
                 logger.info(f"Generated sequence {seq_idx+1} with {len(mutations_made)} mutations: {mutations_desc}")
@@ -446,7 +450,7 @@ def generate_multi_table_single_point_mutations(source_dfs: List[pd.DataFrame], 
                 seq_list[pos] = mut_aa
                 mutated_seq = ''.join(seq_list)
 
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"rr_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = f"{orig_aa}{pos+1}{mut_aa}"
                 mutation_positions = [pos + 1]
 
@@ -534,7 +538,7 @@ def generate_multi_table_top_mutations(source_dfs: List[pd.DataFrame], num_seque
 
             if mutations_made:
                 mutated_seq = ''.join(seq_list)
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"top_stack_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = ",".join(mutations_made)
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
 
@@ -588,7 +592,7 @@ def generate_multi_table_top_mutations(source_dfs: List[pd.DataFrame], num_seque
                 seq_list = list(reference_seq)
                 seq_list[pos] = mut_aa
                 mutated_seq = ''.join(seq_list)
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"top_rr_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = f"{orig_aa}{pos+1}{mut_aa}"
                 mutation_positions = [pos + 1]
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
@@ -678,7 +682,7 @@ def generate_multi_table_weighted_random(source_dfs: List[pd.DataFrame], num_seq
 
             if mutations_made:
                 mutated_seq = ''.join(seq_list)
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"wr_stack_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = ",".join(mutations_made)
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
 
@@ -729,7 +733,7 @@ def generate_multi_table_weighted_random(source_dfs: List[pd.DataFrame], num_seq
                     seq_list = list(reference_seq)
                     seq_list[pos] = mut_aa
                     mutated_seq = ''.join(seq_list)
-                    sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"wr_rr_{seq_idx+1:03d}"
+                    sequence_id = numbered_id(prefix, seq_idx+1)
                     mutations_desc = f"{orig_aa}{pos+1}{mut_aa}"
                     mutation_positions = [pos + 1]
                     sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
@@ -743,7 +747,7 @@ def generate_multi_table_weighted_random(source_dfs: List[pd.DataFrame], num_seq
 
 def generate_weighted_random_mutations(freq_df: pd.DataFrame, num_sequences: int,
                                      min_frequency: float, max_mutations: Optional[int],
-                                     random_seed: Optional[int], prefix: str = "", combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
+                                     random_seed: Optional[int], prefix: str, combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
     """
     Generate random sequences weighted by mutation frequencies.
     
@@ -874,7 +878,7 @@ def generate_weighted_random_mutations(freq_df: pd.DataFrame, num_sequences: int
         
         # Create final sequence
         mutated_seq = ''.join(seq_list)
-        sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"rand_{seq_idx+1:03d}"
+        sequence_id = numbered_id(prefix, seq_idx+1)
         mutations_desc = ",".join(mutations_made) if mutations_made else "none"
         
         sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
@@ -994,7 +998,7 @@ def generate_multi_table_hotspot_focused(source_dfs: List[pd.DataFrame], num_seq
 
             if mutations_made:
                 mutated_seq = ''.join(seq_list)
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"hs_stack_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = ",".join(mutations_made)
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
 
@@ -1071,7 +1075,7 @@ def generate_multi_table_hotspot_focused(source_dfs: List[pd.DataFrame], num_seq
                 seq_list = list(reference_seq)
                 seq_list[pos] = mut_aa
                 mutated_seq = ''.join(seq_list)
-                sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"hs_rr_{seq_idx+1:03d}"
+                sequence_id = numbered_id(prefix, seq_idx+1)
                 mutations_desc = f"{orig_aa}{pos+1}{mut_aa}"
                 mutation_positions = [pos + 1]
                 sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
@@ -1084,7 +1088,7 @@ def generate_multi_table_hotspot_focused(source_dfs: List[pd.DataFrame], num_seq
 
 
 def generate_hotspot_focused_mutations(freq_df: pd.DataFrame, num_sequences: int,
-                                     min_frequency: float, prefix: str = "", hotspot_count: int = 10, combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
+                                     min_frequency: float, prefix: str, hotspot_count: int = 10, combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
     """
     Generate mutations focused on hotspot positions with highest mutation rates.
 
@@ -1273,7 +1277,7 @@ def generate_hotspot_focused_mutations(freq_df: pd.DataFrame, num_sequences: int
 
         # Create final sequence
         mutated_seq = ''.join(seq_list)
-        sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"hotspot_{seq_idx+1:03d}"
+        sequence_id = numbered_id(prefix, seq_idx+1)
         mutations_desc = ",".join(mutations_made) if mutations_made else "none"
 
         logger.info(f"DEBUG: Generated sequence {seq_idx+1}: {mutations_desc}")
@@ -1290,7 +1294,7 @@ def generate_hotspot_focused_mutations(freq_df: pd.DataFrame, num_sequences: int
 
 
 def generate_top_mutations(freq_df: pd.DataFrame, num_sequences: int,
-                          min_frequency: float, prefix: str = "", combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
+                          min_frequency: float, prefix: str, combination_strategy: str = "average") -> List[Tuple[str, str, str, List[int]]]:
     """
     Generate sequences using top N most frequent mutations per position.
     
@@ -1365,7 +1369,7 @@ def generate_top_mutations(freq_df: pd.DataFrame, num_sequences: int,
         
         # Create final sequence
         mutated_seq = ''.join(seq_list)
-        sequence_id = f"{prefix}_{seq_idx+1:03d}" if prefix else f"top_{seq_idx+1:03d}"
+        sequence_id = numbered_id(prefix, seq_idx+1)
         mutations_desc = ",".join(mutations_made) if mutations_made else "none"
         
         sequences.append((sequence_id, mutated_seq, mutations_desc, mutation_positions))
@@ -1435,11 +1439,10 @@ def main():
         mode = config['mode']
         num_sequences = config['num_sequences']
         min_frequency = config['min_frequency']
-        prefix = config.get('prefix', '')
+        prefix = config['prefix']
         
         logger.info(f"Generating {num_sequences} sequences using mode: {mode}")
-        if prefix:
-            logger.info(f"Using prefix: {prefix}")
+        logger.info(f"Using prefix: {prefix}")
         
         if mode == "single_point":
             sequences = generate_single_point_mutations(freq_df, num_sequences, min_frequency, prefix, combination_strategy)

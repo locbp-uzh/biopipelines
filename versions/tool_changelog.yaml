@@ -1386,8 +1386,12 @@ MutationComposer:
   files:
   - biopipelines/mutation_composer.py
   - pipe_scripts/pipe_mutation_composer.py
-  current: "1.0"
-  history: []
+  current: "1.1"
+  history:
+  - version: '1.1'
+    date: '2026-10-30'
+    note: >-
+      With no `prefix`, the ids it declares are the ids it writes for every mode and combination strategy. The wrapper declared `mut_001`, `rand_001`, `hotspot_001` or `top_001` from the mode alone, while the script chose its own prefix per strategy (`stack_001`, `rr_001`, `wr_stack_001`, ...) when two or more tables were combined with `stack` or `round_robin`. The wrapper now resolves the prefix once, hands it to the script, and both build every id through `combinatorics.numbered_id`.
 
 MutationProfiler:
   files:
