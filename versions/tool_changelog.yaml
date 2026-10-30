@@ -2513,8 +2513,12 @@ HBDesigner:
   - biopipelines/hbdesigner.py
   - pipe_scripts/pipe_hbdesigner.py
   - pipe_scripts/pipe_hbdesigner_constraints.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      The collector takes the upstream `missing` manifests (`--upstream-missing`) and writes their rows into `tables/missing.csv` beside its own. HBDesigner owns that file, so the footer's central propagation stands down, and the collector read no upstream manifest: when an upstream filter dropped a parent (`Panda.filter` on the ranks of a first HBDesigner run), the designs of that parent were declared, never produced, and not excused, and the step was marked FAILED although every design of a surviving parent was on disk. No id changes.
   - version: '2.3'
     date: '2026-10-30'
     note: >-

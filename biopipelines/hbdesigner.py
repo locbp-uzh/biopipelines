@@ -106,7 +106,7 @@ class HBDesigner(BaseConfig):
     """
 
     TOOL_NAME = "HBDesigner"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "hbdesigner"
 
     DESIGN_MODELS = ("design_002", "design_020")
@@ -424,7 +424,7 @@ python {self.collect_py} \\
     --summary-csv "{self.summary_table}" \\
     --sequences-csv "{self.sequences_csv}" \\
     --missing-csv "{self.missing_csv}" \\
-    --suffix-pattern "{self._suffix_pattern()}"
+    --suffix-pattern "{self._suffix_pattern()}"{self.upstream_missing_flag(self.structures_stream)}
 
 """
 

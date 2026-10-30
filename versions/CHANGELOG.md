@@ -67,6 +67,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **HBDesigner** 2.3 → 2.4. The collector takes the upstream `missing` manifests (`--upstream-missing`) and writes their rows into `tables/missing.csv` beside its own. HBDesigner owns that file, so the footer's central propagation stands down, and the collector read no upstream manifest: when an upstream filter dropped a parent (`Panda.filter` on the ranks of a first HBDesigner run), the designs of that parent were declared, never produced, and not excused, and the step was marked FAILED although every design of a surviving parent was on disk. No id changes.
+
 - **Vina** 2.8 → 2.9. Same two changes as Gnina, whose pipe script it shares: a receptor with unparseable coordinates is a `failure` row of `missing` instead of a docked one-point receptor, and a complex that fails in `score` or `minimize` keeps a NaN row of `scores`.
 
 - **Gnina** 2.8 → 2.9. A receptor with an ATOM line whose coordinates are not numbers is refused before it is protonated, boxed or docked: its pairs are `failure` rows of `missing` whose cause says the coordinates are unparseable. Open Babel reads such a line as an atom at the origin, so Vina boxed on the origin-centred conformer, found the box inside that one-point receptor and docked into it (about -1 kcal/mol, no failure row), while GNINA stopped for lack of a box. In `score` and `minimize` a complex that fails keeps a row of `scores` with every score NaN, besides its `missing` row, as a result table keeps one row per id that entered.

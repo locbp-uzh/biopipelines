@@ -41,7 +41,7 @@ import sys
 import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.biopipelines_io import load_datastream, iterate_files, read_upstream_missing, MISSING_COLUMNS
 from biopipelines.combinatorics import multiplied_id_parents
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
 
@@ -89,6 +89,8 @@ def main():
     parser.add_argument("--missing-csv", required=True)
     parser.add_argument("--suffix-pattern", required=True,
                         help="Rank suffix of the output ids, e.g. <1..5>: the pattern the wrapper declares them with")
+    parser.add_argument("--upstream-missing", nargs="*", default=None,
+                        help="Upstream missing manifests whose rows are kept in this step's missing table")
     args = parser.parse_args()
 
     ds = load_datastream(args.structures_json)
@@ -180,7 +182,7 @@ def main():
         args.sequences_csv, index=False)
 
     os.makedirs(os.path.dirname(args.missing_csv), exist_ok=True)
-    pd.DataFrame(missing_rows, columns=["id", "removed_by", "kind", "cause"]).to_csv(
+    pd.DataFrame(read_upstream_missing(args.upstream_missing) + missing_rows, columns=MISSING_COLUMNS).to_csv(
         args.missing_csv, index=False)
 
     if failed:

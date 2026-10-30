@@ -35,7 +35,7 @@ TOP_K = 3
 PATTERN = f"<1..{TOP_K}>"
 
 
-def _collect(tmp_path, pattern=PATTERN):
+def _collect(tmp_path, pattern=PATTERN, extra=()):
     exec_root = tmp_path / "execution"
     for struct_id, produced in INPUTS.items():
         run = exec_root / struct_id
@@ -62,7 +62,7 @@ def _collect(tmp_path, pattern=PATTERN):
          "--exec-root", str(exec_root), "--structures-dir", str(step / "structures"),
          "--summary-csv", str(step / "tables" / "summary.csv"),
          "--sequences-csv", str(step / "sequences" / "sequences.csv"),
-         "--missing-csv", str(step / "tables" / "missing.csv"), "--suffix-pattern", pattern],
+         "--missing-csv", str(step / "tables" / "missing.csv"), "--suffix-pattern", pattern, *extra],
         capture_output=True, text=True)
     return result, step
 
@@ -132,3 +132,34 @@ class TestCollector:
         with open(COLLECT) as handle:
             text = handle.read()
         assert not re.search(r"""f['"]\{\w+\}_\{""", text)
+
+    def test_the_rows_an_upstream_filter_wrote_stay_in_the_manifest_beside_its_own(self, tmp_path):
+        """HBDesigner owns tables/missing.csv, so the footer's central propagation stays out of it and the collector must merge."""
+        upstream = tmp_path / "upstream_missing.csv"
+        pd.DataFrame([{"id": "q_9", "removed_by": "Panda", "kind": "filter", "cause": "Filtered by: Rank <= 2"}]).to_csv(
+            upstream, index=False)
+        result, step = _collect(tmp_path, extra=["--upstream-missing", str(upstream)])
+        assert result.returncode == 0, result.stderr
+        rows = {row["id"]: row["kind"] for _, row in _read(step / "tables" / "missing.csv").iterrows()}
+        assert rows["q_9"] == "filter"
+        assert rows["z_1"] == "failure" and rows["a+b_2"] == "filter"
+
+    def test_the_wrapper_hands_the_collector_the_manifest_of_a_filtered_input(self, local_config, isolated_cwd):
+        from biopipelines.hbdesigner import HBDesigner
+        from biopipelines.mock import Mock
+        from biopipelines.panda import Panda
+        from biopipelines.pipeline import Pipeline
+
+        with Pipeline(project="TestSuite", job="hbdesigner_filtered", description="x", on_the_fly=False,
+                      local_output=True, config="local"):
+            generator = Mock(
+                ids=["a", "b", "c"],
+                streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
+                tables={"scores": {"columns": ["score"], "fill": {"score": 1.0}}},
+            )
+            filtered = Panda(pool=generator, operations=[Panda.filter("score > 0.5")])
+            tool = HBDesigner(structures=filtered, top_k=2).tool
+            script = tool.generate_script("unused.sh")
+        collector = script[script.index("pipe_hbdesigner.py"):]
+        collector = collector[:collector.index("\n\n")]
+        assert "--upstream-missing" in collector
