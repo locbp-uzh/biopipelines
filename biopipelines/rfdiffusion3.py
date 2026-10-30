@@ -213,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.10"
+    TOOL_VERSION = "3.11"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -290,6 +290,10 @@ fi
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
     ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
+    pending_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion3_pending.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
+    stderr_folder = Path(lambda self: self.execution_path("stderr"))
 
     def __init__(self,
                  contig: Union[str, "TableReference", tuple] = "",
@@ -862,12 +866,33 @@ python -c "import torch; import torchvision" 2>/dev/null || true
 # Run RFdiffusion3 (outputs CIF.gz format to raw folder)
 # n_batches: number of designs to generate (default: 1)
 # diffusion_batch_size: number of models per design (default: 8)
-{self.container_prefix()}rfd3 design \\
-    out_dir="{self.raw_output_folder}" \\
-    inputs="{self.json_file}" \\
-    n_batches={self.num_designs} \\
-    diffusion_batch_size={self.num_models} \\
-    global_prefix=""{sampler_args}
+run_rfd3() {{
+    {self.container_prefix()}rfd3 design \\
+        out_dir="{self.raw_output_folder}" \\
+        inputs="$1" \\
+        n_batches={self.num_designs} \\
+        diffusion_batch_size={self.num_models} \\
+        global_prefix=""{sampler_args}
+}}
+
+run_rfd3 "{self.json_file}"
+
+# The batch stops at the first input it cannot parse: each input it left without outputs runs alone, so a crash costs only that input.
+mkdir -p "{self.stderr_folder}"
+RERUN_FAILS=0
+for KEY in $(python "{self.pending_py}" --json "{self.json_file}" --raw-folder "{self.raw_output_folder}"); do
+    python "{self.pending_py}" --json "{self.json_file}" --key "$KEY" --single-json "{self.configuration_path('single_$KEY.json')}"
+    if run_rfd3 "{self.configuration_path('single_$KEY.json')}" 2> >(tee "{self.stderr_folder}/$KEY.stderr" >&2); then
+        RERUN_FAILS=0
+    else
+        RERUN_FAILS=$((RERUN_FAILS + 1))
+    fi
+    # Three in a row failing alone is the environment, not the inputs: stop rather than reload the model for every one.
+    if [ "$RERUN_FAILS" -ge 3 ]; then
+        echo "Three inputs in a row failed alone; the remaining ones are not rerun"
+        break
+    fi
+done
 
 """
 
@@ -965,6 +990,9 @@ python "{self.table_py_file}" \\
         script_content += self._generate_postprocess_section()
         script_content += self.generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
+        script_content += self.generate_missing_propagation(
+            self.pdb_stream, missing_csv=self.missing_csv, local_missing=self.local_missing_csv
+        )
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -990,8 +1018,9 @@ python "{self.table_py_file}" \\
                 prov_arg += f' --key-prefix "{self.prefix}"'
         else:
             prov_arg = ""
+        failure_arg = f' --local-missing-csv "{self.local_missing_csv}" --stderr-dir "{self.stderr_folder}"'
         return f"""echo "Writing structures map from actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}{failure_arg}
 
 """
 
@@ -1039,6 +1068,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
 
         # Define table structures
         tables = {
+            "missing": self.missing_table_info(self.missing_csv),
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,

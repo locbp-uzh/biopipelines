@@ -2137,8 +2137,12 @@ RFDAA_PrepareLigand:
   files:
   - biopipelines/rfdiffusion_allatom.py
   - pipe_scripts/pipe_rfdaa_prepare_ligand.py
-  current: "2.6"
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-10-30'
+    note: >-
+      No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. See the RFdiffusionAllAtom 2.7 entry.
   - version: '2.6'
     date: '2026-10-30'
     note: >-
@@ -2180,8 +2184,12 @@ RFdiffusion:
   files:
   - biopipelines/rfdiffusion.py
   - pipe_scripts/pipe_rfdiffusion_table.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-30'
+    note: >-
+      An input whose run crashed is a `failure` row of this step's `tables/missing.csv`, one per design the run did not make, and its `cause` is the error line the run printed (`AssertionError: ('A', 47) is not in pdb file!`, not the hint printed after it). The stderr of each run is captured next to the output, `pipe_update_structures_map.py` writes the rows to `_execution/local_missing.csv` (new `--local-missing-csv` and `--stderr-dir`), and `generate_missing_propagation(local_missing=...)` merges them with the upstream manifests, as Gnina does; the `missing` table is now always declared. The step is still marked FAILED for the designs it did not make, as HBDesigner's is, and the update step exits non-zero only when the runs that started made no file at all. The good ids and their `structures.id` are unchanged; before, a crashed input left no row and no reason.
   - version: '2.5'
     date: '2026-10-30'
     note: >-
@@ -2217,8 +2225,12 @@ RFdiffusion3:
   - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
   - pipe_scripts/pipe_rfdiffusion3_postprocess.py
   - pipe_scripts/pipe_rfdiffusion3_table.py
-  current: "3.10"
+  current: "3.11"
   history:
+  - version: '3.11'
+    date: '2026-10-30'
+    note: >-
+      An input whose run crashed is a `failure` row of this step's `tables/missing.csv`, one per design the run did not make, and its `cause` is the error line the run printed (`AssertionError: ('A', 47) is not in pdb file!`, not the hint printed after it). The stderr of each run is captured next to the output, `pipe_update_structures_map.py` writes the rows to `_execution/local_missing.csv` (new `--local-missing-csv` and `--stderr-dir`), and `generate_missing_propagation(local_missing=...)` merges them with the upstream manifests, as Gnina does; the `missing` table is now always declared. The step is still marked FAILED for the designs it did not make, as HBDesigner's is, and the update step exits non-zero only when the runs that started made no file at all. The good ids and their `structures.id` are unchanged; before, a crashed input left no row and no reason. `rfd3 design` takes every input in one call and stops at the first it cannot parse, so the inputs after the crashed one never ran: the inputs a batch left without outputs now run one by one (`pipe_rfdiffusion3_pending.py`), a crash costing only its own input, and three in a row failing alone end the reruns. A batch that ran clean pays nothing.
   - version: '3.10'
     date: '2026-10-30'
     note: >-
@@ -2291,8 +2303,12 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
   - biopipelines/rfdiffusion_allatom.py
-  current: "2.6"
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-10-30'
+    note: >-
+      An input whose run crashed is a `failure` row of this step's `tables/missing.csv`, one per design the run did not make, and its `cause` is the error line the run printed (`AssertionError: ('A', 47) is not in pdb file!`, not the hint printed after it). The stderr of each run is captured next to the output, `pipe_update_structures_map.py` writes the rows to `_execution/local_missing.csv` (new `--local-missing-csv` and `--stderr-dir`), and `generate_missing_propagation(local_missing=...)` merges them with the upstream manifests, as Gnina does; the `missing` table is now always declared. The step is still marked FAILED for the designs it did not make, as HBDesigner's is, and the update step exits non-zero only when the runs that started made no file at all. The good ids and their `structures.id` are unchanged; before, a crashed input left no row and no reason.
   - version: '2.6'
     date: '2026-10-30'
     note: >-
@@ -2554,8 +2570,12 @@ XTB:
 RFdiffusion2:
   files:
   - biopipelines/rfdiffusion2.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-30'
+    note: >-
+      An input whose run crashed is a `failure` row of this step's `tables/missing.csv`, one per design the run did not make, and its `cause` is the error line the run printed (`AssertionError: ('A', 47) is not in pdb file!`, not the hint printed after it). The stderr of each run is captured next to the output, `pipe_update_structures_map.py` writes the rows to `_execution/local_missing.csv` (new `--local-missing-csv` and `--stderr-dir`), and `generate_missing_propagation(local_missing=...)` merges them with the upstream manifests, as Gnina does; the `missing` table is now always declared. The step is still marked FAILED for the designs it did not make, as HBDesigner's is, and the update step exits non-zero only when the runs that started made no file at all. The good ids and their `structures.id` are unchanged; before, a crashed input left no row and no reason.
   - version: '1.5'
     date: '2026-10-30'
     note: >-

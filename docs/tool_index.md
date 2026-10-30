@@ -12,11 +12,11 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.6 | `biopipelines/boltzgen.py` |
 | 2 | PocketGen | Structure Generation           | 2.5 | `biopipelines/pocketgen.py` |
-| 3 | RFdiffusion | Structure Generation           | 2.5 | `biopipelines/rfdiffusion.py` |
-| 4 | RFdiffusion3 | Structure Generation           | 3.10 | `biopipelines/rfdiffusion3.py` |
+| 3 | RFdiffusion | Structure Generation           | 2.6 | `biopipelines/rfdiffusion.py` |
+| 4 | RFdiffusion3 | Structure Generation           | 3.11 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFD4Proteina | Structure Generation           | 1.3 | `biopipelines/rfd4proteina.py` |
-| 6 | RFdiffusionAllAtom | Structure Generation           | 2.6 | `biopipelines/rfdiffusion_allatom.py` |
-| 7 | RFdiffusion2              | Structure Generation           | 1.5 | `biopipelines/rfdiffusion2.py` |
+| 6 | RFdiffusionAllAtom | Structure Generation           | 2.7 | `biopipelines/rfdiffusion_allatom.py` |
+| 7 | RFdiffusion2              | Structure Generation           | 1.6 | `biopipelines/rfdiffusion2.py` |
 | 8 | HBDesigner | Structure Generation           | 2.4 | `biopipelines/hbdesigner.py` |
 | 9 | FLOWR | Structure Generation           | 1.2 | `biopipelines/flowr.py` |
 | 10 | DNAEncoder                | Sequence Design                | 1.3 | `biopipelines/dna_encoder.py` |

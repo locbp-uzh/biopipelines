@@ -143,7 +143,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     # RFdiffusion's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -290,6 +290,8 @@ fi
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
+    stderr_folder = Path(lambda self: self.execution_path("stderr"))
     #   contigs_json       — per-PDB resolved {contigs, inpaint, inpaint_str},
     #                        written at runtime by pipe_rfdiffusion_contigs.py.
     #   contigs_py         — that resolver (one pass over all ids → JSON).
@@ -681,7 +683,7 @@ fi
         # declared; without the manifest the completion check counts them as owed and
         # fails the step for inputs it correctly skipped.
         script_content += self.generate_missing_propagation(
-            self.pdb_input, self.pdb_stream, missing_csv=self.missing_csv
+            self.pdb_input, self.pdb_stream, missing_csv=self.missing_csv, local_missing=self.local_missing_csv
         )
         script_content += self.generate_completion_check_footer()
         return script_content
@@ -864,6 +866,7 @@ python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion"
 echo "Output folder: {self.output_folder}"
+mkdir -p "{self.stderr_folder}"
 cd {self.folders["RFdiffusion"]}
 
 for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
@@ -886,7 +889,7 @@ for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
         RFD_OPTIONS+=("contigmap.inpaint_str=['$INPAINT_STR_SEL']")
     fi
     echo "Running RFdiffusion for $STRUCT_ID"
-    {self.container_prefix()}python {self.inference_py_file} "${{RFD_OPTIONS[@]}}"
+    {self.container_prefix()}python {self.inference_py_file} "${{RFD_OPTIONS[@]}}" 2> >(tee "{self.stderr_folder}/$STRUCT_ID.stderr" >&2)
 done
 
 """
@@ -915,8 +918,9 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
         has_parents = self.pdb_stream and not self._scaffold_guided
         prov_arg = (f' --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}"'
                     ' --parent-column "structures.id"') if has_parents else ""
+        failure_arg = f' --local-missing-csv "{self.local_missing_csv}" --stderr-dir "{self.stderr_folder}"'
         return f"""echo "Writing structures map from actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}{failure_arg}
 
 """
 
@@ -957,9 +961,8 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
             )
         }
 
-        # Declare a `missing` table when any input axis carries one.
-        if self._collect_upstream_missing_paths(self.pdb_input, self.pdb_stream):
-            tables["missing"] = self.missing_table_info(self.missing_csv)
+        # The step writes it: failure rows of its own, and every upstream manifest.
+        tables["missing"] = self.missing_table_info(self.missing_csv)
 
         return {
             "structures": structures,

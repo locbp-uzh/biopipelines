@@ -420,9 +420,9 @@ The guiding-potential types differ per RFdiffusion variant, so each tool exposes
 
   `fixed` / `designed` are chain-aware residue selections of the output; `source_fixed` is the motif's residues in the input PDB (motif scaffolding only). `plddt_mean` is RFdiffusion's own per-trajectory pLDDT averaged over residues at the final step (empty when the trb carries none).
 
-- `missing` (only when an input axis carries one): | id | removed_by | kind | cause |
+- `missing`: | id | removed_by | kind | cause |
 
-  The upstream manifest, forwarded. An upstream filter drops ids at execution time, after this step has declared its outputs; without the manifest the completion check counts those ids as outputs still owed and marks the step FAILED for inputs it correctly skipped.
+  One `failure` row per design an input's run did not make, its `cause` the error line that run printed (a crashed input is named and explained, and the step is marked FAILED for the designs it did not make), plus the upstream manifest forwarded. An input an upstream filter dropped never ran and is excused, not a failure. An upstream filter drops ids at execution time, after this step has declared its outputs; without the manifest the completion check counts those ids as outputs still owed and marks the step FAILED for inputs it correctly skipped.
 
 **Examples**:
 ```python
@@ -488,6 +488,9 @@ The sweep/benchmark orchestrator (`benchmark/pipeline.py`, `sweep.*`), the `stop
 
 **Tables**:
 - `structures`: | id | pdb | fixed | designed | source_fixed | plddt_mean | status |
+- `missing`: | id | removed_by | kind | cause |
+
+  One `failure` row per design an input's run did not make, its `cause` the error line that run printed (a crashed input is named and explained, and the step is marked FAILED for the designs it did not make), plus the upstream manifest forwarded. An input an upstream filter dropped never ran and is excused, not a failure.
 
 **Example** (active-site scaffolding, the open-source demo case):
 
@@ -595,6 +598,10 @@ RFdiffusion3 emits no `designs` stream, so `Grouped(rfd3)` has no default axis t
 
   | id | design | model | sampled_contig | num_tokens_in | num_residues_in | num_chains | num_atoms | num_residues |
   |----|--------|-------|----------------|---------------|-----------------|------------|-----------|--------------|
+
+- `missing`: | id | removed_by | kind | cause |
+
+  One `failure` row per design an input's run did not make, its `cause` the error line that run printed (a crashed input is named and explained, and the step is marked FAILED for the designs it did not make), plus the upstream manifest forwarded. An input an upstream filter dropped never ran and is excused, not a failure. `rfd3 design` stops at the first input it cannot parse, so the inputs a batch left without outputs are run again one by one and a crash costs only its own input.
 
 - `sequences`:
 
@@ -785,6 +792,10 @@ Notes:
 
   | id | pdb | fixed | designed | source_fixed | plddt_mean | status |
   |----|-----|-------|----------|--------------|------------|--------|
+
+- `missing`: | id | removed_by | kind | cause |
+
+  One `failure` row per design an input's run did not make, its `cause` the error line that run printed (a crashed input is named and explained, and the step is marked FAILED for the designs it did not make), plus the upstream manifest forwarded. An input an upstream filter dropped never ran and is excused, not a failure.
 
 **Example**:
 ```python

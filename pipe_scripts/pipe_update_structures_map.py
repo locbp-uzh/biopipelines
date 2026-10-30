@@ -16,6 +16,13 @@ through ``combinatorics.multiplied_id_parents``), never by stripping a suffix
 off the file id. If a config-time map happens to exist (legacy tools), its
 non-id/file/value columns are carried forward by exact id match.
 
+With ``--local-missing-csv`` the script also answers for the inputs whose run
+produced nothing: every id a run that did start would have made but did not
+becomes a ``failure`` row there, its cause the real error line of that run's
+captured stderr (``--stderr-dir``), and the script exits non-zero only when no
+file at all was produced by the runs that started. A parent the input stream
+carries without a file (dropped by an upstream filter) never ran and gets no row.
+
 Usage:
     python pipe_update_structures_map.py \\
         --structures-map /path/to/structures_map.csv \\
@@ -25,14 +32,34 @@ Usage:
         [--set-provenance structures.id=4AKE] \\
         [--parents-json /path/to/input_structures.json \\
          --suffix-pattern "<1..5>" --parent-column structures.id \\
-         [--key-prefix op7]]
+         [--key-prefix op7]] \\
+        [--local-missing-csv /path/to/_execution/local_missing.csv \\
+         [--stderr-dir /path/to/_execution/stderr]]
 """
 
 import argparse
 import os
 import glob
+import re
 import sys
 import pandas as pd
+
+MISSING_COLUMNS = ["id", "removed_by", "kind", "cause"]
+# A foundry validator line ("Error: <reason>") states the reason better than the exception that wraps it.
+_FOUNDRY_ERROR = re.compile(r"^Error: .+")
+_EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception)\b.*:.+")
+_HYDRA_HINT = "Set the environment variable HYDRA_FULL_ERROR"
+
+
+def error_cause(text, limit=200):
+    """The reason a run failed: its last error line, not the hint or box drawing printed after it."""
+    lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+    for pattern in (_FOUNDRY_ERROR, _EXCEPTION_LINE):
+        hits = [line for line in lines if pattern.match(line)]
+        if hits:
+            return (hits[-1][len("Error: "):] if pattern is _FOUNDRY_ERROR else hits[-1])[:limit]
+    plain = [line for line in lines if not line.startswith(_HYDRA_HINT)]
+    return plain[-1][:limit] if plain else ""
 
 
 def update_map_from_folder(structures_map, output_folder, extension="pdb",
@@ -110,6 +137,53 @@ def update_map_from_folder(structures_map, output_folder, extension="pdb",
     print(f"Updated {structures_map} with {len(rows)} structures")
 
 
+def _produced_ids(output_folder, extension="pdb"):
+    """Ids of the files the runs left in the output folder."""
+    pattern = os.path.join(output_folder, f"*.{extension}")
+    return {os.path.splitext(os.path.basename(path))[0] for path in glob.glob(pattern)}
+
+
+def _parents_that_ran(parents_json):
+    """Ids of the input stream whose file exists: a parent an upstream filter dropped never ran."""
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import contextlib
+    from biopipelines.biopipelines_io import load_datastream, iterate_files
+    # iterate_files names the ids it skips on stdout; keep that out of the step log's data.
+    with contextlib.redirect_stdout(sys.stderr):
+        return {item_id for item_id, _ in iterate_files(load_datastream(parents_json))}
+
+
+def record_failures(local_missing_csv, parent_of, ran, produced, stderr_dir=None, key_prefix=None):
+    """Write a `failure` row for every id a run that started did not make, with the error that run printed.
+
+    Args:
+        local_missing_csv: This step's local missing file; its folder names the step in `removed_by`.
+        parent_of: {output id: parent id} for every id the step can make (None without input structures).
+        ran: Parents whose run started.
+        produced: Ids of the files the runs left.
+        stderr_dir: Folder of `<key>.stderr`, one capture per run; the key is the parent id, prefixed when the tool names its outputs so.
+        key_prefix: The prefix of that key.
+    """
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from biopipelines.biopipelines_io import step_id_from_table_path
+    step_id = step_id_from_table_path(local_missing_csv)
+    rows = []
+    for out_id, parent in (parent_of or {}).items():
+        if parent not in ran or out_id in produced:
+            continue
+        key = f"{key_prefix}_{parent}" if key_prefix else parent
+        captured = os.path.join(stderr_dir, f"{key}.stderr") if stderr_dir else ""
+        text = open(captured, errors="replace").read() if captured and os.path.exists(captured) else ""
+        rows.append({"id": out_id, "removed_by": step_id, "kind": "failure",
+                     "cause": error_cause(text) or "no design was produced and no error was captured for this input"})
+    os.makedirs(os.path.dirname(os.path.abspath(local_missing_csv)), exist_ok=True)
+    pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(local_missing_csv, index=False)
+    if rows:
+        print(f"WARNING: {len(rows)} design(s) of {len({parent_of[r['id']] for r in rows})} input(s) were not "
+              f"produced; failure rows in {local_missing_csv}", file=sys.stderr)
+    return rows
+
+
 def _parse_set_provenance(spec):
     """Parse 'col=val,col2=val2' into {col: val}. Returns None if empty."""
     if not spec:
@@ -160,12 +234,26 @@ def main():
     parser.add_argument("--key-prefix", default=None,
                         help="Prefix a tool puts in front of the parent in its output "
                              "ids ('<prefix>_<parent>_<n>'); the parent stays bare")
+    parser.add_argument("--local-missing-csv", default=None,
+                        help="Write a failure row here for every id a run that started did not make, "
+                             "and exit non-zero when those runs made no file at all")
+    parser.add_argument("--stderr-dir", default=None,
+                        help="Folder of <key>.stderr, the captured stderr of each run, for the cause of a failure row")
 
     args = parser.parse_args()
     if args.parents_json and not (args.suffix_pattern and args.parent_column):
         parser.error("--parents-json needs --suffix-pattern and --parent-column")
     parent_of = (_parents_from_stream(args.parents_json, args.suffix_pattern, args.key_prefix)
                  if args.parents_json else None)
+
+    nothing_produced = False
+    if args.local_missing_csv:
+        ran = _parents_that_ran(args.parents_json) if args.parents_json else None
+        produced = _produced_ids(args.output_folder, args.extension)
+        record_failures(args.local_missing_csv, parent_of, ran or set(), produced,
+                        stderr_dir=args.stderr_dir, key_prefix=args.key_prefix)
+        # Runs that started and made nothing; a stream every parent of which an upstream filter dropped started none.
+        nothing_produced = (ran is None or bool(ran)) and not produced
 
     update_map_from_folder(
         structures_map=args.structures_map,
@@ -176,6 +264,9 @@ def main():
         parent_column=args.parent_column,
         parent_of=parent_of,
     )
+    if nothing_produced:
+        print(f"ERROR: no design was produced in {args.output_folder}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -107,7 +107,7 @@ class RFdiffusion2(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion2"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     # RFdiffusion2's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
 
@@ -171,6 +171,9 @@ fi
     inference_py_file = Path(lambda self: "rf_diffusion/run_inference.py")
     table_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_table.py"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
+    stderr_folder = Path(lambda self: self.execution_path("stderr"))
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
     ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     # Per-PDB contig resolution (shared with the RFdiffusion family).
@@ -363,6 +366,9 @@ fi
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
+        script_content += self.generate_missing_propagation(
+            self.pdb_stream, missing_csv=self.missing_csv, local_missing=self.local_missing_csv
+        )
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -450,6 +456,7 @@ python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion2 ({mode} mode)"
 echo "Output folder: {self.output_folder}"
+mkdir -p "{self.stderr_folder}"
 cd {repo_dir}
 export PYTHONPATH="{repo_dir}"
 
@@ -465,7 +472,7 @@ for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
         {common_array}
     )
     echo "Running RFdiffusion2 for $STRUCT_ID"
-    {self.container_prefix()}python {self.inference_py_file} "${{RF2_OPTIONS[@]}}"
+    {self.container_prefix()}python {self.inference_py_file} "${{RF2_OPTIONS[@]}}" 2> >(tee "{self.stderr_folder}/$STRUCT_ID.stderr" >&2)
 done
 
 # RFdiffusion2 names outputs "<id>_<n>-atomized-bb-<bool>.pdb/.trb"; strip the
@@ -502,7 +509,7 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
         structures_dir = self.stream_folder("structures")
         # Parents come from the input stream by exact id, with the suffix pattern get_output_files declares.
         return f"""echo "Writing structures map from actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}" --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}" --parent-column "structures.id"
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}" --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}" --parent-column "structures.id" --local-missing-csv "{self.local_missing_csv}" --stderr-dir "{self.stderr_folder}"
 
 """
 
@@ -527,6 +534,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         )
 
         tables = {
+            "missing": self.missing_table_info(self.missing_csv),
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,

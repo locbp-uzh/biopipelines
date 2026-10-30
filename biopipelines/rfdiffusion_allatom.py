@@ -73,7 +73,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "2.6"
+    TOOL_VERSION = "2.7"
     # RFdiffusion-AllAtom's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -151,6 +151,9 @@ fi
     table_py_file = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_table.py"))
     pdb_ds_json = Path(lambda self: self.configuration_path("input_structures.json"))
     update_map_py = Path(lambda self: self.pipe_script_path("pipe_update_structures_map.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
+    stderr_folder = Path(lambda self: self.execution_path("stderr"))
     ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     substrate_json = Path(lambda self: self.configuration_path("input_substrate.json"))
     # Per-PDB contig resolution (see RFdiffusion for the contract).
@@ -444,6 +447,9 @@ fi
         script_content += self._generate_script_run_rfdiffusion()
         script_content += self._generate_script_create_table()
         script_content += self._generate_script_update_structures_map()
+        script_content += self.generate_missing_propagation(
+            self.pdb_stream, missing_csv=self.missing_csv, local_missing=self.local_missing_csv
+        )
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -581,6 +587,7 @@ python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion-AllAtom ({mode} mode)"
 echo "Output folder: {self.output_folder}"
+mkdir -p "{self.stderr_folder}"
 cd {repo_dir}
 
 for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
@@ -604,7 +611,7 @@ for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
         AA_OPTIONS+=("contigmap.inpaint_str=$INPAINT_STR_SEL")
     fi
     echo "Running RFdiffusion-AllAtom for $STRUCT_ID"
-    {self.container_prefix()}python {self.inference_py_file} "${{AA_OPTIONS[@]}}"
+    {self.container_prefix()}python {self.inference_py_file} "${{AA_OPTIONS[@]}}" 2> >(tee "{self.stderr_folder}/$STRUCT_ID.stderr" >&2)
 done
 
 """
@@ -632,8 +639,9 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
         # Parents come from the input stream by exact id; with no PDB there are none.
         prov_arg = (f' --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}"'
                     ' --parent-column "structures.id"') if self.pdb_stream else ""
+        failure_arg = f' --local-missing-csv "{self.local_missing_csv}" --stderr-dir "{self.stderr_folder}"'
         return f"""echo "Writing structures map from actual output files"
-python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}
+python {self.update_map_py} --structures-map "{structures_map}" --output-folder "{structures_dir}"{prov_arg}{failure_arg}
 
 """
 
@@ -663,6 +671,7 @@ python {self.update_map_py} --structures-map "{structures_map}" --output-folder 
         )
 
         tables = {
+            "missing": self.missing_table_info(self.missing_csv),
             "structures": TableInfo(
                 name="structures",
                 path=self.main_table,
@@ -719,7 +728,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "2.6"
+    TOOL_VERSION = "2.7"
 
     # Lazy path descriptors
     #   structures_csv  — standalone TableInfo (tables/structures.csv).

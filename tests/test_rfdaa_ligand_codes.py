@@ -76,7 +76,7 @@ class TestScript:
             RFdiffusionAllAtom(pdb=_structures(tmp_path, list(LIGANDS)), ligand=_compounds(tmp_path),
                                contigs="60-60", num_designs=2)
             script_path = pipeline.save()
-        return next(pathlib.Path(script_path).parent.glob("*_RFdiffusionAllAtom.sh")).read_text(encoding="utf-8")
+        return next(pathlib.Path(script_path).parent.glob("*_RFdiffusionAllAtom.sh")).read_text(encoding="utf-8", errors="replace")
 
     def test_the_code_is_resolved_for_each_structure_inside_the_loop(self, local_config, isolated_cwd, new_pipeline,
                                                                        tmp_path):
