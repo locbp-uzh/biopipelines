@@ -194,20 +194,9 @@ for boltz_folder_path, config_id in work_items:
                 sequence_id = config_id
                 print(f"Mapping {config_id} to sequence ID: {sequence_id} (exact match)")
             else:
-                # Try pattern matching for protein_ligand combinations
-                matched = False
-                for seq_id in sequence_ids:
-                    # Check if config_id contains seq_id as a component
-                    if config_id == seq_id or config_id.startswith(seq_id + '+') or config_id.endswith('+' + seq_id):
-                        sequence_id = seq_id
-                        matched = True
-                        print(f"Mapping {config_id} to sequence ID: {sequence_id} (pattern match)")
-                        break
-        
-                if not matched:
-                    # Cannot determine mapping - crash instead of guessing
-                    raise ValueError(f"ERROR: Cannot map config_id '{config_id}' to any expected sequence ID: {sequence_ids}. "
-                                   f"Cannot proceed with output validation.")
+                # The config step names every folder after an expected id, so any other folder is not this step's prediction
+                raise ValueError(f"ERROR: Cannot map config_id '{config_id}' to any expected sequence ID: {sequence_ids}. "
+                               f"Cannot proceed with output validation.")
         else:
             # No expected sequence IDs - use config_id directly
             sequence_id = config_id

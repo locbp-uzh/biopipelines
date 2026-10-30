@@ -39,7 +39,7 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "2.12"
+    TOOL_VERSION = "2.13"
     # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Boltz2Env"

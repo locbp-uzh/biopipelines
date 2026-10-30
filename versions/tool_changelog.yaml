@@ -303,8 +303,12 @@ Boltz2:
   - pipe_scripts/pipe_boltz_results.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.12"
+  current: "2.13"
   history:
+  - version: '2.13'
+    date: '2026-10-30'
+    note: >-
+      Post-processing maps a prediction folder to its id by exact match and refuses any other folder. It also accepted a folder whose name started or ended with `<expected id>+`, which attributed a foreign prediction (a leftover in the execution folder) to an expected id and let it overwrite that id's structure, scores and alignment.
   - version: '2.12'
     date: '2026-10-29'
     note: >-
