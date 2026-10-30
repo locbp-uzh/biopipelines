@@ -106,7 +106,7 @@ class HBDesigner(BaseConfig):
     """
 
     TOOL_NAME = "HBDesigner"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "hbdesigner"
 
     DESIGN_MODELS = ("design_002", "design_020")
@@ -424,7 +424,7 @@ python {self.collect_py} \\
     --summary-csv "{self.summary_table}" \\
     --sequences-csv "{self.sequences_csv}" \\
     --missing-csv "{self.missing_csv}" \\
-    --top-k {self.top_k}
+    --suffix-pattern "{self._suffix_pattern()}"
 
 """
 

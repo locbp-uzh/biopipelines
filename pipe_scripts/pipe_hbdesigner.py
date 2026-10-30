@@ -15,8 +15,9 @@ This script, for every input id:
     since the prefix is the PDB basename, not the id), orders designs by
     ``Rank`` and links each to its PDB by ``Output_PDB`` (keyed on the upstream
     schema, not filename sort order),
-  * copies the top_k retained designs into the structures stream folder with
-    the framework ids ``<id>_1..<id>_top_k`` (rank order),
+  * copies the retained designs into the structures stream folder under the
+    ids the wrapper declares, ``<id>_1..<id>_top_k`` (rank order), taken from the
+    suffix pattern the wrapper passes,
   * extracts each design's one-letter sequence (HBDesigner emits no FASTA) into
     the content-bearing sequences stream CSV,
   * accumulates the summary rows, tagged with a ``structures.id`` provenance
@@ -41,6 +42,7 @@ import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.combinatorics import multiplied_id_parents
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
 
 
@@ -85,7 +87,8 @@ def main():
     parser.add_argument("--summary-csv", required=True)
     parser.add_argument("--sequences-csv", required=True)
     parser.add_argument("--missing-csv", required=True)
-    parser.add_argument("--top-k", type=int, required=True)
+    parser.add_argument("--suffix-pattern", required=True,
+                        help="Rank suffix of the output ids, e.g. <1..5>: the pattern the wrapper declares them with")
     args = parser.parse_args()
 
     ds = load_datastream(args.structures_json)
@@ -99,6 +102,8 @@ def main():
 
     for struct_id, _ in iterate_files(ds):
         n_inputs += 1
+        # The ids of ranks 1..k of this input, in rank order, from the pattern the wrapper declares them with.
+        rank_ids = list(multiplied_id_parents([struct_id], args.suffix_pattern))
         run_dir = os.path.join(args.exec_root, struct_id)
         # Glob the per-id dir: upstream names the stats CSV from the PDB basename, not the stream id.
         crashed = os.path.exists(os.path.join(run_dir, ".hbdes_failed"))
@@ -116,14 +121,14 @@ def main():
             print(f"WARNING: {struct_id}: {e}", file=sys.stderr)
             ordered = []
 
-        keep = ordered[:args.top_k]
+        keep = ordered[:len(rank_ids)]
         if not keep:
             # Zero designs is a failure, not an intentional filter.
             print(f"WARNING: {struct_id}: no designed PDBs in {run_dir}", file=sys.stderr)
             failed.append(struct_id)
 
         for rank, (pdb_path, row) in enumerate(keep, start=1):
-            out_id = f"{struct_id}_{rank}"
+            out_id = rank_ids[rank - 1]
             # Extract sequence first; on failure drop the whole design so the three streams stay consistent.
             try:
                 seq = _pdb_sequence(pdb_path)
@@ -149,14 +154,14 @@ def main():
         produced = len(keep)
         # Crash / zero designs -> failure (not excused); fewer-than-top_k -> filter (excused).
         fail = crashed or produced == 0
-        for rank in range(produced + 1, args.top_k + 1):
+        for out_id in rank_ids[produced:]:
             if fail:
-                missing_rows.append({"id": f"{struct_id}_{rank}", "removed_by": "HBDesigner",
+                missing_rows.append({"id": out_id, "removed_by": "HBDesigner",
                                      "kind": "failure",
                                      "cause": "run_hbdesigner crashed" if crashed
                                      else "produced no designs"})
             else:
-                missing_rows.append({"id": f"{struct_id}_{rank}", "removed_by": "HBDesigner",
+                missing_rows.append({"id": out_id, "removed_by": "HBDesigner",
                                      "kind": "filter",
                                      "cause": "fewer valid designs than top_k"})
 

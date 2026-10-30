@@ -2433,8 +2433,12 @@ HBDesigner:
   - biopipelines/hbdesigner.py
   - pipe_scripts/pipe_hbdesigner.py
   - pipe_scripts/pipe_hbdesigner_constraints.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      The collector takes the wrapper's rank suffix pattern (`--suffix-pattern`, in place of `--top-k`) and reads the id of every rank of an input, produced or not, from `combinatorics.multiplied_id_parents`. The ids it writes and the `missing` ids of ranks a run did not produce used to be three `f"{id}_{rank}"` of its own, beside the pattern the wrapper declares them with and hands to the structures-map step; all of them now come from that one pattern. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-
