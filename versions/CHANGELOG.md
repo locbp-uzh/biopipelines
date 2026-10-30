@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **TMalign** 1.1 → 1.2. Two alignment rows that would share an id are refused before any aligner runs, as two pairs sharing one already were. A mode name holds the `_` that separates an id's suffix, so the `non_sequential` row of the pair (`a`, `b`) and the `sequential` row of the pair (`a`, `b_non`) were both `a+b_non_sequential`, and a join or a `missing` row on `id` could not tell them apart. No id changes for a pair table without such a pair.
+
+- **USalign** 1.1 → 1.2. Two alignment rows that would share an id are refused before any aligner runs, as two pairs sharing one already were. A mode name holds the `_` that separates an id's suffix, so the `non_sequential` row of the pair (`a`, `b`) and the `sequential` row of the pair (`a`, `b_non`) were both `a+b_non_sequential`, and a join or a `missing` row on `id` could not tell them apart. No id changes for a pair table without such a pair.
+
 - **HBDesigner** 2.2 → 2.3. The collector takes the wrapper's rank suffix pattern (`--suffix-pattern`, in place of `--top-k`) and reads the id of every rank of an input, produced or not, from `combinatorics.multiplied_id_parents`. The ids it writes and the `missing` ids of ranks a run did not produce used to be three `f"{id}_{rank}"` of its own, beside the pattern the wrapper declares them with and hands to the structures-map step; all of them now come from that one pattern. No id changes.
 
 - **PLACER** 2.1 → 2.2. The driver writes `units.json` with the structure and ligand ids of every run, and the post-processing reads them by exact run id. It used to split the run id on its first `+`, so a structure id holding one (a complex that is itself a pair, `a+b`) put `a` in `structures.id` and `b+<ligand>` in `compounds.id` of the structures map and the scores table. The run id is composed by `predict_single_output_id` and the sample id by `generate_multiplied_ids`, as the wrapper declares them, and two runs that compose to one id (`a+b`+`c` and `a`+`b+c`) are refused before the model loads, since they would write the same files. No id changes.

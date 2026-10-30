@@ -236,14 +236,31 @@ def empty_row(structure_1: str, structure_2: str, mode: str) -> Dict[str, Any]:
     return row
 
 
+def check_row_ids(pairs: List[Tuple[str, str]], modes: List[Dict[str, Any]]) -> None:
+    """Refuse two (pair, mode) rows that would share an id.
+
+    `read_pairs` already refuses two pairs with one id. A mode name holds the `_` that separates an id's suffix, so `non_sequential` of the pair (a, b) and `sequential` of the pair (a, b_non) are both `a+b_non_sequential`.
+    """
+    owner: Dict[str, Tuple[str, str, str]] = {}
+    for structure_1, structure_2 in pairs:
+        for mode in modes:
+            row = (structure_1, structure_2, mode["label"])
+            earlier = owner.setdefault(row_id(*row), row)
+            if earlier != row:
+                raise ValueError(
+                    f"the alignments {earlier} and {row} both have the id {row_id(*row)!r}, because a mode name "
+                    f"contains '_'; rename the structure so that the row ids are distinct")
+
+
 def align_pairs(pairs: List[Tuple[str, str]], files: Dict[str, str], declared: set,
                 modes: List[Dict[str, Any]], binary: str, step_id: str, container_prefix: str = "",
                 run: Callable[[List[str]], Tuple[int, str, str]] = run_command,
                 log: Callable[[str], None] = print, report_every: int = 100):
     """Align every pair in every mode; return (alignment rows, local missing rows).
 
-    Each (pair, mode) gives exactly one row. One that could not be aligned keeps its row with NaN values and adds a kind="failure" row, with the same id, to the missing rows.
+    Each (pair, mode) gives exactly one row, and no two share an id. One that could not be aligned keeps its row with NaN values and adds a kind="failure" row, with the same id, to the missing rows.
     """
+    check_row_ids(pairs, modes)
     rows: List[Dict[str, Any]] = []
     missing: List[Dict[str, Any]] = []
     declared = set(declared)

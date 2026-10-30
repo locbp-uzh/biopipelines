@@ -100,7 +100,7 @@ class USalign(PairAligner):
     """
 
     TOOL_NAME = "USalign"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "usalign"
     BINARY = "USalign"
 

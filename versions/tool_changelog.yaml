@@ -2779,8 +2779,12 @@ USalign:
   - biopipelines/usalign.py
   - biopipelines/pair_alignment.py
   - pipe_scripts/pipe_pair_alignment.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-30'
+    note: >-
+      Two alignment rows that would share an id are refused before any aligner runs, as two pairs sharing one already were. A mode name holds the `_` that separates an id's suffix, so the `non_sequential` row of the pair (`a`, `b`) and the `sequential` row of the pair (`a`, `b_non`) were both `a+b_non_sequential`, and a join or a `missing` row on `id` could not tell them apart. No id changes for a pair table without such a pair.
   - version: '1.1'
     date: '2026-10-29'
     note: >-
@@ -2795,8 +2799,12 @@ TMalign:
   - biopipelines/tmalign.py
   - biopipelines/pair_alignment.py
   - pipe_scripts/pipe_pair_alignment.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-30'
+    note: >-
+      Two alignment rows that would share an id are refused before any aligner runs, as two pairs sharing one already were. A mode name holds the `_` that separates an id's suffix, so the `non_sequential` row of the pair (`a`, `b`) and the `sequential` row of the pair (`a`, `b_non`) were both `a+b_non_sequential`, and a join or a `missing` row on `id` could not tell them apart. No id changes for a pair table without such a pair.
   - version: '1.1'
     date: '2026-10-29'
     note: >-

@@ -109,6 +109,32 @@ class TestDockingFailuresNameTheirStep:
         assert excused == ["prot"]
 
 
+# ── USalign and TMalign: a row id is its pair with a mode appended ────────────
+
+class TestPairAlignmentRowIds:
+
+    MODES = [{"label": "sequential", "args": []}, {"label": "non_sequential", "args": ["-mm", "5"]}]
+
+    def _align(self, pairs):
+        from biopipelines import pair_alignment as pa
+
+        def never(cmd):
+            raise AssertionError("an aligner ran before the row ids were checked")
+
+        files = {sid: f"{sid}.pdb" for pair in pairs for sid in pair}
+        return pa.align_pairs(pairs, files, set(files), self.MODES, "USalign", "004_USalign",
+                              run=never, log=lambda message: None)
+
+    def test_two_rows_that_would_share_an_id_are_refused_before_anything_runs(self):
+        """A mode name holds the `_` that separates an id's suffix, so (a, b_non) in `sequential` and (a, b) in `non_sequential` were both `a+b_non_sequential`."""
+        with pytest.raises(ValueError, match=r"both have the id 'a\+b_non_sequential'"):
+            self._align([("a", "b_non"), ("a", "b")])
+
+    def test_no_pairs_is_no_rows(self):
+        rows, missing = self._align([])
+        assert rows == [] and missing == []
+
+
 # ── PocketGen and PLACER: the pair id comes from the shared rule, its parts from provenance ──
 
 def _stream(tmp_path, name, ids, fmt, with_files):
