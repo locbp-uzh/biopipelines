@@ -3,10 +3,12 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
-"""GEMS runner. Stages a directory of <pair_id>.pdb + <pair_id>.sdf files
+"""GEMS runner. Stages a directory of <stage_name>.pdb + <stage_name>.sdf files
 from two DataStreams (cross product), then runs the upstream
 GEMS_dataprep_workflow.py and inference.py against that directory. Reads
-the resulting predictions CSV and writes our standard affinity table."""
+the resulting predictions CSV and writes our standard affinity table.
+
+A staging name only names the files GEMS reads and the predictions it writes; the id of a row is the pair id from combinatorics.predict_single_output_id, and the two are tied by exact lookup."""
 
 import argparse
 import os
@@ -18,6 +20,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values, read_upstream_missing, step_id_from_table_path  # noqa: E402
+from biopipelines.combinatorics import predict_single_output_id  # noqa: E402
 # Shared coordinate-ligand -> sanitized SDF (bond-order template) — single
 # implementation, also used by OpenBabel and the other ligand-consuming tools.
 from biopipelines.ligand_utils import write_ligand_sdf  # noqa: E402
@@ -40,7 +43,10 @@ def load_smiles_lookup(smiles_json):
 
 
 def stage_pairs(prot_pairs, lig_pairs, work_dir, smiles_lookup):
-    """Stage each (protein, ligand) pair into work_dir as pair_id.pdb / pair_id.sdf.
+    """Stage each (protein, ligand) pair into work_dir as <stage_name>.pdb / <stage_name>.sdf.
+
+    The stage name is positional (pair<N>), so two pairs never share a file whatever their ids hold.
+    Each returned row carries the pair id (`id`), its stage name and the two axis ids.
 
     The staged PDB is protein-only (HETATM lines stripped). GEMS's graph builder
     (dataprep/graph_construction.py) tries to bond the SDF ligand to the nearest
@@ -50,19 +56,44 @@ def stage_pairs(prot_pairs, lig_pairs, work_dir, smiles_lookup):
     protein-only and `_ligand.sdf` = ligand; we honor that here.
     """
     os.makedirs(work_dir, exist_ok=True)
+    protein_ids = [pid for pid, _ in prot_pairs]
+    ligand_ids = [lid for lid, _ in lig_pairs]
     pair_meta = []
-    for prot_id, prot_pdb in prot_pairs:
-        for lig_id, lig_file in lig_pairs:
-            pair_id = f"{prot_id}__{lig_id}"
-            dst_pdb = os.path.join(work_dir, f"{pair_id}.pdb")
-            dst_sdf = os.path.join(work_dir, f"{pair_id}.sdf")
+    for i, (prot_id, prot_pdb) in enumerate(prot_pairs):
+        for j, (lig_id, lig_file) in enumerate(lig_pairs):
+            pair_id = predict_single_output_id(
+                structures=("each", protein_ids, i, [], False),
+                ligands=("each", ligand_ids, j, [], False),
+            )
+            stage_name = f"pair{len(pair_meta)}"
+            dst_pdb = os.path.join(work_dir, f"{stage_name}.pdb")
+            dst_sdf = os.path.join(work_dir, f"{stage_name}.sdf")
             with open(prot_pdb) as src, open(dst_pdb, "w") as dst:
                 for line in src:
                     if not line.startswith("HETATM"):
                         dst.write(line)
             write_ligand_sdf(lig_file, dst_sdf, smiles_lookup.get(lig_id))
-            pair_meta.append({"pair_id": pair_id, "structures.id": prot_id, "ligands.id": lig_id})
+            pair_meta.append({"id": pair_id, "stage_name": stage_name, "structures.id": prot_id, "ligands.id": lig_id})
     return pair_meta
+
+
+def affinity_rows(pair_meta, pred_lookup, step_id):
+    """(affinity rows, missing rows): each staged pair is looked up by its stage name and written under its pair id."""
+    rows, missing = [], []
+    for meta in pair_meta:
+        pair_id = meta["id"]
+        if meta["stage_name"] in pred_lookup:
+            pkd = pred_lookup[meta["stage_name"]]
+            rows.append({
+                "id": pair_id,
+                "structures.id": meta["structures.id"],
+                "ligands.id": meta["ligands.id"],
+                "pkd_pred": round(pkd, 4),
+            })
+            print(f"  {pair_id}: pKd = {pkd:.3f}")
+        else:
+            missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": "GEMS produced no prediction for this pair"})
+    return rows, missing
 
 
 def main():
@@ -143,20 +174,8 @@ def main():
     preds = pd.read_csv(pred_csv)
     pred_lookup = {str(row["id"]): float(row["y_pred"]) for _, row in preds.iterrows()}
 
-    rows, missing = [], []
     step_id = step_id_from_table_path(args.missing_csv)
-    for meta in pair_meta:
-        pair_id = meta["pair_id"]
-        if pair_id in pred_lookup:
-            rows.append({
-                "id": pair_id,
-                "structures.id": meta["structures.id"],
-                "ligands.id": meta["ligands.id"],
-                "pkd_pred": round(pred_lookup[pair_id], 4),
-            })
-            print(f"  {pair_id}: pKd = {pred_lookup[pair_id]:.3f}")
-        else:
-            missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": "GEMS produced no prediction for this pair"})
+    rows, missing = affinity_rows(pair_meta, pred_lookup, step_id)
 
     all_missing = read_upstream_missing(args.upstream_missing) + missing
 

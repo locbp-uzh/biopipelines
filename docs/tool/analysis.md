@@ -1411,6 +1411,8 @@ Protein–ligand **binding-affinity** prediction via a graph neural network with
 **Tables**:
 - `affinity`: | id | structures.id | ligands.id | pkd_pred |
 
+  One row per structure and ligand pair; `id` is `<structure>+<ligand>` (for example `prot1+lig1`), and `structures.id` and `ligands.id` name the two parents.
+
   **Units.** `pkd_pred` is a predicted pKd — that is −log10(Kd) with Kd in molar — so **higher is stronger**: 9 is nanomolar, 6 is micromolar. The opposite direction to Boltz2's `affinity_pred_value`.
 - `missing`: | id | removed_by | kind | cause |
 

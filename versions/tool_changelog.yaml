@@ -881,8 +881,12 @@ GEMS:
   files:
   - biopipelines/gems.py
   - pipe_scripts/pipe_gems.py
-  current: "2.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-10-30'
+    note: >-
+      A row of `affinity` and of `missing` is named `<structure>+<ligand>`, the id rule for two axes, where it was `<structure>__<ligand>`. The files handed to GEMS are named by a positional staging name and its predictions are mapped back by exact lookup, so two pairs can no longer land on one file.
   - version: '2.0'
     date: '2026-09-02'
     note: >-

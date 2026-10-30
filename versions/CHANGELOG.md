@@ -65,6 +65,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **GEMS** 2.0 → 2.1. A row of `affinity` and of `missing` is named `<structure>+<ligand>`, the id rule for two axes, where it was `<structure>__<ligand>` (`prot1+lig1`, not `prot1__lig1`); `structures.id` and `ligands.id` are unchanged. The files handed to GEMS are named by a positional staging name, which is never an id, and its predictions are mapped back by exact lookup, so two pairs whose ids spell the same joined string can no longer overwrite each other's file. The pair id comes from `predict_single_output_id`. Anything that joined a GEMS table on the old `__` id has to join on `structures.id` and `ligands.id` or on the new id.
+
 - **NeuralPLexer** 2.1 → 2.2. Staging records the protein and the ligand of each pair in `_configuration/pairs.csv` (`id | structures.id | compounds.id`), which post-processing reads, where it split the pair folder name on its first `+`: a Boltz2 complex `prot+lig0` docked against `LIG1` was recorded as protein `prot` and ligand `lig0+LIG1`. A folder that is not a staged pair now raises instead of being parsed. The pair id is composed by `predict_single_output_id` and the rank suffix by the new `combinatorics.ranked_id`, the function that declares the ids. The ids are unchanged.
 
 - **DynamicBind** 2.2 → 2.3. The pair id is composed by `predict_single_output_id` and the rank suffix by the new `combinatorics.ranked_id`, the function that declares the ids, where post-processing spelled both by hand. The ids are unchanged; its provenance columns were already read from the per-protein file name and the ligand CSV, never split from an id.
