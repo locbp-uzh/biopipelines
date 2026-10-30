@@ -10,12 +10,28 @@ Nothing here runs a model or a cluster job; the pipe scripts are driven on synth
 """
 
 import itertools
+import os
+import re
+import sys
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 from biopipelines import combinatorics as cb
 from biopipelines.combinatorics import Bundle, Each, predict_output_ids_with_provenance
+from biopipelines.fuse import Fuse
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
+sys.path.insert(0, SCRIPTS)
+
+import pipe_fuse_queries as fuse_pipe  # noqa: E402
+
+
+def _script_text(name):
+    with open(os.path.join(SCRIPTS, name)) as handle:
+        return handle.read()
 
 
 # ── the shared functions ──────────────────────────────────────────────────────
@@ -103,3 +119,57 @@ class TestPredictSingleProvenance:
                               for name, (mode, ids, _idx, static, static_first) in selections.items()}
             single = cb.predict_single_provenance(**row_selections)
             assert single == {key: values[position] for key, values in whole.items()}
+
+
+# ── Fuse ──────────────────────────────────────────────────────────────────────
+
+def _fuse_slot(tmp_path, name, ids):
+    table = tmp_path / f"{name}.csv"
+    pd.DataFrame({"id": ids, "sequence": ["ACDE"[: 2 + i % 3] for i in range(len(ids))]}).to_csv(
+        table, index=False)
+    return {"ids": list(ids), "map_table": str(table), "files": []}
+
+
+def _fuse_config_side(slots, linker_lengths):
+    fuse = Fuse.__new__(Fuse)
+    fuse.input_slots = slots
+    fuse.linker_lengths = linker_lengths
+    return fuse._predict_sequence_ids()
+
+
+FUSE_CASES = {
+    "no linkers": (None, [["a1", "a2"], ["b1"]]),
+    "one junction": (["1-3"], [["a1", "a2"], ["b1", "b2"]]),
+    "a junction without a linker": ([None, "2-3"], [["a1"], ["b1", "b2"], ["c1"]]),
+    "a set of lengths": (["2+5"], [["a1"], ["b1"]]),
+}
+
+
+class TestFuse:
+
+    @pytest.mark.parametrize("case", sorted(FUSE_CASES))
+    def test_the_ids_the_pipe_script_writes_are_the_ids_the_wrapper_declares(self, tmp_path, case):
+        linker_lengths, slot_ids = FUSE_CASES[case]
+        slots = [_fuse_slot(tmp_path, f"slot{i}", ids) for i, ids in enumerate(slot_ids)]
+        declared, declared_provenance = _fuse_config_side(slots, linker_lengths)
+        rows = fuse_pipe.generate_fusion_sequences(slots, "GS", linker_lengths or [], "fuse")
+        assert [row["id"] for row in rows] == declared
+        assert len(set(declared)) == len(declared), "two distinct rows share an id"
+        for index in range(len(slots)):
+            assert [row[f"sequences_{index + 1}.id"] for row in rows] == declared_provenance[
+                f"sequences_{index + 1}"]
+
+    def test_the_documented_shape_is_slot_then_length_then_slot_joined_by_plus(self, tmp_path):
+        slots = [_fuse_slot(tmp_path, "s0", ["a1", "a2"]), _fuse_slot(tmp_path, "s1", ["b1"])]
+        declared, _ = _fuse_config_side(slots, ["1-2"])
+        assert declared == ["a1+1+b1", "a1+2+b1", "a2+1+b1", "a2+2+b1"]
+
+    def test_the_wrapper_and_its_pipe_script_build_the_id_with_the_one_shared_function(self):
+        import biopipelines.fuse as fuse_module
+        assert fuse_module.join_axis_ids is cb.join_axis_ids
+        assert fuse_pipe.join_axis_ids is cb.join_axis_ids
+
+    def test_neither_side_joins_the_parts_itself(self):
+        assert not re.search(r"""['"]\+['"]\.join""", _script_text("pipe_fuse_queries.py"))
+        with open(os.path.join(REPO_ROOT, "biopipelines", "fuse.py")) as handle:
+            assert not re.search(r"""['"]\+['"]\.join""", handle.read())

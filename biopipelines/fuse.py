@@ -22,12 +22,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
+    from .combinatorics import join_axis_ids
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
+    from combinatorics import join_axis_ids
 
 
 class Fuse(BaseConfig):
@@ -51,7 +53,7 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Fuse step. The retired spelling still sets the label and now also reaches the framework.
 
     @classmethod
@@ -204,8 +206,8 @@ echo "=== Fuse ready ==="
         Predict sequence IDs and provenance from the cartesian product of
         all slot IDs × linker length combinations.
 
-        ID format: {S1_id}_{J0_len}_{S2_id}_{J1_len}_{S3_id}
-        where S = slot sequence, J = junction linker length.
+        ID format: {S1_id}+{J0_len}+{S2_id}+{J1_len}+{S3_id}
+        where S = slot sequence, J = junction linker length, joined by the axis separator.
 
         Returns:
             (sequence_ids, provenance) where provenance is:
@@ -240,7 +242,7 @@ echo "=== Fuse ready ==="
         provenance = {f"sequences_{i+1}": [] for i in range(len(self.input_slots))}
 
         for combo in product(*axes):
-            seq_id = "+".join(str(part) for part in combo)
+            seq_id = join_axis_ids(combo)
             sequence_ids.append(seq_id)
 
             for slot_idx in range(len(self.input_slots)):

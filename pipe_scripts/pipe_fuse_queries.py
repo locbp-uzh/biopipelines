@@ -21,6 +21,7 @@ from itertools import product
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.combinatorics import join_axis_ids
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
 from biopipelines.id_patterns import is_lazy, partial_expand_ids, select_ids
 
@@ -213,7 +214,7 @@ def generate_fusion_sequences(
                     positions.append(('L', i + 1, None, None))
         else:
             # Build result dict
-            seq_id = "+".join(str(part) for part in combo)
+            seq_id = join_axis_ids(combo)
 
             # Lengths string from junction lengths (only non-None junctions)
             length_parts = []

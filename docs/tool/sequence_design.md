@@ -179,6 +179,8 @@ Concatenates multiple sequences with flexible linkers. Creates fusion sequences 
 
 **Streams**: `sequences`, `fasta` (one multi-record FASTA of the fused sequences)
 
+**Ids**: one per combination of the slots and the junction lengths, joined with `+` in slot order: `donor+3+cam+5+acceptor` is the fusion of `donor`, a 3-residue linker, `cam`, a 5-residue linker and `acceptor`. With `linker_lengths=None` there are no length parts (`donor+cam+acceptor`), and a junction given as `None` contributes none. The parent of each slot is in the `sequences_<n>.id` columns, which a consumer reads rather than splitting the id.
+
 **Tables**:
 - `sequences`:
 
