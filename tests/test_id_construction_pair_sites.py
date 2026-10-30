@@ -107,3 +107,118 @@ class TestDockingFailuresNameTheirStep:
         excused = checker._load_expected_missing_ids(
             {"tables": {"missing": {"path": str(missing)}}}, "004_Vina", "Vina")
         assert excused == ["prot"]
+
+
+# ── PocketGen and PLACER: the pair id comes from the shared rule, its parts from provenance ──
+
+def _stream(tmp_path, name, ids, fmt, with_files):
+    from biopipelines.datastream import DataStream, create_map_table
+
+    table = tmp_path / f"{name}_map.csv"
+    files = [str(tmp_path / "<id>.pdb")] if with_files else []
+    extra = {"code": ["LIG"] * len(ids), "smiles": ["C"] * len(ids)} if name == "compounds" else None
+    create_map_table(str(table), ids=list(ids), files=files or None, additional_columns=extra)
+    return DataStream(name=name, ids=list(ids), files=files, map_table=str(table), format=fmt)
+
+
+# Ids as upstream tools make them: a protein that is itself a pair (`a+b`), a ligand with `+` and one with `_`.
+PROTEINS = ["a+b", "c"]
+LIGANDS = ["l+1", "m_2"]
+PAIRS = {
+    "a+b+l+1": ("a+b", "l+1"), "a+b+m_2": ("a+b", "m_2"), "c+l+1": ("c", "l+1"), "c+m_2": ("c", "m_2"),
+}
+
+
+def _run(script, *args):
+    return subprocess.run([sys.executable, os.path.join(SCRIPTS, script), *args], capture_output=True, text=True)
+
+
+class TestPocketGenPairs:
+
+    HETATM_SCAFFOLD = (
+        "ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00  0.00           N\n"
+        "ATOM      2  CA  GLY A   1       1.458   0.000   0.000  1.00  0.00           C\n"
+        "HETATM    5  C1  LIG A   2       5.000   5.000   5.000  1.00  0.00           C\n"
+        "END\n")
+
+    def _stage(self, tmp_path, proteins, ligands):
+        pytest.importorskip("rdkit")
+        for protein in proteins:
+            (tmp_path / f"{protein}.pdb").write_text(self.HETATM_SCAFFOLD)
+        structures = _stream(tmp_path, "structures", proteins, "pdb", True)
+        compounds = _stream(tmp_path, "compounds", ligands, "csv", False)
+        structures.save_json(str(tmp_path / "structures.json"))
+        compounds.save_json(str(tmp_path / "ligand.json"))
+        staging = tmp_path / "staging"
+        result = _run("pipe_pocketgen_stage.py", "--structures-json", str(tmp_path / "structures.json"),
+                      "--ligand-json", str(tmp_path / "ligand.json"), "--staging-folder", str(staging),
+                      "--extras-dir", str(tmp_path / "extras"))
+        return staging, result, structures, compounds
+
+    def _postprocess(self, tmp_path, staging, samples=2, without=()):
+        for pair in sorted(d for d in os.listdir(staging) if (staging / d).is_dir()):
+            if pair in without:
+                continue
+            for sample in range(samples):
+                (staging / pair / f"{sample}_whole_relaxed.pdb").write_text(
+                    "ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00  0.00           N\nEND\n")
+        out = tmp_path / "step" / "structures"
+        result = _run("pipe_pocketgen_postprocess.py", "--staging-folder", str(staging),
+                      "--structures-folder", str(out), "--sequences-folder", str(tmp_path / "step" / "sequences"),
+                      "--structures-map", str(out / "structures_map.csv"),
+                      "--sequences-csv", str(tmp_path / "step" / "sequences" / "sequences.csv"),
+                      "--missing-csv", str(tmp_path / "step" / "tables" / "missing.csv"))
+        return result, out
+
+    def test_each_row_names_the_scaffold_and_ligand_it_was_made_from(self, tmp_path):
+        """The post-processing split a pair id on its first `+`, so a scaffold id that holds one (`a+b`) gave `a` and `b+l+1`."""
+        import pandas as pd
+
+        staging, staged, _s, _c = self._stage(tmp_path, PROTEINS, LIGANDS)
+        assert staged.returncode == 0, staged.stderr
+        post, out = self._postprocess(tmp_path, staging)
+        assert post.returncode == 0, post.stderr
+        table = pd.read_csv(out / "structures_map.csv", dtype=str, keep_default_na=False)
+        got = {row["id"]: (row["structures.id"], row["compounds.id"]) for _, row in table.iterrows()}
+        assert got == {f"{pair}_{k}": parts for pair, parts in PAIRS.items() for k in (0, 1)}
+        sequences = pd.read_csv(tmp_path / "step" / "sequences" / "sequences.csv", dtype=str, keep_default_na=False)
+        assert {row["id"]: (row["structures.id"], row["compounds.id"]) for _, row in sequences.iterrows()} == got
+
+    def test_the_ids_written_are_covered_by_the_ids_declared(self, tmp_path, local_config, isolated_cwd):
+        import pandas as pd
+        from biopipelines import id_patterns
+        from biopipelines.pocketgen import PocketGen
+
+        staging, staged, structures, compounds = self._stage(tmp_path, PROTEINS, LIGANDS)
+        assert staged.returncode == 0, staged.stderr
+        tool = PocketGen(structures=structures, ligand=compounds)
+        tool.configure_inputs({"PocketGen": str(tmp_path / "repo")})
+        declared = list(tool.get_output_files()["structures"].ids)
+        post, out = self._postprocess(tmp_path, staging)
+        assert post.returncode == 0, post.stderr
+        written = list(pd.read_csv(out / "structures_map.csv", dtype=str, keep_default_na=False)["id"])
+        assert len(written) == len(set(written)) == 8
+        assert id_patterns.select_ids(declared, written) == written
+
+    def test_a_pair_without_samples_is_a_failure_row_under_its_own_id(self, tmp_path):
+        import pandas as pd
+
+        staging, staged, _s, _c = self._stage(tmp_path, PROTEINS, LIGANDS)
+        assert staged.returncode == 0, staged.stderr
+        post, _out = self._postprocess(tmp_path, staging, without=("c+m_2",))
+        assert post.returncode == 0, post.stderr
+        missing = pd.read_csv(tmp_path / "step" / "tables" / "missing.csv", dtype=str, keep_default_na=False)
+        assert [(row["id"], row["kind"]) for _, row in missing.iterrows()] == [("c+m_2", "failure")]
+
+    def test_two_pairs_that_join_to_one_id_are_refused_before_anything_is_staged(self, tmp_path):
+        staging, staged, _s, _c = self._stage(tmp_path, ["a+b", "a"], ["c", "b+c"])
+        assert staged.returncode != 0
+        assert "a+b+c" in staged.stderr
+        assert not staging.exists() or not any((staging / d).is_dir() for d in os.listdir(staging))
+
+    def test_neither_script_joins_or_splits_an_id_itself(self):
+        for name in ("pipe_pocketgen_stage.py", "pipe_pocketgen_postprocess.py"):
+            text = _script_text(name)
+            assert not re.search(r"""f['"]\{\w+\}\+\{""", text), name
+            assert not re.search(r"""split\(['"]\+['"]""", text), name
+            assert not re.search(r"""f['"]\{\w*pair_id\}_\{""", text), name

@@ -11,7 +11,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | # | Tool | Category | Version | Source file |
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.6 | `biopipelines/boltzgen.py` |
-| 2 | PocketGen | Structure Generation           | 2.0 | `biopipelines/pocketgen.py` |
+| 2 | PocketGen | Structure Generation           | 2.1 | `biopipelines/pocketgen.py` |
 | 3 | RFdiffusion | Structure Generation           | 2.5 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.10 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFD4Proteina | Structure Generation           | 1.3 | `biopipelines/rfd4proteina.py` |

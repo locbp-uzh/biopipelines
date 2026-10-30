@@ -4,9 +4,9 @@
 
 """What PocketGen declares it will produce is what its staging produces.
 
-`get_output_files` predicts pair ids through `predict_output_ids_with_provenance`, which honors `Bundle` and `Each`; `pipe_pocketgen_stage.py` re-composes them by hand as `f"{prot_id}+{lig_id}"` in a nested loop, and `pipe_pocketgen_postprocess.py` splits them back apart on the first `+`. A hand-rolled two-axis join has no notion of bundle versus each, so the two sides can only be trusted to agree while every axis is iterated.
+`get_output_files` predicts pair ids through `predict_output_ids_with_provenance`, which honors `Bundle` and `Each`; `pipe_pocketgen_stage.py` composes them at run time with `predict_single_output_id` in a nested loop over the two axes and writes each pair's parents to `pairs.json`, which `pipe_pocketgen_postprocess.py` reads by exact pair id (it no longer splits an id). A nested loop has no notion of bundle versus each, so the two sides can only be trusted to agree while every axis is iterated.
 
-They do agree, because the constructor refuses a `Bundle` (and a bare `Each`) on either axis: `structures` and `ligand` accept a `DataStream` or a `StandardizedOutput` and nothing else. That refusal is the whole reason the flat product at runtime is correct, so it is pinned here alongside the predict-equals-produce comparison. Widen the constructor to accept a wrapper and these tests fail together, which is the signal to move the runtime onto `predict_single_output_id` the way `pipe_mock.py` does.
+They do agree, because the constructor refuses a `Bundle` (and a bare `Each`) on either axis: `structures` and `ligand` accept a `DataStream` or a `StandardizedOutput` and nothing else. That refusal is the whole reason the loop at runtime is correct, so it is pinned here alongside the predict-equals-produce comparison. Widen the constructor to accept a wrapper and these tests fail together, which is the signal to carry each axis's mode into the staging the way `pipe_mock.py` does.
 """
 
 import importlib.util
@@ -83,7 +83,7 @@ def _declared_pair_ids(tool):
 
 
 def _staged_pair_ids(tmp_path, structures, ligand):
-    """Run the real staging script and return the pair folders it created."""
+    """Run the real staging script and return the pair folders it created (its manifest is a file, not a folder)."""
     structures_json = tmp_path / "structures.json"
     ligand_json = tmp_path / "ligand.json"
     structures.save_json(str(structures_json))
@@ -99,7 +99,7 @@ def _staged_pair_ids(tmp_path, structures, ligand):
         capture_output=True, text=True,
     )
     assert result.returncode == 0, f"staging failed: {result.stderr}"
-    return sorted(os.listdir(staging))
+    return sorted(d for d in os.listdir(staging) if (staging / d).is_dir())
 
 
 def _postprocess():
@@ -128,15 +128,18 @@ def test_predict_equals_produce_for_iterated_axes(tmp_path, record_case):
 
 
 def test_postprocess_recovers_both_axis_ids_from_every_pair_id(tmp_path):
-    """The pair id must survive the round trip: staging joins on '+', post-processing splits on it."""
+    """The parents of a pair survive the round trip: staging records them, post-processing looks them up by pair id."""
     structures = _structures_stream(tmp_path)
     ligand = _ligand_stream(tmp_path)
-    parse_pair_id = _postprocess().parse_pair_id
+    staged = _staged_pair_ids(tmp_path, structures, ligand)
+    load_pair_parents = _postprocess().load_pair_parents
 
-    for pair_id in _staged_pair_ids(tmp_path, structures, ligand):
-        prot_id, lig_id = parse_pair_id(pair_id)
-        assert prot_id in SCAFFOLDS
-        assert lig_id in LIGANDS
+    parents = load_pair_parents(str(tmp_path / "staging"))
+    assert sorted(parents) == staged
+    for pair_id, provenance in parents.items():
+        assert pair_id == f"{provenance['structures.id']}+{provenance['compounds.id']}"
+        assert provenance["structures.id"] in SCAFFOLDS
+        assert provenance["compounds.id"] in LIGANDS
 
 
 # ── every axis-mode combination ───────────────────────────────────────────────

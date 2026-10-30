@@ -28,6 +28,7 @@ Outputs the content-bearing sequences CSV (id | structures.id | compounds.id
 
 import argparse
 import csv
+import json
 import os
 import re
 import shutil
@@ -36,6 +37,7 @@ from typing import Dict, List, Tuple
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import step_id_from_table_path  # noqa: E402
+from biopipelines.combinatorics import generate_multiplied_ids  # noqa: E402
 from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
 
@@ -81,11 +83,10 @@ def parse_sequence_from_pdb(pdb_path: str) -> str:
     return "".join(seq)
 
 
-def parse_pair_id(pair_dir_name: str) -> Tuple[str, str]:
-    if "+" not in pair_dir_name:
-        raise ValueError(f"staged folder {pair_dir_name!r} is not a '<prot>+<lig>' pair")
-    prot, lig = pair_dir_name.split("+", 1)
-    return prot, lig
+def load_pair_parents(staging_folder: str) -> Dict[str, Dict[str, str]]:
+    """{pair id: {"structures.id": ..., "compounds.id": ...}} as the staging wrote it; a pair's parents are never recovered from its id."""
+    with open(os.path.join(staging_folder, "pairs.json")) as handle:
+        return json.load(handle)
 
 
 def collect_samples(pair_dir: str) -> List[Tuple[int, str]]:
@@ -127,10 +128,15 @@ def main():
         print(f"ERROR: staging folder missing: {args.staging_folder}", file=sys.stderr)
         sys.exit(1)
 
+    pair_parents = load_pair_parents(args.staging_folder)
     pair_names = sorted(
         d for d in os.listdir(args.staging_folder)
         if os.path.isdir(os.path.join(args.staging_folder, d))
     )
+    unknown = [name for name in pair_names if name not in pair_parents]
+    if unknown:
+        print(f"ERROR: staged folder(s) that pairs.json does not list: {unknown}", file=sys.stderr)
+        sys.exit(1)
 
     for pair_id in pair_names:
         pair_dir = os.path.join(args.staging_folder, pair_id)
@@ -144,9 +150,9 @@ def main():
             })
             continue
 
-        prot_id, lig_id = parse_pair_id(pair_id)
+        parents = pair_parents[pair_id]
         for sample_idx, src_pdb in samples:
-            out_id = f"{pair_id}_{sample_idx}"
+            out_id = generate_multiplied_ids([pair_id], [str(sample_idx)])[0][0]
             dst_pdb = os.path.join(args.structures_folder, f"{out_id}.pdb")
             shutil.copyfile(src_pdb, dst_pdb)
 
@@ -155,13 +161,13 @@ def main():
             map_rows.append({
                 "id": out_id,
                 "file": dst_pdb,
-                "structures.id": prot_id,
-                "compounds.id": lig_id,
+                "structures.id": parents["structures.id"],
+                "compounds.id": parents["compounds.id"],
             })
             seq_rows.append({
                 "id": out_id,
-                "structures.id": prot_id,
-                "compounds.id": lig_id,
+                "structures.id": parents["structures.id"],
+                "compounds.id": parents["compounds.id"],
                 "sample": str(sample_idx),
                 "sequence": seq,
             })

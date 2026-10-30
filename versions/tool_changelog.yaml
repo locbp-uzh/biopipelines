@@ -1722,8 +1722,12 @@ PocketGen:
   - pipe_scripts/pipe_pocketgen_driver.py
   - pipe_scripts/pipe_pocketgen_postprocess.py
   - pipe_scripts/pipe_pocketgen_stage.py
-  current: "2.0"
+  current: "2.1"
   history:
+  - version: '2.1'
+    date: '2026-10-30'
+    note: >-
+      The staging writes the scaffold and ligand ids of every pair to `pairs.json`, and the post-processing reads them by exact pair id. It used to split the pair folder's name on its first `+`, so a scaffold id holding one (a protein that is itself a pair, `a+b`) put `a` in `structures.id` and `b+<ligand>` in `compounds.id` of the structures map and the sequences table, the columns a join on either axis relies on. The pair id is composed by `predict_single_output_id` and the sample id by `generate_multiplied_ids`, as the wrapper declares them, and two pairs that compose to one id (`a+b`+`c` and `a`+`b+c`) are refused before anything is staged, since they would share a folder. No id changes.
   - version: '2.0'
     date: '2026-09-02'
     note: >-

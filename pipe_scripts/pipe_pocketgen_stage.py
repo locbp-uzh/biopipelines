@@ -30,6 +30,7 @@ that produces silent garbage out of PocketGen.
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -40,6 +41,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     iterate_files,
     iterate_values,
 )
+from biopipelines.combinatorics import predict_single_output_id, predict_single_provenance  # noqa: E402
 from biopipelines.ligand_utils import resolve_ligand_code, write_ligand_sdf  # noqa: E402
 from biopipelines.pdb_parser import field_res_name, field_chain, field_res_seq  # noqa: E402
 
@@ -134,6 +136,26 @@ def materialise_ligand_sdf(
         )
 
 
+def stage_pairs(proteins, ligand_ids):
+    """Every (scaffold, ligand) pair as (pair id, scaffold path, provenance), the id and the provenance composed by the shared axis rule.
+
+    Provenance is {"structures.id": ..., "compounds.id": ...}: the post-processing reads a pair's parents from it by exact id. Two pairs that compose to one id are refused, since they would share a staging folder.
+    """
+    pairs, owner = [], {}
+    for prot_id, prot_path in proteins:
+        for lig_id in ligand_ids:
+            axes = dict(structures=("each", [prot_id], 0, [], False), compounds=("each", [lig_id], 0, [], False))
+            pair_id = predict_single_output_id(**axes)
+            if pair_id in owner:
+                raise ValueError(
+                    f"the pairs {owner[pair_id]} and {(prot_id, lig_id)} both have the id {pair_id!r}, because an "
+                    f"id contains '+'; rename one so that the pair ids are distinct")
+            owner[pair_id] = (prot_id, lig_id)
+            provenance = {f"{axis}.id": value for axis, value in predict_single_provenance(**axes).items()}
+            pairs.append((pair_id, prot_path, provenance))
+    return pairs
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--structures-json", required=True)
@@ -168,37 +190,40 @@ def main():
 
     os.makedirs(args.extras_dir, exist_ok=True)
 
+    pairs = stage_pairs(proteins, ligand_ids)
+    # The parents of every pair folder, for the post-processing to read by exact pair id.
+    with open(os.path.join(args.staging_folder, "pairs.json"), "w") as handle:
+        json.dump({pair_id: provenance for pair_id, _path, provenance in pairs}, handle)
+
     n_pairs = 0
     failed = []
-    for prot_id, prot_path in proteins:
-        for lig_id in ligand_ids:
-            pair_id = f"{prot_id}+{lig_id}"
-            pair_dir = os.path.join(args.staging_folder, pair_id)
-            os.makedirs(pair_dir, exist_ok=True)
+    for pair_id, prot_path, _provenance in pairs:
+        pair_dir = os.path.join(args.staging_folder, pair_id)
+        os.makedirs(pair_dir, exist_ok=True)
 
-            dst_pdb = os.path.join(pair_dir, f"{pair_id}.pdb")
-            dst_sdf = os.path.join(pair_dir, f"{pair_id}_ligand.sdf")
+        dst_pdb = os.path.join(pair_dir, f"{pair_id}.pdb")
+        dst_sdf = os.path.join(pair_dir, f"{pair_id}_ligand.sdf")
 
-            shutil.copyfile(prot_path, dst_pdb)
-            try:
-                materialise_ligand_sdf(
-                    pair_id=pair_id,
-                    scaffold_pdb=dst_pdb,
-                    code=ligand_code,
-                    smiles=template_smiles,
-                    dst_sdf=dst_sdf,
-                    extras_dir=args.extras_dir,
-                )
-                print(f"  [stage] {pair_id}: extracted HETATM {ligand_code} from scaffold + bond-order template")
-                n_pairs += 1
-            except Exception as exc:
-                print(f"  [stage] {pair_id}: FAILED to materialise docked SDF: {exc}", file=sys.stderr)
-                failed.append((pair_id, str(exc)))
-                # The extracted ligand PDB (if any) is still under
-                # args.extras_dir for inspection. Leave the pair_dir alone —
-                # PocketGen's driver picks up only folders that contain a
-                # readable {name}_ligand.sdf, so partial staging is harmless
-                # downstream.
+        shutil.copyfile(prot_path, dst_pdb)
+        try:
+            materialise_ligand_sdf(
+                pair_id=pair_id,
+                scaffold_pdb=dst_pdb,
+                code=ligand_code,
+                smiles=template_smiles,
+                dst_sdf=dst_sdf,
+                extras_dir=args.extras_dir,
+            )
+            print(f"  [stage] {pair_id}: extracted HETATM {ligand_code} from scaffold + bond-order template")
+            n_pairs += 1
+        except Exception as exc:
+            print(f"  [stage] {pair_id}: FAILED to materialise docked SDF: {exc}", file=sys.stderr)
+            failed.append((pair_id, str(exc)))
+            # The extracted ligand PDB (if any) is still under
+            # args.extras_dir for inspection. Leave the pair_dir alone —
+            # PocketGen's driver picks up only folders that contain a
+            # readable {name}_ligand.sdf, so partial staging is harmless
+            # downstream.
 
     print(f"Staged {n_pairs} (scaffold, ligand) pair(s) under {args.staging_folder}")
     if failed:
