@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **RFdiffusionAllAtom** 2.5 → 2.6. Each input structure is designed against the `code` of its own ligand. The wrapper read the first ligand of the compounds stream once and passed that code to `inference.ligand=` for every structure, so a second prepared ligand with another code (`lig_a` = `UNL`, `lig_b` = `ASP`) was designed against `UNL`. `resolve_rfdaa_ligand_code.py` is called inside the loop: a structure named after a ligand of the stream (a prepared ligand keeps its ligand's id) gets that ligand's code, any other structure the first ligand's, so one ligand is still broadcast over several proteins. The unconditional run is unchanged. No id changes.
+
+- **RFDAA_PrepareLigand** 2.5 → 2.6. No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. See the RFdiffusionAllAtom 2.6 entry.
+
 - **HBDesigner** 2.3 → 2.4. The collector takes the upstream `missing` manifests (`--upstream-missing`) and writes their rows into `tables/missing.csv` beside its own. HBDesigner owns that file, so the footer's central propagation stands down, and the collector read no upstream manifest: when an upstream filter dropped a parent (`Panda.filter` on the ranks of a first HBDesigner run), the designs of that parent were declared, never produced, and not excused, and the step was marked FAILED although every design of a surviving parent was on disk. No id changes.
 
 - **Vina** 2.8 → 2.9. Same two changes as Gnina, whose pipe script it shares: a receptor with unparseable coordinates is a `failure` row of `missing` instead of a docked one-point receptor, and a complex that fails in `score` or `minimize` keeps a NaN row of `scores`.

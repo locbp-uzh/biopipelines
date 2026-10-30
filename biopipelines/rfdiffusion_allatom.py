@@ -73,7 +73,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     # RFdiffusion-AllAtom's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -158,6 +158,7 @@ fi
     contig_args_json = Path(lambda self: self.configuration_path("contig_args.json"))
     contigs_py = Path(lambda self: self.pipe_script_path("pipe_rfdiffusion_contigs.py"))
     contigs_reader_py = Path(lambda self: self.pipe_script_path("resolve_rfdiffusion_contigs.py"))
+    ligand_code_py = Path(lambda self: self.pipe_script_path("resolve_rfdaa_ligand_code.py"))
 
     def __init__(self,
                  ligand: Union[str, DataStream, StandardizedOutput],
@@ -460,7 +461,7 @@ fi
         aa_args.append(f"inference.num_designs={self.num_designs}")
         aa_args.append(f"inference.design_startnum={self.design_startnum}")
         # Ligand residue code resolved from the compounds stream at runtime
-        # into $LIGAND_CODE (one ligand, broadcast to every PDB).
+        # into $LIGAND_CODE (per structure inside the loop).
         aa_args.append("inference.ligand=$LIGAND_CODE")
 
         if self.ppi_design:
@@ -524,12 +525,12 @@ fi
         With a PDB input, runs once per input structure in a bash loop over the
         input ids (resolved at runtime). Per-PDB contigs / inpaint / inpaint_str
         are pre-resolved into contig_options.json by pipe_rfdiffusion_contigs.py.
-        The single ligand is broadcast to every PDB (its code resolved once).
-        Without a PDB it is a single unconditional run.
+        Each run takes the `code` of the ligand named like its structure, or of the
+        first ligand when none is (one ligand broadcast over several proteins).
+        Without a PDB it is a single unconditional run with the first ligand's code.
         """
-        # Resolve the ligand `code` from the compounds stream at runtime: pick
-        # the first id at runtime (not ids[0] at config time), then read its
-        # `code` value. One ligand is reused across the whole loop.
+        # The unconditional run has no structure id, so it reads the first ligand
+        # at runtime (not ids[0] at config time) and its `code` value.
         self.ligand_stream.save_json(self.ligand_json)
         ligand_snippet = f"""LIGAND_ID={Resolve.stream_ids(self.ligand_json, index=0)}
 LIGAND_CODE={Resolve.stream_item(self.ligand_json, '$LIGAND_ID', column='code')}
@@ -575,7 +576,7 @@ cd {repo_dir}
                 "output_json": str(self.contigs_json),
             }, f, indent=2)
 
-        return f"""{ligand_snippet}echo "Resolving per-PDB contig options"
+        return f"""echo "Resolving per-PDB contig options"
 python {self.contigs_py} "{self.contig_args_json}"
 
 echo "Starting RFdiffusion-AllAtom ({mode} mode)"
@@ -584,6 +585,7 @@ cd {repo_dir}
 
 for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
     INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$STRUCT_ID')}
+    LIGAND_CODE=$(python {self.ligand_code_py} "{self.ligand_json}" "$STRUCT_ID")
     OPTS=$(python {self.contigs_reader_py} "{self.contigs_json}" "$STRUCT_ID")
     CONTIGS=$(echo "$OPTS" | sed -n '1p')
     INPAINT_SEL=$(echo "$OPTS" | sed -n '2p')
@@ -717,7 +719,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
 
     # Lazy path descriptors
     #   structures_csv  — standalone TableInfo (tables/structures.csv).

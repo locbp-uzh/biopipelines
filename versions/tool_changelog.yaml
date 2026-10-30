@@ -2085,8 +2085,12 @@ RFDAA_PrepareLigand:
   files:
   - biopipelines/rfdiffusion_allatom.py
   - pipe_scripts/pipe_rfdaa_prepare_ligand.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-30'
+    note: >-
+      No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. See the RFdiffusionAllAtom 2.6 entry.
   - version: '2.5'
     date: '2026-10-30'
     note: >-
@@ -2235,8 +2239,12 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
   - biopipelines/rfdiffusion_allatom.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-30'
+    note: >-
+      Each input structure is designed against the `code` of its own ligand. The wrapper read the first ligand of the compounds stream once and passed that code to `inference.ligand=` for every structure, so a second prepared ligand with another code (`lig_a` = `UNL`, `lig_b` = `ASP`) was designed against `UNL`. `resolve_rfdaa_ligand_code.py` is called inside the loop: a structure named after a ligand of the stream (a prepared ligand keeps its ligand's id) gets that ligand's code, any other structure the first ligand's, so one ligand is still broadcast over several proteins. The unconditional run is unchanged. No id changes.
   - version: '2.5'
     date: '2026-10-30'
     note: >-
