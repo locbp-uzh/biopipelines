@@ -91,7 +91,7 @@ def _resolve_parent_ids(cfg):
         return list(cfg["parent_ids"]), []
 
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from biopipelines.combinatorics import predict_single_output_id
+    from biopipelines.combinatorics import predict_single_output_id, predict_single_provenance
 
     ids_by_position = [_load_source_ids(src["path"]) for src in sources]
     ids_by_stream = {src["name"]: ids for src, ids in zip(sources, ids_by_position)}
@@ -124,20 +124,14 @@ def _resolve_parent_ids(cfg):
     out, contributions = [], []
     for combination in combinations:
         picked = dict(zip(iterated_names, combination))
-        selection, contributed = {}, {}
+        selection = {}
         for name, mode, ids, static_ids, static_first in per_axis:
             idx = picked.get(name) if mode != "bundle" else None
             selection[name] = (mode, ids, idx, static_ids, static_first)
-            # Recorded while composing rather than recovered by splitting the id afterwards: a bundled
-            # axis contributes several '+'-joined parts and is hoisted ahead of the iterated ones.
-            if mode == "bundle":
-                contributed[name] = "+".join(ids)
-                for member_position, member in enumerate(ids, start=1):
-                    contributed[f"{name}.{member_position}"] = member
-            else:
-                contributed[name] = ids[idx or 0]
         out.append(predict_single_output_id(**selection))
-        contributions.append(contributed)
+        # Recorded while composing rather than recovered by splitting the id afterwards: a bundled
+        # axis contributes several '+'-joined parts and is hoisted ahead of the iterated ones.
+        contributions.append(predict_single_provenance(**selection))
     return out, contributions
 
 
@@ -191,36 +185,6 @@ def _apply_missing(ids, parents_mapped, missing):
     return keep_ids, keep_parents
 
 
-def _rebuild_runtime_provenance(cfg, parent_ids):
-    """Re-project config-time provenance onto the runtime parent IDs.
-
-    Config-time `parent_ids` may be compact patterns (e.g. "s1_<1..2>"), and
-    config-time `provenance[axis]` is indexed alongside them. At runtime we
-    resolve upstream map_tables to their real IDs (["s1_1", "s1_2"]). For
-    provenance lookup to stay correct, we rebuild the per-axis lists so that
-    their length and order match the runtime parent_ids.
-
-    Single-axis: each axis list becomes `parent_ids` (since parent == axis id).
-    Multi-axis: the runtime parent_ids are '+'-joined cartesian products, so
-    we split on '+' to recover per-axis values in declared axis order.
-    """
-    sources = cfg.get("source_streams") or []
-    axis_names = list((cfg.get("provenance") or {}).keys()) or list(cfg.get("axis_names") or [])
-    if not sources or not axis_names:
-        return cfg.get("provenance") or {}
-
-    if len(sources) == 1:
-        axis = axis_names[0]
-        return {axis: list(parent_ids)}
-
-    prov = {axis: [] for axis in axis_names}
-    for pid in parent_ids:
-        parts = pid.split("+")
-        for i, axis in enumerate(axis_names):
-            prov[axis].append(parts[i] if i < len(parts) else "")
-    return prov
-
-
 def _provenance_from_contributions(contributions, axis_names):
     """Per-axis provenance as recorded during composition, one row per parent id."""
     return {axis: [row.get(axis, "") for row in contributions] for axis in axis_names}
@@ -234,10 +198,10 @@ def main(config_path):
 
     parent_ids, contributions = _resolve_parent_ids(cfg)
     axis_names = list((cfg.get("provenance") or {}).keys()) or list(cfg.get("axis_names") or [])
-    if contributions and axis_names:
+    if cfg.get("source_streams") and axis_names:
         cfg["provenance"] = _provenance_from_contributions(contributions, axis_names)
     else:
-        cfg["provenance"] = _rebuild_runtime_provenance(cfg, parent_ids)
+        cfg["provenance"] = cfg.get("provenance") or {}
     cfg["parent_ids"] = list(parent_ids)
     expanded_ids, parents_mapped = _apply_children(parent_ids, cfg)
     expanded_ids, parents_mapped = _apply_missing(

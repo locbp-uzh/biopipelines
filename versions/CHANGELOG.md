@@ -63,6 +63,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Mock** 1.5 → 1.6. The provenance of a row comes from `predict_single_provenance` instead of a join of the pipe script's own, and `_rebuild_runtime_provenance`, which split the id on `+`, is removed: it could be reached only when it had nothing to rebuild. No id or provenance cell changes.
+
 - **BioEmu2** 1.6 → 1.7. A run's `ligands.id` for a ligand axis with a static companion, `Bundle(Each(ligands), cofactor)`, is the ligand id alone, as the wrapper declares it; it was the companion joined to the ligand (`cof+l1`), which is no id of the compounds stream, so a join on `ligands.id` matched nothing. The provenance of a run comes from `predict_single_provenance` and the conformer ids `<run>_<k>` from `generate_multiplied_ids`, so the pipe script builds neither by hand.
 
 - **Fuse** 1.3 → 1.4. The id of a fusion, `<slot>+<length>+<slot>...`, is joined by `join_axis_ids` in both the wrapper and the pipe script, which each carried their own copy of the join. No id changes; the docstring that described the ids with `_` now describes the `+` they have always had.

@@ -132,7 +132,7 @@ class Mock(BaseConfig):
     """Stub tool for tests. See module docstring for usage."""
 
     TOOL_NAME = "Mock"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
 
     # streams={...} is a documented feature: the caller names the streams.
     USER_STREAM_NAMES = True

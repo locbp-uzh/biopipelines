@@ -128,28 +128,12 @@ def _provenance_both_ways(tmp_path, source, streams):
 
 
 def test_runtime_provenance_matches_what_was_declared(tmp_path):
-    """`_rebuild_runtime_provenance` split the parent id on '+' and assigned part i to axis i. A bundled axis contributes several parts and the composer hoists it ahead of the iterated axes, so every column came out wrong: with Bundle(compounds) and Each(structures), `structures` was given a ligand id. Provenance is now kept from composition, where the contribution of each axis is still known."""
+    """A positional rebuild (since removed) split the parent id on '+' and assigned part i to axis i. A bundled axis contributes several parts and the composer hoists it ahead of the iterated axes, so every column came out wrong: with Bundle(compounds) and Each(structures), `structures` was given a ligand id. Provenance is now kept from composition, where the contribution of each axis is still known."""
     compounds = _stream(tmp_path, "compounds", ["LIG1", "LIG2"])
     structures = _stream(tmp_path, "structures", ["seedA_1", "seedA_2"])
     declared, runtime = _provenance_both_ways(
         tmp_path, [Bundle(compounds), Each(structures)], [compounds, structures])
     assert runtime == declared
-
-
-def test_the_positional_split_it_replaces_really_was_wrong(tmp_path):
-    """Kept as evidence rather than as a guard: this is what the old path produced for the case above."""
-    compounds = _stream(tmp_path, "compounds", ["LIG1", "LIG2"])
-    structures = _stream(tmp_path, "structures", ["seedA_1", "seedA_2"])
-    parents, prov, axis_names, axes = Mock._resolve_from_source(
-        [Bundle(compounds), Each(structures)])
-    module = _pipe_mock()
-    cfg = {"parent_ids": parents, "axes": axes, "provenance": prov,
-           "axis_names": axis_names,
-           "source_streams": [{"name": "compounds", "path": "unused"},
-                              {"name": "structures", "path": "unused"}]}
-    positional = module._rebuild_runtime_provenance(cfg, parents)
-    assert positional["structures"] == ["LIG1", "LIG1"], "a ligand id in the structures column"
-    assert positional != {name: prov[name] for name in prov}
 
 
 @pytest.mark.parametrize("first_mode, second_mode", [

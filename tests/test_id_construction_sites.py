@@ -9,6 +9,7 @@ The repo rule is that an output id or a provenance value is produced only by `co
 Nothing here runs a model or a cluster job; the pipe scripts are driven on synthetic tables.
 """
 
+import importlib.util
 import itertools
 import os
 import re
@@ -22,8 +23,9 @@ from biopipelines import combinatorics as cb
 from biopipelines import id_patterns
 from biopipelines.combinatorics import (Bundle, CombinatoricsConfig, Each, generate_combinatorics_config,
                                         predict_output_ids_with_provenance)
-from biopipelines.datastream import DataStream
+from biopipelines.datastream import DataStream, create_map_table
 from biopipelines.fuse import Fuse
+from biopipelines.mock import Mock
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
@@ -33,6 +35,14 @@ import pipe_bioemu2 as bioemu2_pipe  # noqa: E402
 import pipe_fuse_queries as fuse_pipe  # noqa: E402
 
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
+
+
+def _pipe_mock():
+    spec = importlib.util.spec_from_file_location(
+        "pipe_mock_under_test", os.path.join(SCRIPTS, "pipe_mock.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _script_text(name):
@@ -223,3 +233,45 @@ class TestBioEmu2:
         assert not re.search(r"""['"]\+['"]\.join""", text)
         assert not re.search(r"""split\(['"]\+['"]""", text)
         assert not re.search(r"""f['"]\{run_id\}_\{""", text)
+
+
+# ── Mock ──────────────────────────────────────────────────────────────────────
+
+def _mock_stream(tmp_path, name, ids, counter=itertools.count()):
+    table = tmp_path / f"map_{next(counter)}_{name}.csv"
+    create_map_table(str(table), ids=ids)
+    return DataStream(name=name, ids=list(ids), map_table=str(table), format="csv")
+
+
+class TestMock:
+
+    @pytest.mark.parametrize("shape", ["each x bundle", "bundle x each", "static after", "static first"])
+    def test_the_provenance_it_writes_is_what_the_wrapper_declares(self, tmp_path, shape):
+        compounds = _mock_stream(tmp_path, "compounds", ["LIG1", "LIG2"])
+        structures = _mock_stream(tmp_path, "structures", ["seedA_1", "seedA_2", "seedA_3"])
+        source, streams = {
+            "each x bundle": ([Each(compounds), Bundle(structures)], [compounds, structures]),
+            "bundle x each": ([Bundle(compounds), Each(structures)], [compounds, structures]),
+            "static after": ([Bundle(Each(compounds), structures)], [compounds, structures]),
+            "static first": ([Bundle(structures, Each(compounds))], [structures, compounds]),
+        }[shape]
+        parents, provenance, axis_names, axes = Mock._resolve_from_source(source)
+        module = _pipe_mock()
+        source_streams = []
+        for position, stream in enumerate(streams):
+            json_path = tmp_path / f"axis_{position}.json"
+            stream.save_json(str(json_path))
+            source_streams.append({"name": stream.name, "path": str(json_path)})
+        ids, contributions = module._resolve_parent_ids(
+            {"parent_ids": parents, "axes": axes, "provenance": provenance,
+             "axis_names": axis_names, "source_streams": source_streams})
+        assert ids == parents
+        assert module._provenance_from_contributions(contributions, axis_names) == {
+            name: provenance[name] for name in axis_names}
+
+    def test_no_positional_split_of_an_id_is_left_in_the_pipe_script(self):
+        """`_rebuild_runtime_provenance` paired the parts of a '+' id with the declared axes, which a bundle hoisted ahead of the iterated axes makes wrong. It was reachable only when it had nothing to rebuild, so it went, and the provenance a row had is the provenance kept from composing it."""
+        text = _script_text("pipe_mock.py")
+        assert not re.search(r"""split\(['"]\+['"]""", text)
+        assert "_rebuild_runtime_provenance" not in text
+        assert not re.search(r"""['"]\+['"]\.join""", text)
