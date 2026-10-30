@@ -50,7 +50,7 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -65,6 +65,8 @@ echo "=== MutationComposer ready ==="
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
     sequences_fasta = Path(lambda self: self.stream_path("sequences", "sequences.fasta"))
     config_file = Path(lambda self: self.configuration_path("mutation_composer_config.json"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     composer_py = Path(lambda self: self.pipe_script_path("pipe_mutation_composer.py"))
 
     def __init__(self,
@@ -108,6 +110,7 @@ echo "=== MutationComposer ready ==="
             Streams: sequences (.csv)
             Tables:
                 sequences: id | sequence | mutations | mutation_positions
+                missing: id | removed_by | kind | cause. One `failure` row for each of the `num_sequences` ids the step could not generate, because the frequency table(s) hold no further mutation to apply; the step fails only when it generated none.
         """
         # Normalize frequencies to list for consistent handling
         if isinstance(frequencies, list):
@@ -206,6 +209,8 @@ echo "=== MutationComposer ready ==="
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self.generate_script_run_composer()
+        script_content += self.generate_missing_propagation(
+            *self.mutation_inputs, missing_csv=self.missing_csv, local_missing=self.local_missing_csv)
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -226,7 +231,8 @@ echo "=== MutationComposer ready ==="
             "prefix": self._sequence_prefix(),
             "hotspot_count": self.hotspot_count,
             "sequences_output": self.sequences_csv,
-            "sequences_fasta": self.sequences_fasta
+            "sequences_fasta": self.sequences_fasta,
+            "local_missing_csv": self.local_missing_csv
         }
 
         with open(self.config_file, 'w') as f:
@@ -262,7 +268,8 @@ python "{self.composer_py}" --config "{self.config_file}"
                 path=self.sequences_csv,
                 columns=["id", "sequence", "mutations", "mutation_positions"],
                 description=f"Generated sequences using {self.mode} mode"
-            )
+            ),
+            "missing": self.missing_table_info(self.missing_csv)
         }
 
         return {

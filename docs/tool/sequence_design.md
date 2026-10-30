@@ -459,6 +459,13 @@ Generates new protein sequences by composing mutations based on frequency analys
   | id | sequence | mutations | mutation_positions |
   |----|----------|-----------|-------------------|
 
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  The step declares `num_sequences` ids, and a short frequency table can give fewer sequences (`single_point` draws each mutation once, a `stack` finds every position taken). Each declared id with no sequence is a `failure` row of `missing`, so a consumer sees the ids that exist and the reason for the others. The step fails only when it wrote no sequence at all.
+
 **Example**:
 ```python
 from biopipelines.mutation_composer import MutationComposer

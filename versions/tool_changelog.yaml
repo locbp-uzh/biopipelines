@@ -1422,8 +1422,12 @@ MutationComposer:
   files:
   - biopipelines/mutation_composer.py
   - pipe_scripts/pipe_mutation_composer.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-30'
+    note: >-
+      A declared sequence id the step could not generate is a `failure` row of its `missing.csv`. The wrapper declares `num_sequences` ids, and a short frequency table gives fewer sequences (`single_point` wrote 6 of 20, `hotspot_focused` with `stack` 3 of 20), yet the step exited 0 with the shorter file, so the ids it never wrote were on no record and a Fuse downstream skipped every combination built on them with only a warning. The pipe now writes `execution/local_missing.csv` with one row per declared id that carries no sequence (cause: no mutation left to apply in the frequency table(s) at `min_frequency`), `missing` is always declared, and the propagation merges the local file with the upstream manifests. The step still exits non-zero only when it wrote no sequence. The completion check excuses upstream rows and `filter` rows, never these `failure` rows.
   - version: '1.1'
     date: '2026-10-30'
     note: >-

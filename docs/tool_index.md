@@ -25,7 +25,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 13 | LigandMPNN | Sequence Design                | 3.4 | `biopipelines/ligand_mpnn.py` |
 | 14 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
 | 15 | Mutagenesis               | Sequence Design                | 1.4 | `biopipelines/mutagenesis.py` |
-| 16 | MutationComposer          | Sequence Design                | 1.1 | `biopipelines/mutation_composer.py` |
+| 16 | MutationComposer          | Sequence Design                | 1.2 | `biopipelines/mutation_composer.py` |
 | 17 | ProteinMPNN | Sequence Design                | 2.10 | `biopipelines/protein_mpnn.py` |
 | 18 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 19 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |

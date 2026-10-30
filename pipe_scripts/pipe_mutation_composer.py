@@ -24,6 +24,9 @@ import random
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines'))
 from combinatorics import numbered_id  # noqa: E402
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from biopipelines.biopipelines_io import MISSING_COLUMNS, step_id_from_table_path  # noqa: E402
+
 # Standard amino acids
 AMINO_ACIDS = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
 
@@ -1408,6 +1411,22 @@ def save_sequences(sequences: List[Tuple[str, str, str, List[int]]], csv_path: s
                 f.write(sequence[i:i+80] + '\n')
 
 
+def ungenerated_rows(prefix: str, num_sequences: int, sequences: List[Tuple[str, str, str, List[int]]],
+                     step_id: str, cause: str) -> List[Dict[str, str]]:
+    """One `failure` row for each of the `num_sequences` declared ids that no sequence carries."""
+    written = {seq_id for seq_id, _, _, _ in sequences}
+    declared = [numbered_id(prefix, number) for number in range(1, num_sequences + 1)]
+    return [{"id": seq_id, "removed_by": step_id, "kind": "failure", "cause": cause}
+            for seq_id in declared if seq_id not in written]
+
+
+def write_local_missing(path: str, rows: List[Dict[str, str]]):
+    """This step's own failures, which the propagation merges with the upstream manifests into tables/missing.csv."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(path, index=False)
+    print(f"Wrote local missing manifest: {path} ({len(rows)} rows)")
+
+
 def main():
     """Main execution function."""
     parser = argparse.ArgumentParser(description='Generate sequences from mutation profiles')
@@ -1460,7 +1479,13 @@ def main():
             raise ValueError(f"Unknown mode: {mode}")
         
         logger.info(f"Generated {len(sequences)} sequences")
-        
+
+        # A declared id the generator left without a sequence is on record before anything else can stop the step
+        cause = (f"no mutation left to apply: the {mode} mode with the {combination_strategy} strategy found no further "
+                 f"mutation at or above min_frequency {min_frequency} in the frequency table(s)")
+        write_local_missing(config['local_missing_csv'], ungenerated_rows(
+            prefix, num_sequences, sequences, step_id_from_table_path(config['local_missing_csv']), cause))
+
         # Save sequences
         logger.info(f"Saving sequences to: {config['sequences_output']}")
         save_sequences(sequences, config['sequences_output'], config['sequences_fasta'])
