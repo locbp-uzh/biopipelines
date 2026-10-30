@@ -862,8 +862,12 @@ Fuse:
   files:
   - biopipelines/fuse.py
   - pipe_scripts/pipe_fuse_queries.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-30'
+    note: >-
+      Two fusions that would share an id are refused, at configuration time and in the pipe script, through the new `check_distinct_fusion_ids`. A slot id that holds the separator makes two combinations spell one id: (`a`, `1+b`) and (`a+1`, `b`) are both `a+1+b`. Both rows were written under it, so a lookup by id could not tell the two sequences apart. The error names both combinations. No id changes for any input that did not clash.
   - version: '1.4'
     date: '2026-10-30'
     note: >-
@@ -1753,8 +1757,12 @@ Pool:
   files:
   - biopipelines/pool.py
   - pipe_scripts/pipe_pool.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-30'
+    note: >-
+      Under `recount_prefix` a row has one number in every stream and table of the pool. Each stream and table numbered its own rows 1 to N, so an id that a stream lacks at runtime (an upstream step filtered it) shifted every later id of that stream, while the result table, which keeps a blank row for it, and `missing` were numbered separately: `rc_2` named one row in the table and another in the stream, and the filtered id was `rc_1` in `missing`. The step also failed its own completion check, because the last declared id was never written. The pool config now carries the number of every declared (run, id) pair, built by `recounted_id` from the declared ids, and the pipe numbers streams, tables and `missing` through it, so a filtered id is a gap in the stream and the same number everywhere else. The default suffix and `keep_ids` are unchanged.
   - version: '1.4'
     date: '2026-10-30'
     note: >-

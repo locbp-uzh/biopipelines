@@ -598,7 +598,8 @@ def test_renumber_ids_recount_mode_is_unchanged():
     import pipe_scripts.pipe_pool as pipe_pool
 
     df = pd.DataFrame({"id": ["a", "b"], "sequences.id": ["s", "t"]})
-    out = pipe_pool._renumber_ids(df, 2, recount_prefix="r", recount_start=5)
+    numbering = {(1, "x"): "r_1", (1, "y"): "r_2", (1, "z"): "r_3", (1, "w"): "r_4"}
+    out = pipe_pool._renumber_ids(df, 2, recount_prefix="r", numbering=numbering)
     assert list(out["id"]) == ["r_5", "r_6"]
     assert list(out["original.id"]) == ["a", "b"]
     assert list(out["sequences.id"]) == ["s", "t"]
@@ -832,3 +833,88 @@ def test_renumber_ids_leaves_a_blank_provenance_cell_blank():
     assert list(out["id"]) == ["a_2", "b_2"]
     assert out["sequences.id"].iloc[0] == "s_2"
     assert pd.isna(out["sequences.id"].iloc[1])
+
+
+# ── recount_prefix: one row has one number in every stream and table ─────────
+#
+# Under recount_prefix each stream and table used to number its own rows 1..N. An id the stream lacks at runtime
+# (an upstream step filtered it) still has a blank row in the result table and a row in `missing`, so after that id
+# the same row carried a different number in each file and a join on `id` paired unrelated rows.
+
+def _write_recount_runs(tmp_path):
+    """Two runs whose stream `kept` lacks the id `b` while `scores` and `missing` still name it."""
+    import pandas as pd
+
+    runs = []
+    for i, (declared, present) in enumerate((
+        (["a", "b", "c"], ["a", "c"]),
+        (["a", "d"], ["a", "d"]),
+    ), start=1):
+        folder = tmp_path / f"run{i}"
+        folder.mkdir()
+        kept = folder / "kept_map.csv"
+        pd.DataFrame({"id": present}).to_csv(kept, index=False)
+        scores = folder / "scores.csv"
+        pd.DataFrame({"id": declared, "score": range(len(declared))}).to_csv(scores, index=False)
+        missing = folder / "missing.csv"
+        pd.DataFrame({"id": [x for x in declared if x not in present], "removed_by": "T", "kind": "filter",
+                      "cause": "c"}, columns=["id", "removed_by", "kind", "cause"]).to_csv(missing, index=False)
+        runs.append({
+            "streams": [{"name": "kept", "stream_key": "kept", "format": "csv", "ids": declared, "files": [],
+                         "map_table": str(kept), "is_shared_file": False}],
+            "tables": [{"name": name, "path": str(path), "columns": []}
+                       for name, path in (("missing", missing), ("scores", scores))],
+        })
+    return runs
+
+
+def test_recount_names_a_row_alike_in_the_stream_the_table_and_missing(tmp_path):
+    import json
+    import sys
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    out = tmp_path / "out"
+    (out / "kept").mkdir(parents=True)
+    config = {
+        "runs": _write_recount_runs(tmp_path),
+        "shared_streams": ["kept"], "shared_tables": ["missing", "scores"],
+        "out_streams": {"kept": {"stream_dir": str(out / "kept"), "map_table": str(out / "kept_map.csv"), "format": "csv"}},
+        "out_tables": {"missing": str(out / "missing.csv"), "scores": str(out / "scores.csv")},
+        "content_bearing_streams": [], "content_file_cols": {}, "output_folder": str(out),
+        "recount_prefix": "rc", "keep_ids": False,
+        "recount_numbering": [[1, "a", "rc_1"], [1, "b", "rc_2"], [1, "c", "rc_3"], [2, "a", "rc_4"], [2, "d", "rc_5"]],
+    }
+    config_json = tmp_path / "pool_config.json"
+    config_json.write_text(json.dumps(config))
+
+    sys.argv = ["pipe_pool.py", str(config_json)]
+    pipe_pool.main()
+
+    kept, scores, missing = (pd.read_csv(out / name) for name in ("kept_map.csv", "scores.csv", "missing.csv"))
+    names = {}
+    for frame in (kept, scores, missing):
+        for _, row in frame.iterrows():
+            names.setdefault((row["pool.path"], row["original.id"]), set()).add(row["id"])
+    assert all(len(ids) == 1 for ids in names.values()), f"a row is named differently in different files: {names}"
+    assert list(kept["id"]) == ["rc_1", "rc_3", "rc_4", "rc_5"]
+    assert list(scores["id"]) == ["rc_1", "rc_2", "rc_3", "rc_4", "rc_5"]
+    assert list(missing["id"]) == ["rc_2"]
+
+
+def test_recount_declares_the_ids_the_pipe_is_given(local_config, isolated_cwd, new_pipeline):
+    """The numbering written to pool_config.json is the one the declared ids come from, so the two cannot drift."""
+    import json
+    from biopipelines.sequence import Sequence
+    from biopipelines.pool import Pool
+
+    pipeline = new_pipeline("pool_recount_numbering")
+    with pipeline:
+        pooled = Pool(runs=[Sequence(seq=["MK", "AY"], ids=["a", "b"], type="protein"),
+                            Sequence(seq=["GF"], ids=["a"], type="protein")], recount_prefix="rc")
+        pipeline.save()
+
+    with open(pooled.producer.pool_config_json) as handle:
+        numbering = json.load(handle)["recount_numbering"]
+    assert numbering == [[1, "a", "rc_1"], [1, "b", "rc_2"], [2, "a", "rc_3"]]
+    assert list(pooled.streams.sequences.ids) == ["rc_1", "rc_2", "rc_3"]

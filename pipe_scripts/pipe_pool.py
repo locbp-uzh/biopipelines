@@ -43,6 +43,12 @@ def _raise_on_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
     raise_on_id_collision(label, ids_by_run)
 
 
+def _recounted_id(recount_prefix: str, numbering: dict, pool_idx: int, original_id: str) -> str:
+    """recount_prefix: the pooled id of a row, one number per (run, original id) across every stream and table."""
+    from biopipelines.pool import recounted_id
+    return recounted_id(recount_prefix, numbering, pool_idx, original_id)
+
+
 def _link_or_copy(source_path: str, dest_path: str) -> None:
     """Create a relative symlink on POSIX, copy on Windows or if linking fails."""
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -68,7 +74,7 @@ def _link_or_copy(source_path: str, dest_path: str) -> None:
 
 def _renumber_ids(df: pd.DataFrame, pool_idx: int,
                   recount_prefix: Optional[str] = None,
-                  recount_start: int = 1,
+                  numbering: Optional[dict] = None,
                   keep_ids: bool = False) -> pd.DataFrame:
     """Renumber the 'id' column.
 
@@ -82,9 +88,8 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
 
     - Keep (``keep_ids``): no id changes; ``original.id`` equals 'id'.
 
-    - Recount (``recount_prefix`` set): replace 'id' with a flat 1-based
-      sequence ``<recount_prefix>_<recount_start + i>`` (i = 0..N-1) and
-      store the original ids in ``original.id``, replacing any such column.
+    - Recount (``recount_prefix`` set): replace 'id' with ``<recount_prefix>_<n>``, n being the number ``numbering`` gives the (run, original id) pair, so a row has the same id here as in every stream and table that names it.
+      The original ids are stored in ``original.id``, replacing any such column.
       ``<axis>.id`` provenance columns are NOT touched in this mode — they
       refer to upstream entities whose ids stay meaningful only in their own
       namespace, so renaming them to a pool-level counter would break
@@ -95,8 +100,9 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
     df = df.copy()
     original = df["id"].astype(str)
     if recount_prefix is not None:
+        numbering = {} if numbering is None else numbering
         df["original.id"] = original
-        df["id"] = [f"{recount_prefix}_{recount_start + i}" for i in range(len(df))]
+        df["id"] = [_recounted_id(recount_prefix, numbering, pool_idx, oid) for oid in original]
         return df
     carried = "original.id" in df.columns
     if not keep_ids:
@@ -114,7 +120,8 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
 
 def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
                           recount_prefix: Optional[str] = None,
-                          keep_ids: bool = False) -> None:
+                          keep_ids: bool = False,
+                          numbering: Optional[dict] = None) -> None:
     """Slice each run's shared artifact (renaming to composite ids) and
     merge the parts into one combined artifact. Writes the consolidated
     map_table with one row per composite id, all pointing at the merged
@@ -137,9 +144,9 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
             for s in run_streams if s["stream_key"] == stream_key
         })
 
+    numbering = {} if numbering is None else numbering
     parts = []
     rows = []
-    counter = 0
     tmp_root = tempfile.mkdtemp(prefix="pool_shared_")
     for pool_idx, run_streams in enumerate(runs_streams, start=1):
         match = next(
@@ -166,8 +173,7 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
         run_composites: List[str] = []
         for oid in ids:
             if recount_prefix is not None:
-                counter += 1
-                composite = f"{recount_prefix}_{counter}"
+                composite = _recounted_id(recount_prefix, numbering, pool_idx, oid)
             elif keep_ids:
                 composite = oid
             else:
@@ -256,15 +262,13 @@ def _load_run_stream(match: dict):
 def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
                    recount_prefix: Optional[str] = None,
                    content_file_col: Optional[str] = None,
-                   keep_ids: bool = False) -> None:
+                   keep_ids: bool = False,
+                   numbering: Optional[dict] = None) -> None:
     """Copy / symlink per-run files into the gather folder and write the
     consolidated map_table for one shared stream.
 
-    If ``recount_prefix`` is set, every emitted row gets a flat 1-based id
-    of the form ``<recount_prefix>_<n>`` (n counts across all runs), the
-    original id is preserved in an ``original.id`` column, and ``<axis>.id``
-    provenance columns are NOT renumbered (their values still refer to
-    upstream entities in their own namespace).
+    If ``recount_prefix`` is set, every emitted row gets an id of the form ``<recount_prefix>_<n>``, n being the number ``numbering`` gives its (run, original id) pair, the same in every stream and table of the pool.
+    The original id is preserved in an ``original.id`` column, and ``<axis>.id`` provenance columns are NOT renumbered (their values still refer to upstream entities in their own namespace).
 
     If ``keep_ids`` is set, ids and ``<axis>.id`` columns are left as the runs
     wrote them, and an id carried by more than one run raises before any file
@@ -294,8 +298,9 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
         isinstance(s, dict) and s.get("stream_key") == stream_key and s.get("is_shared_file")
         for run_streams in runs_streams for s in run_streams
     )
+    numbering = {} if numbering is None else numbering
     if any_shared:
-        _gather_shared_stream(stream_key, runs_streams, out_spec, recount_prefix, keep_ids)
+        _gather_shared_stream(stream_key, runs_streams, out_spec, recount_prefix, keep_ids, numbering)
         return
 
     # Find this stream in each run's payload (by stream_key).
@@ -309,14 +314,12 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
                             {pool_idx: ids for pool_idx, ids, _files, _df in loaded})
 
     rows = []
-    counter = 0  # only used when recount_prefix is set
     for pool_idx, ids, files, run_df in loaded:
         # An upstream original.id means something else (e.g. a parent id): keep it.
         upstream_original = run_df is not None and "original.id" in run_df.columns
         for j, oid in enumerate(ids):
             if recount_prefix is not None:
-                counter += 1
-                composite = f"{recount_prefix}_{counter}"
+                composite = _recounted_id(recount_prefix, numbering, pool_idx, oid)
             elif keep_ids:
                 composite = oid
             else:
@@ -377,15 +380,15 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
 
 def _gather_table(table_name: str, runs_tables: list, out_path: str,
                   recount_prefix: Optional[str] = None,
-                  keep_ids: bool = False) -> None:
+                  keep_ids: bool = False,
+                  numbering: Optional[dict] = None) -> None:
     """Vertically concatenate per-run CSVs after renumbering the id column
-    and appending pool.path. If ``recount_prefix`` is set, ids become a
-    flat 1-based counter ``<recount_prefix>_<n>`` across the combined
-    rows; the original id is kept in ``original.id``. If ``keep_ids`` is
-    set, ids stay as written and an id carried by more than one run raises."""
+    and appending pool.path.
+    If ``recount_prefix`` is set, ids become ``<recount_prefix>_<n>`` with the number ``numbering`` gives the (run, original id) pair, as in the streams, and the original id is kept in ``original.id``.
+    If ``keep_ids`` is set, ids stay as written and an id carried by more than one run raises."""
     frames = []
     ids_by_run = {}
-    counter = 0
+    numbering = {} if numbering is None else numbering
     for pool_idx, run_tables in enumerate(runs_tables, start=1):
         match = next((t for t in run_tables if t["name"] == table_name), None)
         if match is None:
@@ -403,11 +406,9 @@ def _gather_table(table_name: str, runs_tables: list, out_path: str,
             ids_by_run[pool_idx] = df["id"].astype(str).tolist()
         df = _renumber_ids(df, pool_idx,
                            recount_prefix=recount_prefix,
-                           recount_start=counter + 1,
+                           numbering=numbering,
                            keep_ids=keep_ids)
         df["pool.path"] = pool_idx
-        if recount_prefix is not None:
-            counter += len(df)
         frames.append(df)
 
     if keep_ids:
@@ -439,6 +440,9 @@ def main():
     out_streams = config["out_streams"]
     out_tables = config["out_tables"]
     recount_prefix = config.get("recount_prefix")
+    # The configuration step numbered every declared (run, id) pair; a pair it did not declare is numbered after them.
+    numbering = {(int(pool_idx), str(oid)): composite
+                 for pool_idx, oid, composite in config.get("recount_numbering", [])}
     keep_ids = bool(config.get("keep_ids", False))
     # Content streams: _gather_stream writes the combined file (preserving
     # the upstream domain schema + copying any per-id files); the table of the
@@ -458,7 +462,7 @@ def main():
                        recount_prefix=recount_prefix,
                        content_file_col=content_file_cols.get(stream_key)
                        if stream_key in content_bearing_streams else None,
-                       keep_ids=keep_ids)
+                       keep_ids=keep_ids, numbering=numbering)
 
     # A content table shares its file with the stream of the same name (already
     # written by _gather_stream above); don't overwrite it with the table concat.
@@ -466,7 +470,7 @@ def main():
         if table_name in content_bearing_streams:
             continue
         _gather_table(table_name, runs_tables, out_tables[table_name],
-                      recount_prefix=recount_prefix, keep_ids=keep_ids)
+                      recount_prefix=recount_prefix, keep_ids=keep_ids, numbering=numbering)
 
     print("Pool: done")
 

@@ -22,6 +22,7 @@ from itertools import product
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.combinatorics import join_axis_ids
+from biopipelines.fuse import check_distinct_fusion_ids
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
 from biopipelines.id_patterns import is_lazy, partial_expand_ids, select_ids
 
@@ -172,11 +173,14 @@ def generate_fusion_sequences(
             else:
                 junction_combo_indices.append(None)
 
+    combos = list(product(*axes))
+    check_distinct_fusion_ids(combos)
+
     # Generate all combinations
     results = []
     num_slots = len(slots)
 
-    for combo in product(*axes):
+    for combo in combos:
         # Extract slot IDs
         slot_ids_in_combo = [combo[slot_combo_indices[i]] for i in range(num_slots)]
 

@@ -21,7 +21,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 9 | FLOWR | Structure Generation           | 1.2 | `biopipelines/flowr.py` |
 | 10 | DNAEncoder                | Sequence Design                | 1.3 | `biopipelines/dna_encoder.py` |
 | 11 | Frame2Seq | Sequence Design                | 2.0 | `biopipelines/frame2seq.py` |
-| 12 | Fuse | Sequence Design                | 1.4 | `biopipelines/fuse.py` |
+| 12 | Fuse | Sequence Design                | 1.5 | `biopipelines/fuse.py` |
 | 13 | LigandMPNN | Sequence Design                | 3.4 | `biopipelines/ligand_mpnn.py` |
 | 14 | LASErMPNN | Sequence Design                | 2.2 | `biopipelines/lasermpnn.py` |
 | 15 | Mutagenesis               | Sequence Design                | 1.4 | `biopipelines/mutagenesis.py` |
@@ -94,7 +94,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 82 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
 | 83 | ExtractMetrics            | Data Management                | 1.1 | `biopipelines/extract_metrics.py` |
 | 84 | Panda                     | Data Management                | 1.8 | `biopipelines/panda.py` |
-| 85 | Pool                      | Data Management                | 1.4 | `biopipelines/pool.py` |
+| 85 | Pool                      | Data Management                | 1.5 | `biopipelines/pool.py` |
 | 86 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
 | 87 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
 | 88 | SelectionTransfer | Data Management | 1.0 | `biopipelines/selection_transfer.py` |

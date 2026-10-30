@@ -42,6 +42,7 @@ the original ids are kept in the ``original.id`` column, and ``pool.path``
 still records the source run. Counted at config time when every input run
 has fully-resolved ids; otherwise the framework emits a lazy
 ``name_[<#>]`` pattern that pipe_pool resolves at runtime.
+A row keeps its number in every stream and table of the pool: an id that an upstream step filtered is absent from the streams, so its number is a gap there, and it is the same number in the result tables and in ``missing``.
 
 Pass ``keep_ids=True`` to leave every id exactly as the upstream tool wrote
 it. Nothing is suffixed, so two runs that share an id are an error: Pool
@@ -51,7 +52,7 @@ when the ids are known and in the pipe otherwise.
 
 import os
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
@@ -88,6 +89,17 @@ def raise_on_id_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
     )
 
 
+def recounted_id(prefix: str, numbering: Dict[Tuple[int, str], str], pool_idx: int, original_id: str) -> str:
+    """The id a pooled row gets under ``recount_prefix``: ``<prefix>_<n>``, n counting the distinct (run, original id) pairs in order of first use.
+
+    A pair keeps its number in every stream and table of the pool, so a row a stream lacks (an id an upstream step filtered) leaves a gap there instead of shifting every later id, and `missing` names the same row as the other tables. ``numbering`` is the caller's running dict: the configuration step fills it from the declared ids and writes it to the pool config, and ``pipe_pool.py`` starts from it and extends it with any pair it finds that was not declared.
+    """
+    key = (int(pool_idx), str(original_id))
+    if key not in numbering:
+        numbering[key] = f"{prefix}_{len(numbering) + 1}"
+    return numbering[key]
+
+
 class Pool(BaseConfig):
     """
     Pool tool for gathering N parallel-run StandardizedOutputs into one.
@@ -105,7 +117,7 @@ class Pool(BaseConfig):
     """
 
     TOOL_NAME = "Pool"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -137,8 +149,9 @@ echo "=== Pool ready ==="
                 `<recount_prefix>_2`, ..., `<recount_prefix>_N`. Counted at
                 config time when every input run has fully-resolved ids;
                 otherwise the framework emits a lazy `<recount_prefix>_[<#>]`
-                pattern that pipe_pool resolves at runtime. Mutually exclusive
-                with ``keep_ids``.
+                pattern that pipe_pool resolves at runtime.
+                A row has one number in every stream and table, so an id missing from a stream leaves a gap instead of shifting the later ids.
+                Mutually exclusive with ``keep_ids``.
             streams: Stream names to pool. ``None`` (default) is strict: every
                 input must expose the same stream set. A list keeps exactly
                 those streams (each must exist in every input, with matching
@@ -339,6 +352,34 @@ echo "=== Pool ready ==="
         table = run.tables._tables.get(name)
         return table is not None and table.info.path == mt
 
+    @staticmethod
+    def _declared_ids(ds: DataStream) -> List[str]:
+        """The ids a run's stream declares, patterns expanded."""
+        return list(ds.ids_expanded) if hasattr(ds, "ids_expanded") and ds.ids_expanded else list(ds.ids)
+
+    def _any_lazy_ids(self) -> bool:
+        """True when an input stream carries runtime-dependent ids, which no configuration-time count can number."""
+        return any(
+            getattr(r.streams.get(name), "is_lazy", False)
+            for name in self._shared_streams
+            for r in self.runs
+            if r.streams.get(name) is not None
+        )
+
+    def _recount_numbering(self) -> Dict[Tuple[int, str], str]:
+        """The flat number of every declared (run, original id) pair, streams in name order and runs in pool order; empty without recount_prefix or when an id is lazy."""
+        numbering: Dict[Tuple[int, str], str] = {}
+        if self.recount_prefix is None or self._any_lazy_ids():
+            return numbering
+        for name in self._shared_streams:
+            for pool_idx, r in enumerate(self.runs, start=1):
+                ds = r.streams.get(name)
+                if ds is None:
+                    continue
+                for oid in self._declared_ids(ds):
+                    recounted_id(self.recount_prefix, numbering, pool_idx, oid)
+        return numbering
+
     def _check_keep_ids_collisions(self) -> None:
         """Raise on a cross-run id collision in every stream whose ids are known now.
 
@@ -450,6 +491,8 @@ echo "=== Pool ready ==="
             "content_file_cols": content_file_cols,
             "output_folder": self.output_folder,
             "recount_prefix": self.recount_prefix,
+            "recount_numbering": [[pool_idx, oid, composite]
+                                  for (pool_idx, oid), composite in self._recount_numbering().items()],
             "keep_ids": self.keep_ids,
         }
 
@@ -480,13 +523,9 @@ echo "=== Pool ready ==="
         # Decide once whether any input stream carries lazy ids. If yes,
         # config-time counting for recount mode is impossible — we have to
         # emit a lazy `<prefix>_[<#>]` pattern and let pipe_pool resolve.
-        any_lazy = any(
-            getattr(r.streams.get(name), "is_lazy", False)
-            for name in self._shared_streams
-            for r in self.runs
-            if r.streams.get(name) is not None
-        )
+        any_lazy = self._any_lazy_ids()
         recount = self.recount_prefix is not None
+        numbering = self._recount_numbering()
 
         for name in self._shared_streams:
             fmt = self._stream_format_map[name]
@@ -510,10 +549,9 @@ echo "=== Pool ready ==="
 
             for pool_idx, r in enumerate(self.runs, start=1):
                 ds = r.streams.get(name)
-                orig_ids = list(ds.ids_expanded) if hasattr(ds, "ids_expanded") and ds.ids_expanded else list(ds.ids)
-                for oid in orig_ids:
+                for oid in self._declared_ids(ds):
                     if recount and not any_lazy:
-                        composite = f"{self.recount_prefix}_{len(new_ids) + 1}"
+                        composite = recounted_id(self.recount_prefix, numbering, pool_idx, oid)
                     elif self.keep_ids:
                         composite = oid
                     else:

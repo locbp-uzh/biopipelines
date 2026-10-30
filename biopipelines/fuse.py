@@ -32,6 +32,21 @@ except ImportError:
     from combinatorics import join_axis_ids
 
 
+def check_distinct_fusion_ids(combos: List[tuple]) -> None:
+    """Refuse two different fusions that would share an id.
+
+    A fusion is its slot ids and junction lengths in axis order, joined by `join_axis_ids`. A slot id that holds the separator makes two combinations spell one id: (a, 1+b) and (a+1, b) are both `a+1+b`. The wrapper calls this on the combinations it declares and the pipe script on the ones it writes, so neither can emit a row that an id-keyed lookup would confuse with another.
+    """
+    owner: Dict[str, tuple] = {}
+    for combo in combos:
+        fusion_id = join_axis_ids(combo)
+        earlier = owner.setdefault(fusion_id, combo)
+        if earlier != combo:
+            raise ValueError(
+                f"the fusions {tuple(map(str, earlier))} and {tuple(map(str, combo))} both have the id "
+                f"{fusion_id!r}, because a sequence id contains '+'; rename the sequence so that the fusion ids are distinct")
+
+
 class Fuse(BaseConfig):
     """
     Configuration for fusion sequence generation.
@@ -53,7 +68,7 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Fuse step. The retired spelling still sets the label and now also reaches the framework.
 
     @classmethod
@@ -237,11 +252,14 @@ echo "=== Fuse ready ==="
             if i < len(junction_length_lists) and junction_length_lists[i] is not None:
                 axes.append(junction_length_lists[i])
 
+        combos = list(product(*axes))
+        check_distinct_fusion_ids(combos)
+
         # Generate all combinations
         sequence_ids = []
         provenance = {f"sequences_{i+1}": [] for i in range(len(self.input_slots))}
 
-        for combo in product(*axes):
+        for combo in combos:
             seq_id = join_axis_ids(combo)
             sequence_ids.append(seq_id)
 

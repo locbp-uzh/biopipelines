@@ -180,6 +180,14 @@ class TestFuse:
         declared, _ = _fuse_config_side(slots, ["1-2"])
         assert declared == ["a1+1+b1", "a1+2+b1", "a2+1+b1", "a2+2+b1"]
 
+    def test_two_fusions_that_would_share_an_id_are_refused_on_both_sides(self, tmp_path):
+        """A "+" inside a slot id makes (a, 1+b) and (a+1, b) both `a+1+b`; the second row used to overwrite the first in every id-keyed lookup."""
+        slots = [_fuse_slot(tmp_path, "s0", ["a", "a+1"]), _fuse_slot(tmp_path, "s1", ["b", "1+b"])]
+        with pytest.raises(ValueError, match=r"a\+1\+b"):
+            _fuse_config_side(slots, None)
+        with pytest.raises(ValueError, match=r"a\+1\+b"):
+            fuse_pipe.generate_fusion_sequences(slots, "GS", [], "fuse")
+
     def test_the_wrapper_and_its_pipe_script_build_the_id_with_the_one_shared_function(self):
         import biopipelines.fuse as fuse_module
         assert fuse_module.join_axis_ids is cb.join_axis_ids
