@@ -67,7 +67,7 @@ class NeuralPLexer(BaseConfig):
     """
 
     TOOL_NAME = "NeuralPLexer"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     # neuralplexer-inference is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "neuralplexer"

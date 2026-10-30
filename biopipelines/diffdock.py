@@ -67,7 +67,7 @@ class DiffDock(BaseConfig):
     """
 
     TOOL_NAME = "DiffDock"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "diffdock"
 
     # ------------------------------------------------------------------

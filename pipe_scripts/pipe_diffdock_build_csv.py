@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files, iterate_values  # noqa: E402
 from biopipelines.combinatorics import predict_single_output_id  # noqa: E402
+from biopipelines.ligand_utils import ligand_chemistry  # noqa: E402
 
 
 def collect_proteins(ds_json: str):
@@ -55,7 +56,7 @@ def collect_ligands(ds_json: str):
 
     # Value-based stream: read SMILES from the map_table.
     for lid, values in iterate_values(ds, columns=["smiles"]):
-        smiles = values.get("smiles", "")
+        smiles = ligand_chemistry(values)["smiles"]
         if not smiles:
             raise ValueError(
                 f"Compound {lid!r} has neither a file nor a 'smiles' value in the map_table; "

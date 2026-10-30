@@ -565,8 +565,12 @@ DiffDock:
   - biopipelines/diffdock.py
   - pipe_scripts/pipe_diffdock_build_csv.py
   - pipe_scripts/pipe_diffdock_postprocess.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is refused by name, not handed to DiffDock as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: the string "nan" was written as the ligand of the table DiffDock reads. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-
@@ -652,8 +656,12 @@ DynamicBind:
   - pipe_scripts/pipe_dynamicbind_build_csv.py
   - pipe_scripts/pipe_dynamicbind_movie.py
   - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is refused by name, not handed to DynamicBind as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: the string "nan" was written as the ligand of the table DynamicBind reads. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
@@ -1465,8 +1473,12 @@ NeuralPLexer:
   - biopipelines/neuralplexer.py
   - pipe_scripts/pipe_neuralplexer_postprocess.py
   - pipe_scripts/pipe_neuralplexer_stage.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-30'
+    note: >-
+      A ligand whose `smiles` cell is blank is refused by name, not handed to NeuralPLexer as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: a float reached RDKit and the staging died with a TypeError that names no ligand. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-

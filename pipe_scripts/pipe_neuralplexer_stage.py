@@ -30,6 +30,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     iterate_values,
 )
 from biopipelines.combinatorics import predict_single_output_id  # noqa: E402
+from biopipelines.ligand_utils import ligand_chemistry  # noqa: E402
 
 
 def materialise_ligand_sdf(lig_id: str, smiles: str, dst_sdf: str) -> None:
@@ -66,7 +67,7 @@ def collect_ligands(ds_json: str):
         return out
 
     for lid, values in iterate_values(ds, columns=["smiles"]):
-        smiles = values.get("smiles", "")
+        smiles = ligand_chemistry(values)["smiles"]
         if not smiles:
             raise ValueError(f"Compound {lid!r}: no file and no 'smiles' value")
         out.append((lid, None, smiles))

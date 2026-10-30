@@ -31,13 +31,13 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 19 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
 | 20 | AlphaFold                 | Structure Prediction & Docking | 1.15 | `biopipelines/alphafold.py` |
 | 21 | Boltz2 | Structure Prediction & Docking | 2.13 | `biopipelines/boltz2.py` |
-| 22 | DiffDock | Structure Prediction & Docking | 2.2 | `biopipelines/diffdock.py` |
-| 23 | DynamicBind | Structure Prediction & Docking | 2.3 | `biopipelines/dynamicbind.py` |
+| 22 | DiffDock | Structure Prediction & Docking | 2.3 | `biopipelines/diffdock.py` |
+| 23 | DynamicBind | Structure Prediction & Docking | 2.4 | `biopipelines/dynamicbind.py` |
 | 24 | ESMFold | Structure Prediction & Docking | 2.1 | `biopipelines/esmfold.py` |
 | 25 | ESMFold2 | Structure Prediction & Docking | 2.10 | `biopipelines/esmfold2.py` |
 | 26 | Gnina | Structure Prediction & Docking | 2.8 | `biopipelines/gnina.py` |
 | 27 | Vina | Structure Prediction & Docking | 2.8 | `biopipelines/gnina.py` |
-| 28 | NeuralPLexer | Structure Prediction & Docking | 2.2 | `biopipelines/neuralplexer.py` |
+| 28 | NeuralPLexer | Structure Prediction & Docking | 2.3 | `biopipelines/neuralplexer.py` |
 | 29 | OpenFold3 | Structure Prediction & Docking | 1.7 | `biopipelines/openfold3.py` |
 | 30 | PLACER | Structure Prediction & Docking | 2.3 | `biopipelines/placer.py` |
 | 31 | Protenix | Structure Prediction & Docking | 1.6 | `biopipelines/protenix.py` |

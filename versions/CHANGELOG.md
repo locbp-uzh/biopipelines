@@ -67,6 +67,12 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **DiffDock** 2.2 → 2.3. A ligand whose `smiles` cell is blank is refused by name, not handed to DiffDock as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: the string "nan" was written as the ligand of the table DiffDock reads. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
+
+- **DynamicBind** 2.3 → 2.4. A ligand whose `smiles` cell is blank is refused by name, not handed to DynamicBind as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: the string "nan" was written as the ligand of the table DynamicBind reads. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
+
+- **NeuralPLexer** 2.2 → 2.3. A ligand whose `smiles` cell is blank is refused by name, not handed to NeuralPLexer as "nan". For a ligand stream without coordinate files the script reads the `smiles` cell and refuses a ligand that has none, but a blank cell comes back from pandas as NaN, which is truthy, so the refusal never fired: a float reached RDKit and the staging died with a TypeError that names no ligand. The cell is now read through `ligand_utils.ligand_chemistry`, which reads a blank or NaN cell as empty, and the step stops naming the compound. No id changes.
+
 - **Vina** 2.7 → 2.8. Two (protein, ligand) pairs that would join to the same pair id are refused, as in Gnina, whose wrapper and pipe script it shares: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`, and one pair used to vanish with no `missing` row.
 
 - **Gnina** 2.7 → 2.8. Two (protein, ligand) pairs that would join to the same pair id are refused, when the pipeline is configured and again in the pipe script before the first dock. A `+` inside an id allows it: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`, so the two shared one docking scratch file, one `<id>_best.pdb` and one row of every table, one pair vanished with no `missing` row, and the step was marked COMPLETED.

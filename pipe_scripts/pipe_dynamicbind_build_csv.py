@@ -26,6 +26,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     iterate_files,
     iterate_values,
 )
+from biopipelines.ligand_utils import ligand_chemistry  # noqa: E402
 
 
 def collect_ligands(ds_json: str):
@@ -52,7 +53,7 @@ def collect_ligands(ds_json: str):
 
     out = []
     for lid, values in iterate_values(ds, columns=["smiles"]):
-        smiles = values.get("smiles", "")
+        smiles = ligand_chemistry(values)["smiles"]
         if not smiles:
             raise ValueError(
                 f"Compound {lid!r}: no file and no 'smiles' value in map_table"
