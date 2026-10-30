@@ -55,6 +55,20 @@ except ImportError:
     from combinatorics import predict_output_ids
 
 
+# A conformer id is its pair id with this prefix and its index appended: the id of its docking_summary row.
+CONFORMER_PREFIX = "conf"
+
+# The docking_summary columns that can rank a pair's conformers, and which end of each is the better one.
+CONFORMER_RANK_METRICS = {
+    "pseudo_binding_energy": "lower",
+    "best_vina": "lower",
+    "mean_vina": "lower",
+    "best_cnn_score": "higher",
+    "mean_cnn_affinity": "higher",
+}
+CNN_RANK_METRICS = ("best_cnn_score", "mean_cnn_affinity")
+
+
 class Gnina(BaseConfig):
     """
     GNINA molecular docking with CNN-based pose scoring.
@@ -75,7 +89,8 @@ class Gnina(BaseConfig):
           mean scores across runs, pose consistency (fraction of runs that
           converge to the same pose), and pseudo_binding_energy (best Vina +
           conformer strain energy).
-        - structures: one combined protein+ligand PDB per (protein, ligand) pair, id ``<protein>+<ligand>``.
+        - structures: one combined protein+ligand PDB per (protein, ligand) pair, id ``<protein>+<ligand>``
+          (the pair's best conformer; ``top_only=False`` keeps every conformer instead).
 
     Usage:
         with Pipeline(...):
@@ -86,7 +101,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -219,6 +234,8 @@ fi
                  protonate: bool = True,
                  pH: float = 7.4,
                  dock_timeout: Optional[int] = 1800,
+                 top_only: bool = True,
+                 rank_conformers_by: str = "auto",
                  **kwargs):
         """
         Initialize GNINA docking configuration.
@@ -308,10 +325,26 @@ fi
                 and treated as a failed run (the other runs/poses still count).
                 Set generously above a normal dock — scale it up if you raise
                 exhaustiveness. None or 0 disables the cap.
+            top_only: Keep only the best conformer of each (protein, ligand) pair as
+                ``<protein>+<ligand>`` (default). False surfaces every conformer that
+                has an accepted pose as ``<protein>+<ligand>_conf<k>``, the id of its
+                ``docking_summary`` row; how many there are is known only at run time,
+                so those ids are declared lazily. Docking mode only.
+            rank_conformers_by: The ``docking_summary`` column that picks the best
+                conformer when ``top_only`` is True. "auto" (default) is
+                ``pseudo_binding_energy`` when every posed conformer of the pair has one
+                and ``best_vina`` otherwise. Or name one: ``pseudo_binding_energy``,
+                ``best_vina`` or ``mean_vina`` (lowest wins), ``best_cnn_score`` or
+                ``mean_cnn_affinity`` (highest wins; Gnina only, and not with
+                ``cnn_scoring="none"``). A named metric is never replaced by another:
+                if a posed conformer of a pair lacks it, the step raises after writing
+                every pair it could decide. Docking mode only; not with
+                ``top_only=False``, which keeps every conformer.
 
         Output:
             mode="docking":
-                Streams: structures (.pdb) — one best-pose complex per (protein, ligand) pair, id ``<protein>+<ligand>``.
+                Streams: structures (.pdb) — one best-pose complex per (protein, ligand) pair, id ``<protein>+<ligand>``;
+                    with top_only=False one per conformer, id ``<protein>+<ligand>_conf<k>``.
                 Tables:
                     docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score | cnn_score | cnn_affinity
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
@@ -404,6 +437,10 @@ fi
         self.protonate = protonate
         self.pH = pH
 
+        # Which conformer(s) stand for a pair in the structures stream
+        self.top_only = top_only
+        self.rank_conformers_by = rank_conformers_by
+
         # Store conformer_energies table reference if provided
         self.conformer_energies_ref = None
         if conformer_energies is not None:
@@ -436,9 +473,13 @@ fi
         if not self.compounds_stream or len(self.compounds_stream) == 0:
             raise ValueError("compounds parameter is required and must not be empty")
 
+        if not isinstance(self.top_only, bool):
+            raise ValueError("top_only must be a bool")
+
         if self.mode != "docking":
             self._validate_no_search_mode()
         else:
+            self._validate_conformer_ranking()
             has_explicit_box = self.center is not None and self.size is not None
             has_autobox = self.autobox_ligand_path is not None or self.autobox_ligand_stream is not None
             if not has_explicit_box and not has_autobox:
@@ -459,6 +500,32 @@ fi
             raise ValueError("energy_window must be positive")
         if self.num_conformers <= 0:
             raise ValueError("num_conformers must be positive")
+
+    def _validate_conformer_ranking(self):
+        """Refuse a ranking metric this run cannot compute, rather than let it surface after the docking."""
+        metric = self.rank_conformers_by
+        if metric == "auto":
+            return
+        if not isinstance(metric, str) or metric not in CONFORMER_RANK_METRICS:
+            raise ValueError(
+                f"rank_conformers_by must be 'auto' or one of {list(CONFORMER_RANK_METRICS)}, got {metric!r}")
+        if not self.top_only:
+            raise ValueError(
+                "rank_conformers_by only applies with top_only=True: it picks the conformer that stands for "
+                "a pair, and top_only=False keeps every conformer.")
+        if metric in CNN_RANK_METRICS:
+            if self.backend == "vina":
+                raise ValueError(
+                    f"rank_conformers_by={metric!r} is a CNN score and Vina has no CNN, so its "
+                    f"docking_summary has no such column.")
+            if self.cnn_scoring == "none":
+                raise ValueError(
+                    f"rank_conformers_by={metric!r} needs CNN scores, and cnn_scoring='none' computes none.")
+        if metric == "pseudo_binding_energy" and not (
+                self.generate_conformers or self.conformer_energies is not None):
+            raise ValueError(
+                "rank_conformers_by='pseudo_binding_energy' needs conformer energies: set "
+                "generate_conformers=True or pass conformer_energies.")
 
     VINA_SCORING = ("vina", "vinardo", "ad4")
 
@@ -506,6 +573,8 @@ fi
             "conformer_rmsd": (self.conformer_rmsd, 1.0),
             "conformer_energies": (self.conformer_energies, None),
             "rmsd_threshold": (self.rmsd_threshold, 2.0),
+            "top_only": (self.top_only, True),
+            "rank_conformers_by": (self.rank_conformers_by, "auto"),
         }
         offenders = [name for name, (value, default) in docking_only.items()
                      if value != default]
@@ -552,6 +621,9 @@ fi
             ])
             if self.backend != "vina":
                 config_lines.append(f"CNN SCORE THRESHOLD: {self.cnn_score_threshold}")
+            config_lines.append(f"TOP ONLY: {self.top_only}")
+            if self.top_only:
+                config_lines.append(f"RANK CONFORMERS BY: {self.rank_conformers_by}")
         else:
             config_lines.append(f"AUTOBOX ADD: {self.autobox_add}")
         if self.center is not None:
@@ -637,6 +709,8 @@ fi
             "rmsd_threshold": self.rmsd_threshold,
             "protonate": self.protonate,
             "pH": self.pH,
+            "top_only": self.top_only,
+            "rank_conformers_by": self.rank_conformers_by,
             # Argv tokens, not a shell string: the pipe script appends them to the list it hands to
             # subprocess.run with no shell, so nothing re-parses them.
             "extra_args": self.extra_args_tokens(),
@@ -796,6 +870,9 @@ python {self.helper_py} {self.config_json}
                 structures=(self.structures_stream, "structures"),
                 compounds=(self.compounds_stream, "compounds"),
             )
+            if not self.top_only:
+                # The conformers that dock, and so their number, are known only at run time.
+                structure_ids = [f"{pid}[_{CONFORMER_PREFIX}<#>]" for pid in structure_ids]
         else:
             # Score/minimize scores the one ligand each complex already carries,
             # so the output keys on the complex's own id (one row per complex).
@@ -842,6 +919,8 @@ python {self.helper_py} {self.config_json}
                 "rmsd_threshold": self.rmsd_threshold,
                 "protonate": self.protonate,
                 "pH": self.pH,
+                "top_only": self.top_only,
+                "rank_conformers_by": self.rank_conformers_by,
             }
         })
         return base_dict
@@ -871,7 +950,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     ENV_NAME = "vina"
     BACKEND = "vina"
 
@@ -935,16 +1014,21 @@ fi
                  protonate: bool = True,
                  pH: float = 7.4,
                  dock_timeout: Optional[int] = 1800,
+                 top_only: bool = True,
+                 rank_conformers_by: str = "auto",
                  **kwargs):
         """AutoDock Vina docking. See Gnina for the shared argument details.
 
         Args:
             scoring: Vina scoring function — "vina" (default), "vinardo", or
                 "ad4". Replaces Gnina's cnn_scoring, which has no counterpart.
+            rank_conformers_by: As Gnina, without its CNN metrics (``best_cnn_score``
+                and ``mean_cnn_affinity``), which Vina's docking_summary does not have.
 
         Output:
             mode="docking":
-                Streams: structures (.pdb) — one best-pose complex per (protein, ligand) pair, id ``<protein>+<ligand>``.
+                Streams: structures (.pdb) — one best-pose complex per (protein, ligand) pair, id ``<protein>+<ligand>``;
+                    with top_only=False one per conformer, id ``<protein>+<ligand>_conf<k>``.
                 Tables:
                     docking_results: id | structures.id | compounds.id | conformer_id | run | pose | vina_score
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
@@ -978,5 +1062,7 @@ fi
             protonate=protonate,
             pH=pH,
             dock_timeout=dock_timeout,
+            top_only=top_only,
+            rank_conformers_by=rank_conformers_by,
             **kwargs,
         )

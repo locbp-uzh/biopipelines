@@ -42,6 +42,7 @@ from biopipelines.pdb_parser import field_atom_name, field_res_name
 from biopipelines.ligand_utils import write_ligand_sdf
 from biopipelines.id_map_utils import get_mapped_ids
 from biopipelines.combinatorics import generate_multiplied_ids, predict_single_output_id
+from biopipelines.gnina import CONFORMER_PREFIX, CONFORMER_RANK_METRICS
 
 import pipe_vina_backend as vina_backend
 
@@ -72,7 +73,7 @@ def _pair_id(protein_id, ligand_id):
 
 def _group_id(protein_id, ligand_id, conformer_id):
     """Id of a (protein, ligand, conformer) group, one row of docking_summary."""
-    return generate_multiplied_ids([_pair_id(protein_id, ligand_id)], [f"conf{conformer_id}"])[0][0]
+    return generate_multiplied_ids([_pair_id(protein_id, ligand_id)], [f"{CONFORMER_PREFIX}{conformer_id}"])[0][0]
 
 
 def _run_id(group_id, run_idx):
@@ -1028,33 +1029,45 @@ def _single_linkage_cluster(rmsd_matrix, threshold):
 # 5. Results aggregation
 # ---------------------------------------------------------------------------
 
-def _pair_winners(summary_rows, best_poses):
-    """Per pair id, the group id whose best pose stands for the pair in the structures stream.
+def _pair_winners(summary_rows, best_poses, rank_by="auto"):
+    """The group id whose best pose stands for each pair, and the pairs a named metric could not decide.
 
-    Groups are ranked by pseudo_binding_energy (best Vina plus conformer strain) when every posed group of the pair has one, else by best Vina score; the first group wins a tie.
+    Returns (winners, unrankable): `winners` maps a pair id to its winning group id, `unrankable` maps a pair id to the group ids that lack the metric. "auto" ranks by pseudo_binding_energy (best Vina plus conformer strain) when every posed group of the pair has one, else by best Vina score. A named metric is used as given, in the direction CONFORMER_RANK_METRICS records, and never replaced: a pair with a posed group that lacks it has no winner. The first group wins a tie.
     """
+    if rank_by != "auto" and rank_by not in CONFORMER_RANK_METRICS:
+        raise ValueError(f"rank_conformers_by must be 'auto' or one of {list(CONFORMER_RANK_METRICS)}, got {rank_by!r}")
     posed = defaultdict(list)
     for row in summary_rows:
         if row["id"] in best_poses:
             posed[_pair_id(row["structures.id"], row["compounds.id"])].append(row)
-    winners = {}
+    winners, unrankable = {}, {}
     for pair_id, rows in posed.items():
-        column = ("pseudo_binding_energy"
-                  if all(r["pseudo_binding_energy"] != "" for r in rows) else "best_vina")
-        winners[pair_id] = min(rows, key=lambda r: r[column])["id"]
-    return winners
+        if rank_by == "auto":
+            column = ("pseudo_binding_energy"
+                      if all(r["pseudo_binding_energy"] != "" for r in rows) else "best_vina")
+        else:
+            column = rank_by
+            lacking = [r["id"] for r in rows if r.get(column, "") == ""]
+            if lacking:
+                unrankable[pair_id] = lacking
+                continue
+        pick = min if CONFORMER_RANK_METRICS.get(column, "lower") == "lower" else max
+        winners[pair_id] = pick(rows, key=lambda r: r[column])["id"]
+    return winners, unrankable
 
 
 def aggregate_results(all_poses, conformers, consistency, config, prepared_proteins):
     """
     Aggregate results into docking_results.csv and docking_summary.csv.
 
-    Also writes each group's best pose as a combined protein+ligand PDB file: the pair's winning conformer into the structures folder as <pair id>_best.pdb, every other conformer under conformer_poses/.
+    Also writes each group's best pose as a combined protein+ligand PDB file. With top_only the pair's winning conformer goes into the structures folder as <pair id>_best.pdb and every other conformer under conformer_poses/; without it every conformer goes there as <summary id>_best.pdb. A pair that a named rank_conformers_by metric cannot decide gets no stream entry, its conformers go under conformer_poses/, and the step raises once everything else is written.
     """
     output_folder = config["output_folder"]
     docking_results_csv = config["docking_results_csv"]
     docking_summary_csv = config["docking_summary_csv"]
     is_vina = config["backend"] == "vina"
+    top_only = config["top_only"]
+    rank_by = config["rank_conformers_by"]
     cnn_pose_cols = [] if is_vina else ["cnn_score", "cnn_affinity"]
 
     results_cols = ["id", "structures.id", "compounds.id", "conformer_id",
@@ -1150,15 +1163,16 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
         })
         summary_rows.append(row)
 
-    winners = _pair_winners(summary_rows, best_poses)
+    winners, unrankable = _pair_winners(summary_rows, best_poses, rank_by) if top_only else ({}, {})
     map_rows = []
     for row in summary_rows:
         best_pose = best_poses.get(row["id"])
         if best_pose is None:
             continue
         pair_id = _pair_id(row["structures.id"], row["compounds.id"])
-        is_winner = winners[pair_id] == row["id"]
-        dst_pdb = (os.path.join(best_poses_dir, f"{pair_id}_best.pdb") if is_winner
+        is_winner = winners.get(pair_id) == row["id"] if top_only else True
+        stream_id = pair_id if top_only else row["id"]
+        dst_pdb = (os.path.join(best_poses_dir, f"{stream_id}_best.pdb") if is_winner
                    else os.path.join(conformer_poses_dir, f"{row['id']}_best.pdb"))
         prot_info = prepared_proteins.get(row["structures.id"], {})
         protein_pdb = prot_info.get("protein") if isinstance(prot_info, dict) else prot_info
@@ -1167,7 +1181,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             _write_complex_pdb(protein_pdb, best_pose["sdf_file"], best_pose["pose"], dst_pdb)
             row["best_pose_file"] = dst_pdb
             if is_winner:
-                map_rows.append({"id": pair_id, "file": dst_pdb,
+                map_rows.append({"id": stream_id, "file": dst_pdb,
                                  "structures.id": row["structures.id"],
                                  "compounds.id": row["compounds.id"]})
 
@@ -1188,6 +1202,12 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
             structures_map, index=False
         )
         print(f"Wrote structures map: {structures_map} ({len(map_rows)} rows)")
+
+    if unrankable:
+        lacking = "; ".join(f"{pair_id} ({', '.join(ids)})" for pair_id, ids in unrankable.items())
+        raise ValueError(
+            f"rank_conformers_by={rank_by!r} has no value for a posed conformer of {len(unrankable)} pair(s), "
+            f"so they have no entry in the structures stream: {lacking}")
 
 
 def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):

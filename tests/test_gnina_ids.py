@@ -91,6 +91,7 @@ def _dock(pipe_gnina, monkeypatch, tmp_path, proteins, conformers, scores, num_r
         "docking_results_csv": str(tmp_path / "docking_results.csv"),
         "docking_summary_csv": str(tmp_path / "docking_summary.csv"),
         "structures_map": str(tmp_path / "structures_map.csv"),
+        "top_only": True, "rank_conformers_by": "auto",
     }
 
     fake = _FakeGnina(scores)

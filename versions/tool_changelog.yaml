@@ -905,8 +905,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-10-30'
+    note: >-
+      The conformer that stands for a pair is a parameter. `rank_conformers_by` names the `docking_summary` column that picks it (`pseudo_binding_energy`, `best_vina`, `mean_vina`: lowest wins; `best_cnn_score`, `mean_cnn_affinity`: highest wins), and `"auto"`, the default, is the rule of 2.3 and 2.4: `pseudo_binding_energy` when every posed conformer of the pair has one, else `best_vina`. A named metric is never replaced by another: an unknown name, a CNN metric with `cnn_scoring="none"`, and `pseudo_binding_energy` without conformer energies are refused at construction, and a posed conformer that lacks the metric at run time makes the step raise after every pair it could decide is written. `top_only=False` surfaces every conformer that has an accepted pose as `<protein>+<ligand>_conf<k>`, the id of its `docking_summary` row, written as `<id>_best.pdb` in the structures folder; how many dock is known only at run time, so the declared ids are the lazy `<protein>+<ligand>[_conf<#>]`. Both are refused outside `mode="docking"`, and `rank_conformers_by` is refused with `top_only=False`, which keeps every conformer.
   - version: '2.4'
     date: '2026-10-30'
     note: >-
@@ -965,8 +969,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-10-30'
+    note: >-
+      `rank_conformers_by` and `top_only`, as in Gnina, which it shares its pipe script with: the metric that picks the conformer standing for a pair (`pseudo_binding_energy`, `best_vina`, `mean_vina`, lowest wins; `"auto"` keeps the rule of 2.3 and 2.4), and `top_only=False` to surface every conformer as `<protein>+<ligand>_conf<k>` under the lazy declared id `<protein>+<ligand>[_conf<#>]`. Vina has no CNN, so naming `best_cnn_score` or `mean_cnn_affinity` raises.
   - version: '2.4'
     date: '2026-10-30'
     note: >-

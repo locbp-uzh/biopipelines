@@ -466,7 +466,7 @@ Molecular docking and pose scoring with a CNN. Combines AutoDock Vina search wit
 - `"score"` — no search. Score the ligand exactly where it already sits in the input complex (`gnina --score_only`). Use this to get GNINA's Vina/CNN scores for an already-posed complex (a Boltz2 co-fold, a crystal pose, or a Gnina docking output) without re-docking.
 - `"minimize"` — local energy minimization of the in-pocket pose, then score (`gnina --minimize`). Same inputs as `"score"`; emits the refined pose.
 
-In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETATM records (identified by the `compounds` residue code), bond-order-templated against its SMILES, and autoboxed on its own location (`autobox_add` padding). The `compounds` stream **must carry SMILES** in these modes — a code-only `Ligand`/`ligand="LIG"` string is rejected (no chemistry to template bond orders from). The docking-only parameters (`center`, `size`, `autobox_ligand`, `exhaustiveness`, `num_modes`, `num_runs`, `generate_conformers` and the conformer knobs, `rmsd_threshold`) must stay at their defaults outside `"docking"` mode — setting one raises.
+In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETATM records (identified by the `compounds` residue code), bond-order-templated against its SMILES, and autoboxed on its own location (`autobox_add` padding). The `compounds` stream **must carry SMILES** in these modes — a code-only `Ligand`/`ligand="LIG"` string is rejected (no chemistry to template bond orders from). The docking-only parameters (`center`, `size`, `autobox_ligand`, `exhaustiveness`, `num_modes`, `num_runs`, `generate_conformers` and the conformer knobs, `rmsd_threshold`, `top_only`, `rank_conformers_by`) must stay at their defaults outside `"docking"` mode — setting one raises.
 
 **Tags**: dock, predict-property, protein, small-molecule, pocket, binding, energy
 
@@ -499,8 +499,10 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 - `rmsd_threshold`: float = 2.0 - RMSD cutoff (Angstroms) for pose consistency clustering
 - `protonate`: bool = True - Add hydrogens with OpenBabel before docking
 - `pH`: float = 7.4 - Protonation pH
+- `top_only`: bool = True - keep only the best conformer of each (protein, ligand) pair as `<protein>+<ligand>`. False surfaces every conformer that has an accepted pose as `<protein>+<ligand>_conf<k>`, the id of its `docking_summary` row. Docking mode only.
+- `rank_conformers_by`: str = "auto" - the `docking_summary` column that picks the best conformer when `top_only` is True. `"auto"` is `pseudo_binding_energy` when every posed conformer of the pair has one and `best_vina` otherwise. Or name one: `pseudo_binding_energy`, `best_vina` or `mean_vina` (lowest wins), `best_cnn_score` or `mean_cnn_affinity` (highest wins; not with `cnn_scoring="none"`). A named metric is never replaced by another: if a posed conformer of a pair lacks it, the step raises after writing every pair it could decide. An unknown name, `pseudo_binding_energy` without `generate_conformers` or `conformer_energies`, and any value other than `"auto"` together with `top_only=False` are refused at construction. Docking mode only.
 
-**Streams**: `structures` (combined protein+ligand PDB files). In `docking` mode one entry per (protein, ligand) pair under the id `<protein>+<ligand>`, the best pose of the pair's best conformer, written as `<id>_best.pdb`; in `score`/`minimize` mode the scored pose under the complex's own id, written as `<id>_score.pdb` or `<id>_minimize.pdb`.
+**Streams**: `structures` (combined protein+ligand PDB files). In `docking` mode with `top_only=True` one entry per (protein, ligand) pair under the id `<protein>+<ligand>`, the best pose of the pair's best conformer, written as `<id>_best.pdb`. With `top_only=False` one entry per conformer that has an accepted pose, under `<protein>+<ligand>_conf<k>` (the `docking_summary` id of that conformer), written as `<id>_best.pdb`; how many conformers dock is known only at run time (a generated set is filtered by energy and clustered by RMSD), so these ids are declared lazily as `<protein>+<ligand>[_conf<#>]`, and a conformer without an accepted pose has no entry. In `score`/`minimize` mode the scored pose under the complex's own id, written as `<id>_score.pdb` or `<id>_minimize.pdb`.
 
 **Tables** (`mode="docking"`):
 - `docking_results` - One row per accepted pose across all runs:
@@ -522,7 +524,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   - `pose_consistency`: fraction of runs whose best pose clusters together by RMSD. Measures reproducibility (1.0 = all runs converge).
   - `conformer_energy`: MMFF94 relative strain energy (only with `generate_conformers=True`).
   - `pseudo_binding_energy`: `best_vina + conformer_energy`. Penalizes Vina score by conformer strain. Only populated when conformer generation is enabled.
-  - `best_pose_file`: the complex PDB of the group's best pose (lowest Vina score over its runs). The structures stream holds one file per pair, so among a pair's conformers the one with the lowest `pseudo_binding_energy` (lowest `best_vina` when a conformer has no energy) is written to `structures/<protein>+<ligand>_best.pdb`; the other conformers' files go to `execution/conformer_poses/<summary id>_best.pdb`.
+  - `best_pose_file`: the complex PDB of the group's best pose (lowest Vina score over its runs). With `top_only=True` the structures stream holds one file per pair, so among a pair's conformers the one `rank_conformers_by` picks (by default the lowest `pseudo_binding_energy`, the lowest `best_vina` when a conformer has no energy) is written to `structures/<protein>+<ligand>_best.pdb`; the other conformers' files go to `execution/conformer_poses/<summary id>_best.pdb`. With `top_only=False` every conformer's file is `structures/<summary id>_best.pdb` and `conformer_poses/` is not written.
 
 **Tables** (`mode="score"` / `"minimize"`):
 - `scores` - One row per scored complex; empty cells where GNINA did not emit that term for the chosen `cnn_scoring`:
@@ -563,6 +565,11 @@ docked = Gnina(
     exhaustiveness=64
 )
 
+# Pick each pair's conformer by its CNN score instead of the default, or keep every conformer
+best_by_cnn = Gnina(structures=boltz, compounds=compound_library, generate_conformers=True,
+                    rank_conformers_by="best_cnn_score")
+every_conformer = Gnina(structures=boltz, compounds=compound_library, generate_conformers=True, top_only=False)
+
 # Score an already-posed complex without docking (e.g. a Boltz2 co-fold)
 boltz = Boltz2(proteins=poi, ligands=Ligand("STI"))
 scored = Gnina(structures=boltz, compounds=Ligand("STI"), mode="score")
@@ -593,9 +600,9 @@ Vina reads and writes PDBQT only, so the wrapper converts the receptor and ligan
 
 **Installation**: Creates the `vina` env from conda-forge; no binary download.
 
-**Parameters**: as `Gnina`, except `cnn_scoring` / `cnn_score_threshold` are absent and `scoring: str = "vina"` is added.
+**Parameters**: as `Gnina`, except `cnn_scoring` / `cnn_score_threshold` are absent and `scoring: str = "vina"` is added. `top_only` and `rank_conformers_by` are as in Gnina, but `rank_conformers_by` cannot name `best_cnn_score` or `mean_cnn_affinity`: Vina's `docking_summary` has no such column, and naming one raises.
 
-**Streams**: `structures` (combined protein+ligand PDB files), under the same ids as [Gnina](#gnina): `<protein>+<ligand>` in `docking` mode, the complex's own id in `score`/`minimize` mode.
+**Streams**: `structures` (combined protein+ligand PDB files), under the same ids as [Gnina](#gnina): `<protein>+<ligand>` in `docking` mode (`<protein>+<ligand>_conf<k>` with `top_only=False`), the complex's own id in `score`/`minimize` mode.
 
 **Tables** (`mode="docking"`):
 - `docking_results` — one row per accepted pose, id `<protein>+<ligand>_conf<k>_r<run>_p<pose>`: | id | structures.id | compounds.id | conformer_id | run | pose | vina_score |
