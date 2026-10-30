@@ -2,26 +2,23 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
-"""Pair ids and the rows that name them, for the tools that take a protein and a ligand.
+"""Pair ids and the rows that name them, for the tools that take a protein and a ligand or a pair table.
 
 The repo rule is that an output id and its provenance are produced only by `combinatorics.py`.
-Here: the Gnina/Vina `missing` rows named the wrong step, PocketGen and PLACER joined a pair id by
-hand and recovered its parts with a split on `+`, and HBDesigner built its rank ids by hand in the
-collector while the wrapper declares them through the shared multiplier.
+Here: the Gnina/Vina `missing` rows named the wrong step, USalign and TMalign let two rows share an
+id, and PocketGen joined a pair id by hand and recovered its parts with a split on `+`.
+PLACER, Gnina's conformer choice and HBDesigner have files of their own.
 
 Nothing here runs a model or a cluster job; the pipe scripts are driven on synthetic inputs.
 """
 
 import importlib.util
-import json
 import os
 import re
 import subprocess
 import sys
 
 import pytest
-
-from biopipelines import combinatorics as cb
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
