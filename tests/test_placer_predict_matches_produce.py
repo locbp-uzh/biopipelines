@@ -4,11 +4,11 @@
 
 """What PLACER declares it will produce is what its driver produces.
 
-`get_output_files` predicts ids through `predict_output_ids_with_provenance`, which honors `Bundle` and `Each`, while `pipe_placer_driver.py` composes them with a nested loop over the two axes. That pairing is what broke Mock: a hand-rolled product has no notion of bundle versus each, so a bundled axis iterated where it should have contributed one collapsed prefix, and the completion check marked the step FAILED.
+`get_output_files` predicts ids through `predict_output_ids_with_provenance`, which honors `Bundle` and `Each`, while `pipe_placer_driver.py` composes them with `predict_single_output_id` in a nested loop over the two axes. That pairing is what broke Mock: a loop over every axis has no notion of bundle versus each, so a bundled axis iterated where it should have contributed one collapsed prefix, and the completion check marked the step FAILED.
 
-PLACER cannot reach that state, and these cases pin the two independent reasons why. First, the constructor's type gate accepts only a `DataStream` or a `StandardizedOutput`, so a wrapper on either axis is refused before any prediction happens -- both axes are therefore always `each`, and for two iterated axes a flat product is exactly what the framework composer produces. Second, predict and produce are asserted equal on the reachable combinations, including the no-ligand degradation to a bare structure id.
+PLACER cannot reach that state, and these cases pin the two independent reasons why. First, the constructor's type gate accepts only a `DataStream` or a `StandardizedOutput`, so a wrapper on either axis is refused before any prediction happens -- both axes are therefore always `each`, and for two iterated axes the loop over them is exactly the framework composition. Second, predict and produce are asserted equal on the reachable combinations, including the no-ligand degradation to a bare structure id.
 
-The rejection assertions are the alarm, not a preference: if PLACER ever widens that gate to take `Bundle`, the flat product in the driver becomes wrong on the spot and these tests are what say so. The fix at that point is Mock's -- record each axis's mode in the config and call `predict_single_output_id` from `compose_output_id`.
+The rejection assertions are the alarm, not a preference: if PLACER ever widens that gate to take `Bundle`, the loop in the driver becomes wrong on the spot and these tests are what say so. The fix at that point is Mock's -- record each axis's mode in the config and pass it to `predict_single_output_id` from `compose_output_id`.
 """
 
 import importlib.util

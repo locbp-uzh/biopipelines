@@ -16,7 +16,8 @@ upstream's canonical artefacts into the runs folder:
                                    ligand mode also prmsd, rmsd, kabsch, lddt)
 
 `unit_id` is `<structure>+<ligand>` in ligand mode and `<structure>` in
-sidechain/apo mode (no ligand axis).
+sidechain/apo mode (no ligand axis). The driver's `units.json` gives the parents
+of every unit, which are read from it by exact id and never recovered from the id.
 
 This script flattens those into BioPipelines streams:
 
@@ -32,6 +33,7 @@ This script flattens those into BioPipelines streams:
 
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -40,6 +42,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_values, step_id_from_table_path  # noqa: E402
+from biopipelines.combinatorics import generate_multiplied_ids  # noqa: E402
 
 # Score columns we surface, per mode, in this order. dump_output may emit a
 # subset; any missing column is left blank. Apo/sidechain runs do not predict a
@@ -78,16 +81,10 @@ def split_multimodel_pdb(path):
             buf.append(line)
 
 
-def parse_unit_id(unit_id, mode):
-    """Split a driver output id into (struct_id, lig_id). In ligand mode the id
-    is '<structure>+<ligand>'; in sidechain mode it is just '<structure>' and
-    lig_id is None."""
-    if mode == "ligand":
-        if "+" not in unit_id:
-            raise ValueError(f"run {unit_id!r} is not a '<structure>+<ligand>' pair")
-        struct_id, lig_id = unit_id.split("+", 1)
-        return struct_id, lig_id
-    return unit_id, None
+def load_units(runs_folder):
+    """{unit id: {"structures.id": ..., "compounds.id": ...}} as the driver wrote it."""
+    with open(os.path.join(runs_folder, "units.json")) as handle:
+        return json.load(handle)
 
 
 def load_scores(csv_path, score_columns):
@@ -172,21 +169,24 @@ def main():
     missing_rows = []
     step_id = step_id_from_table_path(args.missing_csv)
 
+    units = load_units(args.runs_folder)
+    unknown = [fname[: -len("_model.pdb")] for fname in model_pdbs if fname[: -len("_model.pdb")] not in units]
+    if unknown:
+        print(f"ERROR: run(s) that units.json does not list: {unknown}", file=sys.stderr)
+        sys.exit(1)
+
     for fname in model_pdbs:
         unit_id = fname[: -len("_model.pdb")]
-        struct_id, lig_id = parse_unit_id(unit_id, args.mode)
         model_path = os.path.join(args.runs_folder, fname)
         scores_path = os.path.join(args.runs_folder, f"{unit_id}.csv")
 
         scores_by_idx = load_scores(scores_path, score_columns) if os.path.isfile(scores_path) else {}
 
-        prov = {"structures.id": struct_id}
-        if is_ligand:
-            prov["compounds.id"] = lig_id
+        prov = {col: units[unit_id][col] for col in prov_cols}
 
         n_models = 0
         for model_n, pdb_text in split_multimodel_pdb(model_path):
-            out_id = f"{unit_id}_{model_n}"
+            out_id = generate_multiplied_ids([unit_id], [str(model_n)])[0][0]
             dst_pdb = os.path.join(args.structures_folder, f"{out_id}.pdb")
             with open(dst_pdb, "w") as f:
                 f.write(pdb_text)

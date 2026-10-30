@@ -111,7 +111,7 @@ class PLACER(BaseConfig):
     """
 
     TOOL_NAME = "PLACER"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "placer"
 
     RERANK_CHOICES = ("prmsd", "plddt", "plddt_pde")

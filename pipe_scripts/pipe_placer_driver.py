@@ -36,6 +36,9 @@ Common flow per input::
     {runs}/{out_id}_model.pdb   — all N models concatenated (MODEL/ENDMDL)
     {runs}/{out_id}.csv         — per-model scores
 
+The driver also writes {runs}/units.json, the parents of every out_id, which the
+post-processing reads by exact id.
+
 The post-processing step (biopipelines env) splits the multi-model PDB into
 per-sample files and builds the BioPipelines streams.
 """
@@ -47,6 +50,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from biopipelines.biopipelines_io import load_datastream, iterate_files  # noqa: E402
+from biopipelines.combinatorics import predict_single_output_id, predict_single_provenance  # noqa: E402
 from biopipelines.ligand_utils import resolve_ligand_code  # noqa: E402
 from biopipelines.pdb_parser import field_res_name, field_res_seq  # noqa: E402
 
@@ -119,12 +123,39 @@ def _atom_sel_to_placer_tuple(sel, struct_path):
     raise ValueError(f"bond atom selection {sel!r} matched no residue in {struct_path}")
 
 
+def _axes(struct_id, lig_id):
+    """The axis selections of one run: both axes are iterated, and the ligand axis is absent in sidechain/apo mode."""
+    axes = {"structures": ("each", [struct_id], 0, [], False)}
+    if lig_id is not None:
+        axes["compounds"] = ("each", [lig_id], 0, [], False)
+    return axes
+
+
 def compose_output_id(struct_id, lig_id):
     """Compose one output id from a (structure, ligand) selection, `lig_id=None` in sidechain/apo mode.
 
-    Both axes are always iterated: PLACER's constructor accepts only a DataStream or a StandardizedOutput, so a `Bundle`/`Each` wrapper is refused before any of this runs and neither axis can ask to collapse into a single prefix. That is why a flat product is correct here and no per-axis mode is carried in from configuration time. If PLACER ever learns to take a wrapper, this is the one place to switch over to `biopipelines.combinatorics.predict_single_output_id`, which is what `get_output_files` already predicts through.
+    Both axes are always iterated: PLACER's constructor accepts only a DataStream or a StandardizedOutput, so a `Bundle`/`Each` wrapper is refused before any of this runs and neither axis can ask to collapse into a single prefix, and no per-axis mode is carried in from configuration time. The id is the shared composition `get_output_files` predicts through. If PLACER ever learns to take a wrapper, the axis modes have to come from the configuration here.
     """
-    return f"{struct_id}+{lig_id}" if lig_id is not None else struct_id
+    return predict_single_output_id(**_axes(struct_id, lig_id))
+
+
+def unit_manifest(structure_ids, ligand_ids):
+    """{run id: {"structures.id": ..., "compounds.id": ...}} for every (structure, ligand) run, `ligand_ids=[None]` in sidechain/apo mode.
+
+    The post-processing reads a run's parents from this by exact id instead of splitting the id. Two runs that compose to one id are refused, since they would write the same files.
+    """
+    manifest, owner = {}, {}
+    for struct_id in structure_ids:
+        for lig_id in ligand_ids:
+            unit_id = compose_output_id(struct_id, lig_id)
+            if unit_id in owner:
+                raise ValueError(
+                    f"the runs {owner[unit_id]} and {(struct_id, lig_id)} both have the id {unit_id!r}, because an "
+                    f"id contains '+'; rename one so that the run ids are distinct")
+            owner[unit_id] = (struct_id, lig_id)
+            manifest[unit_id] = {f"{axis}.id": value
+                                 for axis, value in predict_single_provenance(**_axes(struct_id, lig_id)).items()}
+    return manifest
 
 
 def parse_target_res(s):
@@ -199,6 +230,8 @@ def main():
         print(f"Covalent bonds to enforce: {bond_specs}")
 
     os.makedirs(args.runs_folder, exist_ok=True)
+    with open(os.path.join(args.runs_folder, "units.json"), "w") as handle:
+        json.dump(unit_manifest([sid for sid, _ in structures], ligand_ids), handle)
 
     # Load the model once; reuse across inputs.
     placer = PLACER.PLACER()

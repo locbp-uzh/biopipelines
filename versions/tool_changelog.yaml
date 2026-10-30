@@ -1656,8 +1656,12 @@ PLACER:
   - biopipelines/placer.py
   - pipe_scripts/pipe_placer_driver.py
   - pipe_scripts/pipe_placer_postprocess.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-10-30'
+    note: >-
+      The driver writes `units.json` with the structure and ligand ids of every run, and the post-processing reads them by exact run id. It used to split the run id on its first `+`, so a structure id holding one (a complex that is itself a pair, `a+b`) put `a` in `structures.id` and `b+<ligand>` in `compounds.id` of the structures map and the scores table. The run id is composed by `predict_single_output_id` and the sample id by `generate_multiplied_ids`, as the wrapper declares them, and two runs that compose to one id (`a+b`+`c` and `a`+`b+c`) are refused before the model loads, since they would write the same files. No id changes.
   - version: '2.1'
     date: '2026-09-04'
     note: >-
