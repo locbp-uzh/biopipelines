@@ -65,7 +65,9 @@ class PocketGen(BaseConfig):
 
     GPU: request ``Resources(gpu="A100")``. The environment's torch (1.13.1+cu117)
     lists kernels up to sm_86 only and warns that an H100 (sm_90) is not
-    compatible. ``gpu="any"`` can land on an H100.
+    compatible. ``gpu="any"`` can land on an H100. ``RESOURCE_REQUIREMENTS``
+    declares the Hopper models (H100, H200, GH200) as unsupported, and generating
+    the batch scripts warns when the request is one of them or may land on one.
 
     Outputs:
         Streams:
@@ -86,7 +88,8 @@ class PocketGen(BaseConfig):
     """
 
     TOOL_NAME = "PocketGen"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
+    RESOURCE_REQUIREMENTS = {"gpu": {"incompatible": ["H100", "H200", "GH200"], "use": "A100"}}
     ENV_NAME = "pocketgen"
 
     # ------------------------------------------------------------------

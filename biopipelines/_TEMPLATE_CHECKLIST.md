@@ -16,6 +16,7 @@ Before editing, classify the tool based on the following:
 
 ## 2. Identity & docstring
 - [ ] `TOOL_NAME` unique; `TOOL_VERSION` set.
+- [ ] If a run, a build log or upstream says the tool does not run on some GPU model, declare it in `RESOURCE_REQUIREMENTS` (see the developer manual) and say why in the docstring.
 - [ ] `ENV_NAME` declared (the env this tool builds and runs in), unless the tool installs nothing and lives in the `biopipelines` env. **Nothing catches its absence** — not the pre-commit hook, not CI — the tool simply fails to install. Note it is the tool's *default* name, not the authoritative one: `_install_env` reads the `environments:` entry from the active config (see §3 and §9) and only falls back to `ENV_NAME` under `env_manager: pip`.
 - [ ] Class docstring documents every input param and every output stream/table *with columns*. 
 

@@ -54,6 +54,18 @@ machine:
     - "miniforge3"
     - "apptainer"
 
+  # GPU models the machine offers, model -> memory. A tool that declares the GPUs it does
+  # not support (RESOURCE_REQUIREMENTS) is warned about when Resources(gpu=...) can put it
+  # on one: a request that names a model is judged by name, a request that does not
+  # (any, 80GB, !L4, 32GB|80GB) is judged against this list. Leave the memory empty where it
+  # is not known: such a model can be the answer to any memory request. Without this key
+  # only a request that names a model is judged.
+  gpu_models:
+    L4:
+    A100:
+    H100:
+    H200: "140GB"
+
   # Container executor: "apptainer" or "singularity" or "none"
   # Used for tools that run inside containers (e.g., RFdiffusionAllAtom)
   container_executor: "apptainer"

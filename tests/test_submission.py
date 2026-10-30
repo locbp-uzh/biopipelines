@@ -167,12 +167,69 @@ class TestSummarize:
         assert "Nothing has run yet" in text, (
             "the scheduler accepting a job is not the job succeeding")
 
+    def test_a_clean_submission_reads_as_it_always_did(self):
+        text = submission.summarize({**submission.parse(SUCCESS), "output": SUCCESS}, host="cluster")
+        assert text == (
+            "Submitted on cluster: 1 run(s), 2 scheduler job(s).\n"
+            "  /shares/x/Bio/Proj/foo_003\n"
+            "  job ids: 4711, 4712\n"
+            "\nNothing has run yet — poll with bp_status once the scheduler starts it.")
+
+    def test_the_warning_lines_of_submit_reach_the_reader_of_a_successful_submission(self):
+        """`./submit` prints `Warning: ...` while it generates the batch scripts; a success used to show only the job ids."""
+        output = SUCCESS.replace(
+            "Detected multi-batch pipeline\n",
+            "Warning: DynamicBind: Resources(gpu=\"any\") may land on H100, which DynamicBind does not support.\n"
+            "Detected multi-batch pipeline\n"
+            "  Warning: Resources(gpu=\"any\") inherited\n"
+            "Warning: DynamicBind: Resources(gpu=\"any\") may land on H100, which DynamicBind does not support.\n")
+
+        text = submission.summarize({**submission.parse(output), "output": output}, host="cluster")
+
+        assert text.count("may land on H100") == 1, "a line repeated by ./submit is shown once"
+        assert "Resources(gpu=\"any\") inherited" in text
+        assert text.index("job ids: 4711, 4712") < text.index("Warning") < text.index("Nothing has run yet")
+
+    def test_the_text_of_the_warnings_is_not_changed(self):
+        output = SUCCESS + "Warning: first line\nWarning: second line\n"
+        text = submission.summarize({**submission.parse(output), "output": output}, host="cluster")
+        assert "  Warning: first line\n  Warning: second line" in text
+
+    def test_a_line_that_only_mentions_a_warning_is_not_one(self):
+        output = SUCCESS + "Checking for Warning: signs\nNo Warning: here either\n"
+        text = submission.summarize({**submission.parse(output), "output": output}, host="cluster")
+        assert "Warning" not in text
+
     def test_failure_shows_the_reason_and_the_tail(self):
         text = submission.summarize({**submission.parse(SUB_FAILED), "output": SUB_FAILED},
                                     host="cluster")
         assert "Submission failed on cluster" in text
         assert "Invalid partition name" in text
         assert "Last lines of ./submit" in text
+
+
+NEWLINE = chr(10)
+
+
+class TestSubmitShowsTheWarningsOfGeneration:
+    """`./submit` hides the pipeline's own output unless -v; the warnings have to come through that filter."""
+
+    def test_the_warning_lines_pass_the_non_verbose_filter_once_and_in_order(self):
+        import shutil
+        import subprocess
+        from pathlib import Path
+
+        if shutil.which("bash") is None:
+            pytest.skip("bash is needed to run the filter of ./submit")
+        script = (Path(__file__).parent.parent / "submit").read_text(encoding="utf-8")
+        line = next(l.strip() for l in script.splitlines() if l.strip().startswith("local warning_output="))
+        generation = NEWLINE.join(["Pipeline: foo", "Warning: first", "Batch 1: Tools 1-1", "  Warning: second",
+                                   "Warning: first", "not a Warning: line"])
+
+        harness = NEWLINE.join(['filter() {', 'local pipeline_output="$1"', line, 'echo "$warning_output"', '}', 'filter "$1"'])
+        done = subprocess.run(["bash", "-c", harness, "_", generation], capture_output=True, text=True)
+
+        assert done.stdout.splitlines() == ["Warning: first", "  Warning: second"]
 
 
 def test_read_only_tools_write_nothing_to_the_log(tmp_path):

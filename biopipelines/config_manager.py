@@ -817,6 +817,21 @@ class ConfigManager:
         value = self._get_machine_config().get('gpus_per_node')
         return int(value) if value else None
 
+    def get_gpu_models(self) -> Dict[str, str]:
+        """The GPU models the machine offers, ``{model: memory}``; empty when ``machine.gpu_models`` is absent.
+
+        A model whose memory the config does not state maps to "". Used to judge a request that does not pin a
+        model (``any``, ``80GB``, ``!X``) against the GPUs a tool does not support.
+        """
+        value = self._get_machine_config().get('gpu_models')
+        if not value:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"machine.gpu_models must map a GPU model to its memory (leave the memory empty if unknown), "
+                f"e.g. {{A100: '', H200: '140GB'}}; got {type(value).__name__}.")
+        return {str(model): ("" if memory is None else str(memory)) for model, memory in value.items()}
+
     def get_node_exclusive(self) -> bool:
         """True when the scheduler allocates whole nodes to a job.
 

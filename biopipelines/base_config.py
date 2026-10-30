@@ -236,12 +236,14 @@ try:
     from .config_manager import ConfigManager
     from .file_paths import Path
     from . import contract_enforcement
+    from .resource_requirements import validate_requirements
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from config_manager import ConfigManager
     from file_paths import Path
     import contract_enforcement
+    from resource_requirements import validate_requirements
 
 
 
@@ -295,6 +297,9 @@ class BaseConfig(ABC):
     # "" = off. Set to a dialect from EXTRA_ARGS_DIALECTS to declare that this tool renders constructor kwargs it does not type onto its upstream command line, so an advanced user can reach an upstream option the wrapper never curated.
     FORWARD_UNKNOWN_KWARGS = ""
 
+    # What this tool needs from the machine, e.g. {"gpu": {"incompatible": ["H100"], "use": "A100"}}. Empty = no requirement. Only "gpu" is read: when the batch's Resources(gpu=...) can put the tool on a model it does not support, generating the batch scripts warns (see resource_requirements.py). Not the instance attribute `resources`, which is the batch's own request.
+    RESOURCE_REQUIREMENTS: Dict[str, Dict[str, Any]] = {}
+
     # {alternative spelling: current parameter name}. A renamed parameter keeps its old spelling here so a pipeline written against it still binds the new parameter; a synonym a user reasonably expects (RFdiffusion3's `contigs`, the plural its three sibling tools take) is declared the same way. Resolved before the constructor binds its parameters — see _resolve_parameter_aliases.
     PARAMETER_ALIASES: Dict[str, str] = {}
 
@@ -329,6 +334,7 @@ class BaseConfig(ABC):
         Wrapping here rather than at each of the ~90 call sites is what lets a DataStream stay constructible standalone while still naming its tool.
         """
         super().__init_subclass__(**kwargs)
+        validate_requirements(cls.TOOL_NAME, cls.RESOURCE_REQUIREMENTS)
         if cls.FORWARD_UNKNOWN_KWARGS:
             if cls.FORWARD_UNKNOWN_KWARGS not in EXTRA_ARGS_DIALECTS:
                 raise ValueError(

@@ -24,6 +24,7 @@
   - [Required Methods](#required-methods)
   - [Renaming a Parameter: `PARAMETER_ALIASES`](#renaming-a-parameter-parameter_aliases)
   - [Forwarding Untyped Kwargs: `FORWARD_UNKNOWN_KWARGS`](#forwarding-untyped-kwargs-forward_unknown_kwargs)
+  - [Declaring What a Tool Needs: `RESOURCE_REQUIREMENTS`](#declaring-what-a-tool-needs-resource_requirements)
   - [Path Descriptors](#path-descriptors)
   - [Script Generation](#script-generation)
   - [Output Prediction](#output-prediction)
@@ -780,6 +781,23 @@ self.extra_args_bash_tokens()                          # each token double-quote
 **The trade you are making.** Forwarding turns a configuration-time report into a runtime failure. A non-forwarding tool answers `MyTool(num_desgins=8)` at the user's desk with `[contract:unknown_kwargs] … did you mean 'num_designs'?`; a forwarding tool renders `--num_desgins 8` as written, and the complaint arrives from upstream, on a compute node, after the queue. Only the typo check survives the switch: `check_probable_typo` still names a key within the similarity cutoff of a real parameter name, because a near-miss is almost certainly a misspelling either way — but a key that resembles nothing is passed through unvalidated, since the wrapper has no model of the upstream parser to check it against. So the marker is a good trade on a large, stable option surface where the curated subset will always be a fraction of what upstream accepts, and a bad one on a tool with two or three flags, where typing the third flag is less work than the failure mode.
 
 **Shell safety.** Every forwarded key and value goes through `_validate_extra_arg` at construction. Keys are checked against `_SAFE_EXTRA_KEY_RE` in `base_config.py`, so a key that is not a plain Python identifier — a dotted hydra override such as `denoiser.noise_scale_ca` — reaches the constructor only as `Tool(**{"denoiser.noise_scale_ca": 0.5})`; check that regex before assuming a given upstream flag has a keyword spelling at all. Values refuse the four characters that break double-quoted interpolation — `"`, `` ` ``, `$`, backslash — and also `;`, `|`, `&`, `<`, `>`, `(`, `)`, CR and LF. That second list is wider than the freeform denylist elsewhere in the framework for a specific reason: LigandMPNN emits its command through `eval`, which re-parses the line and strips one layer of quoting, so the double quotes the renderer puts around a forwarded value do not survive to contain a `;`. See [Shell Safety](#shell-safety); this is the same fourth layer, with the `eval` case accounted for.
+
+### Declaring What a Tool Needs: `RESOURCE_REQUIREMENTS`
+
+A wrapper that cannot run on some GPU declares it, instead of leaving the pipeline author to find out from a CUDA error:
+
+```python
+class DynamicBind(BaseConfig):
+    RESOURCE_REQUIREMENTS = {"gpu": {"incompatible": ["H100", "H200", "GH200"], "use": "A100"}}
+```
+
+- **Name.** `RESOURCE_REQUIREMENTS` is a class-level declaration like `TOOL_NAME` and `TOOL_VERSION`. It is not `self.resources`, the instance attribute that holds the batch's own request. It defaults to `{}` on `BaseConfig`.
+- **Fields.** `gpu.incompatible` lists the models the tool does not run on. `gpu.compatible`, when not empty, lists the only models it runs on, so every model outside it counts as unsupported. `gpu.use` is the request the warning suggests (without it, the first `compatible` model). Only `gpu` is read; other resource keys are allowed and ignored until something reads them. A misspelled key or a value that is not a list of names raises when the class is defined.
+- **Declare only what is verified.** Name a model when a run, a build log or the upstream documentation says the tool does not run on it, and say which in the docstring and in `docs/tool/`.
+- **When it warns.** Once per tool per batch, when the batch scripts are generated (`Pipeline._requirement_warnings`, printed as `Warning: ...` next to the scheduler's own GPU warnings, and shown by `bp_submit`). Never an error: the scheduler decides where the job lands, and the tool may run.
+- **What is judged.** A request that names a model (`H100`, `H100|A100`) is judged by name alone and needs no inventory. A request that does not pin a model is judged against `machine.gpu_models` of the config, `{model: memory}`: `any`, `gpu` and a count may land on every listed model; `!X` on every model but X; `high-memory` and a memory (`80GB`, `32GB|80GB`) on the models of that memory, and a model whose memory the config leaves empty can be the answer to any memory request. The message then says "may land on". Without `machine.gpu_models` only a request that names a model is judged.
+- **What is not judged.** `none`, an empty request and a token that is neither a model name nor a memory are never judged, and neither is a model the tool declares nothing about.
+- **Where.** The judgement is `resource_requirements.gpu_warnings`, a pure function of the tool's name, the request, the declaration and the inventory; the batch's tools are read where the scripts are generated, so the generated scripts are the same with or without a declaration.
 
 ### Path Descriptors and the Canonical Layout
 

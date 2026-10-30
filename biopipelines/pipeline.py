@@ -26,6 +26,7 @@ from .config_manager import ConfigManager
 from .contract_enforcement import ContractViolation
 from ._layout import INTERNAL_FOLDER
 from .schedulers import get_backend, BATCH_SCHEDULERS
+from .resource_requirements import gpu_warnings as requirement_warnings
 
 # `pip freeze` prints an editable install as the URL it was cloned from, so a clone made with a
 # token in that URL prints the token — into the group-readable output root. Every environment
@@ -1502,6 +1503,16 @@ class Pipeline:
             return f"{stem}.sh"
         return f"{stem}_batch{batch_idx + 1}.sh"
 
+    def _requirement_warnings(self, batch_idx: int, tools) -> List[str]:
+        """What the tools of one batch declare in RESOURCE_REQUIREMENTS that the batch's GPU request does not meet, once per tool."""
+        request = self.batch_resources[batch_idx]["gpu"]
+        inventory = ConfigManager().get_gpu_models()
+        messages: List[str] = []
+        for name in dict.fromkeys(tool.TOOL_NAME for tool in tools):
+            declared = getattr(next(tool for tool in tools if tool.TOOL_NAME == name), "RESOURCE_REQUIREMENTS", {})
+            messages.extend(requirement_warnings(name, request, declared, inventory))
+        return messages
+
     def _generate_single_batch(self, email_line):
         """Generate single batch script for the active scheduler."""
         backend = self._backend()
@@ -1548,7 +1559,7 @@ umask 002
         if not self._is_batch_scheduler():
             return
 
-        for w in gpu_warnings:
+        for w in gpu_warnings + self._requirement_warnings(0, self.tools):
             print(f"Warning: {w}")
         print(f"Job script saved to: {job_path}")
         print("="*30+"Job"+"="*30)
@@ -1589,6 +1600,7 @@ umask 002
             gpu_line, gpu_warnings = backend.gpu_directive(resources["gpu"], resources.get("gpus", 1),
                                                   single_gpu_type=ConfigManager().get_node_exclusive())
             warnings.extend(gpu_warnings)
+            warnings.extend(self._requirement_warnings(batch_idx, self.tools[batch_ranges[batch_idx][0]:batch_ranges[batch_idx][1]]))
             gpu_setup = backend.gpu_setup(resources["gpu"])
             extra_directives = backend.extra_options(resources.get(backend.options_key, {}))
             header = backend.header_directives(resources["memory"], resources["time"], f"job_batch{batch_idx + 1}.out")

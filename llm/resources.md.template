@@ -22,6 +22,8 @@
 | `any`     |       |        | small / short jobs                    |
 | `<a100>`  |       |        |                                       |
 
+A tool that does not run on some GPU models (`RESOURCE_REQUIREMENTS`) is checked against the models the machine offers, `machine.gpu_models` in the config (`{model: memory}`); keep the two lists in step when the site adds or retires a GPU pool.
+
 ## Walltime policy
 
 - Backfill granularity: <e.g. 24 h on S3IT — asking for 6 h vs 24 h yields the same queue position>

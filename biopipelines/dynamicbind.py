@@ -69,7 +69,9 @@ class DynamicBind(BaseConfig):
     GPU: request ``Resources(gpu="A100")``. The environment's torch (2.0.1+cu117)
     has kernels up to sm_86 only, so on an H100 (sm_90) the run stops with
     "CUDA error: no kernel image is available" and every pair is a failure row
-    of missing. ``gpu="any"`` can land on an H100.
+    of missing. ``gpu="any"`` can land on an H100. ``RESOURCE_REQUIREMENTS``
+    declares the Hopper models (H100, H200, GH200) as unsupported, and generating
+    the batch scripts warns when the request is one of them or may land on one.
 
     Outputs:
         Streams:
@@ -89,7 +91,8 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "2.6"
+    TOOL_VERSION = "2.7"
+    RESOURCE_REQUIREMENTS = {"gpu": {"incompatible": ["H100", "H200", "GH200"], "use": "A100"}}
     # run_single_protein_inference.py is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "dynamicbind"

@@ -47,6 +47,11 @@ machine:
   cores_per_node: 288
   gpus_per_node: 4
 
+  # GPU models the machine offers, model -> memory (empty where the repo does not state it);
+  # see config.cluster.yaml. Every node is 4x GH200.
+  gpu_models:
+    GH200:
+
 folders:
   base:
     home: "/users/<username>"

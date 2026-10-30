@@ -313,7 +313,7 @@ Flexible-backbone docking. DynamicBind is an equivariant generative model that p
 
 **References**: https://github.com/luwei0917/DynamicBind · https://www.nature.com/articles/s41467-024-45461-2
 
-**Resources**: GPU. Request `Resources(gpu="A100")`. The environment's torch (2.0.1+cu117) has kernels up to sm_86 only, so on an H100 (sm_90) the run stops with "CUDA error: no kernel image is available" and every pair is a `failure` row of `missing`. `gpu="any"` can land on an H100.
+**Resources**: GPU. Request `Resources(gpu="A100")`. The environment's torch (2.0.1+cu117) has kernels up to sm_86 only, so on an H100 (sm_90) the run stops with "CUDA error: no kernel image is available" and every pair is a `failure` row of `missing`. `gpu="any"` can land on an H100. The wrapper declares H100, H200 and GH200 as unsupported (`RESOURCE_REQUIREMENTS`), and generating the batch scripts warns when the request is one of them or may land on one.
 
 **Environment**: `dynamicbind` (inference) + `dynamicbind_relax` (OpenMM pose relaxation); both created at install.
 

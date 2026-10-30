@@ -61,6 +61,8 @@ class TemplateTool(BaseConfig):
     TOOL_VERSION = "0.1"
     # ENV_NAME is the env this tool builds and runs in. It must have an environments: entry keyed by TOOL_NAME in every config.<variant>.yaml the tool is installable under; cls._install_env() reads that entry so install and runtime cannot diverge, and only env_manager "pip" falls back to this literal.
     ENV_NAME = "templatetool"
+    # Optional. The GPU models this tool does not run on, once a run or its upstream documentation says so, e.g. {"gpu": {"incompatible": ["H100"], "use": "A100"}}; generating the batch scripts then warns when Resources(gpu=...) can land on one. Leave it out otherwise.
+    # RESOURCE_REQUIREMENTS = {}
 
     """INSTALLATION.
     Triggered by <Tool>.install() inside an install pipeline (see example_pipelines/install_tools.py), submitted like any pipeline. 

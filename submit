@@ -489,6 +489,12 @@ run_pipeline_and_submit() {
             echo ""
             echo "$error_output"
         fi
+        # Warnings are what the pipeline had to say about the batches it generated (a GPU a tool does not support, a scheduler directive that was dropped); show them once, in order.
+        local warning_output=$(echo "$pipeline_output" | grep -E '^[[:space:]]*Warning:' | awk '!seen[$0]++')
+        if [ -n "$warning_output" ]; then
+            echo ""
+            echo "$warning_output"
+        fi
     fi
     #echo ""
 

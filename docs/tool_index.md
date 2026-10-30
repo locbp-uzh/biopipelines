@@ -11,7 +11,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | # | Tool | Category | Version | Source file |
 |---|------|----------|---------|-------------|
 | 1 | BoltzGen | Structure Generation           | 2.6 | `biopipelines/boltzgen.py` |
-| 2 | PocketGen | Structure Generation           | 2.4 | `biopipelines/pocketgen.py` |
+| 2 | PocketGen | Structure Generation           | 2.5 | `biopipelines/pocketgen.py` |
 | 3 | RFdiffusion | Structure Generation           | 2.5 | `biopipelines/rfdiffusion.py` |
 | 4 | RFdiffusion3 | Structure Generation           | 3.10 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFD4Proteina | Structure Generation           | 1.3 | `biopipelines/rfd4proteina.py` |
@@ -32,7 +32,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 20 | AlphaFold                 | Structure Prediction & Docking | 1.15 | `biopipelines/alphafold.py` |
 | 21 | Boltz2 | Structure Prediction & Docking | 2.13 | `biopipelines/boltz2.py` |
 | 22 | DiffDock | Structure Prediction & Docking | 2.4 | `biopipelines/diffdock.py` |
-| 23 | DynamicBind | Structure Prediction & Docking | 2.6 | `biopipelines/dynamicbind.py` |
+| 23 | DynamicBind | Structure Prediction & Docking | 2.7 | `biopipelines/dynamicbind.py` |
 | 24 | ESMFold | Structure Prediction & Docking | 2.1 | `biopipelines/esmfold.py` |
 | 25 | ESMFold2 | Structure Prediction & Docking | 2.10 | `biopipelines/esmfold2.py` |
 | 26 | Gnina | Structure Prediction & Docking | 2.9 | `biopipelines/gnina.py` |

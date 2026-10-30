@@ -25,6 +25,7 @@ _JOB_ID = re.compile(r"Batch\s+(\S+)\s+submitted:\s*Job ID\s+(\S+)")
 _SINGLE_JOB = re.compile(r"submitted:\s*Job ID\s+(\S+)")
 _GEN_FAILED = re.compile(r"Pipeline generation failed with exit code\s+(\d+)")
 _SUB_FAILED = re.compile(r"Submission failed \(([^)]*)\):\s*(.*)")
+_WARNING = re.compile(r"\s*Warning:")
 
 
 def parse(output):
@@ -146,8 +147,17 @@ def summarize(result, host=None):
         lines.append(f"  {job}")
     if result["job_ids"]:
         lines.append("  job ids: " + ", ".join(result["job_ids"]))
+    warnings = submit_warnings(result.get("output", ""))
+    if warnings:
+        lines.append("\nWarnings from ./submit:")
+        lines += [f"  {line}" for line in warnings]
     lines.append("\nNothing has run yet — poll with bp_status once the scheduler starts it.")
     return "\n".join(lines)
+
+
+def submit_warnings(output):
+    """The `Warning: ...` lines `./submit` printed while it generated the batch scripts, each once, in order."""
+    return list(dict.fromkeys(line.strip() for line in output.splitlines() if _WARNING.match(line)))
 
 
 # --- resuming and cancelling -----------------------------------------------------------------
