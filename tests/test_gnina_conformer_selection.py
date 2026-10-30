@@ -139,18 +139,21 @@ def test_a_tie_goes_to_the_first_conformer(pipe_gnina):
     assert winners == {"p+l": "p+l_conf0"}
 
 
-def test_a_metric_missing_for_a_conformer_fails_loudly_and_keeps_the_rest(pipe_gnina, monkeypatch, tmp_path):
+def test_a_metric_missing_for_a_conformer_is_a_failure_row_and_the_rest_goes_on(pipe_gnina, monkeypatch, tmp_path):
     """Ranking by an energy that one conformer lacks must not fall back to another metric for that pair."""
     energies = {(ligand, k): ENERGIES[k] for ligand in ("l_a", "l_b") for k in POSES}
     energies[("l_b", 1)] = ""
     args = _dock(pipe_gnina, monkeypatch, tmp_path, ["p"], ["l_a", "l_b"], energies=energies,
                  rank_conformers_by="pseudo_binding_energy")
-    with pytest.raises(ValueError, match=r"pseudo_binding_energy.*p\+l_b.*p\+l_b_conf1"):
-        pipe_gnina.aggregate_results(*args)
+    written, causes = pipe_gnina.aggregate_results(*args)
     config = args[3]
+    assert written == {"p+l_a"}
     assert list(pd.read_csv(config["structures_map"], dtype={"id": str})["id"]) == ["p+l_a"]
     assert len(pd.read_csv(config["docking_summary_csv"])) == 6, "the summary of every conformer is kept"
     assert os.path.exists(tmp_path / "execution" / "conformer_poses" / "p+l_b_conf1_best.pdb")
+    rows = pipe_gnina.local_failures(["p"], ["l_a", "l_b"], written, causes, "004_Gnina")
+    assert [(row["id"], row["removed_by"], row["kind"]) for row in rows] == [("p+l_b", "004_Gnina", "failure")]
+    assert "pseudo_binding_energy" in rows[0]["cause"] and "p+l_b_conf1" in rows[0]["cause"]
 
 
 def test_auto_falls_back_to_best_vina_where_an_energy_is_missing(pipe_gnina, monkeypatch, tmp_path):

@@ -101,7 +101,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -206,6 +206,7 @@ fi
     compounds_json = Path(lambda self: self.configuration_path("compounds_ds.json"))
     structures_map = Path(lambda self: self.stream_map_path("structures"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
     autobox_ds_json = Path(lambda self: self.configuration_path("autobox_ligand_ds.json"))
 
     MODES = ("docking", "score", "minimize")
@@ -337,8 +338,8 @@ fi
                 ``best_vina`` or ``mean_vina`` (lowest wins), ``best_cnn_score`` or
                 ``mean_cnn_affinity`` (highest wins; Gnina only, and not with
                 ``cnn_scoring="none"``). A named metric is never replaced by another:
-                if a posed conformer of a pair lacks it, the step raises after writing
-                every pair it could decide. Docking mode only; not with
+                if a posed conformer of a pair lacks it, that pair is a ``failure`` row
+                of ``missing`` and the other pairs go on. Docking mode only; not with
                 ``top_only=False``, which keeps every conformer.
 
         Output:
@@ -690,9 +691,8 @@ fi
             "scores_csv": self.scores_csv,
             "structures_map": self.structures_map,
             "upstream_missing": upstream_missing,
-            # Score/minimize always emit the missing table to record local
-            # failures (no HETATM, SMILES mismatch); docking only on upstream.
-            "missing_csv": self.missing_csv if (upstream_missing or self.mode != "docking") else None,
+            # Failures of this step only; the propagation merges them with the upstream rows into missing.csv.
+            "local_missing_csv": self.local_missing_csv,
             "box": box_config,
             "exhaustiveness": self.exhaustiveness,
             "num_modes": self.num_modes,
@@ -776,9 +776,10 @@ fi
         return script_content
 
     def _generate_missing_table_propagation(self) -> str:
-        """Propagate the union of upstream `missing` manifests into tables/missing.csv."""
+        """Merge the upstream `missing` manifests and this step's own failures into tables/missing.csv."""
         return self.generate_missing_propagation(
-            self.structures_input, self.compounds_input, missing_csv=self.missing_csv
+            self.structures_input, self.compounds_input, missing_csv=self.missing_csv,
+            local_missing=self.local_missing_csv,
         )
 
     def _generate_script_resolve_autobox(self) -> str:
@@ -858,9 +859,7 @@ python {self.helper_py} {self.config_json}
                 ),
             }
 
-        if self.mode != "docking" or self._collect_upstream_missing_paths(
-                self.structures_input, self.compounds_input):
-            tables["missing"] = self.missing_table_info(self.missing_csv)
+        tables["missing"] = self.missing_table_info(self.missing_csv)
 
         best_poses_dir = self.stream_folder("structures")
 
@@ -950,7 +949,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     ENV_NAME = "vina"
     BACKEND = "vina"
 

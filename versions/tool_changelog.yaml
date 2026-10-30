@@ -905,8 +905,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-30'
+    note: >-
+      A pair or complex that fails in this step is a `failure` row of `tables/missing.csv`, in every mode and whether or not an upstream `missing` table exists. The pipe script wrote its own rows straight to `tables/missing.csv`, and only when an upstream table existed; the propagation step then rewrote that file from the upstream manifests alone and erased them, and without an upstream table nothing was written, so a pair whose receptor, ligand or run failed left only an absent file. The pipe now writes `execution/local_missing.csv`, `missing` is always declared, and the propagation merges the local file in. In docking mode every (protein, ligand) pair with no entry in the structures stream is one row under its pair id with the reason: a protein or ligand that could not be prepared, a run that failed or timed out, no accepted pose, or a `rank_conformers_by` metric a posed conformer lacks, which no longer raises after the other pairs are written. The step exits non-zero only when no pair gave a structure, and an empty pose file from the binary is a run with no pose instead of a crash.
   - version: '2.5'
     date: '2026-10-30'
     note: >-
@@ -969,8 +973,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-10-30'
+    note: >-
+      Same `missing` handling as Gnina, whose wrapper and pipe script it shares: a pair or complex that fails here, a receptor that cannot be converted to PDBQT included, is a `failure` row of `tables/missing.csv` under its pair id, with or without an upstream `missing` table, and the table is always declared. The step exits non-zero only when no pair gave a structure.
   - version: '2.5'
     date: '2026-10-30'
     note: >-

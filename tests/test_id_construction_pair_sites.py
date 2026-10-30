@@ -61,9 +61,10 @@ def _receptor_that_fails(pipe_gnina, monkeypatch, step_folder, tmp_path):
     pdb = tmp_path / "prot.pdb"
     pdb.write_text("END\n")
     conformers = [{"ligand_id": "lig", "conformer_id": 0, "sdf_file": str(tmp_path / "lig.sdf"), "energy": ""}]
-    _poses, failures = pipe_gnina.run_docking(
+    _poses, causes = pipe_gnina.run_docking(
         {"prot": {"protein": str(pdb), "crystal_ligand": None}}, conformers, _vina_docking_config(step_folder))
-    return failures
+    # The row the step writes for it, stamped with the step id the way main derives it from the local file's path.
+    return pipe_gnina.local_failures(["prot"], ["lig"], set(), causes, step_folder.name)
 
 
 class TestDockingFailuresNameTheirStep:
@@ -73,7 +74,8 @@ class TestDockingFailuresNameTheirStep:
         step = tmp_path / "004_Vina"
         failures = _receptor_that_fails(_load("pipe_gnina_under_test", "pipe_gnina.py"), monkeypatch, step, tmp_path)
         assert [(row["id"], row["removed_by"], row["kind"]) for row in failures] == [
-            ("prot", "004_Vina", "failure")]
+            ("prot+lig", "004_Vina", "failure")]
+        assert "receptor has no atoms" in failures[0]["cause"]
 
     def test_the_completion_check_does_not_excuse_it(self, monkeypatch, tmp_path):
         """The failed pair's file is absent, and a `failure` of this step must leave that a FAILED step instead of an excused one."""

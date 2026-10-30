@@ -688,7 +688,7 @@ def run_docking(prepared_proteins, conformers, config):
     Parses output SDF files for Vina and CNN scores.
 
     Returns:
-        list of pose record dicts.
+        (list of pose record dicts, {pair id: [why a run of it failed]}); a pair keeps its reasons even when another run of it posed.
     """
     output_folder = config["output_folder"]
     backend = config["backend"]
@@ -730,10 +730,8 @@ def run_docking(prepared_proteins, conformers, config):
 
     all_poses = []
 
-    # Local drops, so a receptor or pair that failed here still leaves a row in
-    # missing.csv instead of vanishing from every output table.
-    dock_failures = []
-    step_id = step_id_from_table_path(config["docking_summary_csv"])
+    # Why a run of a pair failed, so a pair with no pose can say so in missing.csv instead of vanishing from every output table.
+    causes = defaultdict(list)
     total_pairs = len(prepared_proteins) * len(conformers)
     pair_idx = 0
 
@@ -757,9 +755,8 @@ def run_docking(prepared_proteins, conformers, config):
                 vina_backend.receptor_pdbqt(protein_file, receptor_input)
             except RuntimeError as e:
                 print(f"  Warning: receptor conversion failed for {protein_id}: {e}")
-                dock_failures.append({"id": protein_id, "removed_by": step_id,
-                                      "kind": "failure",
-                                      "cause": f"receptor PDBQT conversion failed: {e}"})
+                for ligand_id in dict.fromkeys(conf["ligand_id"] for conf in conformers):
+                    causes[_pair_id(protein_id, ligand_id)].append(f"receptor PDBQT conversion failed: {e}")
                 continue
             vina_box = dict(box)
             if "center" not in vina_box and crystal_ligand:
@@ -785,6 +782,7 @@ def run_docking(prepared_proteins, conformers, config):
             conf_sdf = conf["sdf_file"]
 
             group_id = _group_id(protein_id, ligand_id, conformer_id)
+            pair_id = _pair_id(protein_id, ligand_id)
             print(f"Docking pair {pair_idx}/{total_pairs}: {group_id}")
 
             for run_idx in range(num_runs):
@@ -807,17 +805,21 @@ def run_docking(prepared_proteins, conformers, config):
                         )
                     except subprocess.TimeoutExpired:
                         print(f"Warning: Vina timed out (>{dock_timeout}s), skipping run {label}")
+                        causes[pair_id].append(f"Vina timed out (>{dock_timeout}s) in run {label}")
                         continue
                     except RuntimeError as e:
                         print(f"Warning: Vina input preparation failed for {label}: {e}")
+                        causes[pair_id].append(f"Vina input preparation failed for {label}: {e}")
                         continue
                     if result.returncode != 0:
                         print(f"Warning: Vina failed for {label}")
                         print(f"  stderr: {result.stderr[:500]}")
+                        causes[pair_id].append(f"Vina failed for {label}: {result.stderr[:100].strip()}")
                         continue
                     if vina_backend.pdbqt_to_sdf(out_pdbqt, out_sdf,
                                                  template_sdf=conf_sdf) is None:
                         print(f"Warning: could not convert Vina output for {label}")
+                        causes[pair_id].append(f"could not convert the Vina output of {label}")
                         continue
                     poses = _parse_gnina_output(
                         out_sdf, protein_id, ligand_id, conformer_id,
@@ -844,10 +846,12 @@ def run_docking(prepared_proteins, conformers, config):
                                             timeout=dock_timeout)
                 except subprocess.TimeoutExpired:
                     print(f"Warning: GNINA timed out (>{dock_timeout}s), skipping run {label}")
+                    causes[pair_id].append(f"GNINA timed out (>{dock_timeout}s) in run {label}")
                     continue
                 if result.returncode != 0:
                     print(f"Warning: GNINA failed for {label}")
                     print(f"  stderr: {result.stderr[:500]}")
+                    causes[pair_id].append(f"GNINA failed for {label}: {result.stderr[:100].strip()}")
                     continue
 
                 poses = _parse_gnina_output(
@@ -857,7 +861,7 @@ def run_docking(prepared_proteins, conformers, config):
                 all_poses.extend(poses)
 
     print(f"Docking complete: {len(all_poses)} accepted poses")
-    return all_poses, dock_failures
+    return all_poses, dict(causes)
 
 
 def _build_box_args(box):
@@ -882,7 +886,8 @@ def _parse_gnina_output(sdf_path, protein_id, ligand_id, conformer_id,
                         run_idx, cnn_score_threshold):
     """Parse a GNINA output SDF and return pose records above the CNN threshold."""
     poses = []
-    if not os.path.exists(sdf_path):
+    # An empty file is a run that posed nothing; RDKit raises on it instead of yielding no molecules.
+    if not os.path.exists(sdf_path) or os.path.getsize(sdf_path) == 0:
         return poses
 
     group_id = _group_id(protein_id, ligand_id, conformer_id)
@@ -1060,7 +1065,9 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
     """
     Aggregate results into docking_results.csv and docking_summary.csv.
 
-    Also writes each group's best pose as a combined protein+ligand PDB file. With top_only the pair's winning conformer goes into the structures folder as <pair id>_best.pdb and every other conformer under conformer_poses/; without it every conformer goes there as <summary id>_best.pdb. A pair that a named rank_conformers_by metric cannot decide gets no stream entry, its conformers go under conformer_poses/, and the step raises once everything else is written.
+    Also writes each group's best pose as a combined protein+ligand PDB file. With top_only the pair's winning conformer goes into the structures folder as <pair id>_best.pdb and every other conformer under conformer_poses/; without it every conformer goes there as <summary id>_best.pdb. A pair that a named rank_conformers_by metric cannot decide gets no stream entry and its conformers go under conformer_poses/.
+
+    Returns (the pair ids that have an entry in the structures stream, {pair id: [why it has none]} for the pairs a named metric could not decide).
     """
     output_folder = config["output_folder"]
     docking_results_csv = config["docking_results_csv"]
@@ -1203,11 +1210,46 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
         )
         print(f"Wrote structures map: {structures_map} ({len(map_rows)} rows)")
 
-    if unrankable:
-        lacking = "; ".join(f"{pair_id} ({', '.join(ids)})" for pair_id, ids in unrankable.items())
-        raise ValueError(
-            f"rank_conformers_by={rank_by!r} has no value for a posed conformer of {len(unrankable)} pair(s), "
-            f"so they have no entry in the structures stream: {lacking}")
+    written_pairs = {_pair_id(row["structures.id"], row["compounds.id"]) for row in map_rows}
+    rank_causes = {pair_id: [f"rank_conformers_by={rank_by!r} has no value for the posed conformer(s) "
+                             f"{', '.join(ids)}"] for pair_id, ids in unrankable.items()}
+    return written_pairs, rank_causes
+
+
+def unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers):
+    """{pair id: [why]} for the pairs that never reached the docking: a protein that was not prepared, or a ligand with no conformer."""
+    with_conformers = {conf["ligand_id"] for conf in conformers}
+    causes = defaultdict(list)
+    for protein_id in protein_ids:
+        for ligand_id in ligand_ids:
+            if protein_id not in prepared_proteins:
+                causes[_pair_id(protein_id, ligand_id)].append("the protein could not be prepared")
+            if ligand_id not in with_conformers:
+                causes[_pair_id(protein_id, ligand_id)].append("no conformer could be prepared for the ligand")
+    return dict(causes)
+
+
+def local_failures(protein_ids, ligand_ids, written_pairs, causes, step_id):
+    """One `failure` row, under the pair id, for every (protein, ligand) pair that has no entry in the structures stream.
+
+    The cause is what the step recorded for the pair, else that no run of it gave an accepted pose.
+    """
+    rows = []
+    for protein_id in protein_ids:
+        for ligand_id in ligand_ids:
+            pair_id = _pair_id(protein_id, ligand_id)
+            if pair_id in written_pairs:
+                continue
+            cause = "; ".join(causes.get(pair_id, [])) or "no accepted pose"
+            rows.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": cause[:200]})
+    return rows
+
+
+def write_local_missing(path, rows):
+    """This step's own failures, which the propagation merges with the upstream manifests into tables/missing.csv."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(path, index=False)
+    print(f"Wrote local missing manifest: {path} ({len(rows)} rows)")
 
 
 def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
@@ -1613,18 +1655,15 @@ def main():
     if mode in ("score", "minimize"):
         print(f"\n--- GNINA {mode} (no docking search) ---")
         failed = run_score_mode(structures_ds, compounds_ds, config)
-        all_missing = upstream_missing_rows + failed
-        missing_csv = config.get("missing_csv")
-        if missing_csv:
-            os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
-            pd.DataFrame(all_missing, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
-            print(f"Wrote missing manifest: {missing_csv} ({len(all_missing)} rows)")
+        write_local_missing(config["local_missing_csv"], failed)
         print("\n" + "=" * 60)
         print(f"{engine} {mode} pipeline complete")
         print("=" * 60)
         return
 
     print("\n--- Step 1: Protein Preparation ---")
+    protein_ids = [protein_id for protein_id, _file in iterate_files(structures_ds)]
+    ligand_ids = list(compounds_ds.ids_expanded)
     prepared_proteins = prepare_proteins(
         structures_ds, config["output_folder"],
         config["protonate"], config["pH"]
@@ -1632,27 +1671,33 @@ def main():
 
     print("\n--- Step 2: Conformer Preparation ---")
     conformers = prepare_conformers(compounds_ds, config["output_folder"], config)
-    if not conformers:
-        print("Error: No conformers prepared, cannot proceed with docking")
+    causes = defaultdict(list)
+    for pair_id, why in unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers).items():
+        causes[pair_id] += why
+
+    written_pairs = set()
+    if conformers:
+        print("\n--- Step 3: Docking Execution ---")
+        all_poses, run_causes = run_docking(prepared_proteins, conformers, config)
+
+        print("\n--- Step 4: Pose Consistency Analysis ---")
+        consistency = analyze_pose_consistency(all_poses, config)
+
+        print("\n--- Step 5: Results Aggregation ---")
+        written_pairs, rank_causes = aggregate_results(
+            all_poses, conformers, consistency, config, prepared_proteins)
+        for found in (run_causes, rank_causes):
+            for pair_id, why in found.items():
+                causes[pair_id] += why
+
+    step_id = step_id_from_table_path(config["local_missing_csv"])
+    write_local_missing(config["local_missing_csv"],
+                        local_failures(protein_ids, ligand_ids, written_pairs, causes, step_id))
+
+    if not written_pairs:
+        print(f"ERROR: no (protein, ligand) pair gave a structure; see {config['local_missing_csv']}",
+              file=sys.stderr)
         sys.exit(1)
-
-    print("\n--- Step 3: Docking Execution ---")
-    all_poses, dock_failures = run_docking(prepared_proteins, conformers, config)
-
-    print("\n--- Step 4: Pose Consistency Analysis ---")
-    consistency = analyze_pose_consistency(all_poses, config)
-
-    print("\n--- Step 5: Results Aggregation ---")
-    aggregate_results(all_poses, conformers, consistency, config, prepared_proteins)
-
-    missing_csv = config.get("missing_csv")
-    if missing_csv:
-        os.makedirs(os.path.dirname(missing_csv), exist_ok=True)
-        docked_ids = {str(p.get("structures.id")) for p in all_poses}
-        rows = list(upstream_missing_rows) + [
-            f for f in dock_failures if str(f["id"]) not in docked_ids]
-        pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(missing_csv, index=False)
-        print(f"Wrote missing manifest: {missing_csv} ({len(rows)} rows)")
 
     print("\n" + "=" * 60)
     print(f"{engine} docking pipeline complete")
