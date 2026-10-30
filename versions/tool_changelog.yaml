@@ -886,8 +886,12 @@ Fuse:
   files:
   - biopipelines/fuse.py
   - pipe_scripts/pipe_fuse_queries.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-30'
+    note: >-
+      A fusion id the step could not build is a `failure` row of its `missing.csv`, naming the slot sequence it lacked. Fuse declares every combination of the slot ids, and a slot sequence its producer never wrote has no row in the slot's map table; the combination was skipped with a warning and the id stayed on no record, so a Fuse over a short MutationComposer declared 100 ids, wrote 36 and left 64 unaccounted for. The pipe now writes `execution/local_missing.csv` with one row per declared id it did not build (cause: `slot <n> sequence '<id>' has no row in its upstream stream`, one clause per absent slot), `missing` is always declared, and the propagation merges that file with the `missing` table of every slot's producer, which Fuse never read because it kept its slots as plain dicts. A slot whose producer wrote none of its ids now skips every combination of it instead of stopping with "Could not load sequences". The step exits non-zero only when it built no fusion.
   - version: '1.5'
     date: '2026-10-30'
     note: >-

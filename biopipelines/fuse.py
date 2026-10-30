@@ -68,7 +68,7 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Fuse step. The retired spelling still sets the label and now also reaches the framework.
 
     @classmethod
@@ -87,6 +87,8 @@ echo "=== Fuse ready ==="
     queries_fasta = Path(lambda self: self.stream_path("sequences", f"{self._get_job_base()}_queries.fasta"))
     fuse_config_json = Path(lambda self: self.configuration_path("fuse_config.json"))
     fuse_queries_py = Path(lambda self: self.pipe_script_path("pipe_fuse_queries.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     def __init__(self,
                  sequences: List[Union[DataStream, StandardizedOutput]],
@@ -117,9 +119,12 @@ echo "=== Fuse ready ==="
             Streams: sequences (.csv), fasta (.fasta — shared multi-record artifact)
             Tables:
                 sequences: id | sequence | lengths | sequences_1.id | sequences_2.id | ... | S1 | L1 | S2 | L2 | ... | Sn
+                missing: id | removed_by | kind | cause. One `failure` row for each declared fusion id that was not built because a slot sequence has no row upstream, naming the slot and its id; the step fails only when it built none.
         """
         # Resolve input slots
         self.input_slots = self._resolve_slots(sequences)
+        # The inputs themselves, which carry the `missing` table of the tool that produced a slot
+        self.slot_inputs = list(sequences)
 
         # Validate we have enough slots for fusion
         if len(self.input_slots) < 2:
@@ -329,7 +334,8 @@ echo "=== Fuse ready ==="
             "linker_lengths": self.linker_lengths,
             "slots": self.input_slots,
             "output_csv": self.queries_csv,
-            "output_fasta": self.queries_fasta
+            "output_fasta": self.queries_fasta,
+            "local_missing_csv": self.local_missing_csv
         }
 
         # configuration/ + sequences/ already created by the pipeline.
@@ -351,7 +357,7 @@ echo "{linker_info}"
 
 # Call fuse_queries.py with JSON config
 python {self.fuse_queries_py} --config "{self.fuse_config_json}"
-
+{self.generate_missing_propagation(*self.slot_inputs, missing_csv=self.missing_csv, local_missing=self.local_missing_csv)}
 # Check if files were created successfully
 if [ ! -f "{self.queries_csv}" ]; then
     echo "ERROR: Failed to generate queries CSV file"
@@ -406,7 +412,8 @@ echo "Generated $NUM_SEQUENCES fusion sequence combinations"
                 path=self.queries_csv,
                 columns=["id", "sequence", "lengths"] + provenance_columns + position_columns,
                 description="Fusion sequences with provenance and sequence/linker positions"
-            )
+            ),
+            "missing": self.missing_table_info(self.missing_csv)
         }
 
         # sequences stream: value-based CSV — queries_csv is the map_table.

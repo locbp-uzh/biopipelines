@@ -192,6 +192,13 @@ Concatenates multiple sequences with flexible linkers. Creates fusion sequences 
   - `L1`, `L2`, ...: Linker positions in PyMOL selection format (e.g., "74-75", "238-240")
   - Number of columns depends on number of input sequences: n sequences → n sequence columns (S1...Sn) and n-1 linker columns (L1...Ln-1)
 
+- `missing`:
+
+  | id | removed_by | kind | cause |
+  |----|------------|------|-------|
+
+  Fuse declares every combination of the slot ids. A slot sequence that its producer never wrote (it made fewer than it declared, or an upstream filter dropped it) has no row in the slot's map table, so each combination built on it is a `failure` row of `missing` whose cause names the slot and the sequence id (`slot 2 sequence 'mut_007' has no row in its upstream stream`), and the rows the producer's own `missing` table carries are merged in. The step fails only when it built no fusion.
+
 **Example**:
 ```python
 from biopipelines.fuse import Fuse

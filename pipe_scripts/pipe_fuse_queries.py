@@ -16,12 +16,13 @@ import sys
 import json
 import argparse
 import pandas as pd
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from itertools import product
 
 # Add repo root to path so biopipelines package is importable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.combinatorics import join_axis_ids
+from biopipelines.biopipelines_io import MISSING_COLUMNS, step_id_from_table_path
 from biopipelines.fuse import check_distinct_fusion_ids
 from biopipelines.pdb_parser import parse_pdb_file, get_protein_sequence
 from biopipelines.id_patterns import is_lazy, partial_expand_ids, select_ids
@@ -73,9 +74,11 @@ def load_sequences_from_slot(slot: Dict[str, Any]) -> Dict[str, str]:
     files = slot.get("files", [])
 
     # Try map_table first (CSV with id, sequence columns)
+    map_read = False
     if map_table and os.path.exists(map_table):
         df = pd.read_csv(map_table)
         if 'id' in df.columns and 'sequence' in df.columns:
+            map_read = True
             row_ids = [str(v) for v in df['id'].tolist()]
             selected = set(select_ids(ids, row_ids, where=map_table))
             id_to_seq = {}
@@ -107,6 +110,10 @@ def load_sequences_from_slot(slot: Dict[str, Any]) -> Dict[str, str]:
         if id_to_seq:
             return id_to_seq
 
+    if map_read:
+        # The producer wrote its map but none of the slot's ids has a row: every combination of this slot is skipped and recorded
+        return {}
+
     raise ValueError(f"Could not load sequences for slot with ids: {ids}")
 
 
@@ -114,7 +121,8 @@ def generate_fusion_sequences(
     slots: List[Dict[str, Any]],
     linker: str,
     linker_lengths: List[str],
-    name_base: str
+    name_base: str,
+    skipped: Optional[List[Dict[str, str]]] = None
 ) -> List[Dict[str, Any]]:
     """
     Generate all fusion sequence combinations from multi-ID slots.
@@ -126,6 +134,7 @@ def generate_fusion_sequences(
         linker: Linker sequence template
         linker_lengths: List of length range specifications for each junction
         name_base: Base name (unused in ID, IDs come from slot IDs)
+        skipped: When given, one {"id", "cause"} dict is appended for each combination not built because a slot sequence has no row upstream
 
     Returns:
         List of dicts with sequence info including provenance and position columns
@@ -184,15 +193,22 @@ def generate_fusion_sequences(
         # Extract slot IDs
         slot_ids_in_combo = [combo[slot_combo_indices[i]] for i in range(num_slots)]
 
+        # A combination built on a slot sequence that does not exist is not built; its declared id is recorded as skipped
+        absent = [(i + 1, seq_id) for i, seq_id in enumerate(slot_ids_in_combo) if not slot_sequences[i].get(seq_id, "")]
+        if absent:
+            for slot_number, seq_id in absent:
+                print(f"Warning: No sequence found for {seq_id} in slot {slot_number}, skipping combo")
+            if skipped is not None:
+                skipped.append({"id": join_axis_ids(combo), "cause": "; ".join(
+                    f"slot {slot_number} sequence {seq_id!r} has no row in its upstream stream" for slot_number, seq_id in absent)})
+            continue
+
         # Build the fused sequence and track positions
         fused_sequence = ""
         positions = []  # List of (type, idx, start, end) — end may be None for empty L
 
         for i, seq_id in enumerate(slot_ids_in_combo):
-            seq = slot_sequences[i].get(seq_id, "")
-            if not seq:
-                print(f"Warning: No sequence found for {seq_id} in slot {i+1}, skipping combo")
-                break
+            seq = slot_sequences[i][seq_id]
 
             # Add sequence
             start = len(fused_sequence) + 1  # 1-indexed
@@ -216,41 +232,48 @@ def generate_fusion_sequences(
                 else:
                     # No linker at this junction — record empty L column
                     positions.append(('L', i + 1, None, None))
-        else:
-            # Build result dict
-            seq_id = join_axis_ids(combo)
+        # Build result dict
+        seq_id = join_axis_ids(combo)
 
-            # Lengths string from junction lengths (only non-None junctions)
-            length_parts = []
-            for ji in range(len(junction_combo_indices)):
-                jci = junction_combo_indices[ji]
-                if jci is not None:
-                    length_parts.append(str(combo[jci]))
-            lengths_str = "-".join(length_parts)
+        # Lengths string from junction lengths (only non-None junctions)
+        length_parts = []
+        for ji in range(len(junction_combo_indices)):
+            jci = junction_combo_indices[ji]
+            if jci is not None:
+                length_parts.append(str(combo[jci]))
+        lengths_str = "-".join(length_parts)
 
-            result = {
-                'id': seq_id,
-                'sequence': fused_sequence,
-                'lengths': lengths_str
-            }
+        result = {
+            'id': seq_id,
+            'sequence': fused_sequence,
+            'lengths': lengths_str
+        }
 
-            # Add provenance columns
-            for slot_idx in range(num_slots):
-                result[f'sequences_{slot_idx+1}.id'] = slot_ids_in_combo[slot_idx]
+        # Add provenance columns
+        for slot_idx in range(num_slots):
+            result[f'sequences_{slot_idx+1}.id'] = slot_ids_in_combo[slot_idx]
 
-            # Add S1, L1, S2, L2, S3, etc. columns in PyMOL selection format
-            for pos_type, idx, start, end in positions:
-                col_name = f"{pos_type}{idx}"
-                if start is None:
-                    result[col_name] = ""
-                elif start == end:
-                    result[col_name] = str(start)
-                else:
-                    result[col_name] = f"{start}-{end}"
+        # Add S1, L1, S2, L2, S3, etc. columns in PyMOL selection format
+        for pos_type, idx, start, end in positions:
+            col_name = f"{pos_type}{idx}"
+            if start is None:
+                result[col_name] = ""
+            elif start == end:
+                result[col_name] = str(start)
+            else:
+                result[col_name] = f"{start}-{end}"
 
-            results.append(result)
+        results.append(result)
 
     return results
+
+
+def write_local_missing(path: str, skipped: List[Dict[str, str]], step_id: str) -> None:
+    """This step's own failures, which the propagation merges with the upstream manifests into tables/missing.csv."""
+    rows = [{"id": item["id"], "removed_by": step_id, "kind": "failure", "cause": item["cause"]} for item in skipped]
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(path, index=False)
+    print(f"Wrote local missing manifest: {path} ({len(rows)} rows)")
 
 
 def write_fasta(sequences: List[Dict[str, Any]], fasta_path: str) -> None:
@@ -310,14 +333,22 @@ def main():
         print("Linker: none (direct concatenation)")
 
     # Generate fusion sequences
+    skipped = []
     results = generate_fusion_sequences(
         slots=slots,
         linker=linker,
         linker_lengths=linker_lengths,
-        name_base=name
+        name_base=name,
+        skipped=skipped
     )
 
     print(f"\nGenerated {len(results)} fusion sequences")
+
+    # Every declared id the step could not build is on record before anything else can stop it
+    write_local_missing(config["local_missing_csv"], skipped, step_id_from_table_path(config["local_missing_csv"]))
+    if not results:
+        print("ERROR: no fusion could be built; see " + config["local_missing_csv"], file=sys.stderr)
+        sys.exit(1)
 
     # Create output directory if needed
     output_dir = os.path.dirname(output_csv)
