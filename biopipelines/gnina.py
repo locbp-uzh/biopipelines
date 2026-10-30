@@ -43,7 +43,8 @@ try:
     from .datastream import DataStream
     from .config_manager import ConfigManager
     from .biopipelines_io import Resolve
-    from .combinatorics import predict_output_ids
+    from .combinatorics import predict_output_ids, predict_single_output_id
+    from . import id_patterns
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -52,7 +53,8 @@ except ImportError:
     from datastream import DataStream
     from config_manager import ConfigManager
     from biopipelines_io import Resolve
-    from combinatorics import predict_output_ids
+    from combinatorics import predict_output_ids, predict_single_output_id
+    import id_patterns
 
 
 # A conformer id is its pair id with this prefix and its index appended: the id of its docking_summary row.
@@ -67,6 +69,26 @@ CONFORMER_RANK_METRICS = {
     "mean_cnn_affinity": "higher",
 }
 CNN_RANK_METRICS = ("best_cnn_score", "mean_cnn_affinity")
+
+
+def refuse_shared_pair_ids(protein_ids, ligand_ids):
+    """Refuse two (protein, ligand) pairs whose ids join to the same pair id.
+
+    A `+` inside an id allows it: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`. The two would share one docking scratch file, one `<id>_best.pdb` and one row of every table, so one pair would vanish from the outputs without a `missing` row.
+    """
+    owner = {}
+    for protein_id in protein_ids:
+        for ligand_id in ligand_ids:
+            pair = (protein_id, ligand_id)
+            pair_id = predict_single_output_id(
+                structures=("each", [protein_id], 0, [], False),
+                compounds=("each", [ligand_id], 0, [], False),
+            )
+            earlier = owner.setdefault(pair_id, pair)
+            if earlier != pair:
+                raise ValueError(
+                    f"the pairs {earlier} and {pair} (protein, ligand) both have the id {pair_id!r}, because an id "
+                    f"contains '+'; rename a structure or a compound so that the pair ids are distinct")
 
 
 class Gnina(BaseConfig):
@@ -101,7 +123,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -481,6 +503,10 @@ fi
             self._validate_no_search_mode()
         else:
             self._validate_conformer_ranking()
+            protein_ids, proteins_known = id_patterns.try_expand_ids(list(self.structures_stream.ids))
+            ligand_ids, ligands_known = id_patterns.try_expand_ids(list(self.compounds_stream.ids))
+            if proteins_known and ligands_known:
+                refuse_shared_pair_ids(protein_ids, ligand_ids)
             has_explicit_box = self.center is not None and self.size is not None
             has_autobox = self.autobox_ligand_path is not None or self.autobox_ligand_stream is not None
             if not has_explicit_box and not has_autobox:
@@ -949,7 +975,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
     ENV_NAME = "vina"
     BACKEND = "vina"
 

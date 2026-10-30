@@ -67,6 +67,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Vina** 2.7 → 2.8. Two (protein, ligand) pairs that would join to the same pair id are refused, as in Gnina, whose wrapper and pipe script it shares: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`, and one pair used to vanish with no `missing` row.
+
+- **Gnina** 2.7 → 2.8. Two (protein, ligand) pairs that would join to the same pair id are refused, when the pipeline is configured and again in the pipe script before the first dock. A `+` inside an id allows it: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`, so the two shared one docking scratch file, one `<id>_best.pdb` and one row of every table, one pair vanished with no `missing` row, and the step was marked COMPLETED.
+
 - **Vina** 2.6 → 2.7. The receptor PDBQT keeps only the records Vina's rigid-receptor parser accepts (ATOM, HETATM, REMARK, TER, END, WARNING). Open Babel 3.2, which a fresh conda-forge env resolves to, copies the input's COMPND and AUTHOR records into the PDBQT, and every receptor protonated by `obabel` carries both, so Vina stopped with "Unknown or inappropriate tag found in rigid receptor" and every docking pair became a `failure` row. Score and minimize, which do not protonate, were unaffected.
 
 - **Gnina** 2.6 → 2.7. No change to Gnina's own behaviour; the version moves because the shared pipe_vina_backend.py did. See the Vina entry.

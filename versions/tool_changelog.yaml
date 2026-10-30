@@ -913,8 +913,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.7"
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-10-30'
+    note: >-
+      Two (protein, ligand) pairs that would join to the same pair id are refused, when the pipeline is configured and again in the pipe script before the first dock. A `+` inside an id allows it: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`, so the two shared one docking scratch file, one `<id>_best.pdb` and one row of every table, one pair vanished with no `missing` row, and the step was marked COMPLETED.
   - version: '2.7'
     date: '2026-10-30'
     note: >-
@@ -985,8 +989,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.7"
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-10-30'
+    note: >-
+      Two (protein, ligand) pairs that would join to the same pair id are refused, as in Gnina, whose wrapper and pipe script it shares: protein `p1` with ligand `b+c` and protein `p1+b` with ligand `c` are both `p1+b+c`, and one pair used to vanish with no `missing` row.
   - version: '2.7'
     date: '2026-10-30'
     note: >-

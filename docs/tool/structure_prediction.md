@@ -517,7 +517,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   | id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file |
   |----|---------------|--------------|--------------|-----------|-----------|---------|----------------|-------------------|------------------|-----------------|------------------|-----------------------|----------------|
 
-  IDs are unique per (protein, ligand, conformer) group: `<protein>+<ligand>_conf<k>`, the pair's stream id with the conformer appended. A ligand id may contain `_` (`a_b`+`c` and `a`+`b_c` are `a_b+c` and `a+b_c`).
+  IDs are unique per (protein, ligand, conformer) group: `<protein>+<ligand>_conf<k>`, the pair's stream id with the conformer appended. A ligand id may contain `_` (`a_b`+`c` and `a`+`b_c` are `a_b+c` and `a+b_c`). A `+` inside an id is accepted, but two pairs that would join to the same id (`a`+`b+c` and `a+b`+`c` are both `a+b+c`) are refused, at configuration time and again before the first dock.
 
   - `mean_vina` / `std_vina`: mean and std of the best Vina score per run (not all poses — just the top pose from each independent run). Robust metric for ranking.
   - `mean_cnn_affinity` / `std_cnn_affinity`: same logic for CNN affinity.

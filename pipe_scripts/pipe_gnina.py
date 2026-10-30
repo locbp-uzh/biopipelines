@@ -42,7 +42,7 @@ from biopipelines.pdb_parser import field_atom_name, field_res_name
 from biopipelines.ligand_utils import write_ligand_sdf
 from biopipelines.id_map_utils import get_mapped_ids
 from biopipelines.combinatorics import generate_multiplied_ids, predict_single_output_id
-from biopipelines.gnina import CONFORMER_PREFIX, CONFORMER_RANK_METRICS
+from biopipelines.gnina import CONFORMER_PREFIX, CONFORMER_RANK_METRICS, refuse_shared_pair_ids
 
 import pipe_vina_backend as vina_backend
 
@@ -1664,6 +1664,7 @@ def main():
     print("\n--- Step 1: Protein Preparation ---")
     protein_ids = [protein_id for protein_id, _file in iterate_files(structures_ds)]
     ligand_ids = list(compounds_ds.ids_expanded)
+    refuse_shared_pair_ids(protein_ids, ligand_ids)
     prepared_proteins = prepare_proteins(
         structures_ds, config["output_folder"],
         config["protonate"], config["pH"]
