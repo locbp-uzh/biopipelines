@@ -837,8 +837,12 @@ Foldseek:
   files:
   - biopipelines/foldseek.py
   - pipe_scripts/pipe_foldseek.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-31'
+    note: >-
+      Documentation only, no behavior change. Says where the default multimer thresholds come from: 0.65 and 0.65 are the values of the Chaperone `foldseek` block, unsourced there, while Foldseek's own multimer defaults are 0.7 for the complex TM-score, 0.7 for each chain and 0.3 for the interface lDDT. Says that the TM-score cutoffs apply to the TM-score normalized by the aligned region, so they are not the standard length-normalized cutoffs, and that the default threshold list is Chaperone's. Docstrings are one line per paragraph.
   - version: '1.4'
     date: '2026-10-29'
     note: >-

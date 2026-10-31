@@ -77,6 +77,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Foldseek** 1.4 → 1.5. Documentation only. Says where the default multimer thresholds come from (0.65 and 0.65 are Chaperone's unsourced values; Foldseek's own are 0.7, 0.7 per chain and 0.3 for the interface lDDT) and that the TM-score cutoffs apply to the TM-score normalized by the aligned region, so they are not the standard length-normalized cutoffs. Docstrings are one line per paragraph.
+
 - **SequenceIdentityGate** 1.0 → 1.1. Documentation only. The docs called the gap scores the EMBOSS Needle defaults while the aligner penalizes end gaps, which Needle does not by default; they now say what runs. They also say that the default threshold 0.4 is the value of the Chaperone block that scores the scaffold region of RNA designs, so for protein sequences over their whole length it is a choice to confirm and not a measured threshold.
 
 - **Foldcomp** 1.1 → 1.2. `database` is refused at configuration when it holds a double quote, a backtick, `$` or a backslash, because the path is echoed inside double quotes in the generated bash, where `$(...)` would run. The domain id is made by `generate_multiplied_ids`, with the same ids as before.

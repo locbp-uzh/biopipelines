@@ -4,11 +4,7 @@
 
 """Foldseek tool: structural clustering at TM-score thresholds.
 
-Runs `foldseek easy-cluster` (one protein chain per structure) or
-`foldseek easy-multimercluster` (whole complexes) once per TM-score threshold,
-and reports for every structure the cluster it falls in and the number of
-clusters the whole set splits into. The block mirrors the Foldseek block of the
-RosettaCommons Chaperone framework.
+Runs `foldseek easy-cluster` (one protein chain per structure) or `foldseek easy-multimercluster` (whole complexes) once per TM-score threshold, and reports for every structure the cluster it falls in and the number of clusters the whole set splits into. The block mirrors the Foldseek block of the RosettaCommons Chaperone framework, and so do the default TM-score thresholds and the default multimer thresholds (see THRESHOLDS in the class docstring).
 
 Reference: van Kempen et al., Nature Biotechnology, doi:10.1038/s41587-023-01773-0. https://github.com/steineggerlab/foldseek
 """
@@ -36,6 +32,7 @@ ALIGNMENT_TYPES = (1, 2)
 COV_MODES = (0, 1, 2, 3, 4, 5)
 # Foldseek-Multimer applies the complex TM-score filter in modes 0, 1 and 2 only.
 MULTIMER_COV_MODES = (0, 1, 2)
+# Chaperone's values, unsourced there; Foldseek's own multimer defaults are 0.7 (complex TM), 0.7 (chain TM) and 0.3 (interface lDDT).
 DEFAULT_MULTIMER_TM_THRESHOLD = 0.65
 DEFAULT_INTERFACE_LDDT_THRESHOLD = 0.65
 
@@ -49,81 +46,39 @@ class Foldseek(BaseConfig):
     """
     Foldseek: cluster structures at TM-score thresholds.
 
-    Answers "how many distinct folds are in this set, and which designs share
-    one" by Foldseek's structural alignment, once per threshold in
-    `tm_thresholds`. Cluster counts describe diversity under this protocol; they
-    are not a per-design quality score.
+    Answers "how many distinct folds are in this set, and which designs share one" by Foldseek's structural alignment, once per threshold in `tm_thresholds`. Cluster counts describe diversity under this protocol; they are not a per-design quality score.
 
-    Not StructureCluster. StructureCluster is a base-env triage tool: a
-    superposition-free distance-matrix proxy for TM-score, ranked on metrics you
-    hand it, built for thousands of models. Foldseek runs the real aligner
-    (TM-align by default), at several fixed TM-score thresholds, optionally on
-    whole complexes, and ranks nothing. Reach for StructureCluster to choose
-    which families to look at; reach for Foldseek to report diversity at
-    published TM-score cutoffs.
+    Not StructureCluster. StructureCluster is a base-env triage tool: a superposition-free distance-matrix proxy for TM-score, ranked on metrics you hand it, built for thousands of models. Foldseek runs the real aligner (TM-align by default), at several fixed TM-score thresholds, optionally on whole complexes, and ranks nothing. Reach for StructureCluster to choose which families to look at; reach for Foldseek to report diversity at fixed TM-score cutoffs.
 
     TM-SCORE THRESHOLD AND COVERAGE (read this before comparing counts across studies)
-    Foldseek keeps an alignment when its TM-score exceeds the threshold
-    (`--tmscore-threshold`), normalized by the aligned region by default, and
-    when it passes the E-value and coverage filters. Left unset, `evalue` and
-    `coverage` are not passed and Foldseek applies its own defaults, which differ
-    by mode (read from its source): single-chain easy-cluster uses `-e 0.01` and
-    `-c 0.8` with cov-mode 0 (the alignment must cover 80% of both structures);
-    easy-multimercluster uses `-e 10` and `-c 0.0`, no coverage requirement.
-    Counts shift with these filters, so state them when you compare studies.
+    Foldseek keeps an alignment when its TM-score exceeds the threshold (`--tmscore-threshold`), normalized by the aligned region by default, and when it passes the E-value and coverage filters. Left unset, `evalue` and `coverage` are not passed and Foldseek applies its own defaults, which differ by mode (read from its source): single-chain easy-cluster uses `-e 0.01` and `-c 0.8` with cov-mode 0 (the alignment must cover 80% of both structures); easy-multimercluster uses `-e 10` and `-c 0.0`, no coverage requirement. Counts shift with these filters, so state them when you compare studies.
+
+    NORMALIZATION. The cutoffs apply to the TM-score normalized by the aligned region (the default of Foldseek's `--tmscore-threshold-mode`, which this tool does not expose), not by the length of a protein. The convention that TM 0.5 means the same fold is defined for a TM-score normalized by a protein's length, so these cutoffs are not the standard TM-score cutoffs, and clusters at TM 0.5 here are not directly comparable with that convention.
+
+    THRESHOLDS. None of the default cutoffs was measured for this tool. `tm_thresholds` (0.5, 0.6, 0.7, 0.8) is the list of the `foldseek` block of RosettaCommons Chaperone. In multimer mode `multimer_tm_threshold` and `interface_lddt_threshold` default to 0.65 and 0.65, again Chaperone's values, for which that block gives no source; Foldseek's own multimer defaults are 0.7 for the complex TM-score, 0.7 for each chain (`--chain-tm-threshold`) and 0.3 for the interface lDDT. An interface lDDT of 0.65 is more than twice upstream's, so the cluster counts of a multimer run here differ from those of a Foldseek-Multimer run at its defaults (pass `multimer_tm_threshold=0.7, interface_lddt_threshold=0.3` and `tm_thresholds=[0.7]` to run those). Which values suit your question is a choice to confirm, not a default to inherit.
 
     Below TM 0.5 the thresholds do nothing under the defaults, because the E-value and coverage filters act before the TM-score threshold does and structures of different folds never reach it. In a test set of ubiquitin (two copies), three T4 lysozyme variants, GFP and a 12-residue ubiquitin fragment, thresholds of 0.05, 0.3, 0.5 to 0.8, 0.95 and 0.99 all gave the same 4 clusters. With `evalue=10, coverage=0.0` the threshold 0.05 merged ubiquitin with GFP (3 clusters), while 0.3 and 0.5 still gave 4, so those two filters, not the TM-score, set the limit; the 12-residue fragment stayed alone in every run. `cov_mode` changed which structure represents a cluster (`cov_mode=1` chose the first copy and the first lysozyme) but not its members. In multimer mode, `coverage=0.8, cov_mode=2` merged a trypsin-ubiquitin complex with the ubiquitin monomer (5 clusters became 4), which the default, with no coverage requirement, kept apart.
 
     MULTIMER MODE
-    With `multimer=True` the structures are clustered as complexes with
-    `foldseek easy-multimercluster`. `tm_thresholds` then sets
-    `--chain-tm-threshold` (every chain must align above it), while the whole
-    complex must also exceed `multimer_tm_threshold` and the interface must
-    exceed `interface_lddt_threshold`. Chain names must not contain underscores.
-    Without it every structure is expected to hold ONE protein chain; a file
-    with several chains is recorded as a failure instead of being assigned to
-    one of its chains by guess.
+    With `multimer=True` the structures are clustered as complexes with `foldseek easy-multimercluster`. `tm_thresholds` then sets `--chain-tm-threshold` (every chain must align above it), while the whole complex must also exceed `multimer_tm_threshold` and the interface must exceed `interface_lddt_threshold`. Chain names must not contain underscores. Without it every structure is expected to hold ONE protein chain; a file with several chains is recorded as a failure instead of being assigned to one of its chains by guess.
 
     Inputs:
         structures: PDB or mmCIF structures.
-        tm_thresholds: TM-score thresholds, each in (0, 1) with at most two
-            decimals (default [0.5, 0.6, 0.7, 0.8]). One Foldseek run each.
-        multimer: cluster complexes with easy-multimercluster instead of single
-            chains with easy-cluster (default False).
-        alignment_type: Foldseek `--alignment-type`: 1 TM-align, 2 3Di+AA local
-            alignment followed by the TM-score filter (default 1).
-        min_seq_id: Foldseek `--min-seq-id`, the minimum sequence identity to
-            cluster (default 0.0, no requirement). Single-chain mode only.
-        evalue: Foldseek `-e`, the E-value above which an alignment is dropped
-            (default None: not passed, Foldseek's own default applies). Must be
-            positive.
-        coverage: Foldseek `-c`, the fraction of residues the alignment must
-            cover, read through `cov_mode` (default None: not passed, Foldseek's
-            own default applies). In [0, 1]; 0 switches the requirement off.
-        cov_mode: Foldseek `--cov-mode` (default 0, as always passed). 0
-            coverage of query and target, 1 coverage of target, 2 coverage of
-            query, 3 target length at least `coverage` of query length, 4 query
-            length at least `coverage` of target length, 5 the shorter sequence
-            at least `coverage` of the other length. With `multimer=True` it also
-            picks which complex TM-score must pass `multimer_tm_threshold` (0
-            both, 1 target, 2 query), and only 0, 1 and 2 are allowed.
-        multimer_tm_threshold: Foldseek `--multimer-tm-threshold` (default 0.65
-            when `multimer=True`). Multimer mode only.
-        interface_lddt_threshold: Foldseek `--interface-lddt-threshold` (default
-            0.65 when `multimer=True`). Multimer mode only.
-        threads: CPU threads Foldseek uses (`--threads`, default 1). Match the
-            CPUs requested with Resources.
+        tm_thresholds: TM-score thresholds, each in (0, 1) with at most two decimals (default [0.5, 0.6, 0.7, 0.8], the list of the Chaperone `foldseek` block; see THRESHOLDS). One Foldseek run each.
+        multimer: cluster complexes with easy-multimercluster instead of single chains with easy-cluster (default False).
+        alignment_type: Foldseek `--alignment-type`: 1 TM-align, 2 3Di+AA local alignment followed by the TM-score filter (default 1).
+        min_seq_id: Foldseek `--min-seq-id`, the minimum sequence identity to cluster (default 0.0, no requirement). Single-chain mode only.
+        evalue: Foldseek `-e`, the E-value above which an alignment is dropped (default None: not passed, Foldseek's own default applies). Must be positive.
+        coverage: Foldseek `-c`, the fraction of residues the alignment must cover, read through `cov_mode` (default None: not passed, Foldseek's own default applies). In [0, 1]; 0 switches the requirement off.
+        cov_mode: Foldseek `--cov-mode` (default 0, as always passed). 0 coverage of query and target, 1 coverage of target, 2 coverage of query, 3 target length at least `coverage` of query length, 4 query length at least `coverage` of target length, 5 the shorter sequence at least `coverage` of the other length. With `multimer=True` it also picks which complex TM-score must pass `multimer_tm_threshold` (0 both, 1 target, 2 query), and only 0, 1 and 2 are allowed.
+        multimer_tm_threshold: Foldseek `--multimer-tm-threshold` (default 0.65 when `multimer=True`, Chaperone's value; Foldseek's own default is 0.7). Multimer mode only.
+        interface_lddt_threshold: Foldseek `--interface-lddt-threshold` (default 0.65 when `multimer=True`, Chaperone's value with no source given; Foldseek's own default is 0.3). Multimer mode only.
+        threads: CPU threads Foldseek uses (`--threads`, default 1). Match the CPUs requested with Resources.
 
     Outputs:
         Tables:
             tm_clusters: id | cluster_<t> | representative_<t> | n_clusters_<t>
-                for every threshold, where <t> is the percent form of the
-                threshold (tm50, tm60, tm70, tm80 by default). `cluster_<t>` is
-                the cluster number (1 is the largest), `representative_<t>` the
-                id of the cluster's representative structure, `n_clusters_<t>`
-                the number of clusters the whole set splits into (the same value
-                on every row). One row per structure that entered; a structure
-                Foldseek did not report carries NaN.
+                for every threshold, where <t> is the percent form of the threshold (tm50, tm60, tm70, tm80 by default). `cluster_<t>` is the cluster number (1 is the largest), `representative_<t>` the id of the cluster's representative structure, `n_clusters_<t>` the number of clusters the whole set splits into (the same value on every row). One row per structure that entered; a structure Foldseek did not report carries NaN.
             missing: id | removed_by | kind | cause
 
     Usage::
@@ -140,12 +95,11 @@ class Foldseek(BaseConfig):
         strict = Foldseek(structures=folds, evalue=1e-3, coverage=0.9, cov_mode=0)
 
     See Also:
-        StructureCluster: distance-matrix triage clustering with per-family
-            ranking, no external binary.
+        StructureCluster: distance-matrix triage clustering with per-family ranking, no external binary.
     """
 
     TOOL_NAME = "Foldseek"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     ENV_NAME = "foldseek"
 
     @classmethod

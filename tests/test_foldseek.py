@@ -382,6 +382,17 @@ def test_multimer_defaults_resolve_to_the_documented_values(local_config, isolat
     assert fs.multimer_tm_threshold == 0.65 and fs.interface_lddt_threshold == 0.65
 
 
+def test_the_docstring_says_where_the_defaults_come_from_and_where_upstreams_differ():
+    """The values are Chaperone's and unmeasured here; the user decides, so the text must name Foldseek's own 0.7, 0.7 and 0.3 and the normalization of the cutoffs."""
+    from biopipelines import foldseek
+
+    assert (foldseek.DEFAULT_MULTIMER_TM_THRESHOLD, foldseek.DEFAULT_INTERFACE_LDDT_THRESHOLD) == (0.65, 0.65)
+    doc = foldseek.Foldseek.__doc__
+    for phrase in ("Chaperone", "own multimer defaults are 0.7", "0.3 for the interface lDDT", "NORMALIZATION",
+                   "not the standard TM-score cutoffs"):
+        assert phrase in doc, phrase
+
+
 def _step_text(script_path):
     step = sorted(glob.glob(os.path.join(os.path.dirname(script_path), "*_Foldseek.sh")))[0]
     return open(step, encoding="utf-8", errors="replace").read()
