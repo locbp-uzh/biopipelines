@@ -50,7 +50,7 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -110,7 +110,7 @@ echo "=== MutationComposer ready ==="
             Streams: sequences (.csv)
             Tables:
                 sequences: id | sequence | mutations | mutation_positions
-                missing: id | removed_by | kind | cause. One `failure` row for each of the `num_sequences` ids the step could not generate, because the frequency table(s) hold no further mutation to apply; the step fails only when it generated none.
+                missing: id | removed_by | kind | cause. One `failure` row for each of the `num_sequences` ids the step could not generate, because the frequency table(s) hold no further mutation to apply. The step fails when it wrote no sequence at all, and when every sequence it wrote is identical to the reference (no mutation reached `min_frequency`); the sequences are still written in that case.
         """
         # Normalize frequencies to list for consistent handling
         if isinstance(frequencies, list):

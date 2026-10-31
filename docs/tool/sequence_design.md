@@ -473,7 +473,7 @@ Generates new protein sequences by composing mutations based on frequency analys
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
 
-  The step declares `num_sequences` ids, and a short frequency table can give fewer sequences (`single_point` draws each mutation once, a `stack` finds every position taken). Each declared id with no sequence is a `failure` row of `missing`, so a consumer sees the ids that exist and the reason for the others. The step fails only when it wrote no sequence at all.
+  The step declares `num_sequences` ids, and a short frequency table can give fewer sequences (`single_point` draws each mutation once, a `stack` finds every position taken). Each declared id with no sequence is a `failure` row of `missing`, so a consumer sees the ids that exist and the reason for the others. The step fails when it wrote no sequence at all, and when every sequence it wrote is identical to the reference (no mutation reached `min_frequency`, which points at the frequency data or the threshold rather than at a short table); the sequences are still written in that case.
 
 **Example**:
 ```python
