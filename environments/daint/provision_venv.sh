@@ -32,6 +32,9 @@
 #SBATCH --error=slurm-%j.err
 set -uo pipefail
 
+# Hermetic installs: a package in ~/.local must satisfy neither pip nor the import checks.
+export PYTHONNOUSERSITE=1
+
 STAGE="${1:-base}"
 REPO="${SLURM_SUBMIT_DIR:-$HOME/biopipelines}"
 cd "$REPO"

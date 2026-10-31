@@ -1310,6 +1310,12 @@ class TestTheDaintProvisioning:
         assert "mdtraj" in stage.split("create")[1].splitlines()[0]
         assert re.search(r'"\$B2_VENV/bin/pip" install -r', stage)
 
+    def test_every_stage_installs_and_verifies_without_the_user_site(self):
+        """A package in ~/.local would otherwise satisfy pip and the import verification of a venv that lacks it."""
+        _stage, text = self._stage()
+        export = text.index("export PYTHONNOUSERSITE=1")
+        assert export < text.index('if [ "$STAGE" = "base" ]')
+
     def test_it_rebuilds_a_venv_made_by_another_interpreter(self):
         stage, _text = self._stage()
         assert 'pyvenv.cfg' in stage and 'rm -rf "$B2_VENV"' in stage
