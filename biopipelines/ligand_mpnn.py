@@ -40,7 +40,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "3.4"
+    TOOL_VERSION = "3.5"
     # `chain` and `chains` were one letter apart and meant different things, which is the
     # Ligand code/codes mistake again. `chains` now answers both.
     PARAMETER_ALIASES = {"chain": "chains"}
@@ -205,7 +205,10 @@ fi
             save_stats: Write LigandMPNN's per-position amino-acid distributions
                        (upstream --save_stats). Off by default, so no existing
                        pipeline changes behaviour. One torch .pt per input
-                       structure lands in `execution/stats/<id>.pt` holding
+                       structure lands in `execution/stats/<input file name>.pt`
+                       (the tool's `stats_folder`), named after the structure's
+                       file without `.pdb`, as upstream names its FASTA, so it is
+                       `<id>.pt` whenever the file is `<id>.pdb`, holding
                        `log_probs` of shape [B, L, 21] and `sampling_probs` of
                        shape [B, L, 20], alongside `generated_sequences`, `native_sequence`,
                        `decoding_order`, `seed` and `temperature`.
@@ -311,10 +314,9 @@ fi
             raise ValueError(
                 f"packs_per_design must be a positive integer, got: "
                 f"{self.packs_per_design!r}")
-        if not isinstance(self.pack_side_chains, bool):
-            raise ValueError("pack_side_chains must be a bool")
-        if not isinstance(self.pack_with_ligand_context, bool):
-            raise ValueError("pack_with_ligand_context must be a bool")
+        for name in ("pack_side_chains", "pack_with_ligand_context", "save_stats", "use_atom_context"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a bool")
 
         if not self.ligand_stream or len(self.ligand_stream) == 0:
             raise ValueError("ligand (a compounds stream, e.g. Ligand(codes=...)) is required and must not be empty")

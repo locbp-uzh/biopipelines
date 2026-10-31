@@ -4,7 +4,7 @@
 
 """Config-time coverage for the two LigandMPNN options that map onto upstream flags.
 
-``save_stats`` passes ``--save_stats 1`` (upstream then writes ``execution/stats/<id>.pt``) and ``use_atom_context=False`` passes ``--ligand_mpnn_use_atom_context 0``.
+``save_stats`` passes ``--save_stats 1`` (upstream then writes ``execution/stats/<input file name>.pt``) and ``use_atom_context=False`` passes ``--ligand_mpnn_use_atom_context 0``.
 Both default to upstream's behavior and are emitted only when they change it, so a pipeline that sets neither is unchanged.
 Same pattern as test_ligand_mpnn_params.py: a Mock input, then grep the emitted scripts; no GPU.
 """

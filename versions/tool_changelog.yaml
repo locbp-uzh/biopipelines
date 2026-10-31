@@ -1202,8 +1202,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "3.4"
+  current: "3.5"
   history:
+  - version: '3.5'
+    date: '2026-10-31'
+    note: >-
+      `save_stats` and `use_atom_context` are refused unless they are bools, as `pack_side_chains` and `pack_with_ligand_context` already were: `save_stats="yes"` emitted `--save_stats 1` and `use_atom_context=0` behaved like False without a word. The docstring and the docs section promised the stats file as `execution/stats/<id>.pt`, but upstream `run.py` writes `<out_folder>/stats/<input file name without .pdb>.pt`, the name it gives the FASTA (which this wrapper already derives from the file, not the id), so the promised path did not exist for a structure whose file is not `<id>.pdb`. Both now say the file is named after the input file, and that it is `<id>.pt` when the file is `<id>.pdb`. No command, id or output changes. `tests/test_ligandmpnn_flags.py` pins the check and the two statements.
   - version: '3.4'
     date: '2026-10-29'
     note: >-
