@@ -121,9 +121,9 @@ def resolve_ligand_codes(ligand_json: str):
 
 
 def _clean(row, key) -> str:
-    """A compounds-row field, with serialized-NaN ('', 'nan', 'none') as empty."""
+    """A compounds-row field, with serialized-NaN ('', 'nan', 'none', '<na>') as empty."""
     v = str(row.get(key, "") or "").strip()
-    return "" if v.lower() in ("", "nan", "none") else v
+    return "" if v.lower() in ("", "nan", "none", "<na>") else v
 
 
 def ligand_chemistry(row) -> dict:

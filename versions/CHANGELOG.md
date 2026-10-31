@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `ligand_utils.ligand_chemistry` reads `<NA>`, the spelling of a pandas nullable string, as an empty cell, as `resolve_ligand_smiles` already did. `_clean` accepted `''`, `nan` and `none` only, so a cell holding `<NA>` counted as chemistry for every tool that tests for it. `tests/test_ligand_chemistry_blank.py` pins every spelling.
+
 - Generated shell scripts (step scripts, batch scripts, `config.sh`, `pipeline.sh`) are written as UTF-8 with LF line endings on every host. On Windows they were written in the system code page with CRLF, so a comment holding a non-ASCII character (the em dash of the `missing` propagation footer) came out as a cp1252 byte that does not decode as UTF-8. `tests/test_script_encoding.py` pins it.
 
 - `BaseConfig.RESOURCE_REQUIREMENTS` is where a tool declares what it needs from the machine; only `{"gpu": {"incompatible": [...], "compatible": [...], "use": "A100"}}` is read. Generating the batch scripts warns once per tool per batch (`Warning: ...`, the channel of the scheduler's own GPU warnings) when the batch's `Resources(gpu=...)` names a model the tool does not support, or, for a request that names none (`any`, a count, `high-memory`, `80GB`, `!X`, `A|B`), may land on one according to `machine.gpu_models`; the message names the tool, the request, the models and the fix. It is never an error, `none` and tokens that are neither a model nor a memory are not judged, and a misspelled key refuses at class creation. The generated scripts do not change. `biopipelines/resource_requirements.py` holds the judgement and `tests/test_resource_requirements.py` pins it; the developer manual has the section.
