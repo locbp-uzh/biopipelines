@@ -1069,6 +1069,8 @@ fi
 
 **Pick a real verification.** Prefer an import that exercises the heaviest binary dependency (`import torch`, `import boltz`, `import pymol`) over a shallow check like "directory exists". For binary tools (GNINA), check that the executable is present and `-x`. For tools whose install only downloads weights, check the weight file exists.
 
+**The install body runs with `PYTHONNOUSERSITE=1`; the run does not.** `_Installer` exports it as the first line of the install subshell, because pip counts a package in `~/.local` as already installed and may uninstall it: an env came out incomplete and an unrelated one lost its numpy. A verification import therefore proves the env is complete without the user site, which is stricter than a run needs. Run time is left alone on purpose. Nothing installs there, so nothing can be damaged, and setting it for every step would hide a pip-mode interpreter's own `--user` packages and break, with no install to report it, an env built earlier that relied on the user site. A site whose stale `~/.local` packages shadow an env's own at run time opts in for every step with the `export PYTHONNOUSERSITE=1` line shown commented out under `scheduler.init` in `config.cluster.yaml`.
+
 ### Environments and `ENV_NAME`
 
 A tool that builds its own conda/mamba environment declares that environment's default name as a class attribute, beside `TOOL_NAME` and `TOOL_VERSION`:
@@ -1093,7 +1095,7 @@ The config is consulted **before** the pip fallback, not after. It used to be th
 
 The config entry is the one `_load_environments` activates at run time, so reading the same entry at install time is what keeps the two pointed at the same environment. An install script that hard-codes its own name builds one env while the pipeline activates another, and that mismatch does not surface until a job reaches a compute node and cannot find its interpreter.
 
-**The naming standard: a spec file is named after the environment it defines.** An `environments:` entry names an *environment*, and an environment is defined by `environments/<env>.<variant>.yaml`, falling back to `environments/<env>.yaml` when the env resolves identically across variants. Nothing is keyed by tool name, which is why several tools can share one environment — 23 share `biopipelines`, six share `ProteinEnv`, three share `SE3nv` — and why redirecting a tool is a one-line config change:
+**The naming standard: a spec file is named after the environment it defines.** An `environments:` entry names an *environment*, and an environment is defined by `environments/<env>.<variant>.yaml`, falling back to `environments/<env>.yaml` when the env resolves identically across variants. Nothing is keyed by tool name, which is why several tools can share one environment (`config.cluster.yaml` shares `biopipelines`, `ProteinEnv`, `SE3nv` and `foundry` among several tools each) and why redirecting a tool is a one-line config change:
 
 ```yaml
 environments:
@@ -1106,7 +1108,7 @@ That test lives in the generated bash rather than in Python, and it has to: the 
 
 **`env_manager: pip` cannot build an environment at all.** It has no environment manager, so `_env_install_block` refuses with a message naming the variant, rather than emitting `pip env create -f ...` and `pip run -n ...` — neither of which is a pip command, so the old script could only fail later and less legibly.
 
-**Why a raise is the right answer.** On `daint`, 29 tools that declare an `ENV_NAME` have no `environments:` entry at all, because they genuinely are not set up there — aarch64 has no x86-64 binaries and no PyG wheels, and `config.daint.yaml` is explicitly exempt from the three-variant parity test for that reason. Falling back to `ENV_NAME` for those tools would happily build `mytool` on a login node and then activate nothing, or activate an env the runtime side never agreed to. The raise instead names the tool, the variant and the config file:
+**Why a raise is the right answer.** On `daint`, most tools that declare an `ENV_NAME` have no `environments:` entry at all, because they genuinely are not set up there — aarch64 has no x86-64 binaries and no PyG wheels, and `config.daint.yaml` is explicitly exempt from the parity test's rule that every variant lists the same tools for that reason (it may omit a tool, but not name one the others lack, bar a short named list of base-env tools). Falling back to `ENV_NAME` for those tools would happily build `mytool` on a login node and then activate nothing, or activate an env the runtime side never agreed to. The raise instead names the tool, the variant and the config file:
 
 ```
 MyTool: no environment is configured for it in config.daint.yaml (variant 'daint'), so
@@ -1122,7 +1124,7 @@ So `ENV_NAME` is the tool's declared default, consulted only in pip mode — and
 
 **A multi-environment tool's secondary envs are not config-driven.** `DynamicBind` needs two: an inference env and a relax env. The first comes from `environments.DynamicBind` like everyone else's; the second is a class attribute, `RELAX_ENV_NAME = "dynamicbind_relax"`, with no `environments:` entry in any config variant. Install and runtime both address it through that attribute (`cls.RELAX_ENV_NAME` in `_install_script`, `ConfigManager().get_env_python_command(self.RELAX_ENV_NAME)` in `generate_script`), so the two agree and this is not a bug — but it does mean a site cannot redirect a secondary environment the way it can redirect a primary one. `_load_environments` already accepts a list-valued `environments:` entry (`["dynamicbind", "dynamicbind_relax"]`, addressed by `activate_environment(index=N)`) and `_install_env` takes its first element, so the plumbing for config-driven secondaries exists; no config uses it today. If you write a second multi-env tool, know that you are copying a hardcoded pattern.
 
-**Pip-mode installs build no environment.** Under `env_manager: pip`, `_env_install_block` refuses, as described above. This is also why `_install_env` can safely keep returning `ENV_NAME` in pip mode: that path never builds an environment it could get wrong. Colab, the variant that uses `env_manager: pip`, runs tools in the pre-existing base Python and installs them by other means. Do not spend an afternoon debugging why a pip-mode install produced nothing.
+**Pip-mode installs are refused.** Under `env_manager: pip` there is no environment manager, and the shared helpers used to emit `pip env create -f <yaml>` and `pip run -n <env> ...`, which are not pip commands, so no pip-mode install ever installed anything. `_env_install_block` now refuses with a message naming the variant (see above), and `_install_env` keeps returning `ENV_NAME` in pip mode only as a label: nothing builds an environment under it. The variant that uses `env_manager: pip` is `config.local.yaml`, which runs tools in the interpreter that is already active; `config.colab.yaml` uses micromamba. Install the dependencies of a tool into that interpreter yourself.
 
 ---
 

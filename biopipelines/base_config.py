@@ -651,7 +651,7 @@ class BaseConfig(ABC):
                 )
         else:
             named = BaseConfig._env_create_name_flag(env_name, env_manager)
-            # An env may be built by an upstream installer rather than from a spec (RF3's 'modelforge'), and `env create -f` on an absent file only fails.
+            # An env may be built by an upstream installer or by hand rather than from a spec, and `env create -f` on an absent file only fails.
             env_block = (
                 f'if [ -f "{env_yaml_variant}" ]; then\n'
                 f'    {env_manager} env create -f "{env_yaml_variant}"{named} -y\n'
