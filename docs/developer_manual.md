@@ -1604,7 +1604,7 @@ What the suite covers:
 | `test_panda.py`               | Table transformations, filter/sort/head/tail/sample rename paths.                                                                                                                      |
 | `test_id_filter_audit.py`     | Filtered-stream consumers: `write_filtered_map_table` (subset, order, byte-identical fast path, missing/required columns), combinatorics carrying filtered ids, the runtime materializer pipe script, and stitch/Boltz loaders honoring an id filter. |
 
-All tests use the pip-mode fixture `tests/fixtures/config.local.yaml` (no conda, no containers, no SLURM), so CI and local runs need only `pip install -e ".[test]"`.
+All tests use the pip-mode fixture `tests/fixtures/config.local.yaml` (no conda, no containers, no SLURM), so CI and local runs need only `pip install -e ".[test,mcp]"`.
 
 ### The Mock Tool
 
@@ -1621,11 +1621,15 @@ When adding a framework-level feature (a new ID pattern, a new provenance column
 ### Running the Suite
 
 ```bash
-pip install -e ".[test]"
-pytest tests/ -v
+pip install -e ".[test,mcp]"
+python -m pytest tests/ -v -m "not tool_parameters"
 ```
 
-`tests/conftest.py` writes a per-run report to `tests/test_results.csv` / `.xlsx` with one row per test — `input`, `expected`, `actual`, `matched`, `duration_s`, and any error details — so the suite doubles as a legible artifact of what was tested, not just a pass/fail count.
+That is the selection both CI pipelines run, on Python 3.10–3.13 with the same install (the `mcp` extra is what lets `tests/test_mcp_server.py` collect). The `-m` on the command line replaces the default of `pyproject.toml`, `addopts = "-ra -m 'not tool_parameters and not network'"`, so the tests marked `network` (live calls to RCSB and GitHub) run as well. A bare `pytest tests/` therefore skips them and is a weaker gate than CI.
+
+The per-tool suites under `tests/tool_parameters` are opt-in and neither CI pipeline runs them: `python -m pytest tests/tool_parameters -m tool_parameters -v`. They need no GPU and make no network call, and a green `pytest tests/` says nothing about them.
+
+`tests/conftest.py` writes a per-run report to `tests/_results/test_results.csv` (gitignored; the `.xlsx` beside it only when `openpyxl` is installed) with one row per test — `input`, `expected`, `actual`, `matched`, `duration_s`, and any error details — so the suite doubles as a legible artifact of what was tested, not just a pass/fail count.
 
 The end-to-end test that actually invokes `pipeline.sh` via `bash` (`test_generated_pipeline_sh_executes_end_to_end`) is skipped on Windows because MSYS/Git-bash reinterprets the backslashes in embedded Windows paths as escape characters. It runs on every push/PR on the Linux CI runner.
 
