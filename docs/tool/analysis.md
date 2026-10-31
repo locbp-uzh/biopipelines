@@ -2141,6 +2141,8 @@ Protein–ligand interaction **fingerprints**. For each complex, computes the Pr
 
 **Tables**:
 - `fingerprints`: | id | residue | resn | chain | resnum | resi | interaction_type | present |
+
+  Long format: several rows per complex, none for a complex whose ligand makes no interaction ProLIF detects. Such a complex succeeded, so the step exits non-zero only when no complex was attempted or every one failed.
 - `missing`: | id | removed_by | kind | cause |
 
 **Example**:
@@ -2204,6 +2206,8 @@ Scores and ranks docking poses by residue–atom distance likelihood (graph tran
 - `scores`: | id | structures.id | ligands.id | pose | rtmscore |
 
   **Units.** `rtmscore` is dimensionless — an aggregated statistical potential summed from negative log-likelihoods. Upstream does not state which direction is better, so verify against the paper before ranking on it. It is a **pose-ranking score, not an affinity**: it is not calibrated to a binding constant and is not comparable to Prodigy's ΔG, GEMS's pKd or Boltz2's log-IC50.
+
+  Long format: one row per pose of a pair, none for a pair RTMScore answered with no pose. Such a pair succeeded, so the step exits non-zero only when every pair failed.
 - `missing`: | id | removed_by | kind | cause |
 
 

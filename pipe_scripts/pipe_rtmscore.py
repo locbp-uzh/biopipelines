@@ -205,7 +205,9 @@ def main():
     print(f"Scores: {args.scores_csv} ({len(rows)} rows)")
     print(f"Missing: {args.missing_csv} ({len(all_missing)} rows)")
 
-    if not rows:
+    # A pair that answers with no pose succeeds and writes no row, so only the failures decide.
+    if len(missing) == len(combos):
+        print(f"ERROR: all {len(combos)} attempted pair(s) failed", file=sys.stderr)
         sys.exit(1)
 
 

@@ -77,6 +77,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **ProLIF** 2.2 → 2.3. The step exits non-zero when no complex was attempted or every attempted complex failed, not when `fingerprints` has no row. The table is long format, so a complex whose ligand makes no interaction ProLIF detects succeeds and writes no row, and a batch made only of such complexes used to fail the step. The `Failed: n/m` line counts attempted complexes.
+
+- **RTMScore** 2.3 → 2.4. The step exits non-zero when every pair failed, not when `scores` has no row. The table is long format, so a pair RTMScore answers with no pose succeeds and writes no row, and a batch made only of such pairs used to fail the step.
+
 - **REINVENT4** 1.1 → 1.2. An input compound with no SMILES is a `failure` row of `missing`, not a `filter` row: the compound was asked for and nothing was deliberately dropped, and `filter` is the kind that is excused and so counted as intended. The blank is read through `ligand_utils.ligand_chemistry`, so `none`, `NAN` or spaces count as no SMILES where only an empty cell and a float NaN did. An input REINVENT ran and that yielded no molecule stays a `filter`.
 
 - **GEMS** 2.2 → 2.3. A pair GEMS gave no prediction for keeps its row of `affinity`, with a NaN `pkd_pred`, beside its `failure` row of `missing`. The table dropped the row, so a `Panda` merge of `affinity` against the table that fed it silently came back shorter. The step exits non-zero when no pair at all got a prediction, which an empty table used to decide. No id changes.

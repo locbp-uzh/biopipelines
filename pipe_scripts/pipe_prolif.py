@@ -73,10 +73,12 @@ def main():
 
     ds = load_datastream(args.structures_json)
     rows, failed = [], []
+    attempted = 0
     step_id = step_id_from_table_path(args.missing_csv)
     fp = plf.Fingerprint()
 
     for sid, pdb_path in iterate_files(ds):
+        attempted += 1
         try:
             u = mda.Universe(pdb_path, guess_bonds=True)
             lig_ag = u.select_atoms(f"resname {ligand_code}")
@@ -125,8 +127,13 @@ def main():
     print(f"Missing: {args.missing_csv} ({len(all_missing)} rows)")
 
     if failed:
-        print(f"Failed: {len(failed)}/{len(failed)+len(set(r['id'] for r in rows))}", file=sys.stderr)
-    if not rows:
+        print(f"Failed: {len(failed)}/{attempted}", file=sys.stderr)
+    # A complex with no interaction succeeds and writes no row, so only the attempts decide.
+    if not attempted:
+        print("ERROR: no input entities to process (upstream stream is empty or its files are absent)", file=sys.stderr)
+        sys.exit(1)
+    if len(failed) == attempted:
+        print(f"ERROR: all {attempted} attempted id(s) failed", file=sys.stderr)
         sys.exit(1)
 
 

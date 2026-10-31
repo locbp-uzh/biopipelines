@@ -1968,8 +1968,12 @@ ProLIF:
   files:
   - biopipelines/prolif.py
   - pipe_scripts/pipe_prolif.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-31'
+    note: >-
+      The step exits non-zero when no complex was attempted or every attempted complex failed, not when `fingerprints` has no row. The table is long format, so a complex whose ligand makes no interaction ProLIF detects succeeds and writes no row, and a batch made only of such complexes used to fail the step. The `Failed: n/m` line counts attempted complexes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-
@@ -2378,8 +2382,12 @@ RTMScore:
   files:
   - biopipelines/rtmscore.py
   - pipe_scripts/pipe_rtmscore.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-31'
+    note: >-
+      The step exits non-zero when every pair failed, not when `scores` has no row. The table is long format, so a pair RTMScore answers with no pose succeeds and writes no row, and a batch made only of such pairs used to fail the step.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
