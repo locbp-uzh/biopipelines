@@ -8,6 +8,7 @@ import json
 import math
 import os
 import sys
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -526,9 +527,37 @@ def _upstream_script(tmp_path_factory):
     try:
         with urllib.request.urlopen(UPSTREAM_URL, timeout=20) as response:
             path.write_bytes(response.read())
+    except urllib.error.HTTPError as exc:
+        # An HTTPError is an OSError too, so it is caught first: a dead URL is an answer, not an outage.
+        pytest.fail(f"{UPSTREAM_URL} answered HTTP {exc.code}: upstream moved or removed ipsae.py, which the wrapper installs from the same URL")
     except OSError as exc:
         pytest.skip(f"{UPSTREAM_URL} unreachable ({exc}); cannot run upstream ipsae.py")
     return str(path)
+
+
+def _outcome_when_the_download_raises(monkeypatch, tmp_path_factory, error):
+    """What the fetch helper tells pytest; a skip is caught too, or a wrongly skipped test would just read as skipped."""
+    def urlopen(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    try:
+        _upstream_script(tmp_path_factory)
+    except pytest.fail.Exception:
+        return "failed"
+    except pytest.skip.Exception:
+        return "skipped"
+    return "returned"
+
+
+def test_a_dead_upstream_url_fails_the_suite_instead_of_skipping_it(monkeypatch, tmp_path_factory):
+    error = urllib.error.HTTPError(UPSTREAM_URL, 404, "Not Found", {}, None)
+    assert _outcome_when_the_download_raises(monkeypatch, tmp_path_factory, error) == "failed"
+
+
+def test_an_unreachable_upstream_skips_the_network_test(monkeypatch, tmp_path_factory):
+    error = urllib.error.URLError("no route to host")
+    assert _outcome_when_the_download_raises(monkeypatch, tmp_path_factory, error) == "skipped"
 
 
 @pytest.fixture(scope="module")
