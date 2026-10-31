@@ -318,6 +318,16 @@ class TestBoltz2Wrapper:
         assert outputs["structures"].ids_expanded == expected
         assert outputs["pae"].ids_expanded == expected
 
+    def test_the_sample_ids_are_composed_by_the_shared_helper(
+            self, local_config, isolated_cwd, new_pipeline, monkeypatch):
+        import biopipelines.boltz2 as module
+        calls = []
+        monkeypatch.setattr(module, "generate_multiplied_ids_pattern",
+                            lambda ids, suffix: calls.append(suffix) or [f"{i}#{suffix}" for i in ids])
+        tool, _ = self._boltz(new_pipeline, top_only=False, diffusion_samples=3)
+        assert "<1..3>" in calls
+        assert tool.get_output_files()["structures"].ids == ["p1#<1..3>", "p2#<1..3>"]
+
     def test_the_flag_reaches_boltz_predict(self, local_config, isolated_cwd, new_pipeline):
         _, script_path = self._boltz(new_pipeline)
         body = _step_script(script_path, "Boltz2")

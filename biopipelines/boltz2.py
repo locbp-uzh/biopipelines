@@ -18,7 +18,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
+    from .combinatorics import generate_combinatorics_config, generate_multiplied_ids_pattern, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
     from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
     import sys
@@ -26,7 +26,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo, _validate_freeform_string
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import generate_combinatorics_config, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
+    from combinatorics import generate_combinatorics_config, generate_multiplied_ids_pattern, get_mode, predict_output_ids, predict_output_ids_with_provenance, Bundle, Each
     from datastream_resolver import resolve_input_to_datastream
 
 
@@ -39,7 +39,7 @@ class Boltz2(BaseConfig):
     """
 
     TOOL_NAME = "Boltz2"
-    TOOL_VERSION = "2.13"
+    TOOL_VERSION = "2.14"
     # `boltz predict` takes far more options than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "Boltz2Env"
@@ -1155,16 +1155,11 @@ python {self.boltz_compounds_py} \\
         structure_ext = ".pdb" if self.output_format == "pdb" else ".cif"
         structure_files = [self.stream_path("structures", f"<id>{structure_ext}")]
 
-        # With top_only=False the postprocess surfaces EVERY diffusion sample as
-        # <id>_1..K (for any K, including K=1), so the declared structure ids must
-        # mirror that exactly or the completion check mismatches. Suffix whenever
-        # top_only is off; K = diffusion_samples (Boltz's effective default is 1).
-        # Use the compact lazy-id range pattern (<1..K>) rather than materializing.
-        # Other streams (msas/sequences/compounds) stay per-complex on the base ids.
+        # With top_only off the postprocess surfaces every diffusion sample as <id>_1..K, K being diffusion_samples (Boltz's default is 1).
+        # The other streams (msas, sequences, compounds) stay per-complex on the base ids.
         structure_ids = predicted_ids
         if not self.top_only:
-            k = self.diffusion_samples or 1
-            structure_ids = [f"{pid}_<1..{k}>" for pid in predicted_ids]
+            structure_ids = generate_multiplied_ids_pattern(predicted_ids, f"<1..{self.diffusion_samples or 1}>")
 
         structures = DataStream(
             name="structures",

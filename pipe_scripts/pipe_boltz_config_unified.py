@@ -95,10 +95,7 @@ def parse_arguments():
     # Metal coordination bond constraints
     parser.add_argument('--metal-coord', help='JSON list of metal coordination bond constraints')
     # Sequences output
-    # Boltz's single-sequence mode. The wrapper has emitted --single-sequence
-    # since `single_sequence=` was added, but this parser never declared it, so
-    # argparse rejected the whole invocation and Boltz2 folded zero inputs while
-    # the step still reported post-processing 'successfully'.
+    # Boltz's single-sequence mode; the wrapper emits this flag, so the parser has to declare it.
     parser.add_argument('--single-sequence', action='store_true',
                         help="Fold without an MSA (sets msa: empty on every protein chain)")
     parser.add_argument('--sequences-csv', help='Path to write protein sequences CSV (id, sequence)')
@@ -782,6 +779,10 @@ def main():
         write_protein_sequences(configs, args.sequences_csv)
 
     print(f"\nGenerated {len(configs)} config files")
+    # Nothing left to predict is a step error: boltz predict on an empty folder would fail later with a vaguer message.
+    if not configs and skipped:
+        print("ERROR: every config was skipped")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

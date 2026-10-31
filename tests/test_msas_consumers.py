@@ -209,6 +209,35 @@ class TestAMissingAlignmentFailsOnlyItsOwnId:
         assert rows["id"].tolist() == ["p2"] and rows["kind"].tolist() == ["failure"]
         assert rows["removed_by"].tolist() == ["001_Boltz2"]
 
+    @staticmethod
+    def _boltz_config_step(tmp_path, msa_ids):
+        """The Boltz2 config script as the generated bash calls it, over proteins p1 and p2 and an msas table of `msa_ids`."""
+        from biopipelines.combinatorics import AxisConfig, CombinatoricsConfig
+        pd.DataFrame([{"id": "p1", "sequence": PROTEIN}, {"id": "p2", "sequence": "MKTAYIAKQRQ"}]).to_csv(
+            tmp_path / "proteins.csv", index=False)
+        CombinatoricsConfig(axes={"proteins": AxisConfig(
+            name="proteins", mode="each", entity_type="protein",
+            sources=[{"path": str(tmp_path / "proteins.csv"), "iterate": True}])}).save(
+            str(tmp_path / "combinatorics.json"))
+        msas = _write_table(tmp_path, [{"id": name, "sequence": "", "file": _a3m(tmp_path, name)}
+                                       for name in msa_ids])
+        return subprocess.run(
+            [sys.executable, os.path.join(SCRIPTS, "pipe_boltz_config_unified.py"),
+             "--combinatorics-config", str(tmp_path / "combinatorics.json"),
+             "--output-dir", str(tmp_path / "configs"), "--msa-table", msas,
+             "--skipped-csv", str(tmp_path / "skipped.csv"), "--sequence-ids", str(tmp_path / "ids.csv")],
+            capture_output=True, text=True)
+
+    def test_boltz2_stops_the_step_when_every_config_was_skipped(self, tmp_path):
+        done = self._boltz_config_step(tmp_path, ["other"])
+        assert done.returncode == 1 and "every config was skipped" in done.stdout
+        assert sorted(read_skipped_queries(str(tmp_path / "skipped.csv"))) == ["p1", "p2"]
+
+    def test_boltz2_goes_on_when_only_some_configs_were_skipped(self, tmp_path):
+        done = self._boltz_config_step(tmp_path, ["p1"])
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert sorted(os.listdir(tmp_path / "configs")) == ["p1.yaml"]
+
     def test_alphafold_copies_each_query_its_alignment_and_records_the_ones_without(self, tmp_path):
         copy = _module("pipe_boltz_msa_copy")
         table = _write_table(tmp_path, [{"id": "p1_msa", "sequences.id": "p1", "file": _a3m(tmp_path)}])

@@ -109,9 +109,7 @@ def copy_msa_files(msa_table_path: str, output_folder: str,
 
     copied_count = 0
     if queries_csv:
-        # An msas stream is often wider than the query set — a filtered stream, or a
-        # whole previous run recycled for one sequence. Copying all of it is wasted
-        # IO, and the extra a3m files sit in the same folder the predictor scans.
+        # An msas stream is often wider than the query set, and copying all of it wastes IO and puts extra a3m files where the predictor scans.
         missing = {}
         queries = read_queries(queries_csv)
         for seq_id, sequence in queries:

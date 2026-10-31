@@ -311,8 +311,12 @@ Boltz2:
   - pipe_scripts/pipe_boltz_results.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.13"
+  current: "2.14"
   history:
+  - version: '2.14'
+    date: '2026-10-31'
+    note: >-
+      With `msas`, a step that left no config (every protein had no usable alignment) printed `Generated 0 config files` and went on, so `boltz predict` ran on an empty folder and the step failed later with a vaguer error; the config script exits 1 with `every config was skipped` now, after writing the skipped-query file, as the RF3, OpenFold3 and Protenix config steps do. The ids of `top_only=False` are composed with `generate_multiplied_ids_pattern`, and three comments that split a sentence over several lines are collapsed.
   - version: '2.13'
     date: '2026-10-30'
     note: >-
