@@ -252,8 +252,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.8"
+  current: "1.9"
   history:
+  - version: '1.9'
+    date: '2026-10-31'
+    note: >-
+      The Daint route of 1.8 is two routes behind one config entry. `config.daint.yaml` keeps `BioEmu2: "bioemu2"`, a venv on top of the `edf:` image as for Boltz2, which `BioEmu2.install()` and `environments/daint/provision_venv.sh bioemu2` build; an image that already carries bioemu2 is used by setting the entry to `""`, which activates nothing and makes install refuse by name, as for BioEmu, and only then. The `bioemu2` stage of `provision_venv.sh` now builds the venv the entry names, `$VENV_ROOT/bioemu2` over a conda layer that supplies mdtraj, and rebuilds one made by another interpreter; 1.8 built a conda env the framework never activated. The docstring, `docs/tool/analysis.md`, the Daint reference and the developer manual describe both routes. `tests/test_bioemu2.py` runs the shipped config in both settings: what the step activates, that install builds the venv or is refused, and that the stage builds what the entry names.
   - version: '1.8'
     date: '2026-10-31'
     note: >-

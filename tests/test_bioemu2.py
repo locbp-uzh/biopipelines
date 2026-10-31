@@ -1188,8 +1188,8 @@ class TestTheCheckpointFetch:
 
 
 @pytest.fixture
-def daint_config(monkeypatch):
-    """The shipped config.daint.yaml behind ConfigManager, reset on both sides."""
+def daint_config(monkeypatch, tmp_path):
+    """Loads the shipped config.daint.yaml behind ConfigManager, with `environments.BioEmu2` replaced when asked; reset on both sides."""
     from biopipelines.config_manager import ConfigManager
 
     def reset():
@@ -1197,29 +1197,75 @@ def daint_config(monkeypatch):
         ConfigManager._config = None
         ConfigManager._variant = None
 
-    path = os.path.join(REPO_ROOT, "config.daint.yaml")
+    def load(entry=None):
+        path = os.path.join(REPO_ROOT, "config.daint.yaml")
+        if entry is not None:
+            with open(path, encoding="utf-8") as handle:
+                config = yaml.safe_load(handle)
+            config["environments"]["BioEmu2"] = entry
+            path = str(tmp_path / "config.daint.yaml")
+            with open(path, "w", encoding="utf-8") as handle:
+                yaml.safe_dump(config, handle)
+        reset()
+        monkeypatch.setattr(ConfigManager, "_get_config_path", classmethod(lambda cls, variant=None, _p=path: _p))
+        return ConfigManager(variant="daint")
+
+    yield load
     reset()
-    monkeypatch.setattr(ConfigManager, "_get_config_path", classmethod(lambda cls, variant=None, _p=path: _p))
-    yield ConfigManager(variant="daint")
-    reset()
 
 
-class TestTheDaintRoute:
-    """On daint BioEmu2 runs in a prebuilt image, as BioEmu does: it activates nothing and installs nothing there."""
+class TestTheDaintRoutes:
+    """Two ways to run BioEmu2 on daint, chosen by one config entry: a named env on top of the image, or an image that carries bioemu2."""
 
-    def test_the_environment_entry_is_empty_and_an_image_is_named(self):
+    @staticmethod
+    def _activation(config):
+        tool = BioEmu2.__new__(BioEmu2)
+        tool._load_environments()
+        return tool.activate_environment()
+
+    def test_the_shipped_default_is_the_named_env_with_the_image_underneath(self):
         with open(os.path.join(REPO_ROOT, "config.daint.yaml")) as handle:
             config = yaml.safe_load(handle)
-        assert config["environments"]["BioEmu2"] == ""
+        assert config["environments"]["BioEmu2"] == "bioemu2"
         assert config["edf"]["BioEmu2"].endswith("bioemu2.toml")
 
-    def test_the_configured_image_is_the_one_the_step_runs_in(self, daint_config):
-        assert daint_config.get_environment("BioEmu2") == ""
-        assert daint_config.get_edf("BioEmu2").endswith("/edf/bioemu2.toml")
+    def test_by_default_the_step_runs_in_the_image_and_activates_the_named_venv(self, daint_config):
+        config = daint_config()
+        assert config.get_edf("BioEmu2").endswith("/edf/bioemu2.toml")
+        activation = self._activation(config)
+        assert f'source "{config.get_venv_path("bioemu2")}/bin/activate"' in activation
+        assert "provided by the tool's EDF image" not in activation
 
-    def test_installing_under_daint_is_refused_by_name_not_attempted(self, daint_config, tmp_path):
+    def test_by_default_install_builds_the_venv_the_step_activates(self, daint_config, tmp_path):
+        config = daint_config()
+        script = BioEmu2._install_script({"biopipelines": REPO_ROOT}, config.get_env_manager())
+        venv = config.get_venv_path("bioemu2")
+        assert f'-m venv --system-site-packages "{venv}"' in script
+        assert f'pip install -r "{REPO_ROOT}/environments/bioemu2.pip.txt"' in script
+        assert "pipe_bioemu2_weights.py" in script
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    @pytest.mark.parametrize("force", [False, True])
+    def test_by_default_the_install_script_is_valid_bash(self, daint_config, force):
+        script = BioEmu2._install_script({"biopipelines": REPO_ROOT}, daint_config().get_env_manager(),
+                                         force_reinstall=force)
+        done = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+        assert done.returncode == 0, done.stderr
+
+    def test_an_empty_entry_keeps_the_image_and_activates_nothing(self, daint_config):
+        config = daint_config("")
+        assert config.get_environment("BioEmu2") == ""
+        assert config.get_edf("BioEmu2").endswith("/edf/bioemu2.toml")
+        activation = self._activation(config)
+        assert "provided by the tool's EDF image" in activation
+        assert "bin/activate" not in activation
+
+    def test_an_empty_entry_refuses_install_by_name_and_only_an_empty_one_does(self, daint_config, tmp_path):
+        config = daint_config("")
         with pytest.raises(ValueError, match="image supplies the interpreter"):
-            BioEmu2._install_script({"biopipelines": str(tmp_path)}, daint_config.get_env_manager())
+            BioEmu2._install_script({"biopipelines": REPO_ROOT}, config.get_env_manager())
+        config = daint_config()
+        assert BioEmu2._install_script({"biopipelines": REPO_ROOT}, config.get_env_manager())
 
     def test_the_other_variants_still_build_the_env(self):
         for variant in ("cluster", "colab", "container"):
@@ -1228,7 +1274,7 @@ class TestTheDaintRoute:
 
 
 class TestTheDaintProvisioning:
-    """provision_venv.sh builds a bare-node env for BioEmu2 from the repo's own spec, for use without the image."""
+    """provision_venv.sh builds the venv the daint entry names, from the repo's own spec, on a bare node."""
 
     SCRIPT = os.path.join(REPO_ROOT, "environments", "daint", "provision_venv.sh")
 
@@ -1255,10 +1301,22 @@ class TestTheDaintProvisioning:
         assert "-r environments/bioemu2.pip.txt" in code
         assert not re.search(r"pip\"? install bioemu2\b", code)
 
-    def test_it_verifies_the_imports_and_the_cli_the_wrapper_verifies(self):
+    def test_it_builds_the_venv_the_daint_entry_names_over_a_conda_layer(self):
+        """The framework activates $VENV_ROOT/bioemu2, and mdtraj comes from the conda layer the venv inherits."""
         stage, _text = self._stage()
-        assert "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub" in stage
-        assert "sample-equilibrium --help" in stage
+        assert 'B2_VENV="$VENV_ROOT/bioemu2"' in stage
+        assert '-m venv --system-site-packages "$B2_VENV"' in stage
+        assert "mdtraj" in stage.split("create")[1].splitlines()[0]
+        assert re.search(r'"\$B2_VENV/bin/pip" install -r', stage)
+
+    def test_it_rebuilds_a_venv_made_by_another_interpreter(self):
+        stage, _text = self._stage()
+        assert 'pyvenv.cfg' in stage and 'rm -rf "$B2_VENV"' in stage
+
+    def test_it_verifies_in_the_venv_the_imports_and_the_cli_the_wrapper_verifies(self):
+        stage, _text = self._stage()
+        assert '"$B2_VENV/bin/python" -c "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub' in stage
+        assert '"$B2_VENV/bin/bioemu2" sample-equilibrium --help' in stage
 
     @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
     def test_the_script_is_valid_bash(self):

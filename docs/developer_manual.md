@@ -1096,7 +1096,7 @@ environments.MyTool: "<env name>" -- or install MyTool under a variant that conf
 
 An install-time refusal that names all three beats the same failure arriving later, on a compute node, as an activation that finds nothing.
 
-An `environments:` entry that is present but **empty** (`MyTool: ""`) means something different and gets its own message: the tool's image supplies the interpreter, so there is no environment to build and installing under that variant is unsupported. `BioEmu` and `BioEmu2` on `daint` are the two such entries today.
+An `environments:` entry that is present but **empty** (`MyTool: ""`) means something different and gets its own message: the tool's image supplies the interpreter, so there is no environment to build and installing under that variant is unsupported. `BioEmu` on `daint` is the one such entry today; a site whose image already carries `bioemu2` sets `BioEmu2` empty the same way, and only then is its install refused.
 
 So `ENV_NAME` is the tool's declared default, consulted only in pip mode — and the reason to declare it anyway is that it is the single place a reader can find which env the tool means, instead of reading it out of an install script's bash.
 

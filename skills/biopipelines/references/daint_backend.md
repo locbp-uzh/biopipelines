@@ -282,19 +282,21 @@ An import check is not a run. BioEmu passed `import bioemu.sample` and still fai
 
 ## BioEmu2
 
-BioEmu2 (microsoft/bioemu2) is the ligand-capable successor of BioEmu, and it runs from a prebuilt image here for the same reason BioEmu does: its install pulls `cuequivariance_torch` and `cuequivariance_ops_torch` wheels that exist only for one CUDA, torch and aarch64 combination, beside `mdtraj`. A run on a GH200 was reported to work on 2026-10-24 under BioEmu2 1.0. It has not been repeated since the wrapper was rewritten (a new system YAML, ids, tables and install), and the recipe of the image is not in the repo.
+BioEmu2 (microsoft/bioemu2) is the ligand-capable successor of BioEmu. Its install pulls `cuequivariance_torch` and `cuequivariance_ops_torch` wheels that exist only for one CUDA, torch and aarch64 combination, beside `mdtraj`, which is why it runs on top of an image here. A run on a GH200 was reported to work on 2026-10-24 under BioEmu2 1.0, with the image supplying the interpreter. It has not been repeated since the wrapper was rewritten (a new system YAML, ids, tables and install), and the recipe of the image is not in the repo.
 
-**Two routes, and they exclude each other.**
+**One config entry picks the route.** In both, `edf: BioEmu2: "<group>/edf/bioemu2.toml"` puts the whole step in the image.
 
-- **The `daint` variant runs the whole step in the image.** `environments: BioEmu2: ""` says the image supplies the interpreter, as for BioEmu, and `edf: BioEmu2: "<group>/edf/bioemu2.toml"` points at it. Nothing is activated and `BioEmu2.install()` is refused by name. The helper then runs on the image's Python, which needs `pandas` (bioemu2 does not require it; it does bring `mdtraj`, `pyyaml` and `huggingface_hub`), and the EDF has to mount the biopipelines checkout like any image that runs a whole step (see `ngc-pytorch-bp.toml` above).
-- **A helper outside the image wraps only the sampler.** With `BIOEMU2_SRUN_ENVIRONMENT=<EDF>` exported where the helper runs, the helper calls `srun --environment=<EDF> bioemu2 sample-equilibrium ...` for each run, so the pipeline's own Python stays outside. The shape it was reported to work in, with the EDFs by absolute path:
+- **The default: a named env on top of the image.** `environments: BioEmu2: "bioemu2"` activates the venv `bioemu2` inside the image, as `Boltz2Env` is activated for Boltz2. `BioEmu2.install()` builds it (the `tools` stage with `CR_TOOLS=BioEmu2`, which runs the install inside the image), `provision_venv.sh bioemu2` builds the same venv on a bare node over a conda layer that supplies `mdtraj`, and `install()` then fetches the checkpoint. Both install `environments/bioemu2.pip.txt`, so the spec lives in the repo.
+- **An image that already carries bioemu2.** Setting the entry to `""` says the image supplies the interpreter, as for BioEmu. Nothing is activated, the helper runs on the image's Python, which needs `pandas` (bioemu2 does not require it; it does bring `mdtraj`, `pyyaml` and `huggingface_hub`), and `BioEmu2.install()` is refused by name. The EDF has to mount the biopipelines checkout like any image that runs a whole step (see `ngc-pytorch-bp.toml` above).
 
-  ```bash
-  export BIOEMU2_SRUN_ENVIRONMENT=<group>/edf/bioemu2.toml
-  srun --environment=<group>/edf/bp-base.toml micromamba run -n biopipelines python my_pipeline.py
-  ```
+**A helper outside the image wraps only the sampler.** This is a third setting, for a pipeline whose own Python stays outside. With `BIOEMU2_SRUN_ENVIRONMENT=<EDF>` exported where the helper runs, it calls `srun --environment=<EDF> bioemu2 sample-equilibrium ...` for each run. The shape it was reported to work in, with the EDFs by absolute path:
 
-  The helper still splits the trajectory into conformers, so its Python needs `mdtraj`. Leave the variable unset under the `daint` variant, whose `edf:` entry already puts the step in the image. Nothing about it is written into the generated script.
+```bash
+export BIOEMU2_SRUN_ENVIRONMENT=<group>/edf/bioemu2.toml
+srun --environment=<group>/edf/bp-base.toml micromamba run -n biopipelines python my_pipeline.py
+```
+
+The helper still splits the trajectory into conformers, so its Python needs `mdtraj`. Leave the variable unset under the `daint` variant, whose `edf:` entry already puts the step in the image on either route. Nothing about it is written into the generated script.
 
 **The host environment is cut before enroot.** When `BIOEMU2_SRUN_ENVIRONMENT` is set, the helper passes on only HOME, USER, PATH, TERM, SHELL, LANG, LC_ALL, SCRATCH, the SLURM job variables, the four cache directories bioemu2 reads (`BIOEMU2_MSA_CACHE`, `BIOEMU2_EMBEDS_CACHE`, `BIOEMU2_CCD_CACHE`, `BIOEMU2_TEMPLATE_CACHE`), HF_HOME, HF_TOKEN and TRITON_CACHE_DIR. Without that, the host env's `CUDA_HOME`, `LD_LIBRARY_PATH`, `PYTHONPATH` and Triton cache paths reach the image and poison bioemu2's own torch and triton init: the first bring-up jobs failed with `No module named 'triton.ops'` and `undefined symbol: __cudaRegisterLinkedBinary`, errors that point at the wrong env.
 
@@ -302,4 +304,4 @@ BioEmu2 (microsoft/bioemu2) is the ligand-capable successor of BioEmu, and it ru
 
 **The alignment cache.** `BIOEMU2_MSA_CACHE` moves the ColabFold cache of the searched sequences, and bioemu2 reads it itself. On Daint, scratch purges at 30 days and a new search takes minutes against the MMseqs2 server, so a cache on the group store survives the purge. A run with a supplied `msas` alignment uses the step's own cache directory instead.
 
-**A bare node.** `provision_venv.sh bioemu2` builds a conda env at `<conda_env_root>/bioemu2` from `environments/bioemu2.pip.txt` with conda-forge's `mdtraj`, and checks the imports and the CLI. The framework does not activate it, because the daint entry is empty; call its `bin/bioemu2` directly. Like the image, it is not verified here.
+**Untested here:** the venv over the image (that the install resolves `bioemu2[cuda]` on aarch64 and that the conda layer's python runs inside the image), the image-only route under the rewritten wrapper, and the nested `srun`.

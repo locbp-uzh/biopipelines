@@ -79,7 +79,7 @@ class BioEmu2(BaseConfig):
 
     Install:
         BioEmu2.install()   # Python 3.12 env, bioemu2[cuda], and the bioemu2-preview checkpoint from Hugging Face
-                   Under the `daint` variant the entry is empty, because a prebuilt image supplies the interpreter, and install is refused by name there.
+                   Under the `daint` variant the env is a venv on top of the `edf:` image, which install builds inside that image. An image that already carries bioemu2 is used by setting `environments: BioEmu2` to "" there: nothing is activated, and install is refused by name.
 
     Runtime environment:
         BIOEMU2_SRUN_ENVIRONMENT: an EDF path of the CSCS Container Engine. Where the helper runs, the `bioemu2 sample-equilibrium` call becomes `srun --environment=<EDF> bioemu2 ...` and the helper's own environment is cut to what SLURM, enroot and bioemu2 read.
@@ -103,7 +103,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.8"
+    TOOL_VERSION = "1.9"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}

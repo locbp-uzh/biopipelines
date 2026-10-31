@@ -171,28 +171,41 @@ print('  import: boltz', boltz.__version__ if hasattr(boltz,'__version__') else 
 fi
 
 # --------------------------------------------------------------- bioemu2
-# Production runs BioEmu2 in an EDF image that an operator provisions on the group store (config.daint.yaml: BioEmu2: "" and edf: BioEmu2).
-# This stage is the fallback for a bare node, so the install is reproducible from the repo and not hand-built.
-# It makes a conda env that the framework does not activate, because the daint entry is empty: call its bin/bioemu2 directly.
+# config.daint.yaml activates the venv $VENV_ROOT/bioemu2 (BioEmu2: "bioemu2"), under the edf: image when the step runs.
+# This stage builds it on a bare node the way the PyMOL and mkdssp envs are built, a venv over a conda layer.
+# The tools stage (CR_TOOLS=BioEmu2) builds the same venv inside the image instead, and BioEmu2.install() then fetches the checkpoint.
 # conda-forge supplies mdtraj, and bioemu2[cuda] (environments/bioemu2.pip.txt) brings torch and the cuequivariance kernels.
 # Those kernels may build from source where no aarch64 wheel is published, and bp-base carries the compiler. Not verified on a GH200.
+# An image that already carries bioemu2 needs none of this: set BioEmu2 to "" in config.daint.yaml.
 if [ "$STAGE" = "bioemu2" ]; then
-  B2_ENV="$CONDA_ROOT/bioemu2"
-  if [ ! -x "$B2_ENV/bin/python" ]; then
-    echo "[bioemu2] creating the conda env (python 3.12, which bioemu2 requires)"
-    "$MAMBA" create -y -p "$B2_ENV" -c conda-forge python=3.12 pip "mdtraj>=1.9" pandas numpy || exit 1
+  B2_CONDA="$CONDA_ROOT/bioemu2"
+  B2_VENV="$VENV_ROOT/bioemu2"
+  if [ ! -x "$B2_CONDA/bin/python" ]; then
+    echo "[bioemu2] creating the conda layer (python 3.12, which bioemu2 requires)"
+    "$MAMBA" create -y -p "$B2_CONDA" -c conda-forge python=3.12 pip "mdtraj>=1.9" pandas numpy || exit 1
   else
-    echo "[bioemu2] conda env already present"
+    echo "[bioemu2] conda layer already present"
   fi
+
+  # Refuse a venv built by any other interpreter, for the reason the base stage gives.
+  if [ -d "$B2_VENV" ] && ! grep -qx "home = $B2_CONDA/bin" "$B2_VENV/pyvenv.cfg" 2>/dev/null; then
+    echo "[bioemu2] existing venv was not built by $B2_CONDA/bin/python; rebuilding"
+    rm -rf "$B2_VENV"
+  fi
+  if [ ! -d "$B2_VENV" ]; then
+    echo "[bioemu2] creating the venv from that interpreter"
+    "$B2_CONDA/bin/python" -m venv --system-site-packages "$B2_VENV" || exit 1
+  else
+    echo "[bioemu2] venv already present"
+  fi
+
   # Not a bare `pip install bioemu2`: its only release is a release candidate, which the specifier in the file admits.
   echo "[bioemu2] installing environments/bioemu2.pip.txt"
-  "$B2_ENV/bin/pip" install -r environments/bioemu2.pip.txt || exit 1
+  "$B2_VENV/bin/pip" install -r environments/bioemu2.pip.txt || exit 1
 
   echo "[bioemu2] verifying on THIS node"
-  "$B2_ENV/bin/python" -c "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub; print('  imports OK')" \
-    || { echo "[bioemu2] import verification FAILED" >&2; exit 1; }
-  "$B2_ENV/bin/bioemu2" sample-equilibrium --help >/dev/null \
-    || { echo "[bioemu2] the bioemu2 CLI does not run" >&2; exit 1; }
+  "$B2_VENV/bin/python" -c "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub; print('  imports OK')"     || { echo "[bioemu2] import verification FAILED" >&2; exit 1; }
+  "$B2_VENV/bin/bioemu2" sample-equilibrium --help >/dev/null     || { echo "[bioemu2] the bioemu2 CLI does not run" >&2; exit 1; }
   echo "[bioemu2] done"
 fi
 
