@@ -93,6 +93,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **AlphaFold** 1.15 → 1.16. A comment of the `msas` copy section that split a sentence over three lines is one line; no behavior changes.
+
 - **Boltz2** 2.13 → 2.14. With `msas`, a step that left no config (every protein had no usable alignment) printed `Generated 0 config files` and went on, so `boltz predict` ran on an empty folder and the step failed later with a vaguer error; the config script exits 1 with `every config was skipped` now, after writing the skipped-query file, as the RF3, OpenFold3 and Protenix config steps do. The ids of `top_only=False` are composed with `generate_multiplied_ids_pattern`, and three comments that split a sentence over several lines are collapsed.
 
 - **ESMFold2** 2.11 → 2.12. A `failure` row of `missing` names its step (`<NNN>_ESMFold2`) in `removed_by`, where it carried the bare tool name, so a later ESMFold2 step of the same pipeline read the failures of an earlier one as its own and was marked FAILED for ids it never received. The ids of `top_only=False` are composed with `generate_multiplied_ids_pattern`. `top_only` states what it does with several seeds: the best `num_diffusion_samples` samples across all seeds are surfaced as `<id>_1..N` and the rest are dropped; the docs said every sample. The comments of the inference script that split a sentence over several lines are collapsed; no behavior changes.

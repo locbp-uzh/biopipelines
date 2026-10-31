@@ -70,7 +70,7 @@ class AlphaFold(BaseConfig):
     """
 
     TOOL_NAME = "AlphaFold"
-    TOOL_VERSION = "1.15"
+    TOOL_VERSION = "1.16"
     # colabfold_batch is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
 
@@ -461,9 +461,7 @@ python {self.fa_to_csv_fasta_py} {source_file} {self.queries_csv} {self.queries_
         if self.msas_input is None:
             return ""
 
-        # A producer that emits a3m files without declaring an `msas` table -- a Scripting
-        # step building single-sequence alignments, say -- still has the stream's own map
-        # table, and id|file is all the copier reads.
+        # A producer that emits a3m files without an `msas` table (a Scripting step, say) still has the stream's map table, and id|file is all the copier reads.
         try:
             msa_table_path = self.msas_input.tables.msas.info.path
         except AttributeError:

@@ -29,7 +29,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 17 | ProteinMPNN | Sequence Design                | 2.10 | `biopipelines/protein_mpnn.py` |
 | 18 | RBSDesigner | Sequence Design                | 2.0 | `biopipelines/rbs_designer.py` |
 | 19 | StitchSequences           | Sequence Design                | 1.0 | `biopipelines/stitch_sequences.py` |
-| 20 | AlphaFold                 | Structure Prediction & Docking | 1.15 | `biopipelines/alphafold.py` |
+| 20 | AlphaFold                 | Structure Prediction & Docking | 1.16 | `biopipelines/alphafold.py` |
 | 21 | Boltz2 | Structure Prediction & Docking | 2.14 | `biopipelines/boltz2.py` |
 | 22 | DiffDock | Structure Prediction & Docking | 2.4 | `biopipelines/diffdock.py` |
 | 23 | DynamicBind | Structure Prediction & Docking | 2.7 | `biopipelines/dynamicbind.py` |
