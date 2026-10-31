@@ -25,6 +25,7 @@ from biopipelines import (
     AlphaFold,
     Boltz2,
     BoltzGen,
+    BioEmu2,
     MutationProfiler,
     PyMOL,
     Gnina,
@@ -41,9 +42,10 @@ with Pipeline(project="Setup", job="InstallTools"):
     # Sequence design
     ProteinMPNN.install()         # Clones repo (uses SE3nv from RFdiffusion)
     LigandMPNN.install()          # Creates ligandmpnn_env, clones repo
-    # Structure prediction
+    # Structure prediction & equilibrium ensembles
     AlphaFold.install()           # LocalColabFold installation
     Boltz2.install()              # Creates Boltz2Env
+    BioEmu2.install()             # Creates the bioemu2 env (Python 3.12, bioemu2[cuda]), fetches the checkpoint
     # Visualization & Analysis
     PyMOL.install()               # Creates ProteinEnv (PyMOL, pandas, biopython, rdkit)
     MutationProfiler.install()    # Creates MutationEnv
