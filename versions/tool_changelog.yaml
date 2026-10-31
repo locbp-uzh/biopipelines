@@ -2486,8 +2486,12 @@ SequenceIdentityGate:
   files:
   - biopipelines/sequence_identity_gate.py
   - pipe_scripts/pipe_sequence_identity_gate.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-31'
+    note: >-
+      Documentation only, no behavior change. The docstring and docs called the gap scores the EMBOSS Needle defaults while the aligner penalizes end gaps, which Needle does not do by default; they now say what runs and how the choice can change an identity. They also say that the default threshold 0.4 is the value of the Chaperone block that scores the scaffold region of RNA designs, and that here it gates protein sequences over their whole length, so it is a choice to confirm and not a measured protein threshold. Docstrings are one line per paragraph.
   - version: '1.0'
     date: '2026-10-27'
     note: >-

@@ -77,6 +77,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **SequenceIdentityGate** 1.0 → 1.1. Documentation only. The docs called the gap scores the EMBOSS Needle defaults while the aligner penalizes end gaps, which Needle does not by default; they now say what runs. They also say that the default threshold 0.4 is the value of the Chaperone block that scores the scaffold region of RNA designs, so for protein sequences over their whole length it is a choice to confirm and not a measured threshold.
+
 - **Foldcomp** 1.1 → 1.2. `database` is refused at configuration when it holds a double quote, a backtick, `$` or a backslash, because the path is echoed inside double quotes in the generated bash, where `$(...)` would run. The domain id is made by `generate_multiplied_ids`, with the same ids as before.
 
 - **PoseBusters** 2.3 → 2.4. The tool declares a `missing` table, as the tools that consume streams do. A structure with no ligand residue of the stream's code to extract, one on which PoseBusters raised, and one whose file was not found each get a `failure` row of `missing` naming the reason; the first two keep their `all_pass` False row of `posebusters` as before. The failures go to `execution/local_missing.csv` and are merged with the upstream manifests of `structures` and `ligand` into `tables/missing.csv`. Before, both inputs could be filtered upstream and a structure that could not be read left no trace. A pose that fails a check is a result and has no `missing` row, and the step's exit status is unchanged.

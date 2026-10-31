@@ -76,7 +76,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |
 | 65 | RTMScore | Analysis                       | 2.4 | `biopipelines/rtmscore.py` |
 | 66 | SASA                      | Analysis                       | 1.0 | `biopipelines/sasa.py` |
-| 67 | SequenceIdentityGate      | Analysis                       | 1.0 | `biopipelines/sequence_identity_gate.py` |
+| 67 | SequenceIdentityGate      | Analysis                       | 1.1 | `biopipelines/sequence_identity_gate.py` |
 | 68 | StructureCluster          | Analysis                       | 1.1 | `biopipelines/structure_cluster.py` |
 | 69 | ThermoMPNN | Analysis                       | 2.1 | `biopipelines/thermompnn.py` |
 | 70 | VespaG | Analysis                       | 2.1 | `biopipelines/vespag.py` |

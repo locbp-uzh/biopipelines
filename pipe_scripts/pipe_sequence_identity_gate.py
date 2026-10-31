@@ -31,7 +31,7 @@ _ALPHABET = set(_MATRIX.alphabet)
 
 
 def make_aligner() -> Align.PairwiseAligner:
-    """Global aligner with the EMBOSS Needle defaults: BLOSUM62, gap open -10, gap extend -0.5."""
+    """Global aligner with the gap scores of EMBOSS Needle (BLOSUM62, gap open -10, gap extend -0.5) and end gaps penalized, which Needle does not do by default."""
     return Align.PairwiseAligner(mode="global", substitution_matrix=_MATRIX,
                                  open_gap_score=-10.0, extend_gap_score=-0.5)
 

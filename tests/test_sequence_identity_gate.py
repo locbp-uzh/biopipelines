@@ -46,6 +46,29 @@ def test_gaps_count_in_the_denominator(pipe):
     assert identity == pytest.approx(10 / 13)
 
 
+def test_end_gaps_are_penalized_like_any_other_gap(pipe):
+    """Needle's gap scores (open 10, extend 0.5) charge a 3-residue end gap 11; Needle itself would not charge it by default, and the docstring says so."""
+    aligner = pipe.make_aligner()
+    assert aligner.score("MKTAYIAKQR", "MKTAYIAKQR") - aligner.score("MKTAYIAKQR", "MKTAYIAKQRLLL") == pytest.approx(11.0)
+
+
+def test_penalized_end_gaps_change_the_identity_of_a_design_cut_from_a_longer_protein(pipe):
+    design = "QNIAFNHLCADFYHVELLCH"
+    reference = "QNYQYVHIARQIRKFNHRCADIDSVEYNGHLPNLWGFYKT"
+    free = pipe.make_aligner()
+    free.end_gap_score = 0.0
+    assert pipe.global_identity(pipe.make_aligner(), design, reference) == pytest.approx(0.325)
+    assert pipe.global_identity(free, design, reference) == pytest.approx(0.25)
+
+
+def test_the_docs_do_not_call_the_penalized_end_gaps_the_needle_defaults():
+    from biopipelines import sequence_identity_gate
+
+    for text in (sequence_identity_gate.SequenceIdentityGate.__doc__, open(SCRIPT, encoding="utf-8").read()):
+        assert "the EMBOSS Needle defaults" not in text
+        assert "end gaps" in text and "Needle" in text
+
+
 def test_unrelated_sequences_score_low(pipe):
     assert pipe.global_identity(pipe.make_aligner(), "WWWWWWWWWW", "MKTAYIAKQR") < 0.2
 

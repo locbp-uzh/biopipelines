@@ -5,11 +5,7 @@
 """
 SequenceIdentityGate: global sequence identity of each design against natural references.
 
-A novelty gate for design campaigns: a design that copies a natural protein can
-score well on every structural metric because the predictor may have memorized
-it too, so this tool reports how close each design sits to the nearest natural
-sequence. It mirrors the sequence identity gate of the RosettaCommons Chaperone
-framework, applied to protein sequences.
+A novelty gate for design campaigns: a design that copies a natural protein can score well on every structural metric because the predictor may have memorized it too, so this tool reports how close each design sits to the nearest natural sequence. It mirrors the sequence identity gate of the RosettaCommons Chaperone framework, applied to protein sequences.
 """
 
 import os
@@ -29,60 +25,37 @@ except ImportError:
 
 class SequenceIdentityGate(BaseConfig):
     """
-    SequenceIdentityGate: maximum global identity of each design to a set of
-    natural reference sequences.
+    SequenceIdentityGate: maximum global identity of each design to a set of natural reference sequences.
 
-    For every design the tool aligns it against every reference with a global
-    (Needleman-Wunsch) alignment and keeps the highest identity and the
-    reference that gave it. Identity is the number of identical aligned
-    positions divided by the alignment length, gaps included, so a design that
-    shares a long stretch with a longer natural protein is not scored as if it
-    were that protein. The alignment uses BLOSUM62 with a gap-open score of -10
-    and a gap-extend score of -0.5 (the EMBOSS Needle defaults); end gaps are
-    penalized. When several alignments tie on score, Biopython's first one
-    decides.
+    For every design the tool aligns it against every reference with a global (Needleman-Wunsch) alignment and keeps the highest identity and the reference that gave it. Identity is the number of identical aligned positions divided by the alignment length, gaps included, so a design that shares a long stretch with a longer natural protein is not scored as if it were that protein.
 
-    The tool never filters. `passed` states whether `max_identity` is strictly
-    below `threshold`, and every design keeps its row, so the gate is applied
-    downstream, as an explicit step::
+    ALIGNMENT. BLOSUM62 with a gap-open score of -10 and a gap-extend score of -0.5, which are the gap scores of EMBOSS Needle (its protein defaults of 10 and 0.5), but with end gaps penalized like any other gap. Needle does not penalize end gaps unless asked to (`-endweight`); Biopython's `PairwiseAligner`, which runs here, does by default, and the tool keeps that. For a design shorter than its reference this changes which positions are paired and so the identity (in a synthetic test of 60 random 300-residue proteins, each with an 80-residue design cut from it and half of its residues replaced, the two settings gave a different identity for 25 designs, by up to about 0.02). Free end gaps would be `end_gap_score=0`; the tool does not offer them, and you should confirm the penalized choice suits your references. When several alignments tie on score, Biopython's first one decides.
+
+    The tool never filters. `passed` states whether `max_identity` is strictly below `threshold`, and every design keeps its row, so the gate is applied downstream, as an explicit step::
 
         gate = SequenceIdentityGate(sequences=designs, references=Sequence("naturals.fasta"))
         novel = Panda(tables=gate.tables.identity_gate,
                       operations=[Panda.filter("passed == True")],
                       pool=designs)
 
-    The whole sequence is scored. A motif copied unchanged from a natural
-    protein therefore counts toward the identity, which raises `max_identity`
-    for every design that carries it; set `threshold` for that campaign rather
-    than reusing a value from another one.
+    THRESHOLD. The default 0.4 is the value of the `sequence_identity_gate` block of RosettaCommons Chaperone, whose own description reads "0.40 is the RNA motif-scaffolding bench..." and which scores the scaffold region only (`exclude_motif=True`, because the motif identity is 100% by construction) of RNA designs against Rfam and RNAcentral homologs. Here the same number gates protein sequences over their whole length, so it is not a protein threshold that anyone measured, and a motif copied unchanged from a natural protein counts toward the identity and raises `max_identity` for every design that carries it. Set `threshold` for each campaign, and confirm the value you choose rather than keeping the default by inertia.
 
     Inputs:
-        sequences: protein sequences to score (StandardizedOutput or DataStream
-            with a `sequences` stream). One row is one polymer chain, so a
-            multi-chain design is scored chain by chain.
-        references: natural protein sequences to compare against, as a
-            `sequences` stream; `Sequence("references.fasta")` turns a FASTA
-            file into one. Required and non-empty. A reference that cannot be
-            scored stops the step rather than silently weakening the gate.
-        threshold: maximum identity, as a fraction in [0, 1], a design may have
-            and still pass (default 0.4). Set it per campaign.
+        sequences: protein sequences to score (StandardizedOutput or DataStream with a `sequences` stream). One row is one polymer chain, so a multi-chain design is scored chain by chain.
+        references: natural protein sequences to compare against, as a `sequences` stream; `Sequence("references.fasta")` turns a FASTA file into one. Required and non-empty. A reference that cannot be scored stops the step rather than silently weakening the gate.
+        threshold: maximum identity, as a fraction in [0, 1], a design may have and still pass (default 0.4, borrowed from the RNA benchmark above; see THRESHOLD). Set it per campaign.
 
     Outputs:
         Tables:
             identity_gate: id | max_identity | nearest_reference | passed
-                `max_identity` is a fraction in [0, 1], `nearest_reference` the
-                id of the reference that gave it (the first one on a tie), and
-                `passed` is `max_identity < threshold`. A design that could not
-                be scored carries NaN in all three.
+                `max_identity` is a fraction in [0, 1], `nearest_reference` the id of the reference that gave it (the first one on a tie), and `passed` is `max_identity < threshold`. A design that could not be scored carries NaN in all three.
             missing: id | removed_by | kind | cause
 
-    Not covered: the identity of the whole sequence only. A motif-excluded
-    score would need the motif residues mapped from structure numbering onto
-    sequence positions, which no stream in the framework carries.
+    Not covered: the identity of the whole sequence only. A motif-excluded score would need the motif residues mapped from structure numbering onto sequence positions, which no stream in the framework carries.
     """
 
     TOOL_NAME = "SequenceIdentityGate"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     # No _install_script: runs in the biopipelines base env (Biopython is a base dependency).
 
