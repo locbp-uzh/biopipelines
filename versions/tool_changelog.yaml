@@ -2220,8 +2220,12 @@ RFdiffusion:
   files:
   - biopipelines/rfdiffusion.py
   - pipe_scripts/pipe_rfdiffusion_table.py
-  current: "2.6"
+  current: "2.7"
   history:
+  - version: '2.7'
+    date: '2026-10-31'
+    note: >-
+      Under fold conditioning (`scaffold_dir`, `target_ss`, `target_adj`) the declared ids are the files the run writes. The step declared `<pdb>_<n>` ids whenever a `pdb` input was given, but fold conditioning is one run named after the step (`inference.output_prefix` is the step name) that never reads `pdb`, so a one-structure step declared `p1_<1..2>`, wrote `<step>_1.pdb` and `<step>_2.pdb`, and was marked FAILED with every declared output absent. `pdb` together with fold conditioning is now refused when the step is configured: upstream takes the target of a fold-conditioned binder from `target_path`, so the input would be ignored in silence. `hotspot_res` is accepted there with `target_path` and `target_ss` or `target_adj`, which is how upstream pairs them; it required `pdb`, the one input that is now refused. The ids of every other mode are unchanged. `tests/test_rfdiffusion_fold_conditioning.py` compares the declared ids with the `inference.output_prefix` of the generated script.
   - version: '2.6'
     date: '2026-10-30'
     note: >-

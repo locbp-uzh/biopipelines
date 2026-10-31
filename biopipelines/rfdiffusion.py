@@ -143,7 +143,7 @@ class RFdiffusion(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion"
-    TOOL_VERSION = "2.6"
+    TOOL_VERSION = "2.7"
     # RFdiffusion's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -353,7 +353,10 @@ fi
                  binder design, and partial diffusion. Accepts a DataStream or a
                  StandardizedOutput. When it carries multiple structures,
                  RFdiffusion runs once per input PDB (``num_designs`` designs
-                 each); output ids are ``<pdb_id>_<n>``.
+                 each); output ids are ``<pdb_id>_<n>``. Not accepted with fold
+                 conditioning (``scaffold_dir``, ``target_ss``, ``target_adj``), which
+                 is one run named after the step (output ids ``<step name>_<n>``) and
+                 takes its target from ``target_path``.
             inpaint: Residues whose sequence should be masked during diffusion
                      (same chain+range format as contigs). When set, the
                      InpaintSeq checkpoint is used automatically — ensure it
@@ -385,7 +388,8 @@ fi
             hotspot_res: Interface residues on the target the binder should
                          engage, e.g. ``["A30", "A33", "A34"]``
                          (``ppi.hotspot_res``). Binder design only — requires
-                         ``pdb``.
+                         ``pdb``, or ``target_path`` with ``target_ss`` /
+                         ``target_adj`` under fold conditioning.
             symmetry: Point group for symmetric-oligomer generation. A named
                       group (``"tetrahedral"``, ``"octahedral"``,
                       ``"icosahedral"``) or a cyclic/dihedral group
@@ -434,7 +438,8 @@ fi
                           fold conditioning (``scaffoldguided.scaffold_dir``).
                           Setting it turns on ``scaffoldguided.scaffoldguided``.
                           Fold conditioning runs from the scaffold set rather than
-                          ``contigs``.
+                          ``contigs``, as one run named after the step, and takes
+                          no ``pdb`` input (the target is ``target_path``).
             target_ss: Precomputed target secondary-structure tensor file
                        (``scaffoldguided.target_ss``, a ``.pt`` produced by
                        upstream ``helper_scripts/make_secstruc_adj.py`` — a small
@@ -547,9 +552,20 @@ fi
                 "cannot be combined with a pdb input"
             )
 
-        # Hotspots only mean something against a target structure.
-        if self.hotspot_res and self.pdb_stream is None:
-            raise ValueError("hotspot_res requires a pdb input (the binder target)")
+        # Fold conditioning is one run named after the step, and upstream reads its target from target_path, never from a pdb input.
+        if self._scaffold_guided and self.pdb_stream is not None:
+            raise ValueError(
+                "fold conditioning (scaffold_dir, target_ss, target_adj) takes its target from target_path "
+                "and would ignore a pdb input; drop pdb"
+            )
+
+        # Hotspots only mean something against a target structure: a pdb input, or target_path with target_ss/target_adj.
+        has_fold_target = self.target_path is not None and (self.target_ss is not None or self.target_adj is not None)
+        if self.hotspot_res and self.pdb_stream is None and not has_fold_target:
+            raise ValueError(
+                "hotspot_res requires a pdb input (the binder target), or target_path with target_ss/target_adj "
+                "under fold conditioning"
+            )
 
         # provide_seq fixes sequence during partial diffusion.
         if self.provide_seq and self.partial_steps <= 0:
@@ -803,8 +819,7 @@ fi
         prefix = os.path.join(structures_dir, self.pipeline_name)
 
         if self._scaffold_guided:
-            # Fold conditioning: no contigs, no input-pdb loop — the run is
-            # driven entirely by the scaffoldguided.* options in `common`.
+            # Fold conditioning: one run named after the step, driven entirely by the scaffoldguided.* options in `common`.
             return f"""echo "Starting RFdiffusion (fold conditioning)"
 echo "Output folder: {self.output_folder}"
 
@@ -914,8 +929,8 @@ python {self.table_py_file} "{structures_dir}" "{self.main_table}"
         """Generate script to write structures_map.csv from the actual runtime PDBs."""
         structures_map = self.stream_map_path("structures")
         structures_dir = self.stream_folder("structures")
-        # Parents come from the input stream by exact id; with no PDB, or under fold conditioning, there are none.
-        has_parents = self.pdb_stream and not self._scaffold_guided
+        # Parents come from the input stream by exact id; with no PDB there are none (fold conditioning takes no PDB).
+        has_parents = self.pdb_stream
         prov_arg = (f' --parents-json "{self.pdb_ds_json}" --suffix-pattern "{self._suffix_pattern()}"'
                     ' --parent-column "structures.id"') if has_parents else ""
         failure_arg = f' --local-missing-csv "{self.local_missing_csv}" --stderr-dir "{self.stderr_folder}"'

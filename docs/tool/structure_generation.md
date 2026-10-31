@@ -382,7 +382,7 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 
 **Parameters**:
 - `contigs`: str | (TableInfo, column) - Contig specification (e.g., "A1-100", "10-20,A6-140"). Required for every mode except fold conditioning (which runs from a scaffold set). May be a table column reference resolved per-input-PDB at runtime — useful when each input structure needs its own contig.
-- `pdb`: Optional[Union[DataStream, StandardizedOutput]] = None - Input PDB template(s) (optional). **When the input stream holds multiple structures, RFdiffusion now runs once per input PDB** (a runtime loop over the input ids), producing `num_designs` designs for each — so an upstream pose ensemble (e.g. PLACER's models) propagates fully into design instead of only the first structure being used.
+- `pdb`: Optional[Union[DataStream, StandardizedOutput]] = None - Input PDB template(s) (optional). **When the input stream holds multiple structures, RFdiffusion now runs once per input PDB** (a runtime loop over the input ids), producing `num_designs` designs for each — so an upstream pose ensemble (e.g. PLACER's models) propagates fully into design instead of only the first structure being used. Not accepted together with fold conditioning (`scaffold_dir`, `target_ss`, `target_adj`), which takes its target from `target_path` and would ignore it; the combination is refused when the step is configured.
 - `inpaint`: str | (TableInfo, column) = "" - Inpainting specification (also accepts a per-PDB table column reference)
 - `inpaint_str`: str | (TableInfo, column) = "" - Secondary-structure inpainting specification (also accepts a per-PDB table column reference)
 - `num_designs`: int = 1 - Number of backbone designs to generate per input PDB
@@ -391,7 +391,7 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 - `partial_steps`: int = 0 - Partial diffusion steps
 - `reproducible`: bool = False - Use deterministic sampling
 - `design_startnum`: int = 1 - Starting number for design IDs
-- `hotspot_res`: Optional[List[str]] = None - Interface residues the binder should engage, e.g. `["A30","A33","A34"]` (`ppi.hotspot_res`). Binder design only; requires `pdb`.
+- `hotspot_res`: Optional[List[str]] = None - Interface residues the binder should engage, e.g. `["A30","A33","A34"]` (`ppi.hotspot_res`). Binder design only; requires `pdb`, or, under fold conditioning, `target_path` with `target_ss` / `target_adj`.
 - `symmetry`: Optional[str] = None - Point group for symmetric-oligomer generation: a named group (`"tetrahedral"`, `"octahedral"`, `"icosahedral"`) or a cyclic/dihedral group (`"c4"`, `"d2"`). Switches to RFdiffusion's `symmetry` config; the run is unconditional, so `pdb` must not be set and `contigs` is the total assembly length. Pair with an `olig_contacts` guiding potential.
 - `guiding_potentials`: str | GuidingPotential | List = None - Guiding potential(s) (`potentials.guiding_potentials`). Use the typed builder `RFdiffusion.GuidingPotential.olig_contacts(...)` (or `monomer_ROG`, `binder_ncontacts`, …); a raw hydra string or a list is also accepted.
 - `guide_scale`: Optional[float] = None - Global multiplier on the guiding potential (`potentials.guide_scale`).
@@ -402,9 +402,9 @@ pip install -e . # install the rfdiffusion module from the root of the repositor
 - `length`: Optional[str] = None - Total output length, exact or a range (`contigmap.length`, e.g. `"309"` or `"309-311"`). Constrains the *sum* of the diffused segments while each keeps its own range, so a two-linker contig `A1-20/1-4/B1-100/1-4/A50-90` with the total pinned admits (1,4) and (4,1) but not (1,1) or (4,4). Counts the whole chain, motif residues included.
 - `noise_scale_ca` / `noise_scale_frame`: Optional[float] = None - Translational / rotational denoiser noise scale (`denoiser.noise_scale_ca` / `noise_scale_frame`); values < 1 (often 0) reduce diversity but raise quality, common for binder design.
 - `inpaint_str_helix` / `inpaint_str_strand`: Optional[str] = None - Residues whose secondary structure is masked and forced to helix / strand (`contigmap.inpaint_str_helix` / `inpaint_str_strand`).
-- `scaffold_dir`: Optional[str] = None - Directory of scaffold `_ss.pt` / `_adj.pt` files for fold conditioning (`scaffoldguided.scaffold_dir`); setting it (or `target_ss`/`target_adj`) turns on `scaffoldguided.scaffoldguided` and the run is driven by the scaffold set rather than `contigs`.
+- `scaffold_dir`: Optional[str] = None - Directory of scaffold `_ss.pt` / `_adj.pt` files for fold conditioning (`scaffoldguided.scaffold_dir`); setting it (or `target_ss`/`target_adj`) turns on `scaffoldguided.scaffoldguided` and the run is driven by the scaffold set rather than `contigs`. It is one run named after the step, so the output ids are `<step name>_<n>` and no `pdb` input is accepted.
 - `target_ss` / `target_adj`: Optional[str] = None - Precomputed target secondary-structure / block-adjacency tensor files (`scaffoldguided.target_ss` / `target_adj`). These are small per-target `.pt` inputs produced by upstream `helper_scripts/make_secstruc_adj.py` — **not** model weights. Setting either implies `scaffoldguided.target_pdb=True`.
-- `target_path`: Optional[str] = None - Target structure for fold-conditioned binder design (`scaffoldguided.target_path`).
+- `target_path`: Optional[str] = None - Target structure for fold-conditioned binder design (`scaffoldguided.target_path`); the structure a `pdb` input would be in the other modes. Emitted only with `target_ss` / `target_adj`.
 - `mask_loops`: Optional[bool] = None - Allow input loops to be remodelled (`scaffoldguided.mask_loops`).
 - `sampled_insertion` / `sampled_N` / `sampled_C`: Optional[int] = None - Sampled scaffold length variation: total insertion, N-terminus, C-terminus (`scaffoldguided.sampled_insertion` / `sampled_N` / `sampled_C`).
 
