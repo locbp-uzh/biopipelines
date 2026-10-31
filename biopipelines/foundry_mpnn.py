@@ -110,7 +110,7 @@ class FoundryMPNN(BaseConfig):
     """
 
     TOOL_NAME = "FoundryMPNN"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
     ENV_NAME = "foundry"
 
@@ -130,8 +130,9 @@ class FoundryMPNN(BaseConfig):
         run = cls._env_run(env, env_manager)
         have_weights = (f'ls "{ckpt_dir}"/proteinmpnn_*.pt >/dev/null 2>&1 '
                         f'&& ls "{ckpt_dir}"/ligandmpnn_*.pt >/dev/null 2>&1')
-        skip = "" if force_reinstall else f"""# Check if already fully installed (env + both MPNN checkpoints)
-if {env_check} && {have_weights}; then
+        engine_ok = f'{run}python -c "import mpnn.inference_engines.mpnn" >/dev/null 2>&1'
+        skip = "" if force_reinstall else f"""# Check if already fully installed (env + both MPNN checkpoints + a working engine import)
+if {env_check} && {have_weights} && {engine_ok}; then
     echo "FoundryMPNN already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -144,6 +145,9 @@ fi
 # The foundry env is shared with RFdiffusion3 and RF3: create it only when absent
 if ! {env_check}; then
     {env_block}
+elif ! {engine_ok}; then
+    echo "The {env} environment cannot import the MPNN engine (built before atomworks was pinned?); re-applying {cls.ENV_NAME}.pip.txt"
+    {run}pip install -r "{biopipelines}/environments/{cls.ENV_NAME}.pip.txt"
 else
     echo "{env} environment already exists, skipping creation."
 fi
@@ -157,7 +161,7 @@ else
 fi
 
 # Verify installation
-if ({have_weights}) && {run}python -c "import mpnn.inference_engines.mpnn" >/dev/null 2>&1; then
+if ({have_weights}) && {engine_ok}; then
     touch "$INSTALL_SUCCESS"
     echo "=== FoundryMPNN installation complete ==="
 else

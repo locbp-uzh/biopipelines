@@ -805,7 +805,7 @@ It is **not** a drop-in replacement for `Boltz2` in what it predicts: there is n
 
 The whole batch folds in one process: `rf3 fold` takes a single JSON list holding every complex, so a campaign pays one model load rather than one per complex. A single input that makes upstream raise stops the process, and the inputs after it are not predicted; they appear in `missing` as failures.
 
-RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `RF3.install()` creates the environment if it is absent and downloads the RF3 weights into the `RF3` folder of `repositories:`, which `RFdiffusion3.install()` does not do (it fetches only the rfd3 weights, and skips itself once those are present).
+RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `RF3.install()` creates the environment if it is absent and downloads the RF3 weights into the `RF3` folder of `repositories:`, which `RFdiffusion3.install()` does not do (it fetches only the rfd3 weights, and skips itself once those are present). The install counts an existing `foundry` env as installed only when `rf3.inference_engines.rf3` imports, and applies `environments/foundry.pip.txt` again to one that does not, so an env built before atomworks was pinned below 3 is repaired in place.
 
 **Tags**: predict-structure, protein, small-molecule, nucleic-acid, complex, all-atom
 

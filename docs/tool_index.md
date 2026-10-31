@@ -13,7 +13,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 1 | BoltzGen | Structure Generation           | 2.6 | `biopipelines/boltzgen.py` |
 | 2 | PocketGen | Structure Generation           | 2.5 | `biopipelines/pocketgen.py` |
 | 3 | RFdiffusion | Structure Generation           | 2.7 | `biopipelines/rfdiffusion.py` |
-| 4 | RFdiffusion3 | Structure Generation           | 3.12 | `biopipelines/rfdiffusion3.py` |
+| 4 | RFdiffusion3 | Structure Generation           | 3.13 | `biopipelines/rfdiffusion3.py` |
 | 5 | RFD4Proteina | Structure Generation           | 1.4 | `biopipelines/rfd4proteina.py` |
 | 6 | RFdiffusionAllAtom | Structure Generation           | 2.8 | `biopipelines/rfdiffusion_allatom.py` |
 | 7 | RFdiffusion2              | Structure Generation           | 1.6 | `biopipelines/rfdiffusion2.py` |
@@ -112,8 +112,8 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 100 | Sequence                  | Inputs & I/O                   | 1.1 | `biopipelines/sequence.py` |
 | 101 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |
 | 102 | UniProt | Inputs & I/O                   | 1.1 | `biopipelines/uniprot.py` |
-| 103 | RF3 | Structure Prediction & Docking | 1.5 | `biopipelines/rf3.py` |
-| 104 | FoundryMPNN | Sequence Design                | 1.1 | `biopipelines/foundry_mpnn.py` |
+| 103 | RF3 | Structure Prediction & Docking | 1.6 | `biopipelines/rf3.py` |
+| 104 | FoundryMPNN | Sequence Design                | 1.2 | `biopipelines/foundry_mpnn.py` |
 | 105 | Foldcomp | Inputs & I/O                   | 1.2 | `biopipelines/foldcomp.py` |
 | 106 | Embedding                 | Analysis                       | 1.2 | `biopipelines/embedding.py` |
 

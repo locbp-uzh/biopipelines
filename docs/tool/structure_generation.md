@@ -538,6 +538,8 @@ pip install "rc-foundry[all]"
 mkdir /home/$USER/data/rfdiffusion3
 foundry install rfd3 --checkpoint-dir /home/$USER/data/rfdiffusion3
 ```
+`RFdiffusion3.install()` does this itself. It counts an existing `foundry` env as installed only when `rfd3.engine` imports, and applies `environments/foundry.pip.txt` (which keeps `atomworks[ml]<3`) again to one that does not, so an env built before the pin is repaired in place.
+
 **Parameters**:
 - `contig`: str | (TableInfo, column) = "" - Contig specification defining protein chain ranges and design regions
   - Format: "A1-50,60-80,B1-100" (chain letters indicate motif from input PDB)

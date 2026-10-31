@@ -58,7 +58,7 @@ dna = DNAEncoder(
 
 ### FoundryMPNN
 
-ProteinMPNN and LigandMPNN sequence design as re-implemented in RosettaCommons Foundry on AtomWorks, run with its `mpnn` command. It loads the original ProteinMPNN and LigandMPNN weights, which `FoundryMPNN.install()` downloads, and shares the `foundry` environment with `RFdiffusion3` and `RF3` (the environment is shared, the install is not: it fetches its own weights into the `FoundryMPNN` folder of `repositories:`).
+ProteinMPNN and LigandMPNN sequence design as re-implemented in RosettaCommons Foundry on AtomWorks, run with its `mpnn` command. It loads the original ProteinMPNN and LigandMPNN weights, which `FoundryMPNN.install()` downloads, and shares the `foundry` environment with `RFdiffusion3` and `RF3` (the environment is shared, the install is not: it fetches its own weights into the `FoundryMPNN` folder of `repositories:`). The install counts an existing `foundry` env as installed only when `mpnn.inference_engines.mpnn` imports, and applies `environments/foundry.pip.txt` again to one that does not, so an env built before atomworks was pinned below 3 is repaired in place.
 
 **Which MPNN wrapper to use.** This is the same model family as `ProteinMPNN` and `LigandMPNN`, not a new model, so the choice is about the code:
 

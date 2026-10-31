@@ -213,7 +213,7 @@ class RFdiffusion3(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusion3"
-    TOOL_VERSION = "3.12"
+    TOOL_VERSION = "3.13"
     # rfd3's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # RFdiffusion, RFdiffusion2 and RFdiffusionAllAtom all spell this `contigs`, so the plural has to bind here rather than be forwarded to hydra as an unknown override — which discarded the motif and ran an unconditioned de-novo job.
@@ -226,8 +226,10 @@ class RFdiffusion3(BaseConfig):
         repo_dir = folders.get("RFdiffusion3", "")
         biopipelines = folders.get("biopipelines", "")
         env_check = cls._env_exists_check(env, env_manager)
-        skip = "" if force_reinstall else f"""# Check if already fully installed (env + non-empty checkpoint dir)
-if {env_check} && [ -d "{repo_dir}" ] && [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
+        run = cls._env_run(env, env_manager)
+        engine_ok = f'{run}python -c "import rfd3.engine" >/dev/null 2>&1'
+        skip = "" if force_reinstall else f"""# Check if already fully installed (env + non-empty checkpoint dir + a working engine import)
+if {env_check} && [ -d "{repo_dir}" ] && [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {engine_ok}; then
     echo "RFdiffusion3 already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -240,6 +242,9 @@ fi
 # Create {env} env (skip if it already exists)
 if ! {env_check}; then
     {env_block}
+elif ! {engine_ok}; then
+    echo "The {env} environment cannot import the RFdiffusion3 engine (built before atomworks was pinned?); re-applying {cls.ENV_NAME}.pip.txt"
+    {run}pip install -r "{biopipelines}/environments/{cls.ENV_NAME}.pip.txt"
 else
     echo "{env} environment already exists, skipping creation."
 fi
@@ -247,13 +252,13 @@ fi
 # Download model weights (skip if checkpoint dir already populated)
 mkdir -p {repo_dir}
 if [ -z "$(ls -A "{repo_dir}" 2>/dev/null)" ]; then
-    {cls._env_run(env, env_manager)}foundry install rfd3 --checkpoint-dir {repo_dir}
+    {run}foundry install rfd3 --checkpoint-dir {repo_dir}
 else
     echo "Checkpoint dir {repo_dir} already populated, skipping weight download."
 fi
 
 # Verify installation
-if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {cls._env_run(env, env_manager)}python -c "import rfd3.engine" >/dev/null 2>&1; then
+if [ -n "$(ls -A "{repo_dir}" 2>/dev/null)" ] && {engine_ok}; then
     touch "$INSTALL_SUCCESS"
     echo "=== RFdiffusion3 installation complete ==="
 else

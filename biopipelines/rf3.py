@@ -91,7 +91,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
@@ -112,8 +112,9 @@ class RF3(BaseConfig):
         env_check = cls._env_exists_check(env, env_manager)
         run = cls._env_run(env, env_manager)
         have_weights = f'ls "{ckpt_dir}"/*.ckpt >/dev/null 2>&1'
-        skip = "" if force_reinstall else f"""# Check if already fully installed (env + RF3 checkpoint)
-if {env_check} && {have_weights}; then
+        engine_ok = f'{run}python -c "import rf3.inference_engines.rf3" >/dev/null 2>&1'
+        skip = "" if force_reinstall else f"""# Check if already fully installed (env + RF3 checkpoint + a working engine import)
+if {env_check} && {have_weights} && {engine_ok}; then
     echo "RF3 already installed, skipping. Use force_reinstall=True to reinstall."
     touch "$INSTALL_SUCCESS"
     exit 0
@@ -126,6 +127,9 @@ fi
 # The foundry env is shared with RFdiffusion3: create it only when absent
 if ! {env_check}; then
     {env_block}
+elif ! {engine_ok}; then
+    echo "The {env} environment cannot import the RF3 engine (built before atomworks was pinned?); re-applying {cls.ENV_NAME}.pip.txt"
+    {run}pip install -r "{biopipelines}/environments/{cls.ENV_NAME}.pip.txt"
 else
     echo "{env} environment already exists, skipping creation."
 fi
@@ -139,7 +143,7 @@ else
 fi
 
 # Verify installation
-if {have_weights} && {run}python -c "import rf3.inference_engines.rf3" >/dev/null 2>&1; then
+if {have_weights} && {engine_ok}; then
     touch "$INSTALL_SUCCESS"
     echo "=== RF3 installation complete ==="
 else
