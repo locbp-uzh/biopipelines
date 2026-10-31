@@ -191,7 +191,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>FoundryMPNN</b><br>ProteinMPNN and LigandMPNN sequence design as re-implemented in RosettaCommons Foundry, in the environment RFdiffusion3 and RF3 share.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/foundry"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1038/s41592-025-02626-1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>Mutagenesis</b><br>Generate systematic single- or multi-point mutant variants of a sequence.</sub></td>
@@ -260,7 +260,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>ESMFold2</b><br>Predict all-atom protein / nucleic-acid / ligand complexes from sequence, with inference-time scaling.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/evolutionaryscale/esm"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.64898/2026.06.03.729735"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>Gnina</b><br>Dock ligands into a pocket and score poses with deep learning.</sub></td>
@@ -284,13 +284,13 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>OpenFold3</b><br>Open-source co-folding of proteins, nucleic acids and ligands; the Apache-2.0 AlphaFold3 reimplementation.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/aqlaboratory/openfold-3"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.nature.com/articles/s41586-024-07487-w"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>RF3</b><br>All-atom co-folding of proteins, nucleic acids and ligands with RoseTTAFold3, from RosettaCommons Foundry.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/foundry"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1101/2025.08.14.670328"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>PLACER</b><br>Generate scored ligand-pose or sidechain ensembles in a protein pocket.</sub></td>
@@ -303,7 +303,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>Protenix</b><br>All-atom co-folding of proteins, nucleic acids and ligands; ByteDance's AlphaFold3 reproduction, default <code>protenix-v2</code>.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/bytedance/Protenix"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.64898/2026.04.10.717613"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-0071C5?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 
 <tr><td colspan="4"><h3>📐 Analysis</h3></td></tr>
@@ -366,7 +366,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>BioEmu2</b><br>Sample a protein's equilibrium conformational ensemble, with optional bound ligands and covalent constraints.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/microsoft/bioemu2"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>CABSflex</b><br>Estimate protein backbone flexibility and per-residue fluctuation profiles.</sub></td>
@@ -438,19 +438,19 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>Foldseek</b><br>Cluster structures at TM-score thresholds and count the folds in a set.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/steineggerlab/foldseek"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1038/s41587-023-01773-0"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>TMalign</b><br>Align pairs of structures in sequence order and with a circular permutation, and report the TM-score the permutation gained.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/pylelab/USalign"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/nar/gki524"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>USalign</b><br>Align pairs of structures in sequence order, with a circular permutation and non-sequentially, and keep the TM-score, RMSD, alignment and superposition.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/pylelab/USalign"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1038/s41592-022-01585-1"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>FPocket</b><br>Detect binding pockets and score their volume and druggability.</sub></td>
@@ -498,7 +498,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>SequenceIdentityGate</b><br>Report each design's highest global sequence identity to natural reference sequences.</sub></td>
   <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>PoseBusters</b><br>Flag physically implausible poses: clashes, bad geometry, wrong stereochemistry.</sub></td>
@@ -522,13 +522,13 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>PPIDdG</b><br>Rosetta protein-protein binding energy: FastRelax, then bound minus unbound score (PyRosetta).</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/chaperone"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/bioinformatics/btq007"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>LigandDdG</b><br>Rosetta protein-ligand binding energy, hard or soft-repulsive scoring, with the ligand parameterized on the fly (PyRosetta).</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/RosettaCommons/chaperone"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/bioinformatics/btq007"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>ProLIF</b><br>Build interaction fingerprints (H-bonds, hydrophobic, pi-stacking) for complexes.</sub></td>
@@ -677,7 +677,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>SelectionTransfer</b><br>Map a residue selection onto trimmed, shifted, renumbered or permuted structures.</sub></td>
   <td width="100" align="center"><sub><img src="https://img.shields.io/badge/BP-1ABC9C?style=flat-square" alt="BioPipelines native tool"></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20aarch64-8E44AD?style=flat-square&logo=arm&logoColor=white" alt="HPC aarch64 ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 
 <tr><td colspan="4"><h3>🧰 Inputs & I/O</h3></td></tr>
@@ -692,7 +692,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>Foldcomp</b><br>Extract domains of the compressed AlphaFold Database by residue range.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/steineggerlab/foldcomp"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://doi.org/10.1093/bioinformatics/btad153"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/CPU-4C6EF5?style=flat-square&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik05IDJ2Mkg3LjVBMS41IDEuNSAwIDAgMCA2IDUuNVY3SDR2MmgydjJINHYyaDJ2Mkg0djJoMnYxLjVBMS41IDEuNSAwIDAgMCA3LjUgMjBIOXYyaDJ2LTJoMnYyaDJ2LTJoMS41YTEuNSAxLjUgMCAwIDAgMS41LTEuNVYxOGgydi0yaC0ydi0yaDJ2LTJoLTJWOWgyVjdoLTJWNS41QTEuNSAxLjUgMCAwIDAgMTYuNSA0SDE1VjJoLTJ2MmgtMlYySDl6bS0xIDZoOHY4SDhWOHoiLz48L3N2Zz4%3D&logoColor=white" alt="CPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>Ligand</b><br>Fetch small molecules from identifiers or SMILES into a stream.</sub></td>

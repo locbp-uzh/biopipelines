@@ -401,7 +401,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 
 **Environment**: `esmfold2`
 
-**Installation**: `ESMFold2.install()` creates the env and pip-installs the `esm` package from its `main` branch (esm >= 3.4 is required: it carries the model as `esm.models.esmfold2.EsmFold2Model`). Verifies by importing `EsmFold2Model`. An environment built from esm 3.3.0 cannot load the current `biohub/ESMFold2` checkpoint; rebuild it with `ESMFold2.install(force_reinstall=True)`. The Daint environment pins esm to a 3.3.0 commit (`environments/esmfold2.pip.daint.txt`), which this version cannot use.
+**Installation**: `ESMFold2.install()` creates the env and pip-installs the `esm` package from its `main` branch (esm >= 3.4 is required: it carries the model as `esm.models.esmfold2.EsmFold2Model`). Verifies by importing `EsmFold2Model`. An environment built from esm 3.3.0 cannot load the current `biohub/ESMFold2` checkpoint; rebuild it with `ESMFold2.install(force_reinstall=True)`. ESMFold2 is not set up on Daint: the EDF image's torch 2.8 cannot run esm >= 3.4, so `config.daint.yaml` does not list it and `ESMFold2.install()` is refused there by name (`environments/esmfold2.pip.daint.txt` records why).
 
 **Parameters**:
 - `proteins`: DataStream | StandardizedOutput = None — Protein sequences.

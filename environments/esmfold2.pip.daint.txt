@@ -12,6 +12,7 @@
 #
 # esm is pinned against the unpinned-installs rule because the image forces it: from v3.4.0 (2026-08-27) upstream requires torch>=2.11.0,<2.12.0, which the image cannot provide. 26b0bc2 (2026-07-28, version 3.3.0) is the last commit that still accepts torch>=2.2.0 and carries ESMFold2.
 # NOT INSTALLABLE as of 2026-10-11, and no version of this file is: every 3.3.0-era commit needs `transformers @ git+https://github.com/Biohub/transformers.git`, which now 404s, and the versions that dropped that fork need the torch this image cannot provide. Fix by moving the EDF to an NGC image with torch 2.11 and unpinning esm.
+# config.daint.yaml therefore does not list ESMFold2 (neither under environments: nor under edf:), and this file is the record of why. The wrapper itself needs esm >= 3.4, which a 3.3.0 pin cannot satisfy.
 numpy<2
 esm @ git+https://github.com/evolutionaryscale/esm.git@26b0bc2b771e3e419ea74f445a5f35cc094a1509
 pandas

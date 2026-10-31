@@ -14,7 +14,7 @@ Daint is a SLURM cluster like the `cluster` variant, but three of its properties
 
 This is the CSCS-recommended way to install Python on Alps, and it sidesteps the aarch64 conda problem for any tool whose dependencies are pip-installable.
 
-An env yaml pinning anything beyond `python`/`pip` **raises** at install: a venv cannot install conda packages, and silently dropping them would produce an env that looks built and fails at runtime. Tools needing real conda binaries (`mkdssp`, PyMOL, mmseqs2) need those supplied by their EDF image instead.
+An env yaml pinning anything beyond `python`/`pip` **raises** at install unless `machine.env_manager.conda_binary` is set: a venv cannot install conda packages, and silently dropping them would produce an env that looks built and fails at runtime. This config sets it, so such a yaml (PyMOL, `mkdssp`) is built with conda and wrapped in a venv (see *Environments: venv, conda shim, or image* below); without it, the tool's EDF image has to supply those binaries.
 
 ## GPU tools: EDF + the Container Engine
 
@@ -76,7 +76,7 @@ The cost of envs on scratch is the 30-day access-time purge — a tool unused fo
 
 Daint is a SLURM cluster, so `cluster_backend.md` applies for the ssh/scp workflow. This file covers what differs: aarch64, whole-node billing, and a container runtime that is neither apptainer nor plain podman.
 
-Select the variant with `BIOPIPELINES_CONFIG_VARIANT=daint` or `Pipeline(config="daint")`. `config.daint.yaml` carries the paths and the environment mapping. Its `environments:` block is a **routing table, not a verification record**: each of its ~51 keys says which venv (or, when empty, which EDF image's interpreter) a tool activates here. A tool absent from it falls back to the `biopipelines` venv, which is correct for any BP-native tool but unverified for one needing its own env. Presence in the block does *not* mean the tool has been run — the verified list is the much shorter one under *What runs here* below (19 tools at last probe), and *Blocked, with the reason* lists what cannot work here at all.
+Select the variant with `BIOPIPELINES_CONFIG_VARIANT=daint` or `Pipeline(config="daint")`. `config.daint.yaml` carries the paths and the environment mapping. Its `environments:` block is a **routing table, not a verification record**: each of its 57 keys says which venv (or, when empty, which EDF image's interpreter) a tool activates here. A tool absent from it falls back to the `biopipelines` venv, which is correct for any BP-native tool but unverified for one needing its own env. Presence in the block does *not* mean the tool has been run — the verified list is the much shorter one under *What runs here* below (17 tools at last probe), and *Blocked, with the reason* lists what cannot work here at all.
 
 ## One-time setup
 
@@ -200,7 +200,7 @@ There are three routes, and the choice is not stylistic.
 
 **A plain venv** covers anything pip-installable. `pip install torch` resolves a CUDA-enabled aarch64 wheel (`torch 2.13.0+cu130`, `cuda True` on a GH200), so most GPU tools need no container at all. `machine.env_manager.name: "venv"` activates by path — venv has no registry, so `venv_root` is what turns an `environments:` entry into one.
 
-**A conda env wrapped in a venv shim** covers packages with no aarch64 wheel — PyMOL, `mkdssp`, `openbabel` all exist on conda-forge, and micromamba has an aarch64 build. Set `machine.env_manager.conda_binary` and an env yaml naming conda packages is built with conda, then wrapped in a venv created by *its* python: that inherits the packages via `--system-site-packages` and supplies the `bin/activate` the framework sources. Binaries are not inherited and need symlinking (`dssp` does this for `mkdssp`).
+**A conda env wrapped in a venv shim** covers packages with no aarch64 wheel — PyMOL, `mkdssp`, `openbabel` all exist on conda-forge, and micromamba has an aarch64 build. Set `machine.env_manager.conda_binary` and an env yaml naming conda packages is built with conda, then wrapped in a venv created by *its* python: that inherits the packages via `--system-site-packages` and supplies the `bin/activate` the framework sources. Binaries are not inherited and need symlinking, which `_link_conda_binaries` emits: `Vina` links `vina`, `vina_split` and `obabel` with it, and `USalign` and `TMalign` link `USalign` and `TMalign`. `DSSP` does not call it, so its `mkdssp` is not on the shim's PATH until it is linked.
 
 **A prebuilt `.sqsh` image** covers what neither can — BioEmu is the example. Five images cost 5 inodes and 28 GB against ~101k inodes for equivalent venvs, they survive the purge, and they are genuinely shareable where a venv on personal scratch is not. Recipes live in `environments/scripts/`; the images themselves belong on `$STORE`, never in git.
 
@@ -264,7 +264,9 @@ Server startup is not instant, which is why the server belongs in a packed block
 
 ## What runs here
 
-These 19 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2 (before 2.7 only, with esm pinned to 3.3.0; the current version needs esm >= 3.4, which cannot be installed here, see its section below), ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold, BioEmu2 (under 1.0 only; see its section below).
+These 17 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold.
+
+BioEmu2 is not counted: its one reported run was under 1.0 through a route the config no longer selects, and neither current route has run (see its section below). ESMFold2 is not counted either: it ran here under esm 3.3.0 and cannot be rebuilt for the wrapper's esm >= 3.4 (see *Blocked*).
 
 **AlphaFold folds here; it does not search here.** The venv carries `alphafold-colabfold 2.3.20` and `colabfold 1.6.3`, `colabfold_batch --help` exits 0, and `jax 0.11.2` reports `[CudaDevice(id=0)]` on a GH200. `colabfold_search` is installed but shells out to an `mmseqs` binary the wheel does not ship, and the databases are gone — so alignments come from the other cluster and arrive through `msas=`.
 
@@ -276,6 +278,7 @@ Blocked, with the reason:
 - **NeuralPLexer / DiffDock / DynamicBind** — all pin PyG wheels from `data.pyg.org`, which serves `linux_x86_64` only; NeuralPLexer additionally pins `gcc_linux-64`/`gxx_linux-64` and an x86-64 pytorch3d wheel.
 - **RFdiffusion** — the RosettaCommons image is x86-64 only (`no image found in image index for architecture "arm64"`), and the pip route dies on DGL, which ships an aarch64 wheel that loads a prebuilt C++ library named for an exact torch version (`libgraphbolt_pytorch_2.12.1.so`) with no matching build. RFdiffusion3 covers the same ground.
 - **BioEmu** — imports and sees the GPU, but at sample time `get_colabfold_embeds` builds its own ColabFold venv pinning `colabfold==1.5.4` and x86-64 `nvidia-*-cu12` wheels, and the resolve dies on `tensorflow-cpu`. The lab's `md-bioemu` image runs on a GH200, so `edf:` points there instead.
+- **ESMFold2** — the wrapper needs esm >= 3.4, which requires `torch>=2.11.0,<2.12.0`, and the NGC image of the EDF ships torch 2.8. The last esm commit that accepts that torch is a 3.3.0 one, whose `transformers` fork (`Biohub/transformers`) now returns 404 and could not read the current `biohub/ESMFold2` checkpoint anyway. It ran here under esm 3.3.0 and cannot be rebuilt; the way out is an NGC image with torch 2.11. `config.daint.yaml` leaves it out, so `ESMFold2.install()` is refused by name, and `environments/esmfold2.pip.daint.txt` records the dead end.
 - **PLM_Sol** — pins `python=3.8` with hard-pinned deps that cannot coexist with a 3.11+ env.
 
 An import check is not a run. BioEmu passed `import bioemu.sample` and still failed on a real sampling job — twice, on different causes.

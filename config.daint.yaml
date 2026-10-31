@@ -1,7 +1,7 @@
 # BioPipelines Configuration — CSCS Daint (Alps, GH200/aarch64)
 # Select with Pipeline(config="daint") or BIOPIPELINES_CONFIG_VARIANT=daint.
 # Rationale and verified findings for every choice here: skills/biopipelines/references/daint_backend.md
-# STATUS: partial. Only the tools under `environments:` are verified.
+# STATUS: partial. `environments:` routes tools; the ones verified by running are listed in daint_backend.md, under "What runs here".
 
 machine:
   # Set yours in the overlay: two variants claiming one Unix name is ambiguous.
@@ -127,8 +127,8 @@ folders:
   server:
     MMseqs2Server: "<biopipelines_output>/MMseqs2Server"
 
-# Only tools verified on Daint are listed. A tool absent here falls back to the
-# `biopipelines` venv, which carries the pure-python core (pyyaml + pandas).
+# A routing table, not a verification record: a tool listed here has a route on aarch64, and daint_backend.md says which ones have been run.
+# A tool absent here is not set up on Daint: install is refused by name, and at run time it falls back to the `biopipelines` venv (pyyaml + pandas only).
 environments:
   # Empty + an edf: entry means the image supplies the interpreter, so there
   # is no env to activate. Our venv cannot carry BioEmu — see skills/biopipelines/references/daint_backend.md.
@@ -141,7 +141,7 @@ environments:
   BoltzGen: "boltzgen"
   BoltzGenImport: "boltzgen"
   BoltzGenMerge: "boltzgen"
-  ESMFold2: "esmfold2"
+  # ESMFold2 is absent on purpose: the wrapper needs esm >= 3.4 (torch 2.11), and the image's torch 2.8 cannot run it; see environments/esmfold2.pip.daint.txt.
   # CPU-only, and every dependency has an aarch64 wheel, so a plain venv with no
   # EDF. Pinned to admet-ai 1.x by admet_ai.pip.daint.txt.
   ADMETAI: "admet_ai"
@@ -190,6 +190,7 @@ environments:
   EnsembleAnalysis: "biopipelines"
   ExtractMetrics: "biopipelines"
   Fuse: "biopipelines"
+  IPSAE: "biopipelines"
   Ligand: "biopipelines"
   Load: "biopipelines"
   LoadMultiple: "biopipelines"
@@ -228,7 +229,6 @@ edf:
   BoltzGen: "<group>/edf/ngc-pytorch-bp.toml"
   BoltzGenImport: "<group>/edf/ngc-pytorch-bp.toml"
   BoltzGenMerge: "<group>/edf/ngc-pytorch-bp.toml"
-  ESMFold2: "<group>/edf/ngc-pytorch-bp.toml"
   RFdiffusion3: "<group>/edf/ngc-pytorch-bp.toml"
 
 containers: {}
