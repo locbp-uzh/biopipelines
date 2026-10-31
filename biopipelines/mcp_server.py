@@ -34,7 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only without the ext
     MCPServer = None
     Image = None
 
-INSTRUCTIONS = """BioPipelines: 86 protein/ligand-modeling tools behind one declarative Pipeline API.
+INSTRUCTIONS = """BioPipelines: protein/ligand-modeling tools behind one declarative Pipeline API; `bp_tools` with no argument lists every one.
 
 These tools ARE the interface to BioPipelines. Use them in preference to the shell and to the
 repository's own files: do not `ssh` to submit a run, tail a log or list a directory, do not
@@ -94,7 +94,7 @@ def build_server():
             "`RMSD_before`. Call with `inputs` to find tools by what they CONSUME, e.g. "
             "`inputs=\"structures\"`. Both are read from the tools' own source, so they are "
             "exact where a keyword search over prose is not. "
-            "Call with `tags` to find tools by intent, from a closed 39-term vocabulary in four "
+            f"Call with `tags` to find tools by intent, from a closed {len(tool_tags.ALL_TAGS)}-term vocabulary in four "
             "facets (action, subject, readout, capability): terms in the same facet are OR-ed, "
             "different facets AND-ed, so tags=[\"dock\", \"predict-structure\", \"covalent\"] "
             "means (docking or structure prediction) and covalent. `exclude` drops tools "
@@ -134,7 +134,7 @@ def build_server():
                 close = tool_tags.close_tags(tag)
                 if close:
                     lines.append(f"  {tag} — did you mean {', '.join(close)}?")
-            lines += ["", "The vocabulary is closed; these 39 terms are all of it:", "",
+            lines += ["", f"The vocabulary is closed; these {len(tool_tags.ALL_TAGS)} terms are all of it:", "",
                       tool_tags.vocabulary_text(), "",
                       "Tags are the intent layer. For a named metric use bp_tools(outputs=\"rmsd\"), "
                       "which searches stream, table and column names from the tools' own source."]

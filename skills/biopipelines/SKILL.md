@@ -5,7 +5,7 @@ description: >-
   de novo backbone generation, inverse folding and sequence redesign, structure prediction,
   protein-ligand docking, compound-library and covalent screening, saturation mutagenesis,
   stability and solubility engineering, codon optimization. BioPipelines (locbp-uzh, CSBJ 2026)
-  puts 86 tools behind one declarative Pipeline API - RFdiffusion 1/2/3, BoltzGen, ProteinMPNN,
+  puts the tools of its generated catalog behind one declarative Pipeline API - RFdiffusion 1/2/3, BoltzGen, ProteinMPNN,
   LigandMPNN, LASErMPNN, Frame2Seq, ThermoMPNN, AlphaFold, Boltz2, ESMFold2, DiffDock, GNINA,
   Vina, NeuralPLexer, OpenMM, FPocket, P2Rank, PLIP, ProLIF, PoseBusters, Prodigy, RDKit,
   ADMET-AI - and tracks IDs through typed data streams so a multi-stage campaign stays
@@ -16,7 +16,7 @@ description: >-
 
 # BioPipelines
 
-[BioPipelines](https://github.com/locbp-uzh/biopipelines) (Quargnali & Rivera-Fuentes, LOC-BP UZH; CSBJ [10.34133/csbj.0129](https://spj.science.org/doi/10.34133/csbj.0129)) is a Python framework that puts 86 protein/ligand-modeling tools behind one declarative `Pipeline` API. You describe a workflow as a chain of tools; the framework generates and runs the per-tool scripts, tracks IDs through typed data streams, and materializes outputs.
+[BioPipelines](https://github.com/locbp-uzh/biopipelines) (Quargnali & Rivera-Fuentes, LOC-BP UZH; CSBJ [10.34133/csbj.0129](https://spj.science.org/doi/10.34133/csbj.0129)) is a Python framework that puts protein/ligand-modeling tools (counted in the header of `references/tool_index.md`) behind one declarative `Pipeline` API. You describe a workflow as a chain of tools; the framework generates and runs the per-tool scripts, tracks IDs through typed data streams, and materializes outputs.
 
 This skill ships *inside the repo*, so adding it to any agent is one step and it tracks the framework as it evolves. It covers **using** the framework, and running it on **any single-node GPU backend** (Modal/RunPod, a Docker GPU box, or an interactive Slurm GPU shell) via the generic `container` config variant.
 
@@ -37,11 +37,11 @@ Do not run a script in this repo, or a shell command, to do what one of these do
 
 ## Finding tools without the MCP server — read the index, not the prose docs
 
-**`references/tool_index.md` is your catalog.** 88 callable entries, one line each: name, version, hardware (CPU/GPU), the platforms it is verified on, what it does, and a pointer to its full entry. It costs ~4k tokens; the prose docs it points into cost ~78k, and the README's badge table another ~32k.
+**`references/tool_index.md` is your catalog.** It is generated from the source and its header states how many callable entries it holds, one line each: name, version, hardware (CPU/GPU), the platforms it is verified on, what it does, and a pointer to its full entry. It costs ~4k tokens; the prose docs it points into cost ~78k, and the README's badge table another ~32k.
 
 The loop is: **read the index → pick your tools → read only those sections.** Each entry ends with `docs/tool/<file>.md#<anchor>` — read that section for the real signature before you write the stage.
 
-Each index line ends with the tool's tags — a closed 39-term vocabulary in four facets, defined in `docs/tool_tags.md`. Grep them: `covalent`, `binder-design` and `motif-scaffolding` are the sort of capability the one-line summary never mentions.
+Each index line ends with the tool's tags — a closed vocabulary in four facets, defined in `docs/tool_tags.md`. Grep them: `covalent`, `binder-design` and `motif-scaffolding` are the sort of capability the one-line summary never mentions.
 
 Two rules, because both failure modes are silent:
 

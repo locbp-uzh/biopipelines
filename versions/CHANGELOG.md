@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- No prose states a tool count or a tag count any more: the MCP server instructions, `SKILL.md` and the `tool_schemas` docstring point at the generated catalog, whose header counts the tools, and the tag count in `bp_tools` and the generated index is `len(tool_tags.ALL_TAGS)`. The MCP instructions said 86 tools and `SKILL.md` 86 and 88 while the index listed 108.
+
 - `id_map_utils.MsaLookup` is the one place that answers which alignment belongs to a protein: its exact id, then the `sequences.id` provenance column, then the legacy `<id>_msa` row id of maps written before the rule, then, when the caller passes the protein's sequence, the row whose `sequence` column equals it. Nothing looser is tried. A stream that is 1:1 with its input keeps the input's id, and a provenance column that only repeats the id is not written; both are stated in the developer manual next to the output id rules. `tests/test_msas_ids.py` pins the lookup, the producers and a lint that no module builds an id with the `_msa` suffix.
 
 - Generated shell scripts (step scripts, batch scripts, the scheduler job scripts `job.sh`/`job_batchN.sh` and their `slurm*` names, `config.sh`, `pipeline.sh`) are written as UTF-8 with LF line endings on every host. On Windows they were written in the system code page with CRLF, so a comment holding a non-ASCII character (the em dash of the `missing` propagation footer) came out as a cp1252 byte that does not decode as UTF-8. `tests/test_script_encoding.py` pins it, the job scripts through `generate_job_scripts()`, since `save()` does not write them.

@@ -200,7 +200,7 @@ def render(entries):
         "Prefer a tool whose platforms cover the user's mode; when only the verification is "
         "missing, say so and ask rather than refusing the tool.",
         "",
-        "Each line ends with the tool's tags — a closed 39-term vocabulary in four facets "
+        f"Each line ends with the tool's tags — a closed {len(tool_tags.ALL_TAGS)}-term vocabulary in four facets "
         "(action, subject, readout, capability) documented in `docs/tool_tags.md`. Grep them, "
         "or filter with `bp_tools(tags=[...], exclude=[...])`: within a facet the terms are OR-ed, across facets AND-ed. Tags are the intent layer; for a named metric ask "
         "`bp_tools(outputs=\"rmsd\")` instead, which reads stream, table and column names "

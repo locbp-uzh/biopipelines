@@ -6,8 +6,7 @@ the code — every tool declares its streams, tables and columns in `get_output_
 `versions/extract_output_schemas.py` reads them with an AST interpreter that
 `tests/test_doc_schemas.py` already gates the docs against.
 
-So this is derived from verified source, not from new metadata: 86 tools, 445 distinct column
-names, 22 stream names, 67 table names, none of it written by hand.
+So this is derived from verified source, not from new metadata: every tool's column, stream and table names, none of it written by hand.
 
 Matching is case-insensitive substring, because the useful query is the concept: `rmsd` must
 find `ligand_rmsd` and `rmsd_to_ref`, and `ddg` must find `ddG_pred`.

@@ -6,7 +6,7 @@
 
 Every tool section in `docs/tool/*.md` carries a `**Tags**:` line. Tags exist for one job: **finding a tool when you do not know its name.** A search for "covalent" over the tool index returns nothing without them, because a capability like covalent linkage lives in a parameter, never in the one-line summary.
 
-Tags are a *closed* vocabulary of 39 terms in four facets. Closed on purpose: an open list drifts into `dock` / `docking` / `ligand-docking` within a month, and then neither a person nor an agent can guess which spelling to search. A tag earns its place only if it changes the answer to at least two distinct questions.
+Tags are a *closed* vocabulary in four facets (`biopipelines/tool_tags.py` holds the terms). Closed on purpose: an open list drifts into `dock` / `docking` / `ligand-docking` within a month, and then neither a person nor an agent can guess which spelling to search. A tag earns its place only if it changes the answer to at least two distinct questions.
 
 ## How to search
 
