@@ -1551,7 +1551,7 @@ umask 002
 {self.pipeline_script}
 """
         job_path = os.path.join(self.folders["runtime"], self._batch_script_name())
-        with open(job_path, 'w') as f:
+        with open(job_path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(job_content)
         os.chmod(job_path, 0o755)
         self.job_script = job_path
@@ -1645,7 +1645,7 @@ umask 002
 {os.path.join(self.folders["runtime"], f"pipeline_batch{batch_idx + 1}.sh")}
 """
             batch_job_path = os.path.join(self.folders["runtime"], self._batch_script_name(batch_idx))
-            with open(batch_job_path, 'w') as f:
+            with open(batch_job_path, 'w', encoding='utf-8', newline='\n') as f:
                 f.write(batch_job_content)
             os.chmod(batch_job_path, 0o755)
 

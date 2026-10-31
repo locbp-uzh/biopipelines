@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- Generated shell scripts (step scripts, batch scripts, the scheduler job scripts `job.sh`/`job_batchN.sh` and their `slurm*` names, `config.sh`, `pipeline.sh`) are written as UTF-8 with LF line endings on every host. On Windows they were written in the system code page with CRLF, so a comment holding a non-ASCII character (the em dash of the `missing` propagation footer) came out as a cp1252 byte that does not decode as UTF-8. `tests/test_script_encoding.py` pins it, the job scripts through `generate_job_scripts()`, since `save()` does not write them.
+
 - The LSF and PBS backends read an integer GPU request (`gpu=2` or `"2"`) as a count, as SLURM does, and `140GB` as a memory. Both raised `AttributeError` on an integer inside pipeline generation and turned `140GB` into a model (`gmodel=140GB`, `gpu_model=140GB`). The count rule and the memory list live once in `SchedulerBackend` (`gpu_count`, `MEMORY_SPECS`, `is_constraint_like`).
 
 - `combinatorics.prefixed_parent_key` and `combinatorics.recounted_id` join the id helpers there: the key a multiplier tool names one parent's outputs by, which `multiplied_id_parents` and `pipe_update_structures_map.record_failures` each spelled on their own, and Pool's `recount_prefix` id, which lived in `pool.py`.
