@@ -137,7 +137,7 @@ Extracts domains from a Foldcomp-compressed copy of the AlphaFold Database. It t
 - `entries`: TableReference (required) — column of AFDB entries, a table column (`tool.tables.name.column`) or a `(TableInfo | path, column)` tuple.
 - `start`: TableReference (required) — column with the first residue of each domain, from the same table as `entries`.
 - `end`: TableReference (required) — column with the last residue of each domain (inclusive), from the same table.
-- `database`: str (required) — path prefix of a local Foldcomp database.
+- `database`: str (required) — path prefix of a local Foldcomp database. The path is echoed inside double quotes in the generated script, so one holding `"`, a backtick, `$` or a backslash is refused at configuration.
 - `model_version`: int = 4 — the `N` of `model_vN` in the database's entry names, used to expand bare accessions; 4 for every published AFDB database.
 - `threads`: int = 1 — CPU threads Foldcomp uses (`-t`); match the CPUs requested with `Resources(cpus=...)`.
 

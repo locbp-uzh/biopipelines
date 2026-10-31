@@ -2979,8 +2979,12 @@ Foldcomp:
   files:
   - biopipelines/foldcomp.py
   - pipe_scripts/pipe_foldcomp.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-31'
+    note: >-
+      `database` is refused at configuration when it holds a double quote, a backtick, `$` or a backslash, because the path is echoed inside double quotes in the generated bash, where `$(...)` would run. The domain id `<entry>_<start>-<end>` is made by `generate_multiplied_ids`, with the same ids as before. Docstrings are one line per paragraph.
   - version: '1.1'
     date: '2026-10-29'
     note: >-

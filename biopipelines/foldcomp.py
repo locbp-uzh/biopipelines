@@ -4,12 +4,9 @@
 
 """Foldcomp tool: extract domains from a Foldcomp-compressed AlphaFold Database.
 
-Takes a table of AFDB entries with residue ranges, decompresses every entry from a local
-Foldcomp database in one `foldcomp decompress --id-list` pass, cuts each range out of the
-decompressed model and emits one PDB per domain plus a `domains` table.
+Takes a table of AFDB entries with residue ranges, decompresses every entry from a local Foldcomp database in one `foldcomp decompress --id-list` pass, cuts each range out of the decompressed model and emits one PDB per domain plus a `domains` table.
 
-References: Kim et al., Bioinformatics, doi:10.1093/bioinformatics/btad153 (Foldcomp).
-https://github.com/steineggerlab/foldcomp
+References: Kim et al., Bioinformatics, doi:10.1093/bioinformatics/btad153 (Foldcomp). https://github.com/steineggerlab/foldcomp
 """
 
 import os
@@ -43,69 +40,31 @@ class Foldcomp(BaseConfig):
     """
     Foldcomp: extract domains of the AlphaFold Database from a compressed Foldcomp database.
 
-    Takes the AFDB entries of a table (a UniProt accession or a full AFDB entry name per
-    row) with the start and end residue of each domain, and returns one structure per
-    domain. The residue ranges are cut by this tool on the decompressed model: Foldcomp
-    itself decompresses whole entries only.
+    Takes the AFDB entries of a table (a UniProt accession or a full AFDB entry name per row) with the start and end residue of each domain, and returns one structure per domain. The residue ranges are cut by this tool on the decompressed model: Foldcomp itself decompresses whole entries only.
 
     ENTRIES AND RANGES
-    The AFDB clusters of Barrio-Hernandez et al. (Nature 2023, doi:10.1038/s41586-023-06510-w,
-    cluster.foldseek.com) identify every member by its bare UniProt accession, for example
-    `A0A009F5K6`, and cover whole chains: their membership files carry no residue ranges.
-    The domain boundaries of that release are in `4-domain-clustering.zip`
-    (`Structures_from_groups.csv`: `structure_ID` = accession + `_<n>`, `structure_start`,
-    `structure_end`, `uniprot`). The release does not state the convention of the positions;
-    they are read here as 1-based, inclusive positions on the UniProt sequence (the smallest
-    start in the file is 1). Load such a file with `Table` and pass its columns: `uniprot` as
-    `entries`, `structure_start` as `start`, `structure_end` as `end`. A bare accession is expanded to
-    `AF-<accession>-F1-model_v<model_version>`, the name Foldcomp stores; a full AFDB name
-    (`AF-P69905-F1-model_v4`) is used as given, which is how a fragment `F2` of a long
-    protein is requested.
+    The AFDB clusters of Barrio-Hernandez et al. (Nature 2023, doi:10.1038/s41586-023-06510-w, cluster.foldseek.com) identify every member by its bare UniProt accession, for example `A0A009F5K6`, and cover whole chains: their membership files carry no residue ranges. The domain boundaries of that release are in `4-domain-clustering.zip` (`Structures_from_groups.csv`: `structure_ID` = accession + `_<n>`, `structure_start`, `structure_end`, `uniprot`). The release does not state the convention of the positions; they are read here as 1-based, inclusive positions on the UniProt sequence (the smallest start in the file is 1). Load such a file with `Table` and pass its columns: `uniprot` as `entries`, `structure_start` as `start`, `structure_end` as `end`. A bare accession is expanded to `AF-<accession>-F1-model_v<model_version>`, the name Foldcomp stores; a full AFDB name (`AF-P69905-F1-model_v4`) is used as given, which is how a fragment `F2` of a long protein is requested.
 
     DATABASE
-    `database` is the path prefix of a Foldcomp database, the common stem of `<prefix>`,
-    `<prefix>.index`, `<prefix>.dbtype` and `<prefix>.lookup`. Published databases
-    (https://opendata.mmseqs.org/foldcomp/): `afdb_swissprot_v4` (3 GB), `afdb_rep_dark_v4`
-    (2.3 GB), `afdb_rep_v4` (10 GB, the AFDB cluster representatives) and `afdb_uniprot_v4`
-    (1.1 TB, the full AFDB, so the one to use for arbitrary cluster members).
-    The tool never downloads them while running. `Foldcomp.install(swissprot_dir=...)`
-    fetches `afdb_swissprot_v4` once; for the large ones download the files yourself and pass
-    the prefix. Foldcomp reads the whole `.lookup` file into memory before it looks up a name
-    (9 GB on disk for `afdb_uniprot_v4`), so request memory with Resources accordingly.
-    An entry absent from the chosen database is a `failure` row in `missing`.
+    `database` is the path prefix of a Foldcomp database, the common stem of `<prefix>`, `<prefix>.index`, `<prefix>.dbtype` and `<prefix>.lookup`. Published databases (https://opendata.mmseqs.org/foldcomp/): `afdb_swissprot_v4` (3 GB), `afdb_rep_dark_v4` (2.3 GB), `afdb_rep_v4` (10 GB, the AFDB cluster representatives) and `afdb_uniprot_v4` (1.1 TB, the full AFDB, so the one to use for arbitrary cluster members). The tool never downloads them while running. `Foldcomp.install(swissprot_dir=...)` fetches `afdb_swissprot_v4` once; for the large ones download the files yourself and pass the prefix. Foldcomp reads the whole `.lookup` file into memory before it looks up a name (9 GB on disk for `afdb_uniprot_v4`), so request memory with Resources accordingly. An entry absent from the chosen database is a `failure` row in `missing`. The path is written into the generated script, so it may not contain `"`, a backtick, `$` or a backslash.
 
     NUMBERING
-    Each domain is renumbered from 1 and keeps its chain letter; `offset` is recorded so that
-    original residue number = residue number in the file + `offset`. Atom serials restart at 1.
-    A range that runs past the model is clipped to the model and flagged in `clipped`.
+    Each domain is renumbered from 1 and keeps its chain letter; `offset` is recorded so that original residue number = residue number in the file + `offset`. Atom serials restart at 1. A range that runs past the model is clipped to the model and flagged in `clipped`.
 
     Inputs:
-        entries: column of AFDB entries, a TableReference (`tool.tables.name.column`) or a
-            `(TableInfo | path, column)` tuple.
+        entries: column of AFDB entries, a TableReference (`tool.tables.name.column`) or a `(TableInfo | path, column)` tuple.
         start: column of the first residue of each domain, from the same table as `entries`.
         end: column of the last residue of each domain (inclusive), from the same table.
         database: path prefix of a local Foldcomp database.
-        model_version: the N of `model_vN` in the database's entry names, used to expand bare
-            accessions (default 4, the version of every published AFDB database).
-        threads: CPU threads Foldcomp uses (`-t`, default 1). Match the CPUs requested with
-            Resources.
+        model_version: the N of `model_vN` in the database's entry names, used to expand bare accessions (default 4, the version of every published AFDB database).
+        threads: CPU threads Foldcomp uses (`-t`, default 1). Match the CPUs requested with Resources.
 
     Outputs:
         Streams:
-            structures: one PDB per domain, ids `<entry>_<start>-<end>` as written in the table
-                (for example `A0A009F5K6_12-150`); lazy, because the table is read at run time.
+            structures: one PDB per domain, ids `<entry>_<start>-<end>` as written in the table (for example `A0A009F5K6_12-150`), built by the shared multiplied-id rule with the range as the suffix, and `row<n>` for a row whose entry is empty; lazy, because the table is read at run time.
         Tables:
-            domains: id | entry | database_name | start | end | length | offset | entry_length
-                | plddt_mean | found | clipped. One row per distinct domain id of the table.
-                `start`/`end` are the requested range, `length` the residues written, `offset`
-                the shift from the file's numbering to the original one, `entry_length` the
-                residues of the database model, `plddt_mean` the mean over the domain's
-                residues of the B-factor column, `found` whether the domain was written and
-                `clipped` whether the range was cut to the model. An id that failed carries
-                NaN for the values it could not obtain.
-            missing: id | removed_by | kind | cause. `kind="failure"` for an entry that is not
-                in the database, a range outside the model (the cause gives the model's
-                residues and length), an unparsable entry or position.
+            domains: id | entry | database_name | start | end | length | offset | entry_length | plddt_mean | found | clipped. One row per distinct domain id of the table. `start`/`end` are the requested range, `length` the residues written, `offset` the shift from the file's numbering to the original one, `entry_length` the residues of the database model, `plddt_mean` the mean over the domain's residues of the B-factor column, `found` whether the domain was written and `clipped` whether the range was cut to the model. An id that failed carries NaN for the values it could not obtain.
+            missing: id | removed_by | kind | cause. `kind="failure"` for an entry that is not in the database, a range outside the model (the cause gives the model's residues and length), an unparsable entry or position.
 
     Usage::
 
@@ -118,7 +77,7 @@ class Foldcomp(BaseConfig):
     """
 
     TOOL_NAME = "Foldcomp"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "foldcomp"
 
     @classmethod
@@ -206,6 +165,7 @@ echo "Foldcomp database ready: pass database=\\"{directory}/{SWISSPROT_DATABASE}
             raise ValueError("entries, start and end must be three different columns")
         if not isinstance(self.database, str) or not self.database.strip():
             raise ValueError("database must be the path prefix of a Foldcomp database")
+        _validate_freeform_string("database", self.database)
         if self.model_version < 1:
             raise ValueError(f"model_version must be at least 1, got {self.model_version}")
         if self.threads < 1:

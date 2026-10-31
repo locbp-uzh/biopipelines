@@ -24,6 +24,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     step_id_from_table_path,
     container_argv_prefix,
 )
+from biopipelines.combinatorics import generate_multiplied_ids  # noqa: E402
 
 
 ENTRY_NAME = re.compile(r"^AF-[A-Z0-9]+-F[0-9]+-model_v[0-9]+$")
@@ -98,7 +99,8 @@ def build_requests(entries, starts, ends, model_version: int) -> List[Request]:
             request.error = str(e)
         start_text = request.start if request.start is not None else str(raw_start).strip()
         end_text = request.end if request.end is not None else str(raw_end).strip()
-        request.id = f"{entry}_{start_text}-{end_text}" if entry else f"row{index}"
+        # A row with no entry has no parent to multiply, and numbered_id would put an underscore in `row<n>`, so that id stays as it is.
+        request.id = generate_multiplied_ids([entry], [f"{start_text}-{end_text}"])[0][0] if entry else f"row{index}"
         if request.id in seen:
             print(f"WARNING: {request.id} appears more than once in the table; its first row is used", file=sys.stderr)
             continue

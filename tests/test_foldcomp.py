@@ -493,6 +493,28 @@ def test_bad_parameters_are_refused_at_configuration(local_config, isolated_cwd,
         _build(new_pipeline, "fc_bad", **overrides)
 
 
+@pytest.mark.parametrize("database", ["/data/$(touch pwned)/afdb", "/data/`id`/afdb", '/data/"x/afdb', "C:\\data\\afdb"])
+def test_a_database_path_that_would_be_expanded_or_would_break_the_script_is_refused(
+        local_config, isolated_cwd, new_pipeline, database):
+    """The path is echoed inside double quotes in the generated bash, where $(...), a backtick and a quote act."""
+    with pytest.raises(ValueError, match="'database'.*would break the generated shell script"):
+        _build(new_pipeline, "fc_unsafe_database", database=database)
+
+
+def test_an_ordinary_database_path_still_builds_and_its_script_echoes_it_plainly(local_config, isolated_cwd, new_pipeline):
+    pipeline, _ = _build(new_pipeline, "fc_safe_database", database="/data/foldcomp-v4/afdb_rep_v4")
+    assert 'echo "Extracting domains from afdb_rep_v4"' in _step_text(pipeline.save())
+
+
+def test_the_domain_id_is_the_multiplied_id_of_the_entry_and_its_range_and_the_unnamed_row_keeps_its_name(pipe):
+    from biopipelines.combinatorics import generate_multiplied_ids
+
+    requests = pipe.build_requests(["A0A009F5K6", ""], [12, 3], [150, 9], 4)
+    assert requests[0].id == generate_multiplied_ids(["A0A009F5K6"], ["12-150"])[0][0] == "A0A009F5K6_12-150"
+    assert requests[1].id == "row1"
+    assert "generate_multiplied_ids" in open(pipe.__file__, encoding="utf-8").read()
+
+
 def test_columns_of_different_tables_are_refused(local_config, isolated_cwd, new_pipeline):
     from biopipelines.foldcomp import Foldcomp
 

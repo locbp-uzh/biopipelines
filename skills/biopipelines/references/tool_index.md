@@ -75,7 +75,7 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 ## Inputs & I/O
 
 - **CompoundLibrary** v1.0 · CPU · x86-64, aarch64, Colab — Creates compound collections from dictionaries with optional combinatorial expansion. `docs/tool/inputs_io.md#compoundlibrary` · tags: fetch, small-molecule, covalent
-- **Foldcomp** v1.1 · CPU · x86-64, Colab — Extracts domains from a Foldcomp-compressed copy of the AlphaFold Database. `docs/tool/inputs_io.md#foldcomp` [repo](https://github.com/steineggerlab/foldcomp) [paper](https://doi.org/10.1093/bioinformatics/btad153) · tags: data, protein, residues
+- **Foldcomp** v1.2 · CPU · x86-64, Colab — Extracts domains from a Foldcomp-compressed copy of the AlphaFold Database. `docs/tool/inputs_io.md#foldcomp` [repo](https://github.com/steineggerlab/foldcomp) [paper](https://doi.org/10.1093/bioinformatics/btad153) · tags: data, protein, residues
 - **Ligand** v1.5 · CPU · x86-64, aarch64, Colab — Fetches small molecules from RCSB (CCD) or PubChem (name, CID, CAS) or generates from SMILES. `docs/tool/inputs_io.md#ligand` · tags: fetch, small-molecule
 - **Load** v1.7 · CPU · x86-64, aarch64, Colab — Reload previously produced pipeline outputs back into a run. `docs/tool/inputs_io.md#load` · tags: data
 - **LoadMultiple** CPU · x86-64, aarch64, Colab — Reload previously produced pipeline outputs back into a run. `docs/tool/inputs_io.md#load` · tags: data
