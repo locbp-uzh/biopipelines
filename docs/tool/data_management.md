@@ -436,16 +436,20 @@ Carries a residue selection from the structures it is numbered on onto structure
 
 **Parameters**:
 - `selection`: column reference | str - The selection in reference numbering. A column reference (e.g. `rfd.tables.structures.designed`) is looked up by reference id; a selection string (`"A45-60+A72"`) applies to every reference. A chainless selection needs a single-chain reference.
-- `reference`: StandardizedOutput | DataStream - Structures the selection is numbered on. One structure is broadcast to every target; otherwise each target is paired with its reference by id matching (exact, parent/child, then provenance through the target stream's map table).
+- `reference`: StandardizedOutput | DataStream - Structures the selection is numbered on. A stream that declares one id is broadcast to every target. A stream that declares several is matched to the targets by id; see **How targets are paired with references** below.
 - `structures`: StandardizedOutput | DataStream - Structures to map the selection onto. They define the output ids.
+
+**How targets are paired with references.** A reference stream that declares one id is the reference of every target. A stream that declares several is matched to each target by id, in this order: the same id; the id that the target's provenance names in the target stream's map table; a reference whose id is the target's id plus a suffix, or the target's id minus one (a refold `des_1_1` finds `des_1`, and `des_1` finds `des_1_1`). A sibling, an id that shares only a common ancestor with the target (`des_3_1` against `des_1`, both from `des`), is never a match, because its selection belongs to another design and its loop can sit at other positions or have another length; the alignment would still map it with plausible identity. A target with no match keeps its row with empty values and gets an `unmatched` row in `missing`, whose cause names the sibling that was refused. The match counts the ids the reference stream declares, not the files present, so a reference removed by an upstream filter is not broadcast to the other targets. The selection table is read by the id of the matched reference, with the framework's usual id lookup.
 
 **How residues are matched.** Each selected reference chain is aligned (global, BLOSUM62, free end gaps) against every protein chain of the target, and the best-scoring target chain is used, with the same chain id winning a tie. The reference sequence is doubled before aligning, so a circular permutant — the reference's C-terminal half, a linker, then its N-terminal half — aligns as one contiguous block. A selected residue aligned to a gap is listed in `unmapped`, never guessed, and does not appear in `selection`. Only the 20 standard residues are read; a selected residue the reference does not contain fails that id.
 
-Correspondence is by sequence, so it holds as long as the sequence is recognisably conserved. After a full redesign (e.g. ProteinMPNN on every position) the alignment is meaningless: transfer the selection *before* redesign, or check `identity`.
+Correspondence is by sequence, so it holds as long as the sequence is recognizably conserved. After a full redesign (e.g. ProteinMPNN on every position) the alignment is meaningless: transfer the selection *before* redesign, or check `identity`.
+
+A target that carries the reference sequence twice, a tandem fusion for instance, fails: the doubled reference then aligns each residue twice and the id is recorded as a `failure` ("a reference residue aligned twice across the doubled sequence") instead of mapping one copy at random.
 
 **Tables**:
 - `selections`: `id | selection | n_residues | source_selection | unmapped | identity | reference.id` — `selection` is chain-aware in target numbering, `n_residues` counts mapped residues, `source_selection` is the input in reference numbering, `identity` is the fraction of identical aligned pairs over the chains used, `reference.id` the paired reference. A failed id keeps its row with empty values.
-- `missing`: `id | removed_by | kind | cause`
+- `missing`: `id | removed_by | kind | cause`; `kind` is `unmatched` for a target with no reference and `failure` for one whose alignment or selection could not be read.
 
 **Example**:
 

@@ -130,6 +130,116 @@ def test_the_pipe_pairs_targets_with_their_reference_and_reads_the_table(st, tmp
     assert df.loc["d2_1", "reference.id"] == "d2"
 
 
+# ── pairing a target with its reference ──────────────────────────────────────
+
+def test_a_sibling_reference_is_not_a_match(st):
+    """`des_3_1` shares only the ancestor `des` with `des_1`, whose selection sits on another design."""
+    pairing = st.pair_references(["des_3_1"], ["des_1", "des_2"], 2)
+    assert pairing == {"des_3_1": (None, "des_1")}
+
+
+def test_the_exact_parent_and_child_tiers_still_match(st):
+    references = ["des_1", "des_2"]
+    assert st.pair_references(["des_2"], references, 2)["des_2"] == ("des_2", None)
+    assert st.pair_references(["des_2_1"], references, 2)["des_2_1"] == ("des_2", None)
+    assert st.pair_references(["des_2"], ["des_1_1", "des_2_1"], 2)["des_2"] == ("des_2_1", None)
+
+
+def test_the_provenance_of_the_target_map_names_the_reference(st, tmp_path):
+    table = tmp_path / "structures_map.csv"
+    table.write_text("id,file,structures.id\nPanda_1,a.pdb,des_2\n")
+    assert st.pair_references(["Panda_1"], ["des_1", "des_2"], 2, [str(table)])["Panda_1"] == ("des_2", None)
+
+
+def test_one_declared_reference_is_the_reference_of_every_target(st):
+    assert st.pair_references(["a_1", "b_1"], ["ref"], 1) == {"a_1": ("ref", None), "b_1": ("ref", None)}
+
+
+def test_a_reference_filtered_upstream_is_not_broadcast_to_the_other_targets(st):
+    """The stream declares two ids but only `des_1` has a file; counting the files would hand its selection to `des_2_1`."""
+    pairing = st.pair_references(["des_1_1", "des_2_1"], ["des_1"], 2)
+    assert pairing["des_1_1"] == ("des_1", None)
+    assert pairing["des_2_1"][0] is None
+
+
+def _stage(tmp_path, references, targets, absent=()):
+    """A step folder with a reference and a target stream; `references` and `targets` map id to sequence, `absent` ids have no file."""
+    folder = tmp_path / "003_SelectionTransfer"
+    for sub in ("_configuration", "_execution", "tables", "inputs"):
+        (folder / sub).mkdir(parents=True)
+    inputs = folder / "inputs"
+    for sid, seq in {**references, **targets}.items():
+        if sid not in absent:
+            write_pdb(inputs / f"{sid}.pdb", seq)
+    DataStream(name="structures", ids=list(references), files=[str(inputs / "<id>.pdb")],
+               format="pdb").save_json(str(folder / "_configuration" / "reference.json"))
+    DataStream(name="structures", ids=list(targets), files=[str(inputs / "<id>.pdb")],
+               format="pdb").save_json(str(folder / "_configuration" / "structures.json"))
+    config = folder / "_configuration" / "config.json"
+    config.write_text('{"selection": {"literal": "A8-9"}}')
+    return folder, config
+
+
+def _run_pipe(folder, config, check=True):
+    out = folder / "tables" / "selections.csv"
+    result = subprocess.run([sys.executable, SCRIPT,
+                             "--config-json", str(config),
+                             "--structures-json", str(folder / "_configuration" / "structures.json"),
+                             "--reference-json", str(folder / "_configuration" / "reference.json"),
+                             "--selections-csv", str(out),
+                             "--local-missing-csv", str(folder / "_execution" / "local_missing.csv")],
+                            cwd=REPO, capture_output=True, text=True)
+    if check:
+        assert result.returncode == 0, result.stderr
+    return result, out
+
+
+def test_a_target_whose_own_reference_is_absent_is_unmatched_not_given_a_siblings(tmp_path):
+    folder, config = _stage(tmp_path,
+                            references={"des_1": REF, "des_2": REF[10:]},
+                            targets={"des_1_1": REF[3:], "des_3_1": REF[3:]})
+    _, out = _run_pipe(folder, config)
+
+    df = pd.read_csv(out).set_index("id")
+    assert df.loc["des_1_1", "reference.id"] == "des_1" and df.loc["des_1_1", "selection"] == "A5-6"
+    assert pd.isna(df.loc["des_3_1", "reference.id"]) and pd.isna(df.loc["des_3_1", "selection"])
+    missing = pd.read_csv(folder / "_execution" / "local_missing.csv")
+    assert list(missing["id"]) == ["des_3_1"] and list(missing["kind"]) == ["unmatched"]
+    assert "'des_1' is only a sibling" in missing.loc[0, "cause"]
+    assert list(missing["removed_by"]) == ["003_SelectionTransfer"]
+
+
+def test_a_reference_with_a_missing_file_is_not_broadcast_by_the_pipe(tmp_path):
+    folder, config = _stage(tmp_path,
+                            references={"des_1": REF, "des_2": REF},
+                            targets={"des_1_1": REF[3:], "des_2_1": REF[3:]}, absent={"des_2"})
+    _, out = _run_pipe(folder, config)
+    df = pd.read_csv(out).set_index("id")
+    assert df.loc["des_1_1", "reference.id"] == "des_1" and pd.isna(df.loc["des_2_1", "reference.id"])
+    assert list(pd.read_csv(folder / "_execution" / "local_missing.csv")["id"]) == ["des_2_1"]
+
+
+def test_every_target_unmatched_is_a_step_failure_with_the_tables_written(tmp_path):
+    folder, config = _stage(tmp_path, references={"des_1": REF, "des_2": REF}, targets={"des_3_1": REF})
+    result, out = _run_pipe(folder, config, check=False)
+    assert result.returncode == 1 and "all 1 id(s) failed" in result.stderr
+    assert out.exists() and len(pd.read_csv(folder / "_execution" / "local_missing.csv")) == 1
+
+
+def test_a_target_carrying_the_reference_twice_fails_and_says_why(st):
+    """A tandem fusion aligns each reference residue twice across the doubled reference; the id fails instead of mapping one copy at random."""
+    with pytest.raises(ValueError, match="aligned twice"):
+        run(st, [("A", 10)], chains(REF), chains(REF + REF))
+
+
+def test_a_tandem_target_is_a_failure_row_of_the_step(tmp_path):
+    folder, config = _stage(tmp_path, references={"des_1": REF}, targets={"des_1_1": REF[3:], "des_1_2": REF + REF})
+    _, out = _run_pipe(folder, config)
+    missing = pd.read_csv(folder / "_execution" / "local_missing.csv")
+    assert list(missing["id"]) == ["des_1_2"] and list(missing["kind"]) == ["failure"]
+    assert "aligned twice" in missing.loc[0, "cause"]
+
+
 def _saved_config(root) -> dict:
     import glob
     import json

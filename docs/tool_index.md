@@ -97,7 +97,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 85 | Pool                      | Data Management                | 1.5 | `biopipelines/pool.py` |
 | 86 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
 | 87 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
-| 88 | SelectionTransfer | Data Management | 1.0 | `biopipelines/selection_transfer.py` |
+| 88 | SelectionTransfer | Data Management | 1.1 | `biopipelines/selection_transfer.py` |
 | 89 | MMseqs2                   | MSAs                           | 1.11 | `biopipelines/mmseqs2.py` |
 | 90 | MMseqs2Server             | MSAs                           | 1.10 | `biopipelines/mmseqs2.py` |
 | 91 | MSA                       | MSAs                           | 1.5 | `biopipelines/msa.py` |

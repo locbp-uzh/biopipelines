@@ -52,20 +52,21 @@ class SelectionTransfer(BaseConfig):
     Inputs:
         selection: a table column reference (keyed by reference ids) or a literal selection string
             applied to every reference, e.g. "A45-60+A72". Chainless selections need a single-chain reference.
-        reference: structures the selection is numbered on. One structure is broadcast to every
-            target; otherwise each target is paired with its reference by id matching.
+        reference: structures the selection is numbered on. A stream that declares one id is broadcast to every target. A stream that declares several is matched by id: a target takes the reference with the same id, the one its provenance names in the target stream's map table, or one that is its parent or child by id suffix (a refold `d1_1` finds `d1`). A sibling (a common ancestor and nothing more, `d3` against `d1`) is never a match: its selection belongs to another design, so a target whose own reference is absent is recorded as `unmatched` instead of taking a neighbor's.
         structures: structures to map the selection onto; they define the output ids.
+
+    A target that carries the reference sequence twice (a tandem fusion) fails, because a reference residue then aligns twice across the doubled sequence.
 
     Outputs:
         Tables:
             selections: id | selection | n_residues | source_selection | unmapped | identity | reference.id
                 selection is chain-aware in target numbering; unmapped lists reference residues with
                 no counterpart; identity is the fraction of identical aligned pairs over the chains used.
-            missing: id | removed_by | kind | cause
+            missing: id | removed_by | kind | cause   (kind="unmatched" for a target with no reference, kind="failure" for one whose alignment or selection could not be read)
     """
 
     TOOL_NAME = "SelectionTransfer"
-    TOOL_VERSION = "1.0"
+    TOOL_VERSION = "1.1"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

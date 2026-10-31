@@ -70,7 +70,7 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 - **Pool** v1.5 · CPU · x86-64, aarch64, Colab — Gathers N StandardizedOutputs from parallel runs of the same upstream tool into one combined StandardizedOutput. `docs/tool/data_management.md#pool` · tags: data
 - **ReMap** v1.2 · CPU · x86-64, aarch64, Colab — Renames IDs across all streams and tables from a source tool output. `docs/tool/data_management.md#remap` · tags: data
 - **Selection** v1.2 · CPU · x86-64, aarch64, Colab — Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right. `docs/tool/data_management.md#selection` · tags: data, residues
-- **SelectionTransfer** v1.0 · CPU · x86-64, aarch64, Colab — Carries a residue selection from the structures it is numbered on onto structures from a later stage of the pipeline — after trimming, extending, shif `docs/tool/data_management.md#selectiontransfer` · tags: data, residues, protein
+- **SelectionTransfer** v1.1 · CPU · x86-64, aarch64, Colab — Carries a residue selection from the structures it is numbered on onto structures from a later stage of the pipeline — after trimming, extending, shif `docs/tool/data_management.md#selectiontransfer` · tags: data, residues, protein
 
 ## Inputs & I/O
 

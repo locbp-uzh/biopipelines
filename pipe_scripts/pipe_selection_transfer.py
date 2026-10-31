@@ -13,7 +13,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import pandas as pd
 from Bio.Align import PairwiseAligner, substitution_matrices
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from biopipelines.biopipelines_io import (  # noqa: E402
     load_datastream, iterate_files, load_table, lookup_table_value, step_id_from_table_path,
 )
-from biopipelines.id_map_utils import get_mapped_ids  # noqa: E402
+from biopipelines.id_map_utils import TIER_SIBLING, get_mapped_ids_with_tiers  # noqa: E402
 from biopipelines.pdb_parser import parse_pdb_file, STANDARD_RESIDUES, THREE_TO_ONE  # noqa: E402
 from biopipelines.sele_utils import sele_to_list, list_to_sele  # noqa: E402
 
@@ -119,6 +119,21 @@ def transfer(residues: List[Tuple[str, int]], ref_chains: Chains, tgt_chains: Ch
     return sorted(mapped), sorted(unmapped), identity
 
 
+def pair_references(target_ids, reference_ids, n_declared, map_table_paths=None):
+    """Return {target id: (reference id or None, sibling id that was refused or None)}.
+
+    A reference stream declaring one id is the reference of every target. Several are matched to each target by id: the same id, the id its provenance names in the target stream's map table, or a parent or child of it. A sibling id (a common ancestor, nothing more) is not a match: its selection is another design's, its loop can sit at other positions or have another length, and the alignment would still map it with plausible identity.
+
+    `n_declared` counts the ids the stream declares, not the files present, so a reference filtered upstream is never broadcast to the other targets.
+    """
+    if n_declared == 1:
+        only = next(iter(reference_ids), None)
+        return {tid: (only, None) for tid in target_ids}
+    matches = get_mapped_ids_with_tiers(list(target_ids), list(reference_ids), unique=True,
+                                        map_table_paths=map_table_paths)
+    return {tid: ((None, rid) if tier == TIER_SIBLING else (rid, None)) for tid, (rid, tier) in matches.items()}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config-json", required=True)
@@ -144,12 +159,8 @@ def main():
         print("ERROR: no reference structures available", file=sys.stderr)
         sys.exit(1)
 
-    if len(references) == 1:
-        only = next(iter(references))
-        pairing: Dict[str, Optional[str]] = {tid: only for tid in targets}
-    else:
-        maps = [structures_ds.map_table] if structures_ds.map_table else None
-        pairing = get_mapped_ids(list(targets), list(references), unique=True, map_table_paths=maps)
+    maps = [structures_ds.map_table] if structures_ds.map_table else None
+    pairing = pair_references(list(targets), list(references), len(reference_ds.ids_expanded), maps)
 
     table = None
     if "table" in selection_cfg:
@@ -160,10 +171,17 @@ def main():
     ref_cache: Dict[str, Chains] = {}
     rows, missing_rows = [], []
     for tid, tpath in targets.items():
-        rid = pairing.get(tid)
+        rid, sibling = pairing.get(tid, (None, None))
+        if not rid:
+            reason = "no reference structure matches this id"
+            if sibling:
+                reason += f" ('{sibling}' is only a sibling, another design's reference, and is not used)"
+            print(f"WARNING: {tid} not matched: {reason}", file=sys.stderr)
+            rows.append({"id": tid, "selection": None, "n_residues": None, "source_selection": None,
+                         "unmapped": None, "identity": None, "reference.id": None})
+            missing_rows.append({"id": tid, "removed_by": step_id, "kind": "unmatched", "cause": reason[:200]})
+            continue
         try:
-            if not rid:
-                raise ValueError("no reference structure matches this id")
             if table is None:
                 source = selection_cfg["literal"]
             else:

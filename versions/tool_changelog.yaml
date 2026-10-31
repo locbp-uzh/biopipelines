@@ -2447,8 +2447,12 @@ SelectionTransfer:
   files:
   - biopipelines/selection_transfer.py
   - pipe_scripts/pipe_selection_transfer.py
-  current: "1.0"
+  current: "1.1"
   history:
+  - version: '1.1'
+    date: '2026-10-31'
+    note: >-
+      A target whose own reference is absent is no longer given a sibling's selection. The id match used the whole ladder, so with the references des_1 and des_2 a target des_3_1 took the selection of des_1 and recorded a success; a sibling (a common ancestor and nothing more) is now refused, as Peppr refuses it, and the target is an `unmatched` row of `missing` that names the sibling. The reference count that decides whether one reference is broadcast is the number the stream declares, not the number with a file, so a reference filtered upstream is no longer handed to the other targets. A target with no reference is kind="unmatched", not "failure". The documentation says what is matched, and that a target carrying the reference twice fails.
   - version: '1.0'
     date: '2026-10-12'
     note: >-
