@@ -93,6 +93,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **FLOWR** 1.2 → 1.3. The install creates the conda env only when it is absent, as the install of every sibling does. The shortcut fails whenever the checkpoint alone is missing, and the script then ran `env create` against the env it already had, which errors or re-creates the CUDA 11.8 env instead of only fetching the checkpoint.
+
 - **BioEmu2** 1.9 → 1.10. An existing env gets the tool's own `environments/bioemu2.pip.txt` applied, whatever name the config gives the env. The path was named after the env, so an env redirected to another name (a hand-built one, say) made `pip install -r` run on a file that does not exist.
 
 - **RFdiffusion3** 3.12 → 3.13. The "already installed" shortcut of the install runs `import rfd3.engine` as well as checking the env and the checkpoint folder. The atomworks pin only helps an env built after it, and a `foundry` env built before it (atomworks 3.x, where `rfd3.engine` does not import) still had an env and a populated folder, so it was reported as installed and the step failed at import on the compute node. An env that fails the import now has `environments/foundry.pip.txt` applied to it again, in place, and the final verification decides.

@@ -91,7 +91,7 @@ class FLOWR(BaseConfig):
     """
 
     TOOL_NAME = "FLOWR"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "FLOWR"
 
     @classmethod
@@ -122,7 +122,10 @@ if [ ! -d "{repo_dir}/flowr" ]; then
 fi
 
 {remove_block}
+# Create the env only when absent: a missing checkpoint must not re-create the CUDA env
+if ! {env_check}; then
 {env_block}
+fi
 
 mkdir -p "{repo_dir}/checkpoints"
 if [ ! -s "{checkpoint}" ]; then

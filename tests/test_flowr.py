@@ -10,6 +10,8 @@ import json
 import math
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 import pandas as pd
@@ -559,6 +561,42 @@ def test_the_install_script_pins_the_checkpoint_record_and_checks_the_import(mon
     assert os.path.join("/data/FLOWR", "checkpoints", "flowr_noHs.ckpt") in script
     assert ", flowr.gen.generate_from_pdb\"" in script and 'touch "$INSTALL_SUCCESS"' in script
     assert script.index("mamba env create") < script.index("md5sum")
+
+
+def test_the_env_is_created_only_when_it_is_absent(monkeypatch):
+    from biopipelines.flowr import FLOWR
+
+    monkeypatch.setattr(FLOWR, "_install_env", classmethod(lambda cls, env_manager, env_name=None: "FLOWR"))
+    script = FLOWR._install_script({"biopipelines": "/bp", "FLOWR": "/data/FLOWR"}, env_manager="mamba")
+    create = script.index("mamba env create")
+    guard = script.rindex('if ! mamba run -n FLOWR python -c "" >/dev/null 2>&1; then', 0, create)
+    assert "\nfi\n" not in script[guard:create]
+
+
+# Stands in for git, curl, md5sum and mamba, with a conda env that already exists.
+FAKE_TOOLS = r'''
+git() { mkdir -p "$3/flowr"; }
+curl() { echo weights > "$3"; }
+md5sum() { echo "$FAKE_MD5  $1"; }
+mamba() { echo "$*" >> "$FAKE_LOG"; return 0; }
+'''
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not available")
+def test_a_missing_checkpoint_does_not_recreate_an_existing_env(monkeypatch, tmp_path):
+    """The shortcut fails on a missing checkpoint alone, and the script then ran `env create` on the env it had."""
+    from biopipelines.flowr import FLOWR, CHECKPOINT_MD5
+
+    monkeypatch.setattr(FLOWR, "_install_env", classmethod(lambda cls, env_manager, env_name=None: "FLOWR"))
+    log, success = tmp_path / "log.txt", tmp_path / "success"
+    install = FLOWR._install_script({"biopipelines": ROOT, "FLOWR": (tmp_path / "FLOWR").as_posix()}, env_manager="mamba")
+    script = "\n".join([
+        f'export INSTALL_SUCCESS="{success.as_posix()}" FAKE_LOG="{log.as_posix()}" FAKE_MD5="{CHECKPOINT_MD5}"',
+        FAKE_TOOLS, "(", install, ")",
+    ])
+    result = subprocess.run([shutil.which("bash"), "-c", script], capture_output=True, text=True)
+    assert success.exists(), result.stdout + result.stderr
+    assert "env create" not in log.read_text(encoding="utf-8")
 
 
 def test_the_env_files_keep_upstreams_torch_stack():

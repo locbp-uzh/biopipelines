@@ -18,7 +18,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 6 | RFdiffusionAllAtom | Structure Generation           | 2.8 | `biopipelines/rfdiffusion_allatom.py` |
 | 7 | RFdiffusion2              | Structure Generation           | 1.6 | `biopipelines/rfdiffusion2.py` |
 | 8 | HBDesigner | Structure Generation           | 2.4 | `biopipelines/hbdesigner.py` |
-| 9 | FLOWR | Structure Generation           | 1.2 | `biopipelines/flowr.py` |
+| 9 | FLOWR | Structure Generation           | 1.3 | `biopipelines/flowr.py` |
 | 10 | DNAEncoder                | Sequence Design                | 1.3 | `biopipelines/dna_encoder.py` |
 | 11 | Frame2Seq | Sequence Design                | 2.1 | `biopipelines/frame2seq.py` |
 | 12 | Fuse | Sequence Design                | 1.7 | `biopipelines/fuse.py` |
