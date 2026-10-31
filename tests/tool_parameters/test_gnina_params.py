@@ -130,7 +130,8 @@ def test_box_center_size(local_config, isolated_cwd, new_pipeline):
 def test_mode_default_is_docking(local_config, isolated_cwd, new_pipeline):
     content, out = _build_with_outputs(local_config, isolated_cwd, new_pipeline)
     assert '"mode": "docking"' in content
-    assert sorted(out.tables._tables.keys()) == ["docking_results", "docking_summary"]
+    # Since Gnina 2.6 the `missing` table is always declared.
+    assert sorted(out.tables.keys()) == ["docking_results", "docking_summary", "missing"]
 
 
 @pytest.mark.parametrize("mode", ["score", "minimize"])

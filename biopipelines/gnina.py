@@ -123,7 +123,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.9"
+    TOOL_VERSION = "2.10"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -232,6 +232,8 @@ fi
     autobox_ds_json = Path(lambda self: self.configuration_path("autobox_ligand_ds.json"))
 
     MODES = ("docking", "score", "minimize")
+    # The values of GNINA's --cnn_scoring, in the order of its --help.
+    CNN_SCORING = ("none", "rescore", "refinement", "metrorescore", "metrorefine", "all")
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -304,10 +306,17 @@ fi
             num_runs: Number of independent docking runs per conformer with
                 incremented seeds. More runs improve pose consistency statistics
                 (default 1).
-            seed: Base random seed. Each run uses seed + run_index (default 42).
-            cnn_scoring: CNN scoring mode. Options: "rescore" (re-score Vina poses
-                with CNN, default), "refinement" (optimize with CNN), "none"
-                (Vina only), "rescore_only" (CNN score only, no Vina).
+            seed: Base random seed (default 42). Each docking run uses seed + run_index,
+                and the RDKit conformer embedding uses seed itself.
+            cnn_scoring: Where in the docking GNINA uses the CNN (its ``--cnn_scoring``).
+                "rescore" (default) re-ranks the final poses, the cheapest CNN option;
+                "refinement" also refines the poses after the Monte Carlo chains (about 10x
+                slower than rescore on a GPU); "none" uses the empirical scoring function
+                throughout; "metrorescore" (Metropolis + rescore) and "metrorefine"
+                (Metropolis + refinement) are GNINA's two Metropolis variants, which upstream
+                describes only by those names; "all" uses the CNN as the scoring function
+                throughout (extremely slow, upstream does not recommend it). Any other value
+                is refused at configuration time.
             generate_conformers: If True, generate RDKit ETKDGv3 conformers for
                 each ligand, filter by energy window, cluster by RMSD, and dock
                 each representative independently (default False).
@@ -373,6 +382,7 @@ fi
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
                     missing: id | removed_by | kind | cause
                 Ids: docking_summary rows are ``<protein>+<ligand>_conf<k>``, docking_results rows ``<protein>+<ligand>_conf<k>_r<run>_p<pose>``.
+                Both tables are keyed on conformers and poses, so a pair that gave no pose has no row in either; its record is the ``failure`` row of ``missing``.
             mode="score"/"minimize":
                 Streams: structures (.pdb) — the scored complex ("score" re-emits
                     the input pose unchanged; "minimize" emits the refined pose).
@@ -478,11 +488,15 @@ fi
 
         if self.backend == "vina":
             self._validate_vina_backend()
-        elif self.scoring != "vina":
-            raise ValueError(
-                "scoring only applies to Vina; Gnina selects its scoring "
-                "function with cnn_scoring instead."
-            )
+        else:
+            if self.scoring != "vina":
+                raise ValueError(
+                    "scoring only applies to Vina; Gnina selects its scoring "
+                    "function with cnn_scoring instead."
+                )
+            if self.cnn_scoring not in self.CNN_SCORING:
+                raise ValueError(
+                    f"cnn_scoring must be one of {list(self.CNN_SCORING)}, got {self.cnn_scoring!r}")
 
         if not self.structures_stream or len(self.structures_stream) == 0:
             raise ValueError("structures parameter is required and must not be empty")
@@ -587,24 +601,15 @@ fi
         no-search modes skip entirely. Raising (rather than silently ignoring)
         keeps a misconfigured score run from looking like it honored them.
         """
-        docking_only = {
-            "center": (self.center, None),
-            "size": (self.size, None),
-            "autobox_ligand": (self.autobox_ligand_stream or self.autobox_ligand_path, None),
-            "exhaustiveness": (self.exhaustiveness, 8),
-            "num_modes": (self.num_modes, 9),
-            "num_runs": (self.num_runs, 1),
-            "generate_conformers": (self.generate_conformers, False),
-            "num_conformers": (self.num_conformers, 50),
-            "energy_window": (self.energy_window, 2.0),
-            "conformer_rmsd": (self.conformer_rmsd, 1.0),
-            "conformer_energies": (self.conformer_energies, None),
-            "rmsd_threshold": (self.rmsd_threshold, 2.0),
-            "top_only": (self.top_only, True),
-            "rank_conformers_by": (self.rank_conformers_by, "auto"),
-        }
-        offenders = [name for name, (value, default) in docking_only.items()
-                     if value != default]
+        # Defaults come from Gnina's own signature, as in _validate_vina_backend.
+        import inspect
+        inherited = inspect.signature(Gnina.__init__).parameters
+        docking_only = ("center", "size", "exhaustiveness", "num_modes", "num_runs", "generate_conformers",
+                        "num_conformers", "energy_window", "conformer_rmsd", "conformer_energies",
+                        "rmsd_threshold", "top_only", "rank_conformers_by")
+        offenders = [name for name in docking_only if getattr(self, name) != inherited[name].default]
+        if (self.autobox_ligand_stream or self.autobox_ligand_path) != inherited["autobox_ligand"].default:
+            offenders.append("autobox_ligand")
         if offenders:
             raise ValueError(
                 f"mode={self.mode!r} ignores docking-only parameters; remove "
@@ -975,7 +980,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.9"
+    TOOL_VERSION = "2.10"
     ENV_NAME = "vina"
     BACKEND = "vina"
 
@@ -1059,6 +1064,7 @@ fi
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
                     missing: id | removed_by | kind | cause
                 Ids: docking_summary rows are ``<protein>+<ligand>_conf<k>``, docking_results rows ``<protein>+<ligand>_conf<k>_r<run>_p<pose>``.
+                Both tables are keyed on conformers and poses, so a pair that gave no pose has no row in either; its record is the ``failure`` row of ``missing``.
             mode="score"/"minimize":
                 Streams: structures (.pdb) — the scored complex.
                 Tables:

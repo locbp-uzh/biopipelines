@@ -40,7 +40,7 @@ from biopipelines.biopipelines_io import (
     read_upstream_missing, MISSING_COLUMNS, step_id_from_table_path,
 )
 from biopipelines.pdb_parser import field_atom_name, field_res_name
-from biopipelines.ligand_utils import write_ligand_sdf
+from biopipelines.ligand_utils import ligand_chemistry, write_ligand_sdf
 from biopipelines.id_map_utils import get_mapped_ids
 from biopipelines.combinatorics import generate_multiplied_ids, predict_single_output_id
 from biopipelines.gnina import CONFORMER_PREFIX, CONFORMER_RANK_METRICS, refuse_shared_pair_ids
@@ -354,7 +354,7 @@ def prepare_proteins(structures_ds, output_folder, protonate, pH, failed=None):
 # 2. Ligand / conformer preparation
 # ---------------------------------------------------------------------------
 
-def _load_compound_mols(compounds_ds, conf_dir):
+def _load_compound_mols(compounds_ds, conf_dir, seed):
     """
     Load compound molecules from any upstream tool format.
 
@@ -390,9 +390,9 @@ def _load_compound_mols(compounds_ds, conf_dir):
         if mol is None and map_df is not None and "smiles" in map_df.columns:
             row = map_df[map_df["id"] == ligand_id]
             if not row.empty:
-                smiles = str(row.iloc[0]["smiles"])
-                if smiles and smiles != "nan":
-                    mol, sdf_path = _mol_from_smiles(smiles, ligand_id, conf_dir)
+                smiles = ligand_chemistry(row.iloc[0])["smiles"]
+                if smiles:
+                    mol, sdf_path = _mol_from_smiles(smiles, ligand_id, conf_dir, seed)
 
         # Strategy 3: DataStream files list
         if mol is None and expanded_files:
@@ -457,7 +457,7 @@ def _load_mol_from_file(file_path, ligand_id, conf_dir):
         return None, None
 
 
-def _mol_from_smiles(smiles, ligand_id, conf_dir):
+def _mol_from_smiles(smiles, ligand_id, conf_dir, seed):
     """Generate a 3D molecule from SMILES and write to SDF."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -466,7 +466,7 @@ def _mol_from_smiles(smiles, ligand_id, conf_dir):
 
     mol = Chem.AddHs(mol)
     params = AllChem.ETKDGv3()
-    params.randomSeed = 42
+    params.randomSeed = seed
     status = AllChem.EmbedMolecule(mol, params)
     if status == -1:
         AllChem.EmbedMolecule(mol, AllChem.ETKDG())
@@ -550,7 +550,8 @@ def prepare_conformers(compounds_ds, output_folder, config):
     conformer_rmsd = config.get("conformer_rmsd", 1.0)
     conformer_energies_ref = config.get("conformer_energies_ref")
 
-    compound_mols = _load_compound_mols(compounds_ds, conf_dir)
+    seed = config["seed"]
+    compound_mols = _load_compound_mols(compounds_ds, conf_dir, seed)
     print(f"Loaded {len(compound_mols)} compounds from upstream")
 
     all_conformers = []
@@ -560,7 +561,7 @@ def prepare_conformers(compounds_ds, output_folder, config):
         if generate:
             mol = Chem.AddHs(mol)
             params = AllChem.ETKDGv3()
-            params.randomSeed = 42
+            params.randomSeed = seed
             cids = AllChem.EmbedMultipleConfs(mol, numConfs=num_conformers, params=params)
 
             if len(cids) == 0:
@@ -1368,20 +1369,16 @@ def _write_complex_pdb(protein_pdb, ligand_sdf, pose_index, dst_pdb):
 # ---------------------------------------------------------------------------
 
 def _load_score_chemistry(compounds_ds):
-    """Map each compound id to its (code, smiles).
+    """Map each compound id to its (code, smiles), either one "" when the compound has none.
 
     The code locates the in-pocket HETATM residue to score; the SMILES restores
-    that pose's bond orders before scoring.
+    that pose's bond orders before scoring. The loop over the complexes fails the
+    complexes of a compound that lacks one, so one such compound never stops the step.
     """
     chem = {}
     for cid, values in iterate_values(compounds_ds, columns=["code", "smiles"]):
         code = str(values.get("code", "")).strip()
-        if not code or code.lower() == "nan":
-            raise ValueError(f"compound {cid} has no residue code to locate its in-pocket pose")
-        smi = str(values.get("smiles", "")).strip()
-        if not smi or smi.lower() == "nan":
-            raise ValueError(f"compound {cid} (code {code}) has no SMILES for bond-order templating")
-        chem[cid] = (code, smi)
+        chem[cid] = ("" if code.lower() == "nan" else code, ligand_chemistry(values)["smiles"])
     return chem
 
 
@@ -1559,6 +1556,10 @@ def run_score_mode(structures_ds, compounds_ds, config):
                     f"carries no compounds.id provenance and the compounds stream has "
                     f"{len(compound_ids)} compounds")
             ligand_code, template_smiles = chem[compound_id]
+            if not ligand_code:
+                raise RuntimeError(f"compound {compound_id} has no residue code to locate its in-pocket pose")
+            if not template_smiles:
+                raise RuntimeError(f"compound {compound_id} (code {ligand_code}) has no SMILES for bond-order templating")
 
             clean_protein = os.path.join(scratch, f"{structure_id}_protein.pdb")
             _clean_protein_pdb(complex_pdb, clean_protein)

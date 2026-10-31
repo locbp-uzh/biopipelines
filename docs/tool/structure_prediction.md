@@ -489,8 +489,8 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 - `exhaustiveness`: int = 8 - Search exhaustiveness
 - `num_modes`: int = 9 - Docked poses per run
 - `num_runs`: int = 1 - Independent docking runs per conformer
-- `seed`: int = 42 - Base random seed (each run uses `seed + run_index`)
-- `cnn_scoring`: str = "rescore" - CNN scoring mode (`"rescore"`, `"refinement"`, `"none"`, `"rescore_only"`)
+- `seed`: int = 42 - Base random seed. Each docking run uses `seed + run_index`, and the RDKit conformer embedding uses `seed` itself, so two seeds dock different conformers.
+- `cnn_scoring`: str = "rescore" - where in the docking GNINA uses its CNN, one of GNINA's six `--cnn_scoring` values: `"none"` (the empirical scoring function throughout), `"rescore"` (re-rank the final poses; the cheapest CNN option), `"refinement"` (also refine the poses after the Monte Carlo chains; about 10x slower than `rescore` on a GPU), `"metrorescore"` (Metropolis + rescore), `"metrorefine"` (Metropolis + refinement) or `"all"` (the CNN as the scoring function throughout; extremely slow, upstream does not recommend it). Any other value is refused at construction with the list of valid ones.
 - `generate_conformers`: bool = False - Generate RDKit ETKDGv3 conformers per ligand
 - `num_conformers`: int = 50 - Conformers to generate before filtering
 - `energy_window`: float = 2.0 - Max relative MMFF94 energy (kcal/mol) for conformer filtering
@@ -500,6 +500,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 - `rmsd_threshold`: float = 2.0 - RMSD cutoff (Angstroms) for pose consistency clustering
 - `protonate`: bool = True - Add hydrogens with OpenBabel before docking
 - `pH`: float = 7.4 - Protonation pH
+- `dock_timeout`: Optional[int] = 1800 - Wall-clock cap in seconds for one GNINA docking run (30 min by default). A flexible ligand at high `exhaustiveness` can occasionally give a search that never terminates; a run that exceeds the cap is killed, warned and counted as a failed run (the other runs and poses still count, and a pair whose every run failed is a `failure` row of `missing` with the cause "timed out"). Keep it well above a normal dock and scale it up when you raise `exhaustiveness`. `None` or `0` disables the cap. Also applies to the scoring run of `score`/`minimize` mode.
 - `top_only`: bool = True - keep only the best conformer of each (protein, ligand) pair as `<protein>+<ligand>`. False surfaces every conformer that has an accepted pose as `<protein>+<ligand>_conf<k>`, the id of its `docking_summary` row. Docking mode only.
 - `rank_conformers_by`: str = "auto" - the `docking_summary` column that picks the best conformer when `top_only` is True. `"auto"` is `pseudo_binding_energy` when every posed conformer of the pair has one and `best_vina` otherwise. Or name one: `pseudo_binding_energy`, `best_vina` or `mean_vina` (lowest wins), `best_cnn_score` or `mean_cnn_affinity` (highest wins; not with `cnn_scoring="none"`). A named metric is never replaced by another: if a posed conformer of a pair lacks it, that pair is a `failure` row of `missing` and the other pairs go on. An unknown name, `pseudo_binding_energy` without `generate_conformers` or `conformer_energies`, and any value other than `"auto"` together with `top_only=False` are refused at construction. Docking mode only.
 
@@ -519,6 +520,8 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   |----|---------------|--------------|--------------|-----------|-----------|---------|----------------|-------------------|------------------|-----------------|------------------|-----------------------|----------------|
 
   IDs are unique per (protein, ligand, conformer) group: `<protein>+<ligand>_conf<k>`, the pair's stream id with the conformer appended. A ligand id may contain `_` (`a_b`+`c` and `a`+`b_c` are `a_b+c` and `a+b_c`). A `+` inside an id is accepted, but two pairs that would join to the same id (`a`+`b+c` and `a+b`+`c` are both `a+b+c`) are refused, at configuration time and again before the first dock.
+
+  `docking_results` and `docking_summary` are keyed on poses and conformers, so a pair that gave no accepted pose (a receptor that could not be prepared, a ligand with no conformer, a binary that failed, or a `rank_conformers_by` metric that is absent) has no row in either; the pair-level record of that failure is its `failure` row of `missing`, under the pair id `<protein>+<ligand>`. A conformer that did pose but whose pair could not be decided keeps its `docking_summary` row.
 
   - `mean_vina` / `std_vina`: mean and std of the best Vina score per run (not all poses — just the top pose from each independent run). Robust metric for ranking.
   - `mean_cnn_affinity` / `std_cnn_affinity`: same logic for CNN affinity.

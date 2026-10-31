@@ -957,8 +957,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.9"
+  current: "2.10"
   history:
+  - version: '2.10'
+    date: '2026-10-31'
+    note: >-
+      `cnn_scoring` is checked when the pipeline is configured, against GNINA's own six values (`none`, `rescore`, `refinement`, `metrorescore`, `metrorefine`, `all`). The docstring and the docs listed `rescore_only`, which GNINA does not accept, and nothing validated the value, so a run that followed them failed every pair on the compute node. In `score` and `minimize` mode a compound with no SMILES or no residue code fails only the complexes paired with it (a NaN row of `scores` and a `failure` row of `missing`) and every other complex is scored; it used to raise before the loop and leave the step with neither `scores.csv` nor `local_missing.csv`. The docking-only parameters that `mode="score"` refuses are compared against Gnina's signature defaults instead of a copy of them, as Vina's validator already did. Both SMILES reads of the pipe script go through `ligand_utils.ligand_chemistry`, so a blank that pandas leaves as text (spaces, `NAN`, `none`) is no chemistry. `seed` is also the seed of the RDKit conformer embedding, which was fixed at 42 whatever `seed` was; the default is 42, so a run that never set it docks the same conformers. The docs now list `dock_timeout` and say that `docking_results` and `docking_summary` are keyed on poses and conformers, so a pair that gave no pose is a `failure` row of `missing` only.
   - version: '2.9'
     date: '2026-10-30'
     note: >-
@@ -1037,8 +1041,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.9"
+  current: "2.10"
   history:
+  - version: '2.10'
+    date: '2026-10-31'
+    note: >-
+      The changes of Gnina 2.10 that apply without a CNN, whose wrapper and pipe script Vina shares. In `score` and `minimize` mode a compound with no SMILES or no residue code fails only the complexes paired with it (a NaN row of `scores` and a `failure` row of `missing`) and every other complex is scored. The docking-only parameters that `mode="score"` refuses are compared against the signature defaults instead of a copy of them. Both SMILES reads of the pipe script go through `ligand_utils.ligand_chemistry`, so a blank that pandas leaves as text (spaces, `NAN`, `none`) is no chemistry. `seed` is also the seed of the RDKit conformer embedding, which was fixed at 42 whatever `seed` was; the default is 42, so a run that never set it docks the same conformers. The docs list `dock_timeout`.
   - version: '2.9'
     date: '2026-10-30'
     note: >-
