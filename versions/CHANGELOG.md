@@ -93,6 +93,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **USalign** 1.3 → 1.4. Under `env_manager: venv` (the `daint` variant) the install links the conda binaries `USalign` and `TMalign` into the venv shim. A shim over a conda env inherits its packages but not its executables, so `USalign -h` of the install check could only fail there, and the pipe script's call of the binary by name found nothing on the activated PATH. The conda family puts the binaries on PATH itself, so no other variant changes.
+
+- **TMalign** 1.3 → 1.4. Installs through USalign's script, so it takes the same link of the conda binaries into a venv shim; see USalign 1.3.
+
 - **MMseqs2Server** 1.10 → 1.11. No change to the server. Version follows MMseqs2 1.12, with which it shares `biopipelines/mmseqs2.py`.
 
 - **MMseqs2** 1.11 → 1.12. Two comments of `pipe_mmseqs2_sequences.py` that split a sentence over several lines are one line each; no behavior changes.

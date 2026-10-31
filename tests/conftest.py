@@ -321,6 +321,31 @@ def config_variant(monkeypatch):
     _reset()
 
 
+@pytest.fixture
+def shipped_config(monkeypatch):
+    """Load a repo-root ``config.<variant>.yaml`` and yield its ConfigManager."""
+    from biopipelines.config_manager import ConfigManager
+
+    def _reset():
+        ConfigManager._instance = None
+        ConfigManager._config = None
+        ConfigManager._variant = None
+
+    def _load(variant: str):
+        path = REPO_ROOT / f"config.{variant}.yaml"
+        assert path.exists(), f"Missing shipped config: {path}"
+        _reset()
+        monkeypatch.setattr(
+            ConfigManager, "_get_config_path",
+            classmethod(lambda cls, variant=None, _p=str(path): _p),
+        )
+        return ConfigManager(variant=variant)
+
+    _reset()
+    yield _load
+    _reset()
+
+
 # ── generated-script structure helpers ────────────────────────────────────────
 
 _TOOLS_HEADER_RE = re.compile(r"^#\s*Tools:\s*(.+)$", re.MULTILINE)

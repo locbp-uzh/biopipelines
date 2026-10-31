@@ -17,11 +17,7 @@ config.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Every config.<variant>.yaml the repo ships. daint is aarch64-only and
 # deliberately configures a subset; it is included because the guard bug was
@@ -29,31 +25,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SHIPPED_VARIANTS = ["cluster", "colab", "container", "daint", "local"]
 
 INTERNAL_ERRORS = (KeyError, AttributeError, TypeError, IndexError)
-
-
-@pytest.fixture
-def shipped_config(monkeypatch):
-    """Load a repo-root ``config.<variant>.yaml`` and yield its ConfigManager."""
-    from biopipelines.config_manager import ConfigManager
-
-    def _reset():
-        ConfigManager._instance = None
-        ConfigManager._config = None
-        ConfigManager._variant = None
-
-    def _load(variant: str):
-        path = REPO_ROOT / f"config.{variant}.yaml"
-        assert path.exists(), f"Missing shipped config: {path}"
-        _reset()
-        monkeypatch.setattr(
-            ConfigManager, "_get_config_path",
-            classmethod(lambda cls, variant=None, _p=str(path): _p),
-        )
-        return ConfigManager(variant=variant)
-
-    _reset()
-    yield _load
-    _reset()
 
 
 def _installable_tools():

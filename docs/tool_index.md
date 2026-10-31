@@ -81,8 +81,8 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 69 | ThermoMPNN | Analysis                       | 2.1 | `biopipelines/thermompnn.py` |
 | 70 | VespaG | Analysis                       | 2.1 | `biopipelines/vespag.py` |
 | 71 | XTB | Analysis                       | 2.1 | `biopipelines/xtb.py` |
-| 72 | TMalign                   | Analysis                       | 1.3 | `biopipelines/tmalign.py` |
-| 73 | USalign                   | Analysis                       | 1.3 | `biopipelines/usalign.py` |
+| 72 | TMalign                   | Analysis                       | 1.4 | `biopipelines/tmalign.py` |
+| 73 | USalign                   | Analysis                       | 1.4 | `biopipelines/usalign.py` |
 | 74 | BFactor                   | Analysis                       | 1.2 | `biopipelines/bfactor.py` |
 | 75 | ESM2                      | Analysis                       | 1.1 | `biopipelines/esm2.py` |
 | 76 | AiZynthFinder | Cheminformatics                | 2.5 | `biopipelines/aizynthfinder.py` |

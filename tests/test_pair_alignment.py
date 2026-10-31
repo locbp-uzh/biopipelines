@@ -633,6 +633,25 @@ def test_tmalign_installs_through_the_usalign_environment(local_config, monkeypa
     assert "USalign -h" in text and "TMalign -h" in text and "INSTALL_SUCCESS" in text
 
 
+def test_the_venv_install_links_both_binaries_into_the_shim(shipped_config):
+    """A venv shim over a conda env inherits its packages, not its executables, so `USalign -h` of the check could only fail."""
+    from biopipelines import TMalign, USalign
+
+    manager = shipped_config("daint")
+    for tool in (USalign, TMalign):
+        script = tool._install_script({"biopipelines": ROOT}, manager.get_env_manager())
+        assert re.findall(r"for _bin in (.+); do", script) == ["USalign TMalign"], tool.TOOL_NAME
+        assert f"{manager.get_conda_env_root()}/usalign/bin/$_bin" in script
+        assert script.index("ln -sf") < script.rindex('touch "$INSTALL_SUCCESS"')
+
+
+def test_a_conda_family_install_links_nothing(shipped_config):
+    from biopipelines import USalign
+
+    manager = shipped_config("cluster")
+    assert "ln -sf" not in USalign._install_script({"biopipelines": ROOT}, manager.get_env_manager())
+
+
 def test_the_two_wrappers_share_one_environment(local_config):
     from biopipelines import TMalign, USalign
     assert USalign.ENV_NAME == TMalign.ENV_NAME == "usalign"

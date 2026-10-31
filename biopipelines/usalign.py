@@ -81,7 +81,7 @@ class USalign(PairAligner):
     """
 
     TOOL_NAME = "USalign"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "usalign"
     BINARY = "USalign"
 
@@ -108,7 +108,7 @@ if ! {env_check}; then
 else
     echo "{env} environment already exists, skipping creation."
 fi
-
+{cls._link_conda_binaries(env, env_manager, ("USalign", "TMalign"))}
 if {verified}; then
     touch "$INSTALL_SUCCESS"
     echo "=== USalign installation complete ==="

@@ -76,7 +76,7 @@ class TMalign(PairAligner):
     """
 
     TOOL_NAME = "TMalign"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "usalign"
     BINARY = "TMalign"
     REPORTS_DELTA = True
