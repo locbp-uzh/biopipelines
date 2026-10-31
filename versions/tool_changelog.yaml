@@ -740,8 +740,12 @@ ESMFold2:
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.10"
+  current: "2.11"
   history:
+  - version: '2.11'
+    date: '2026-10-31'
+    note: >-
+      Documentation only. `seed_offset` states what a repeated run gives: the same sample, to within GPU numerical noise (measured on a 36-residue protein: 0.04 A CA-RMSD between repeats, against 33.7 A between adjacent seeds), so runs pooled across offsets need seed ranges that do not overlap. `ligands` states the routing: a compound given as a CCD entry is folded by its CCD code, any other from its SMILES.
   - version: '2.10'
     date: '2026-10-29'
     note: >-

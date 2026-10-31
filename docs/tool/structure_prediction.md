@@ -406,7 +406,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 **Parameters**:
 - `proteins`: DataStream | StandardizedOutput = None — Protein sequences.
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: DataStream | StandardizedOutput = None — Nucleic-acid sequences (double-stranded axes add the reverse-complement chain automatically).
-- `ligands`: DataStream | StandardizedOutput = None — Compounds stream (`Ligand` / `CompoundLibrary`); folded by CCD code (SMILES ligands supported too).
+- `ligands`: DataStream | StandardizedOutput = None — Compounds stream (`Ligand` / `CompoundLibrary`). A compound whose `format` is `ccd` is folded by its CCD code; any other is folded from its `smiles`. A compound with neither fails that complex (a `failure` row in `missing`) instead of folding something else.
 - `msas`: StandardizedOutput = None — Precomputed MSAs to recycle per protein chain (e.g. from MMseqs2 or a previous run). Omit for single-sequence folding. With it, every protein chain needs an alignment matched to its protein id (or, failing that, its sequence): a complex with a chain that has none is not folded, keeps a blank row of `confidence` and lands in `missing` as a `failure`.
 - `modifications`: Optional[List[Dict]] = None — Per-residue CCD substitutions on a polymer chain, e.g. `[{"chain": "A", "position": 122, "ccd": "SEP"}]`. The residue is replaced by its CCD entry and atom-tokenized, so `SEP` / `TPO` / `PTR` give real phospho-residues with their phosphate rather than the unmodified parent. Works on DNA/RNA chains too (`PSU`, …). CCD codes only — the upstream `Modification.smiles` field is not implemented, and a `smiles` key is rejected rather than ignored.
 - `covalent_bonds`: Optional[List[Dict]] = None — Inter-entity covalent links, e.g. `[{"atom1": ["A", 122, "SG"], "atom2": ["C", 1, "C1"]}]`. Atom names are resolved against the residue's CCD atoms at runtime; an unknown chain, residue, or atom name raises instead of being silently dropped.
@@ -414,6 +414,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 - `num_sampling_steps`: int = 100 — Diffusion sampling steps.
 - `num_diffusion_samples`: int = 1 — Diffusion samples per seed.
 - `num_seeds`: int = 1 — Independent seeds; the best by ipTM (complex) / pLDDT (monomer) is kept.
+- `seed_offset`: int = 0 — First seed value, so seeds run `seed_offset` .. `seed_offset + num_seeds - 1`; a non-negative integer. Peak GPU memory is set by `num_diffusion_samples`, so a complex too large to sample deeply in one run can be sampled across several runs that differ only in `seed_offset`, and the samples pooled. Without it every run starts at seed 0 and repeating a fold reproduces the same sample, to within GPU numerical noise (measured on a 36-residue protein: 0.04 Å CA-RMSD between repeats, against 33.7 Å between adjacent seeds). Give each run a range of seeds that does not overlap the others.
 - `msa_max_depth`: int = 1024 — MSA subsampling depth per loop.
 - `include_pae`: bool = False — Also tabulate PAE (adds `max_pae` to the confidence table) and write each structure's full PAE matrix to the `pae` stream.
 - `top_only`: bool = True — Keep only the best sample per complex. When False, surface every diffusion sample as `<id>_1..N` (pair with `num_diffusion_samples=N`).

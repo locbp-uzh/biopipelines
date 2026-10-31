@@ -131,3 +131,41 @@ def test_bad_covalent_bonds_raise(local_config, isolated_cwd, new_pipeline, bond
         q = _protein()
         with pytest.raises(ValueError, match=expected):
             ESMFold2(proteins=q, covalent_bonds=bonds)
+
+
+# ── seed_offset ───────────────────────────────────────────────────────────────
+
+def _fold_with(new_pipeline, name, **kwargs):
+    """Fold one protein with the given ESMFold2 kwargs; returns the step's output and the emitted artifacts."""
+    from biopipelines.esmfold2 import ESMFold2
+    pipeline = new_pipeline(name)
+    with pipeline:
+        step = ESMFold2(proteins=_protein(), **kwargs)
+        script_path = pipeline.save()
+    return step, read_all_emitted_artifacts(script_path)
+
+
+def test_seed_offset_defaults_to_zero_so_a_repeated_run_is_unchanged(local_config, isolated_cwd, new_pipeline):
+    _, content = _fold_with(new_pipeline, "esmfold2_seed_default")
+    assert_substrings_in(content, ["--num-seeds 1", "--seed-offset 0"])
+
+
+def test_seed_offset_reaches_the_inference_command(local_config, isolated_cwd, new_pipeline):
+    _, content = _fold_with(new_pipeline, "esmfold2_seed_offset", num_seeds=3, seed_offset=7)
+    assert_substrings_in(content, ["--num-seeds 3", "--seed-offset 7"])
+
+
+def test_the_config_display_names_the_first_seed_only_when_it_is_not_zero(
+        local_config, isolated_cwd, new_pipeline):
+    _, default = _fold_with(new_pipeline, "esmfold2_seed_display_default", num_seeds=2)
+    assert "SEEDS: 2" in default and "SEEDS: 2 (from" not in default
+    _, offset = _fold_with(new_pipeline, "esmfold2_seed_display_offset", num_seeds=2, seed_offset=5)
+    assert "SEEDS: 2 (from 5)" in offset
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, "3", None])
+def test_bad_seed_offset_raises(local_config, isolated_cwd, new_pipeline, value):
+    from biopipelines.esmfold2 import ESMFold2
+    with new_pipeline("esmfold2_bad_seed_offset"):
+        with pytest.raises(ValueError, match="seed_offset must be a non-negative int"):
+            ESMFold2(proteins=_protein(), seed_offset=value)
