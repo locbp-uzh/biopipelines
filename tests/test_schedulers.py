@@ -11,7 +11,8 @@ Two layers:
   ``#SBATCH``.
 
 The SLURM backend's byte-for-byte output is covered by test_parallel.py /
-test_service.py, so it is not re-checked here.
+test_service.py, so it is not re-checked here beyond the integer ``gpu``
+count, which those files never pass.
 """
 from __future__ import annotations
 
@@ -77,6 +78,23 @@ def test_hms_to_hhmm():
 ])
 def test_options_key(name, opts_key):
     assert get_backend(name).options_key == opts_key
+
+
+@pytest.mark.parametrize("spec", [1, 2, "2", " 4 "])
+def test_slurm_integer_gpu_spec_is_a_count(spec):
+    # An integer or all-digit string is a count, not a model: it used to raise AttributeError in `.startswith`.
+    from biopipelines.schedulers import SlurmBackend
+    directive, warns = SlurmBackend().gpu_directive(spec, 1, single_gpu_type=False)
+    assert directive == f"#SBATCH --gpus={int(spec)}"
+    assert warns == []
+
+
+def test_slurm_gpu_spec_none_still_declines_and_a_model_is_still_typed():
+    from biopipelines.schedulers import SlurmBackend
+    b = SlurmBackend()
+    assert b.gpu_directive(None, 1)[0] == ""
+    assert b.gpu_directive("none", 1)[0] == ""
+    assert b.gpu_directive("A100", 2)[0] == "#SBATCH --gpus=A100:2"
 
 
 def test_lsf_headers_and_gpu():
@@ -232,3 +250,22 @@ def test_options_passthrough(name, scheduler_config, isolated_cwd):
         assert "#BSUB -q normal" in script
     else:
         assert "#PBS -q normal" in script
+
+
+def test_slurm_pipeline_with_an_integer_gpu_generates_its_batch_script(
+    slurm_local_config, isolated_cwd, new_slurm_pipeline,
+):
+    """`Resources(gpu=1)` once crashed inside generation: the run directory was written and no job submitted."""
+    from biopipelines.pipeline import Resources
+    from biopipelines.mock import Mock
+
+    pipeline = new_slurm_pipeline("int_gpu")
+    with pipeline:
+        Resources(gpu=1)
+        Mock(ids=["a"], streams={"out": {"format": "pdb", "file": "<id>.pdb"}})
+        pipeline.save()
+        pipeline.generate_job_scripts()
+
+    script = (Path(pipeline.folders["runtime"]) / "slurm.sh").read_text(encoding="utf-8")
+    assert "#SBATCH --gpus=1\n" in script
+    assert "--gpus=None" not in script
