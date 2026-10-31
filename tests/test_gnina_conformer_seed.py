@@ -11,7 +11,6 @@ from rdkit.Chem import AllChem
 
 from biopipelines.datastream import DataStream
 
-from tests.test_gnina_ids import pipe_gnina  # noqa: F401 (a fixture)
 
 FLEXIBLE = "CCCCCCCC(=O)NCCCC(=O)O"
 

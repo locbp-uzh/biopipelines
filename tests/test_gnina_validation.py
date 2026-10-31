@@ -13,7 +13,7 @@ import pytest
 
 from biopipelines.gnina import Gnina
 
-from tests.test_gnina_ids import _declared_stream
+from tests._helpers import declared_stream as _declared_stream
 
 UPSTREAM_CNN_SCORING = ("none", "rescore", "refinement", "metrorescore", "metrorefine", "all")
 

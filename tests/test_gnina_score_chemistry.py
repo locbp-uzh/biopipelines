@@ -16,9 +16,7 @@ import pytest
 
 from biopipelines.datastream import DataStream
 
-from tests.test_gnina_ids import PROTEIN_LINE, pipe_gnina  # noqa: F401 (a fixture)
-from tests.test_gnina_conformer_selection import _write_sdf
-from tests.test_gnina_missing_table import LIGAND_PDB
+from tests._helpers import LIGAND_PDB, PROTEIN_LINE, write_pose_sdf as _write_sdf
 
 SCORE_TERMS = ["vina_affinity", "cnn_score", "cnn_affinity", "cnn_vs", "cnn_affinity_variance"]
 
