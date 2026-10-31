@@ -1157,17 +1157,13 @@ def multiplied_id_parents(
     """
     Map every concrete id a multiplier tool makes to the parent it was made from.
 
-    The ids are exactly those ``generate_multiplied_ids_pattern`` declares at
-    configuration time, expanded, so a pipe script that calls this with the
-    parents that really exist at runtime cannot drift from the declared ids.
-    Provenance is then looked up by exact id, never recovered by stripping a
-    suffix off the output id.
+    The ids are exactly those ``generate_multiplied_ids_pattern`` declares at configuration time, expanded, so a pipe script that calls this with the parents that exist at runtime cannot drift from the declared ids.
+    Provenance is then looked up by exact id, never recovered by stripping a suffix off the output id.
 
     Args:
         parent_ids: Concrete parent ids (a lazy parent must be resolved first).
         suffix_pattern: Suffix pattern appended to each parent (e.g., "<1..3>").
-        key_prefix: For a tool that names its outputs ``<key_prefix>_<parent>_<n>``
-            while the parent stays the bare input id.
+        key_prefix: For a tool that names its outputs ``<key_prefix>_<parent>_<n>`` while the parent stays the bare input id.
 
     Example:
         multiplied_id_parents(["5HG6_1"], "<1..2>")
