@@ -1132,6 +1132,23 @@ def generate_multiplied_ids_pattern(
     return [f"{parent}_{suffix_pattern}" for parent in input_ids]
 
 
+def prefixed_parent_key(parent: str, key_prefix: str = "") -> str:
+    """The key a multiplier tool names one parent's outputs by: ``<key_prefix>_<parent>``, or the bare parent."""
+    return f"{key_prefix}_{parent}" if key_prefix else parent
+
+
+def recounted_id(prefix: str, numbering: Dict[Tuple[int, str], str], pool_idx: int, original_id: str) -> str:
+    """The id a pooled row gets under Pool's ``recount_prefix``: ``<prefix>_<n>``, n counting the distinct (run, original id) pairs in order of first use.
+
+    A pair keeps its number in every stream and table of the pool, so a row a stream lacks (an id an upstream step filtered) leaves a gap there instead of shifting every later id, and `missing` names the same row as the other tables.
+    ``numbering`` is the caller's running dict: the configuration step fills it from the declared ids and writes it to the pool config, and ``pipe_pool.py`` starts from it and extends it with any pair it finds that was not declared.
+    """
+    key = (int(pool_idx), str(original_id))
+    if key not in numbering:
+        numbering[key] = f"{prefix}_{len(numbering) + 1}"
+    return numbering[key]
+
+
 def multiplied_id_parents(
     parent_ids: List[str],
     suffix_pattern: str,
@@ -1163,7 +1180,7 @@ def multiplied_id_parents(
 
     parents = {}
     for parent in parent_ids:
-        key = f"{key_prefix}_{parent}" if key_prefix else parent
+        key = prefixed_parent_key(parent, key_prefix)
         for output_id in id_patterns.expand_ids(generate_multiplied_ids_pattern([key], suffix_pattern)):
             parents[output_id] = parent
     return parents

@@ -6,19 +6,12 @@
 """
 Execution-time script for the Pool tool.
 
-Reads a pool_config.json describing N upstream runs that share the same
-stream + table schema and produces:
+Reads a pool_config.json describing N upstream runs that share the same stream + table schema and produces:
 
-* For each shared stream: copies (or symlinks where possible) the per-run
-  files into the gather folder under composite ids ``<orig_id>_<pool_idx>``
-  (1-based pool index). Writes a single map_table CSV per stream carrying
-  the composite ids, file paths, a ``pool.path`` column and an ``original.id``
-  column holding the id before renaming.
-* For each shared table: vertically concatenates the per-run CSVs after
-  renumbering the ``id`` column the same way and appending the
-  ``pool.path`` and ``original.id`` columns.
-* With ``keep_ids`` no id is suffixed, and an id carried by more than one run
-  raises a ValueError instead of overwriting.
+* For each shared stream: copies (or symlinks where possible) the per-run files into the gather folder under composite ids ``<orig_id>_<pool_idx>`` (1-based pool index).
+  It writes one map_table CSV per stream with the composite ids, file paths, a ``pool.path`` column and an ``original.id`` column holding the id before renaming.
+* For each shared table: concatenates the per-run CSVs after renumbering the ``id`` column the same way and appending ``pool.path`` and ``original.id``.
+* With ``keep_ids`` no id is suffixed, and an id carried by more than one run raises a ValueError instead of overwriting.
 
 Usage:
     python pipe_pool.py <pool_config.json>
@@ -45,7 +38,7 @@ def _raise_on_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
 
 def _recounted_id(recount_prefix: str, numbering: dict, pool_idx: int, original_id: str) -> str:
     """recount_prefix: the pooled id of a row, one number per (run, original id) across every stream and table."""
-    from biopipelines.pool import recounted_id
+    from biopipelines.combinatorics import recounted_id
     return recounted_id(recount_prefix, numbering, pool_idx, original_id)
 
 
@@ -72,6 +65,11 @@ def _link_or_copy(source_path: str, dest_path: str) -> None:
             shutil.copy2(source_path, dest_path)
 
 
+def _is_axis_id(column: str) -> bool:
+    """An ``<axis>.id`` provenance column, which the default mode suffixes; ``original.id`` is kept."""
+    return column.endswith(".id") and column not in ("id", "original.id")
+
+
 def _renumber_ids(df: pd.DataFrame, pool_idx: int,
                   recount_prefix: Optional[str] = None,
                   numbering: Optional[dict] = None,
@@ -80,20 +78,15 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
 
     Three modes, all of which record the id before renaming in ``original.id``:
 
-    - Default (``recount_prefix=None``): append ``_<pool_idx>`` to every
-      entry in the 'id' column. ``<axis>.id`` provenance columns get the
-      same suffix so cross-stream lineage stays consistent within the
-      gather output. Other columns are left untouched, and an ``original.id``
-      the input already carried is kept as it was.
+    - Default (``recount_prefix=None``): append ``_<pool_idx>`` to every entry in the 'id' column.
+      ``<axis>.id`` provenance columns get the same suffix so cross-stream lineage stays consistent within the gather output.
+      Other columns are left untouched, and an ``original.id`` the input already carried is kept as it was.
 
     - Keep (``keep_ids``): no id changes; ``original.id`` equals 'id'.
 
     - Recount (``recount_prefix`` set): replace 'id' with ``<recount_prefix>_<n>``, n being the number ``numbering`` gives the (run, original id) pair, so a row has the same id here as in every stream and table that names it.
       The original ids are stored in ``original.id``, replacing any such column.
-      ``<axis>.id`` provenance columns are NOT touched in this mode — they
-      refer to upstream entities whose ids stay meaningful only in their own
-      namespace, so renaming them to a pool-level counter would break
-      downstream joins against the upstream tables.
+      ``<axis>.id`` provenance columns are NOT touched in this mode: they name upstream entities, and a pool-level counter would break joins against the upstream tables.
     """
     if "id" not in df.columns:
         return df
@@ -108,7 +101,7 @@ def _renumber_ids(df: pd.DataFrame, pool_idx: int,
     if not keep_ids:
         df["id"] = original + f"_{pool_idx}"
         for col in df.columns:
-            if col == "id" or not col.endswith(".id"):
+            if not _is_axis_id(col):
                 continue
             # a blank cell (the row of a failed id) stays blank, as in _gather_stream
             named = df[col].notna() & (df[col].astype(str) != "")
@@ -355,17 +348,13 @@ def _gather_stream(stream_key: str, runs_streams: list, out_spec: dict,
             if recount_prefix is not None or not upstream_original:
                 row["original.id"] = oid
 
-            # Carry over any extra provenance / value columns from the input
-            # map_table that aren't already covered. Renumber `<axis>.id`
-            # columns for consistency with the new composite id — but only
-            # in the default path. Under recount or keep_ids the upstream
-            # axis ids stay verbatim because they still name the same entities.
+            # Carry the input map's other columns; only the default mode suffixes `<axis>.id`
             if run_df is not None and j < len(run_df):
                 run_row = run_df.iloc[j].to_dict()
                 for col, val in run_row.items():
                     if col in ("id", "file") or col in row:
                         continue
-                    if (recount_prefix is None and not keep_ids and col.endswith(".id")
+                    if (recount_prefix is None and not keep_ids and _is_axis_id(col)
                             and pd.notna(val) and str(val) != ""):
                         row[col] = f"{val}_{pool_idx}"
                     elif col not in row:

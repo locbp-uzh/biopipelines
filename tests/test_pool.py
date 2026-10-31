@@ -590,7 +590,35 @@ def test_renumber_ids_default_mode_keeps_an_upstream_original_id_and_suffixes_ax
 
     carried = pd.DataFrame({"id": ["m"], "original.id": ["parent"]})
     out = pipe_pool._renumber_ids(carried, 2)
-    assert out.iloc[0].to_dict() == {"id": "m_2", "original.id": "parent_2"}
+    assert out.iloc[0].to_dict() == {"id": "m_2", "original.id": "parent"}
+
+
+def test_a_stream_map_keeps_an_upstream_original_id_and_suffixes_axis_ids(tmp_path):
+    """The stream path carries the column through the same rule as the tables."""
+    import pandas as pd
+    import pipe_scripts.pipe_pool as pipe_pool
+
+    runs = []
+    for i in (1, 2):
+        run_dir = tmp_path / f"run{i}"
+        run_dir.mkdir()
+        pdb = run_dir / "m.pdb"
+        pdb.write_text("ATOM\n")
+        map_csv = run_dir / "structures_map.csv"
+        pd.DataFrame({"id": ["m"], "file": [str(pdb)], "original.id": ["parent"],
+                      "sequences.id": ["s"]}).to_csv(map_csv, index=False)
+        runs.append([{"name": "structures", "stream_key": "structures", "format": "pdb",
+                      "ids": ["m"], "files": [str(pdb)], "map_table": str(map_csv),
+                      "is_shared_file": False}])
+    out_dir = tmp_path / "out"
+    spec = {"stream_dir": str(out_dir), "map_table": str(out_dir / "structures_map.csv"),
+            "format": "pdb"}
+    pipe_pool._gather_stream("structures", runs, spec)
+
+    df = pd.read_csv(out_dir / "structures_map.csv")
+    assert list(df["id"]) == ["m_1", "m_2"]
+    assert list(df["original.id"]) == ["parent", "parent"]
+    assert list(df["sequences.id"]) == ["s_1", "s_2"]
 
 
 def test_renumber_ids_recount_mode_is_unchanged():

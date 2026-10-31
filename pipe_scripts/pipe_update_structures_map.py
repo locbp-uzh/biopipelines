@@ -166,12 +166,13 @@ def record_failures(local_missing_csv, parent_of, ran, produced, stderr_dir=None
     """
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from biopipelines.biopipelines_io import step_id_from_table_path
+    from biopipelines.combinatorics import prefixed_parent_key
     step_id = step_id_from_table_path(local_missing_csv)
     rows = []
     for out_id, parent in (parent_of or {}).items():
         if parent not in ran or out_id in produced:
             continue
-        key = f"{key_prefix}_{parent}" if key_prefix else parent
+        key = prefixed_parent_key(parent, key_prefix)
         captured = os.path.join(stderr_dir, f"{key}.stderr") if stderr_dir else ""
         text = open(captured, errors="replace").read() if captured and os.path.exists(captured) else ""
         rows.append({"id": out_id, "removed_by": step_id, "kind": "failure",

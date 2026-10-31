@@ -28,13 +28,9 @@ Identical original ids across runs (the typical case — same tool, same
 parameters) no longer collide. The ``pool.path`` column in every emitted
 map_table records the same pool index for downstream queries.
 
-The suffix is applied to every id, whether or not two runs share it, so
-pooled ids are NOT the ids the upstream tool produced. A step that matches
-pooled ids by string prefix (``sid.startswith(parent_id)``) is unsafe: the
-pooled parent ``P_1`` is a prefix of the pooled design ``P_12_1`` (design
-12) but not of ``P_7_1`` (design 7). Match on the ``original.id`` column
-instead, which every pooled map_table and table carries and which holds the
-id before this Pool renamed it.
+The suffix is applied to every id, whether or not two runs share it, so pooled ids are NOT the ids the upstream tool produced.
+A step that matches pooled ids by string prefix (``sid.startswith(parent_id)``) is unsafe: the pooled parent ``P_1`` is a prefix of the pooled design ``P_12_1`` (design 12) but not of ``P_7_1`` (design 7).
+Match on the ``original.id`` column instead, which every pooled map_table and table carries and which holds the id before this Pool renamed it; an ``original.id`` the input already carried is kept, except under ``recount_prefix``.
 
 Pass ``recount_prefix="name"`` to switch to a flat 1-based renumber across
 the combined rows: ids become ``name_1``, ``name_2``, ..., ``name_N``,
@@ -58,12 +54,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .combinatorics import recounted_id
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from combinatorics import recounted_id
 
 
 def raise_on_id_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
@@ -89,17 +87,6 @@ def raise_on_id_collision(label: str, ids_by_run: Dict[int, List[str]]) -> None:
     )
 
 
-def recounted_id(prefix: str, numbering: Dict[Tuple[int, str], str], pool_idx: int, original_id: str) -> str:
-    """The id a pooled row gets under ``recount_prefix``: ``<prefix>_<n>``, n counting the distinct (run, original id) pairs in order of first use.
-
-    A pair keeps its number in every stream and table of the pool, so a row a stream lacks (an id an upstream step filtered) leaves a gap there instead of shifting every later id, and `missing` names the same row as the other tables. ``numbering`` is the caller's running dict: the configuration step fills it from the declared ids and writes it to the pool config, and ``pipe_pool.py`` starts from it and extends it with any pair it finds that was not declared.
-    """
-    key = (int(pool_idx), str(original_id))
-    if key not in numbering:
-        numbering[key] = f"{prefix}_{len(numbering) + 1}"
-    return numbering[key]
-
-
 class Pool(BaseConfig):
     """
     Pool tool for gathering N parallel-run StandardizedOutputs into one.
@@ -117,7 +104,7 @@ class Pool(BaseConfig):
     """
 
     TOOL_NAME = "Pool"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

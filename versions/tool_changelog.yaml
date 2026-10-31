@@ -1905,8 +1905,12 @@ Pool:
   files:
   - biopipelines/pool.py
   - pipe_scripts/pipe_pool.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-31'
+    note: >-
+      In default mode an `original.id` the input already carried is kept as it was, as the documentation says; it was suffixed with `_<pool_idx>` like an `<axis>.id` column, so `parent` came out as `parent_2`, an id that names nothing. The table and the stream path share one rule (`_is_axis_id`), and `recounted_id` moved to `combinatorics.py`, where every id is spelled; `biopipelines.pool.recounted_id` still imports.
   - version: '1.5'
     date: '2026-10-30'
     note: >-
