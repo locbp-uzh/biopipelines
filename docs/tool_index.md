@@ -70,7 +70,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 58 | PLM_Sol | Analysis                       | 2.1 | `biopipelines/plm_sol.py` |
 | 59 | PoseBusters | Analysis                       | 2.4 | `biopipelines/posebusters.py` |
 | 60 | PoseChange                | Analysis                       | 1.1 | `biopipelines/pose_change.py` |
-| 61 | Peppr                     | Analysis                       | 1.2 | `biopipelines/peppr.py` |
+| 61 | Peppr                     | Analysis                       | 1.3 | `biopipelines/peppr.py` |
 | 62 | Prodigy | Analysis                       | 2.0 | `biopipelines/prodigy.py` |
 | 63 | ProLIF | Analysis                       | 2.3 | `biopipelines/prolif.py` |
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |

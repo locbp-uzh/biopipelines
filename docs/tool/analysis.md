@@ -1702,7 +1702,7 @@ Scores predicted structures against reference structures with [peppr](https://gi
   |----|------|----------|------|----------|------|-------|-------|-------|
 
   The columns are `id` plus the requested `metrics`, in that order. A metric peppr cannot compute for a system, such as an interface metric on a monomer, is NaN and is not an error.
-- `missing`: ids that could not be evaluated at all, with `kind` = `failure` and peppr's reason in `cause`. These are a prediction with no matching reference, a file that cannot be read, atoms that cannot be matched to the reference, or every requested metric failing. Their row in `peppr` is all NaN. Ids dropped by an upstream filter are carried over from the upstream `missing` table.
+- `missing`: ids that could not be evaluated at all. A prediction with no matching reference has `kind` = `unmatched` (the lookup found no partner); a file that cannot be read, atoms that cannot be matched to the reference, or every requested metric failing have `kind` = `failure` and peppr's reason in `cause`. Their row in `peppr` is all NaN. Ids dropped by an upstream filter are carried over from the upstream `missing` table.
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|

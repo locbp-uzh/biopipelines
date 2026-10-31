@@ -77,6 +77,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Peppr** 1.2 → 1.3. A prediction with no matching reference is `unmatched` in `missing`, not `failure`, because it is a lookup that found no partner. The completion check treats the two alike and the table values are unchanged.
+
 - **IPSAE** 1.4 → 1.5. Documentation and messages. Says where the cutoffs come from (`pae_cutoff` 10 is Chaperone's, `dist_cutoff` 10 is the value of upstream's AlphaFold3 and Boltz examples, while upstream's README uses 15 and 15 for AlphaFold2 and its usage message 10 and 15, so 10 and 10 is a choice to confirm) and that the `ipsae` row takes the highest target where Chaperone's headline takes the lowest. The docstring no longer says every column of a failed id is NaN. The refusal of an empty `pae` stream names `include_pae`. An id with no PAE entry or file is `unmatched` in `missing`.
 
 - **Foldseek** 1.4 → 1.5. Documentation only. Says where the default multimer thresholds come from (0.65 and 0.65 are Chaperone's unsourced values; Foldseek's own are 0.7, 0.7 per chain and 0.3 for the interface lDDT) and that the TM-score cutoffs apply to the TM-score normalized by the aligned region, so they are not the standard length-normalized cutoffs. Docstrings are one line per paragraph.

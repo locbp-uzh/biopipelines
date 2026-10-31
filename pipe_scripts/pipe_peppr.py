@@ -133,10 +133,14 @@ def score_all(poses, references, n_declared, keys, step_id, evaluate):
     rows, missing_rows = [], []
     for sid, pose_path in poses.items():
         row = {"id": sid, **{key: math.nan for key in keys}}
+        reference_id = pairing.get(sid)
+        if reference_id is None:
+            print(f"WARNING: {sid} not matched: no reference with a matching id", file=sys.stderr)
+            missing_rows.append({"id": sid, "removed_by": step_id,
+                                 "kind": "unmatched", "cause": "no reference with a matching id"})
+            rows.append(row)
+            continue
         try:
-            reference_id = pairing.get(sid)
-            if reference_id is None:
-                raise ValueError("no reference with a matching id")
             print(f"{sid}: {os.path.basename(pose_path)} vs {reference_id}")
             row.update(evaluate(sid, references[reference_id], pose_path, keys))
         except Exception as e:

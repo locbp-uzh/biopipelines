@@ -54,11 +54,11 @@ class Peppr(BaseConfig):
         Streams: (none)
         Tables:
             peppr:   id | <one column per requested metric>
-            missing: id | removed_by | kind | cause
+            missing: id | removed_by | kind | cause   (kind="unmatched" for a prediction with no matching reference, kind="failure" for one peppr could not evaluate)
     """
 
     TOOL_NAME = "Peppr"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "peppr"
 
     @classmethod

@@ -186,9 +186,24 @@ def test_every_id_gets_a_row_and_a_failure_is_nan_with_a_missing_entry(pipe):
     for row in rows[1:]:
         assert math.isnan(row["rmsd"]) and math.isnan(row["dockq"])
     assert [(m["id"], m["kind"], m["removed_by"]) for m in missing] == [
-        ("bad", "failure", "003_Peppr"), ("orphan", "failure", "003_Peppr")]
+        ("bad", "failure", "003_Peppr"), ("orphan", "unmatched", "003_Peppr")]
     assert "different entities" in missing[0]["cause"]
     assert "no reference" in missing[1]["cause"]
+
+
+def test_a_prediction_with_only_a_sibling_reference_is_unmatched_not_scored(pipe):
+    """`des_3_1` shares only the ancestor `des` with the reference `des_1`; it must not be scored against it."""
+    seen = []
+
+    def evaluate(system_id, reference_path, pose_path, keys):
+        seen.append(reference_path)
+        return {key: 1.0 for key in keys}
+
+    rows, missing = pipe.score_all({"des_1_1": "p1.pdb", "des_3_1": "p3.pdb"},
+                                   {"des_1": "r1.pdb", "des_2": "r2.pdb"}, 2, ["rmsd"], "003_Peppr", evaluate)
+    assert seen == ["r1.pdb"]
+    assert [(m["id"], m["kind"]) for m in missing] == [("des_3_1", "unmatched")]
+    assert math.isnan(rows[1]["rmsd"])
 
 
 def test_a_metric_that_is_nan_for_one_id_is_not_a_failure(pipe):
