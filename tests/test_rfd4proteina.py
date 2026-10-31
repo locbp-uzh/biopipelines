@@ -305,9 +305,9 @@ def test_a_single_chain_contig_declares_plain_ids(local_config, isolated_cwd, ne
 def test_the_tables_are_declared(local_config, isolated_cwd, new_pipeline):
     built, _ = _build(local_config, isolated_cwd, new_pipeline, name="tables")
     tables = built.tables
-    assert tables.structures.info.columns == ["id", "source_id", "design", "cif", "pdb", "n_chains", "n_residues"]
-    assert tables.sequences.info.columns == ["id", "source_id", "source_pdb", "chain", "sequence", "length"]
-    assert tables.metrics.info.columns == ["id", "source_id"]
+    assert tables.structures.info.columns == ["id", "structures.id", "design", "cif", "pdb", "n_chains", "n_residues"]
+    assert tables.sequences.info.columns == ["id", "design", "structures.id", "source_pdb", "chain", "sequence", "length"]
+    assert tables.metrics.info.columns == ["id", "structures.id"]
     assert tables.missing.info.columns == ["id", "removed_by", "kind", "cause"]
 
 
@@ -608,7 +608,7 @@ def test_metrics_are_rekeyed_to_design_ids_and_keep_the_run_record(tmp_path):
     table = post.build_metrics_table(["t1_1", "t1_2", "t1_3"], {"t1_1": "t1_0", "t1_2": "t1_1", "t1_3": "t1_2"},
                                      {"t1_1": "t1", "t1_2": "t1", "t1_3": "t1"},
                                      post.read_inference_metrics(str(tmp_path)))
-    assert list(table.columns) == ["id", "source_id", "seed", "clash_metrics.frac_atoms_clashing_1p5A", "ckpt_path"]
+    assert list(table.columns) == ["id", "structures.id", "seed", "clash_metrics.frac_atoms_clashing_1p5A", "ckpt_path"]
     assert table["clash_metrics.frac_atoms_clashing_1p5A"].tolist()[:2] == [0.01, 0.02]
     assert table["id"].tolist() == ["t1_1", "t1_2", "t1_3"]
     assert table["seed"].isna().tolist() == [False, False, True]
@@ -618,7 +618,7 @@ def test_without_scoring_the_metrics_table_still_lists_every_design(tmp_path):
     post = _load_script("pipe_rfd4proteina_postprocess")
     assert post.read_inference_metrics(str(tmp_path)) is None
     table = post.build_metrics_table(["t1_1", "t1_2"], {}, {"t1_1": "t1", "t1_2": "t1"}, None)
-    assert table["id"].tolist() == ["t1_1", "t1_2"] and list(table.columns) == ["id", "source_id"]
+    assert table["id"].tolist() == ["t1_1", "t1_2"] and list(table.columns) == ["id", "structures.id"]
 
 
 def test_re_evaluation_files_do_not_duplicate_a_design(tmp_path):
@@ -686,8 +686,34 @@ def test_designs_become_pdbs_sequences_and_table_rows(tmp_path):
     assert table["id"].tolist() == ["t1_1", "t1_2"] and table["n_residues"].tolist() == [5, 5]
     assert table["n_chains"].tolist() == [2, 2] and table["design"].tolist() == [1, 2]
     metrics = pd.read_csv(tmp_path / "tables" / "metrics.csv")
-    assert metrics["id"].tolist() == ["t1_1", "t1_2"] and metrics["source_id"].tolist() == ["t1", "t1"]
+    assert metrics["id"].tolist() == ["t1_1", "t1_2"] and metrics["structures.id"].tolist() == ["t1", "t1"]
     assert pd.read_csv(tmp_path / "007_RFD4Proteina" / "execution" / "local_missing.csv").empty
+
+
+def test_the_result_tables_join_on_one_provenance_column_with_one_meaning(tmp_path):
+    """`source_id` was the input structure in `structures` and `metrics` and the design in `sequences`."""
+    pytest.importorskip("Bio")
+    import pandas as pd
+    _write_design_cif(tmp_path / "run" / "inference_samples" / "t1_0" / "t1_0_generated.cif",
+                      {"A": ["ALA", "GLY"], "B": ["LEU"]})
+    _write_design_cif(tmp_path / "run" / "inference_samples" / "t2_0" / "t2_0_generated.cif", {"A": ["VAL"]})
+    result = _run_postprocess(tmp_path, {"attempted": ["t1", "t2"], "built": ["t1", "t2"], "failed": {}}, 1)
+    assert result.returncode == 0, result.stderr
+
+    structures = pd.read_csv(tmp_path / "tables" / "structures.csv")
+    sequences = pd.read_csv(tmp_path / "sequences" / "sequences.csv")
+    metrics = pd.read_csv(tmp_path / "tables" / "metrics.csv")
+    for table in (structures, sequences, metrics):
+        assert "source_id" not in table.columns
+        assert "structures.id" in table.columns
+    assert structures.set_index("id")["structures.id"].to_dict() == {"t1_1": "t1", "t2_1": "t2"}
+    assert metrics.set_index("id")["structures.id"].to_dict() == {"t1_1": "t1", "t2_1": "t2"}
+    assert sequences["id"].tolist() == ["t1_1_A", "t1_1_B", "t2_1"]
+    assert sequences["design"].tolist() == ["t1_1", "t1_1", "t2_1"]
+    assert sequences["structures.id"].tolist() == ["t1", "t1", "t2"]
+    joined = sequences.merge(structures, left_on="design", right_on="id", suffixes=("", "_design"))
+    assert len(joined) == len(sequences)
+    assert (joined["structures.id"] == joined["structures.id_design"]).all()
 
 
 def test_a_design_that_was_never_written_is_a_failure_row_not_a_gap(tmp_path):

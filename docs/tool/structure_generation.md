@@ -296,20 +296,22 @@ Not implemented as a recipe, reachable only through `conditions` or forwarded ov
 **Tables**:
 - `structures`:
 
-  | id | source_id | design | cif | pdb | n_chains | n_residues |
-  |----|-----------|--------|-----|-----|----------|------------|
+  | id | structures.id | design | cif | pdb | n_chains | n_residues |
+  |----|---------------|--------|-----|-----|----------|------------|
 
-  `cif` is the annotated CIF `rfd4-generate` wrote (kept under `_execution/rfd4/inference_samples/`).
+  `structures.id` is the input structure the design came from, the provenance column named after the `structures` parameter and the same in all three tables. `design` is the replicate number 1..`num_designs`. `cif` is the annotated CIF `rfd4-generate` wrote (kept under `_execution/rfd4/inference_samples/`).
 
 - `sequences`:
 
-  | id | source_id | source_pdb | chain | sequence | length |
-  |----|-----------|------------|-------|----------|--------|
+  | id | design | structures.id | source_pdb | chain | sequence | length |
+  |----|--------|---------------|------------|-------|----------|--------|
+
+  `design` is the id of the design the chain belongs to, the key the chain rows of one design are grouped by; it is the `id` of that design in `structures` and `metrics`, so `sequences` joins them with `left_on="design", right_on="id"`. Not to be confused with `structures.design`, the replicate number.
 
 - `metrics` (upstream inline metrics, one row per design):
 
-  | id | source_id |
-  |----|-----------|
+  | id | structures.id |
+  |----|---------------|
 
   Plus one column per upstream metric when `metrics_tags` is set, prefixed by the metric key (e.g. `clash_metrics.frac_atoms_clashing_1p5A`; see the upstream metrics reference). The run record (`seed`, `ckpt_path`, `ckpt_name`) is kept; the `generation.*` configuration dump and the path columns are dropped. A design that scoring did not reach has NaN.
 

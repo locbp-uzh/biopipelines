@@ -322,10 +322,11 @@ class RFD4Proteina(BaseConfig):
             sequences: value-based, one row per polymer chain of each design.
         Chain ids: a run of the contig that holds a preserved segment keeps that segment's chain id, and a run that is only designed gets the first letter no preserved segment holds. In `50-120, /0, A17-131` the binder is chain B and the target stays A; in `150, /0, B386` the designed protein is chain A and the ligand B.
         Tables:
-            structures: id | source_id | design | cif | pdb | n_chains | n_residues
-            sequences:  id | source_id | source_pdb | chain | sequence | length
-            metrics:    id | source_id, plus one column per upstream inline metric when `metrics_tags` is set (columns are prefixed by the metric key, e.g. `clash_metrics.frac_atoms_clashing_1p5A`); the run record (`seed`, `ckpt_path`, `ckpt_name`) is kept and the `generation.*` configuration dump is dropped.
+            structures: id | structures.id | design | cif | pdb | n_chains | n_residues
+            sequences:  id | design | structures.id | source_pdb | chain | sequence | length
+            metrics:    id | structures.id, plus one column per upstream inline metric when `metrics_tags` is set (columns are prefixed by the metric key, e.g. `clash_metrics.frac_atoms_clashing_1p5A`); the run record (`seed`, `ckpt_path`, `ckpt_name`) is kept and the `generation.*` configuration dump is dropped.
             missing:    id | removed_by | kind | cause
+            In every table `structures.id` is the id of the input structure the design came from (the provenance column named after the `structures` parameter). In `sequences`, `design` is the id of the design, the key the chain rows of one design are grouped by, which is the `id` of that design in `structures` and `metrics`; in `structures`, `design` is the replicate number 1..num_designs.
 
     Requirements:
         Linux x86_64, Python 3.12, an NVIDIA GPU of Ampere generation or newer and a CUDA 13-compatible driver. Not available on aarch64 (Daint).
@@ -357,7 +358,7 @@ class RFD4Proteina(BaseConfig):
     """
 
     TOOL_NAME = "RFD4Proteina"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     # Hydra application: untyped keyword arguments become extra `key=value` overrides.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # `num_replicates` is upstream's own name; forwarded it would collide with the managed override.
@@ -662,19 +663,19 @@ python "{self.postprocess_py}" \\
             "structures": TableInfo(
                 name="structures",
                 path=self.structures_csv,
-                columns=["id", "source_id", "design", "cif", "pdb", "n_chains", "n_residues"],
-                description="RFD4-Proteina designs: source structure, replicate, annotated CIF and PDB paths, size",
+                columns=["id", "structures.id", "design", "cif", "pdb", "n_chains", "n_residues"],
+                description="RFD4-Proteina designs: input structure, replicate, annotated CIF and PDB paths, size",
             ),
             "sequences": TableInfo(
                 name="sequences",
                 path=self.sequences_csv,
-                columns=["id", "source_id", "source_pdb", "chain", "sequence", "length"],
+                columns=["id", "design", "structures.id", "source_pdb", "chain", "sequence", "length"],
                 description="Designed sequence of each polymer chain",
             ),
             "metrics": TableInfo(
                 name="metrics",
                 path=self.metrics_csv,
-                columns=["id", "source_id"],
+                columns=["id", "structures.id"],
                 description="Upstream inline metrics per design (one column per metric when metrics_tags is set)",
             ),
             "missing": self.missing_table_info(self.missing_csv),

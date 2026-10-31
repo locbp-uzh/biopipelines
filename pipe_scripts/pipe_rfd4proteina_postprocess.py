@@ -75,7 +75,7 @@ def read_inference_metrics(run_dir: str) -> Optional[pd.DataFrame]:
 def build_metrics_table(ids: List[str], uid_by_id: Dict[str, str], source_by_id: Dict[str, str],
                         frame: Optional[pd.DataFrame]) -> pd.DataFrame:
     """One row per design id with its source structure; the upstream metric columns follow, NaN where scoring did not reach a design."""
-    base = pd.DataFrame({"id": ids, "source_id": [source_by_id[i] for i in ids]})
+    base = pd.DataFrame({"id": ids, "structures.id": [source_by_id[i] for i in ids]})
     if frame is None:
         return base
     id_by_uid = {uid: oid for oid, uid in uid_by_id.items()}
@@ -120,7 +120,7 @@ def main():
             uid_by_id[oid] = uid
             source_by_id[oid] = sid
             attempted += 1
-            row = {"id": oid, "source_id": sid, "design": replicate, "cif": "", "pdb": "",
+            row = {"id": oid, "structures.id": sid, "design": replicate, "cif": "", "pdb": "",
                    "n_chains": math.nan, "n_residues": math.nan}
             try:
                 if sid in failed_inputs:
@@ -144,7 +144,8 @@ def main():
                 for chain_id, sequence in chains.items():
                     sequences_rows.append({
                         "id": f"{oid}_{chain_id}" if len(chains) > 1 else oid,
-                        "source_id": oid,
+                        "design": oid,
+                        "structures.id": sid,
                         "source_pdb": pdb_path,
                         "chain": chain_id,
                         "sequence": sequence,
@@ -161,10 +162,10 @@ def main():
                  args.metrics_csv, args.local_missing_csv):
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    pd.DataFrame(structures_rows, columns=["id", "source_id", "design", "cif", "pdb", "n_chains", "n_residues"]
+    pd.DataFrame(structures_rows, columns=["id", "structures.id", "design", "cif", "pdb", "n_chains", "n_residues"]
                  ).to_csv(args.structures_csv, index=False)
     pd.DataFrame(map_rows, columns=["id", "file", "structures.id"]).to_csv(args.structures_map_csv, index=False)
-    pd.DataFrame(sequences_rows, columns=["id", "source_id", "source_pdb", "chain", "sequence", "length"]
+    pd.DataFrame(sequences_rows, columns=["id", "design", "structures.id", "source_pdb", "chain", "sequence", "length"]
                  ).to_csv(args.sequences_csv, index=False)
     build_metrics_table(ids, uid_by_id, source_by_id, read_inference_metrics(args.run_dir)).to_csv(args.metrics_csv, index=False)
     pd.DataFrame(local_missing_rows, columns=["id", "removed_by", "kind", "cause"]
