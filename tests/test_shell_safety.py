@@ -509,8 +509,8 @@ def test_ligandmpnn_does_not_eval_its_command(local_config, isolated_cwd, new_pi
     assert 'python run.py "${LMPNN_ARGS[@]}"' in body
 
 
-def test_ligandmpnn_save_stats_and_atom_context_reach_the_command(local_config, isolated_cwd, new_pipeline):
-    """Both options used to append to a variable the argv-array rewrite had removed, so setting either raised NameError."""
+def _ligandmpnn_step(new_pipeline, **options):
+    """The LigandMPNN step as the pipeline holds it, and the body of the script it emitted."""
     import glob
 
     from biopipelines.ligand import Ligand
@@ -521,12 +521,43 @@ def test_ligandmpnn_save_stats_and_atom_context_reach_the_command(local_config, 
     with pipeline:
         seeds = Mock(ids=["s1"], streams={"structures": {"format": "pdb", "file": "<id>.pdb"}})
         ligand = Ligand(codes="STI")
-        LigandMPNN(structures=seeds.streams.structures, ligand=ligand.streams.compounds,
-                   save_stats=True, use_atom_context=False)
+        LigandMPNN(structures=seeds.streams.structures, ligand=ligand.streams.compounds, **options)
 
+    (tool,) = [t for t in pipeline.tools if t.TOOL_NAME == "LigandMPNN"]
     body = open(glob.glob(pipeline.folders["runtime"] + "/*LigandMPNN*.sh")[0], encoding="utf-8").read()
+    return tool, body
+
+
+def test_ligandmpnn_save_stats_and_atom_context_reach_the_command(local_config, isolated_cwd, new_pipeline):
+    """Both options used to append to a variable the argv-array rewrite had removed, so setting either raised NameError."""
+    _, body = _ligandmpnn_step(new_pipeline, save_stats=True, use_atom_context=False)
     assert '"--save_stats" "1"' in body
     assert '"--ligand_mpnn_use_atom_context" "0"' in body
+
+
+def test_ligandmpnn_save_stats_and_atom_context_are_not_emitted_unless_they_change_upstream_behavior(
+    local_config, isolated_cwd, new_pipeline,
+):
+    _, body = _ligandmpnn_step(new_pipeline)
+    assert "--save_stats" not in body
+    assert "--ligand_mpnn_use_atom_context" not in body
+
+
+def test_ligandmpnn_stats_land_in_the_execution_folder(local_config, isolated_cwd, new_pipeline):
+    """Upstream creates <out_folder>/stats itself, and `stats_folder` is where the docstring tells the user to read it."""
+    tool, _ = _ligandmpnn_step(new_pipeline, save_stats=True)
+    assert os.path.normpath(tool.stats_folder) == os.path.normpath(os.path.join(tool.execution_folder, "stats"))
+
+
+def test_ligandmpnn_stats_and_atom_context_are_recorded_in_the_serialized_configuration(
+    local_config, isolated_cwd, new_pipeline,
+):
+    tool, _ = _ligandmpnn_step(new_pipeline, save_stats=True, use_atom_context=False)
+    params = tool.to_dict()["lmpnn_params"]
+    assert params["save_stats"] is True and params["use_atom_context"] is False
+    tool, _ = _ligandmpnn_step(new_pipeline)
+    params = tool.to_dict()["lmpnn_params"]
+    assert params["save_stats"] is False and params["use_atom_context"] is True
 
 
 def test_a_hostile_path_stays_one_argument_for_ligandmpnn():
