@@ -95,10 +95,27 @@ class SchedulerBackend:
     def header_directives(self, memory: str, time: str, output_name: str) -> str:
         raise NotImplementedError
 
+    # The GPU memories a request may name instead of a model.
+    MEMORY_SPECS = ("24GB", "32GB", "80GB", "96GB", "140GB")
+
     def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
                       single_gpu_type: bool = False) -> Tuple[str, List[str]]:
         """Return ``(directive_text, warnings)`` for a GPU request."""
         raise NotImplementedError
+
+    @staticmethod
+    def gpu_count(gpu_spec: Any) -> Optional[int]:
+        """The GPU count an integer request (``gpu=2`` or ``"2"``) stands for, or None for any other request."""
+        if isinstance(gpu_spec, bool):
+            return None
+        if isinstance(gpu_spec, int) or str(gpu_spec).strip().isdigit():
+            return int(gpu_spec)
+        return None
+
+    def is_constraint_like(self, gpu_spec: str) -> bool:
+        """A request that names no model: high-memory, an exclusion, alternatives or a memory."""
+        return (gpu_spec == "high-memory" or gpu_spec.startswith("!") or "|" in gpu_spec
+                or gpu_spec in self.MEMORY_SPECS)
 
     def extra_options(self, options: dict) -> str:
         raise NotImplementedError
@@ -162,11 +179,9 @@ class SlurmBackend(SchedulerBackend):
         # untyped `gpu:N` — a typed request there is rejected outright.
         if single_gpu_type:
             return f"#SBATCH --gres=gpu:{n}", []
-        # An integer is a count, not a model: `gpu=1` used to reach `.startswith` and raise
-        # AttributeError inside pipeline generation, so the run directory was written and no job
-        # was ever submitted.
-        elif isinstance(gpu_spec, int) or str(gpu_spec).strip().isdigit():
-            return f"#SBATCH --gpus={int(gpu_spec)}", []
+        # An integer is a count, not a model
+        elif self.gpu_count(gpu_spec) is not None:
+            return f"#SBATCH --gpus={self.gpu_count(gpu_spec)}", []
         elif gpu_spec == "high-memory":
             return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\"", []
         elif gpu_spec == "gpu" or gpu_spec == "any":
@@ -177,12 +192,8 @@ class SlurmBackend(SchedulerBackend):
                 return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"GPUMEM32GB|GPUMEM80GB|GPUMEM96GB\"", []
             else:
                 return f"#SBATCH --gpus={n}\n#SBATCH --constraint=\"~GPU{excluded_model}\"", []
-        # "140GB" belongs here: the pipe-list branch below already emits
-        # GPUMEM140GB, so a lone "140GB" was the only way to name an H200 that
-        # fell through to the typed-GRES branch and produced the invalid
-        # `--gpus=140GB:1` — sbatch rejects it and the pipeline generates but
-        # never submits, with no error surfaced against the run.
-        elif gpu_spec in ["24GB", "32GB", "80GB", "96GB", "140GB"] or "|" in gpu_spec:
+        # A lone "140GB" fell through to the typed branch and produced the invalid `--gpus=140GB:1`
+        elif gpu_spec in self.MEMORY_SPECS or "|" in gpu_spec:
             if "|" in gpu_spec:
                 memory_options = gpu_spec.split("|")
                 constraint_parts = [f"GPUMEM{mem}" for mem in memory_options]
@@ -265,15 +276,11 @@ class LsfBackend(SchedulerBackend):
         warnings: List[str] = []
         if gpu_spec is None or str(gpu_spec).strip().lower() in ("none", ""):
             return "", warnings
+        if self.gpu_count(gpu_spec) is not None:
+            return f'#BSUB -gpu "num={self.gpu_count(gpu_spec)}"', warnings
         if gpu_spec in ("gpu", "any"):
             return f'#BSUB -gpu "num={n}"', warnings
-        constraint_like = (
-            gpu_spec == "high-memory"
-            or gpu_spec.startswith("!")
-            or "|" in gpu_spec
-            or gpu_spec in ("24GB", "32GB", "80GB", "96GB")
-        )
-        if constraint_like:
+        if self.is_constraint_like(gpu_spec):
             warnings.append(
                 f"LSF: GPU spec {gpu_spec!r} has no LSF equivalent; "
                 f"requesting {n} generic GPU(s). Use lsf_options for a native "
@@ -346,15 +353,11 @@ class PbsBackend(SchedulerBackend):
         warnings: List[str] = []
         if gpu_spec is None or str(gpu_spec).strip().lower() in ("none", ""):
             return "", warnings
+        if self.gpu_count(gpu_spec) is not None:
+            return f"#PBS -l select=1:ngpus={self.gpu_count(gpu_spec)}", warnings
         if gpu_spec in ("gpu", "any"):
             return f"#PBS -l select=1:ngpus={n}", warnings
-        constraint_like = (
-            gpu_spec == "high-memory"
-            or gpu_spec.startswith("!")
-            or "|" in gpu_spec
-            or gpu_spec in ("24GB", "32GB", "80GB", "96GB")
-        )
-        if constraint_like:
+        if self.is_constraint_like(gpu_spec):
             warnings.append(
                 f"PBS: GPU spec {gpu_spec!r} has no PBS equivalent; "
                 f"requesting {n} generic GPU(s). Use pbs_options for a native "

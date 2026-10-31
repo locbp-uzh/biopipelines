@@ -13,6 +13,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- The LSF and PBS backends read an integer GPU request (`gpu=2` or `"2"`) as a count, as SLURM does, and `140GB` as a memory. Both raised `AttributeError` on an integer inside pipeline generation and turned `140GB` into a model (`gmodel=140GB`, `gpu_model=140GB`). The count rule and the memory list live once in `SchedulerBackend` (`gpu_count`, `MEMORY_SPECS`, `is_constraint_like`).
+
 - `combinatorics.prefixed_parent_key` and `combinatorics.recounted_id` join the id helpers there: the key a multiplier tool names one parent's outputs by, which `multiplied_id_parents` and `pipe_update_structures_map.record_failures` each spelled on their own, and Pool's `recount_prefix` id, which lived in `pool.py`.
 
 - On a single-GPU-type site (`machine.node_exclusive`, Daint) every GPU request but `none` is judged against `machine.gpu_models`. The scheduler emits an untyped `gpu:N` there, yet `Resources(gpu="gh")`, the request the Daint documentation uses, is neither a model nor a memory and was never judged, so DynamicBind and PocketGen, which declare GH200 incompatible, generated in silence on a machine made only of GH200. The warning's suggested request without `gpu.use` is the first `compatible` model as listed, not the first alphabetically.

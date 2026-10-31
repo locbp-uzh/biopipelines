@@ -128,6 +128,24 @@ def test_pbs_headers_and_gpu():
     assert warns and "80GB|96GB" in warns[0]
 
 
+@pytest.mark.parametrize("spec", [2, "2"])
+@pytest.mark.parametrize("name, expected", [
+    ("slurm", "#SBATCH --gpus=2"),
+    ("lsf", '#BSUB -gpu "num=2"'),
+    ("pbs", "#PBS -l select=1:ngpus=2"),
+])
+def test_an_integer_gpu_request_is_a_count_on_every_backend(name, expected, spec):
+    """`gpu=2` used to reach `.startswith` on LSF and PBS and raise inside pipeline generation."""
+    assert get_backend(name).gpu_directive(spec, 1) == (expected, [])
+
+
+@pytest.mark.parametrize("name", ["lsf", "pbs"])
+def test_140gb_is_a_memory_not_a_model(name):
+    directive, warns = get_backend(name).gpu_directive("140GB", 1)
+    assert "140GB" not in directive
+    assert warns and "140GB" in warns[0]
+
+
 def test_lsf_dependency_and_options_and_email():
     b = get_backend("lsf")
     dep = b.dependency_directive(["<JOBID_BATCH_001>", "<JOBID_BATCH_002>"], ["<JOBID_BATCH_003>"])
