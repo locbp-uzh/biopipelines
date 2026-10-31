@@ -1027,6 +1027,8 @@ Every tool exposes a classmethod `_install_script(cls, folders, env_manager, for
 
 The contract is one-line: **the install script must `touch "$INSTALL_SUCCESS"` only after a real verification succeeds — typically an import test in the env it just created.** The framework deletes the sentinel before the script runs, so a stale file from a prior failed run cannot fake success.
 
+**The install is hermetic, the run is not.** `_Installer` runs the body in a subshell that first exports `PYTHONNOUSERSITE=1`, because pip counts a package in `~/.local` as already installed and may uninstall it, which leaves a new env incomplete and strips an unrelated one. The export covers the verification too. A step's runtime activation does not export it: `config.cluster.yaml` keeps it opt-in in `machine.scheduler.init`. So a verification can pass while the step's own import is shadowed by `~/.local` (symptom: an `ImportError` for a package installed in the env); enable that line, or remove the offending `~/.local/lib/python*` tree.
+
 For tools that create their own conda env, end the install with a verification block:
 
 ```python
@@ -1120,7 +1122,7 @@ So `ENV_NAME` is the tool's declared default, consulted only in pip mode — and
 
 **A multi-environment tool's secondary envs are not config-driven.** `DynamicBind` needs two: an inference env and a relax env. The first comes from `environments.DynamicBind` like everyone else's; the second is a class attribute, `RELAX_ENV_NAME = "dynamicbind_relax"`, with no `environments:` entry in any config variant. Install and runtime both address it through that attribute (`cls.RELAX_ENV_NAME` in `_install_script`, `ConfigManager().get_env_python_command(self.RELAX_ENV_NAME)` in `generate_script`), so the two agree and this is not a bug — but it does mean a site cannot redirect a secondary environment the way it can redirect a primary one. `_load_environments` already accepts a list-valued `environments:` entry (`["dynamicbind", "dynamicbind_relax"]`, addressed by `activate_environment(index=N)`) and `_install_env` takes its first element, so the plumbing for config-driven secondaries exists; no config uses it today. If you write a second multi-env tool, know that you are copying a hardcoded pattern.
 
-**Pip-mode installs are non-functional.** Under `env_manager: pip` the shared helpers emit `pip env create -f <yaml>` and `pip run -n <env> ...`, which are not pip commands — pip has no `env` or `run` subcommand, and neither has ever installed anything. This is also why `_install_env` can safely keep returning `ENV_NAME` in pip mode: that path never built an environment it could get wrong. Colab, the variant that uses `env_manager: pip`, runs tools in the pre-existing base Python and installs them by other means. Do not spend an afternoon debugging why a pip-mode install produced nothing.
+**Pip-mode installs build no environment.** Under `env_manager: pip`, `_env_install_block` refuses, as described above. This is also why `_install_env` can safely keep returning `ENV_NAME` in pip mode: that path never builds an environment it could get wrong. Colab, the variant that uses `env_manager: pip`, runs tools in the pre-existing base Python and installs them by other means. Do not spend an afternoon debugging why a pip-mode install produced nothing.
 
 ---
 
