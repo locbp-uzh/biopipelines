@@ -47,7 +47,7 @@ class RF3(BaseConfig):
             than a SMILES string.
         msas: precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`).
             Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence.
-            With it, every protein chain of an input needs an alignment: an input with a chain that has none is not predicted and lands in `missing` as a `failure`.
+            With it, every protein chain of an input needs an alignment: an input with a chain that has none, whose file is gone or whose format upstream cannot read is not predicted and lands in `missing` as a `failure`.
             Upstream says it pairs alignments across chains on the fly and does not accept pre-paired ones.
         n_recycles: trunk recycles (upstream default 10). A single recycle is refused while early stopping is on, because upstream spends the first recycle on the early-stopping check and has none left to fold with.
         diffusion_batch_size: structures sampled per input from one forward pass of the trunk (upstream default 5).
@@ -72,6 +72,8 @@ class RF3(BaseConfig):
         Streams:
             structures: one `<id>.cif` per predicted complex. The B-factor column carries per-atom pLDDT on
                         a 0 to 1 scale (upstream's `annotate_b_factor_with_plddt`, on in its config).
+                        Its map, the `pae` map and the `confidence` table carry one `<axis>.id` column per input
+                        axis (`proteins.id`, `ligands.id`, ...) naming the input of that axis the row was built from.
             pae:        one `<id>.json` per structure, with the same ids as `structures`. Upstream's full
                         confidence file for that sample (`*_confidences.json`), copied unchanged. A JSON object
                         with keys `atom_chain_ids`, `atom_plddts` (N_atom floats, 0 to 1), `pae`
@@ -80,7 +82,7 @@ class RF3(BaseConfig):
                         one per standard residue and one per atom for ligands and modified residues.
                         `token_res_ids` is a running token index in upstream's source, not a residue number.
         Tables:
-            confidence: id | plddt | ptm | iptm | pae | pde | has_clash | ranking_score | early_stopped | seed | sample
+            confidence: id | plddt | ptm | iptm | pae | pde | has_clash | ranking_score | early_stopped | seed | sample | <axis>.id ...
                         one row per id that entered, NaN where RF3 reported nothing. `plddt`, `pae` and `pde`
                         are upstream's `overall_*` means; `ptm`, `iptm`, `has_clash` and `ranking_score` are
                         its own. An input stopped early has `early_stopped` True and NaN everywhere else.
@@ -89,7 +91,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
@@ -152,6 +154,7 @@ fi
     # Written at EXECUTION time: one JSON list of every example, so `rf3 fold` loads the model once.
     queries_json = Path(lambda self: self.configuration_path("queries.json"))
     skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
+    provenance_csv = Path(lambda self: self.configuration_path("query_provenance.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
     checkpoint_dir = Path(lambda self: self.folders["RF3"])
@@ -332,7 +335,8 @@ fi
 python "{self.config_py}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
     --queries-json "{self.queries_json}" \\
-    --skipped-csv "{self.skipped_csv}"{msa_flag}
+    --skipped-csv "{self.skipped_csv}" \\
+    --provenance-csv "{self.provenance_csv}"{msa_flag}
 
 """
 
@@ -375,6 +379,7 @@ python "{self.postprocess_py}" \\
     --prediction-folder "{self.prediction_folder}" \\
     --queries-json "{self.queries_json}" \\
     --skipped-csv "{self.skipped_csv}" \\
+    --provenance-csv "{self.provenance_csv}" \\
     --structures-dir "{self.stream_folder('structures')}" \\
     --structures-map-csv "{self.structures_map_csv}" \\
     --confidence-csv "{self.confidence_csv}" \\
@@ -388,7 +393,7 @@ python "{self.postprocess_py}" \\
 """
 
     def get_output_files(self) -> Dict[str, Any]:
-        predicted_ids, _provenance = predict_output_ids_with_provenance(**self._axis_kwargs())
+        predicted_ids, provenance = predict_output_ids_with_provenance(**self._axis_kwargs())
 
         # With top_only off every sample is surfaced as <id>_1..N, and the declared ids must say so.
         if self.top_only:
@@ -418,7 +423,8 @@ python "{self.postprocess_py}" \\
                 name="confidence",
                 path=self.confidence_csv,
                 columns=["id", "plddt", "ptm", "iptm", "pae", "pde", "has_clash",
-                         "ranking_score", "early_stopped", "seed", "sample"],
+                         "ranking_score", "early_stopped", "seed", "sample",
+                         *[f"{axis}.id" for axis in provenance]],
                 description="Per-complex confidence scores from RF3",
             ),
             "missing": self.missing_table_info(self.missing_csv),

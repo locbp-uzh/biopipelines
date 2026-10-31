@@ -23,12 +23,13 @@ _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..
 sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from combinatorics import CombinatoricsConfig, predict_single_output_id
+from combinatorics import CombinatoricsConfig, predict_single_output_id, predict_single_provenance
 from biopipelines.biopipelines_io import write_skipped_queries
 from biopipelines.id_map_utils import MissingAlignment, MsaLookup
 from ligand_utils import auth_ligand_field
 from nucleic_acids import DOUBLE_STRANDED_ENTITY_TYPES, reverse_complement
 from pipe_axis_data import load_axis_data
+from pipe_query_provenance import write_query_provenance
 
 # The order chains are written in, so an example's chain ids are stable across runs.
 AXIS_ORDER = ("proteins", "ssDNA", "dsDNA", "ssRNA", "dsRNA", "ligands")
@@ -42,6 +43,10 @@ NUCLEIC_ACID_CHAIN_TYPES = {
 }
 
 MSA_EXTENSIONS = (".a3m", ".a3m.gz", ".fasta")
+
+
+class UnreadableAlignment(ValueError):
+    """An alignment RF3 cannot read; the example it belongs to is skipped with this message as its cause."""
 
 
 def chain_ids(count: int, start: int) -> List[str]:
@@ -93,9 +98,11 @@ def build_component(entity_type: str, record: Dict, label: str, msas: Optional[M
     elif entity_type == "protein" and msas is not None:
         path = msas.require(record_id, sequence)
         if not path.lower().endswith(MSA_EXTENSIONS):
-            raise ValueError(
+            raise UnreadableAlignment(
                 f"RF3 reads precomputed alignments as {', '.join(MSA_EXTENSIONS)}; the msas stream "
                 f"carries {path}. Generate the MSA with MMseqs2(output_format=\"a3m\").")
+        if not os.path.exists(path):
+            raise MissingAlignment(f"the alignment {path} of {record_id} does not exist")
         component["msa_path"] = path
     return component
 
@@ -115,10 +122,13 @@ def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
     return elements
 
 
-def build_examples(elements: Dict[str, Dict], msas: Optional[MsaLookup]) -> Tuple[List[Dict], Dict[str, str]]:
+def build_examples(elements: Dict[str, Dict], msas: Optional[MsaLookup],
+                   provenance: Optional[Dict[str, Dict[str, str]]] = None
+                   ) -> Tuple[List[Dict], Dict[str, str]]:
     """([example, ...], {example id: cause}) for the examples written and the ones skipped.
 
-    An example with a protein chain that has no supplied alignment is skipped with that cause, so it is predicted nowhere instead of single-sequence.
+    An example with a protein chain whose alignment is absent, not on disk or not readable is skipped with that cause, so it is predicted nowhere instead of single-sequence.
+    When a dict is passed as `provenance`, every example that entered, skipped or not, is recorded in it with the input each axis contributed.
     """
     import itertools
 
@@ -157,7 +167,7 @@ def build_examples(elements: Dict[str, Dict], msas: Optional[MsaLookup]) -> Tupl
                 counter += 1
                 try:
                     components.append(build_component(entity_type, member, label, msas))
-                except MissingAlignment as exc:
+                except (MissingAlignment, UnreadableAlignment) as exc:
                     causes.append(str(exc))
                 if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
                     label2 = chain_ids(1, counter)[0]
@@ -193,6 +203,8 @@ def build_examples(elements: Dict[str, Dict], msas: Optional[MsaLookup]) -> Tupl
         if not axis_selections:
             continue
         name = predict_single_output_id(**axis_selections)
+        if provenance is not None:
+            provenance[name] = predict_single_provenance(**axis_selections)
         if causes:
             skipped[name] = "; ".join(dict.fromkeys(causes))
         else:
@@ -206,13 +218,17 @@ def main():
     parser.add_argument("--combinatorics-config", required=True)
     parser.add_argument("--queries-json", required=True)
     parser.add_argument("--skipped-csv", required=True)
+    parser.add_argument("--provenance-csv")
     parser.add_argument("--msas-json")
     args = parser.parse_args()
 
     config = CombinatoricsConfig.load(args.combinatorics_config)
     msas = MsaLookup.load(args.msas_json) if args.msas_json else None
-    examples, skipped = build_examples(axis_elements(config), msas)
+    provenance: Dict[str, Dict[str, str]] = {}
+    examples, skipped = build_examples(axis_elements(config), msas, provenance)
     write_skipped_queries(args.skipped_csv, skipped)
+    if args.provenance_csv:
+        write_query_provenance(args.provenance_csv, provenance)
     for name, cause in skipped.items():
         print(f"WARNING: example {name} skipped: {cause}")
 

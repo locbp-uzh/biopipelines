@@ -33,6 +33,8 @@ from typing import Dict, List, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines'))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from pipe_query_provenance import provenance_columns, read_query_provenance  # noqa: E402
+
 CONFIDENCE_COLUMNS = ["id", "plddt", "ptm", "iptm", "pae", "pde", "has_clash",
                       "ranking_score", "early_stopped", "seed", "sample"]
 
@@ -164,7 +166,7 @@ def collect_example(prediction_folder: str, name: str, top_only: bool, n_samples
                     threshold: Optional[float] = None) -> Dict:
     """What one example produced.
 
-    Returns {"outputs": [...], "dropped": [...]}. An output is {"id", "structure", "confidences",
+    Returns {"name": name, "outputs": [...], "dropped": [...]}. An output is {"id", "structure", "confidences",
     "summary", "seed", "sample"}; a dropped entry is {"id", "kind", "cause", "early_stopped"} and stands for
     an id the wrapper declared that has no structure.
     """
@@ -216,13 +218,13 @@ def collect_example(prediction_folder: str, name: str, top_only: bool, n_samples
         else:
             dropped.append({"id": wanted_id, "kind": "failure", "early_stopped": False,
                             "cause": "rf3 fold wrote no structure for this input"})
-    return {"outputs": outputs, "dropped": dropped}
+    return {"name": name, "outputs": outputs, "dropped": dropped}
 
 
 def skipped_example(name: str, cause: str, top_only: bool, n_samples: int) -> Dict:
     """What an example the config step could not write produced: nothing, under every id it declared."""
     wanted = [name] if top_only else [f"{name}_{k}" for k in range(1, n_samples + 1)]
-    return {"outputs": [],
+    return {"name": name, "outputs": [],
             "dropped": [{"id": wanted_id, "kind": "failure", "early_stopped": False, "cause": cause}
                         for wanted_id in wanted]}
 
@@ -258,6 +260,7 @@ def main():
     parser.add_argument("--prediction-folder", required=True)
     parser.add_argument("--queries-json", required=True)
     parser.add_argument("--skipped-csv", default=None)
+    parser.add_argument("--provenance-csv", default=None)
     parser.add_argument("--structures-dir", required=True)
     parser.add_argument("--structures-map-csv", required=True)
     parser.add_argument("--confidence-csv", required=True)
@@ -276,6 +279,8 @@ def main():
         sys.exit(1)
 
     step_id = step_id_from_table_path(args.local_missing_csv)
+    provenance = read_query_provenance(args.provenance_csv)
+    extra = provenance_columns(provenance)
     os.makedirs(args.structures_dir, exist_ok=True)
     os.makedirs(args.pae_dir, exist_ok=True)
 
@@ -290,29 +295,31 @@ def main():
                 for name, cause in skipped.items()]
 
     for result in results:
+        cells = provenance.get(result["name"], {})
         for output in result["outputs"]:
             destination = os.path.join(args.structures_dir, f"{output['id']}.cif")
             stage_structure(output["structure"], destination)
-            map_rows.append({"id": output["id"], "file": destination})
+            map_rows.append({"id": output["id"], "file": destination, **cells})
             if os.path.exists(output["confidences"]):
                 pae_destination = os.path.join(args.pae_dir, f"{output['id']}.json")
                 shutil.copyfile(output["confidences"], pae_destination)
-                pae_rows.append({"id": output["id"], "file": pae_destination})
+                pae_rows.append({"id": output["id"], "file": pae_destination, **cells})
             else:
                 print(f"WARNING: no {os.path.basename(output['confidences'])} for {output['id']}, "
                       f"left out of the pae stream")
-            confidence_rows.append(confidence_row(
-                output["id"], output["summary"], output["seed"], output["sample"], False))
+            confidence_rows.append({**confidence_row(
+                output["id"], output["summary"], output["seed"], output["sample"], False), **cells})
         for dropped in result["dropped"]:
-            confidence_rows.append(confidence_row(dropped["id"], {}, None, None, dropped["early_stopped"]))
+            confidence_rows.append({**confidence_row(dropped["id"], {}, None, None, dropped["early_stopped"]),
+                                    **cells})
             missing_rows.append({"id": dropped["id"], "removed_by": step_id,
                                  "kind": dropped["kind"], "cause": dropped["cause"]})
         if any(dropped["kind"] == "failure" for dropped in result["dropped"]):
             failed_examples += 1
 
-    write_rows(args.structures_map_csv, ["id", "file"], map_rows)
-    write_rows(args.pae_map_csv, ["id", "file"], pae_rows)
-    write_rows(args.confidence_csv, CONFIDENCE_COLUMNS, confidence_rows)
+    write_rows(args.structures_map_csv, ["id", "file", *extra], map_rows)
+    write_rows(args.pae_map_csv, ["id", "file", *extra], pae_rows)
+    write_rows(args.confidence_csv, [*CONFIDENCE_COLUMNS, *extra], confidence_rows)
     write_rows(args.local_missing_csv, ["id", "removed_by", "kind", "cause"], missing_rows)
 
     print(f"Collected {len(map_rows)} structure(s) for {len(results)} example(s); "

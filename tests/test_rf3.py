@@ -138,10 +138,12 @@ class TestTheCommandLine:
 
 class TestTheInputsJson:
 
-    def test_a_protein_carries_its_msa_and_its_chain_label(self):
+    def test_a_protein_carries_its_msa_and_its_chain_label(self, tmp_path):
+        alignment = tmp_path / "p1.a3m"
+        alignment.write_text(">p1\nMKT\n")
         built = pipe_rf3_config.build_component(
-            "protein", {"id": "p1", "sequence": "MKT"}, "A", MsaLookup([{"id": "p1", "file": "/m/p1.a3m"}]))
-        assert built == {"seq": "MKT", "chain_id": "A", "msa_path": "/m/p1.a3m"}
+            "protein", {"id": "p1", "sequence": "MKT"}, "A", MsaLookup([{"id": "p1", "file": str(alignment)}]))
+        assert built == {"seq": "MKT", "chain_id": "A", "msa_path": str(alignment)}
 
     def test_a_protein_without_an_alignment_has_no_msa_key(self):
         built = pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", None)
@@ -197,15 +199,67 @@ class TestTheInputsJson:
         assert pipe_rf3_config.build_examples(elements, None) == ([], {})
 
     @pytest.mark.parametrize("name", ["a.a3m", "a.a3m.gz", "a.fasta"])
-    def test_the_alignment_formats_upstream_reads_are_accepted(self, name):
-        msas = MsaLookup([{"id": "p1", "file": f"/x/{name}"}])
+    def test_the_alignment_formats_upstream_reads_are_accepted(self, name, tmp_path):
+        (tmp_path / name).write_text(">p1\nMKT\n")
+        msas = MsaLookup([{"id": "p1", "file": str(tmp_path / name)}])
         built = pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", msas)
-        assert built["msa_path"] == f"/x/{name}"
+        assert built["msa_path"] == str(tmp_path / name)
 
     def test_an_alignment_upstream_cannot_read_is_named_not_ignored(self):
         msas = MsaLookup([{"id": "p1", "file": "/x/p1.sto"}])
         with pytest.raises(ValueError, match=r"\.sto"):
             pipe_rf3_config.build_component("protein", {"id": "p1", "sequence": "MKT"}, "A", msas)
+
+
+class TestAnAlignmentThatCannotBeUsedSkipsOnlyItsExample:
+    """A row whose file was purged, or whose format upstream cannot read, must not take the other examples with it."""
+
+    @staticmethod
+    def _elements():
+        records = [{"id": "p1", "sequence": "MKT"}, {"id": "p2", "sequence": "MAA"}, {"id": "p3", "sequence": "MGG"}]
+        return {"proteins": {"mode": "each", "entity_type": "protein", "static_first": False, "static": [],
+                             "iterated": records}}
+
+    def test_a_row_whose_file_is_gone_is_skipped_and_the_examples_after_it_are_built(self, tmp_path):
+        for name in ("p1", "p3"):
+            (tmp_path / f"{name}.a3m").write_text(f">{name}\nMKT\n")
+        msas = MsaLookup([{"id": name, "file": str(tmp_path / f"{name}.a3m")} for name in ("p1", "p2", "p3")])
+        examples, skipped = pipe_rf3_config.build_examples(self._elements(), msas)
+        assert [e["name"] for e in examples] == ["p1", "p3"]
+        assert list(skipped) == ["p2"]
+        assert "does not exist" in skipped["p2"] and str(tmp_path / "p2.a3m") in skipped["p2"]
+
+    def test_a_row_in_a_format_upstream_cannot_read_is_skipped_not_fatal(self, tmp_path):
+        for name in ("p1.a3m", "p2.sto", "p3.a3m"):
+            (tmp_path / name).write_text(">x\nMKT\n")
+        msas = MsaLookup([{"id": f"p{i}", "file": str(tmp_path / name)}
+                          for i, name in enumerate(("p1.a3m", "p2.sto", "p3.a3m"), start=1)])
+        examples, skipped = pipe_rf3_config.build_examples(self._elements(), msas)
+        assert [e["name"] for e in examples] == ["p1", "p3"]
+        assert list(skipped) == ["p2"] and ".sto" in skipped["p2"]
+
+    def test_the_skipped_example_is_a_failure_row_of_the_local_missing_table(self, tmp_path):
+        import pandas as pd
+        from biopipelines.biopipelines_io import write_skipped_queries
+        msas = MsaLookup([{"id": "p1", "file": str(tmp_path / "purged.a3m")}])
+        elements = {"proteins": {"mode": "each", "entity_type": "protein", "static_first": False, "static": [],
+                                 "iterated": [{"id": "p1", "sequence": "MKT"}]}}
+        _examples, skipped = pipe_rf3_config.build_examples(elements, msas)
+        write_skipped_queries(str(tmp_path / "skipped.csv"), skipped)
+        (tmp_path / "queries.json").write_text("[]")
+        out = tmp_path / "out"
+        done = subprocess.run(
+            [sys.executable, os.path.join(REPO_ROOT, "pipe_scripts", "pipe_rf3_postprocess.py"),
+             "--prediction-folder", str(tmp_path / "pred"), "--queries-json", str(tmp_path / "queries.json"),
+             "--skipped-csv", str(tmp_path / "skipped.csv"), "--structures-dir", str(out / "structures"),
+             "--structures-map-csv", str(out / "m.csv"), "--confidence-csv", str(out / "c.csv"),
+             "--pae-dir", str(out / "pae"), "--pae-map-csv", str(out / "pae_map.csv"),
+             "--local-missing-csv", str(out / "001_RF3" / "execution" / "local_missing.csv"),
+             "--diffusion-batch-size", "2"], capture_output=True, text=True)
+        assert done.returncode == 1
+        missing = pd.read_csv(out / "001_RF3" / "execution" / "local_missing.csv")
+        assert missing.loc[0, "kind"] == "failure" and "does not exist" in missing.loc[0, "cause"]
+        assert pd.read_csv(out / "c.csv")["id"].tolist() == ["p1"]
 
 
 def _write_example(pred, name, ranking, *, gz=False, with_confidences=True):
@@ -365,6 +419,44 @@ class TestThePostprocessStep:
         assert sorted(p.stem for p in (out / "structures").glob("*.cif")) == ["ok_1", "ok_2"]
         assert sorted(p.stem for p in (out / "pae").glob("*.json")) == ["ok_1", "ok_2"]
 
+    def test_every_row_names_the_input_of_each_axis_it_was_built_from(self, tmp_path):
+        import pandas as pd
+        _write_example(tmp_path / "pred", "a_1+l_2", [0.2, 0.9])
+        _write_example(tmp_path / "pred", "b+x+l_2", [0.5])
+        (tmp_path / "provenance.csv").write_text(
+            "id,proteins.id,ligands.id\na_1+l_2,a_1,l_2\nb+x+l_2,b+x,l_2\nlost+l_2,lost,l_2\n")
+        out, done = self._run(tmp_path, ["a_1+l_2", "b+x+l_2", "lost+l_2"],
+                              "--provenance-csv", str(tmp_path / "provenance.csv"), "--top-only", "False")
+        assert done.returncode == 0, done.stderr
+        structures = pd.read_csv(out / "structures" / "m.csv").set_index("id")
+        assert structures.loc["a_1+l_2_2", "proteins.id"] == "a_1" and structures.loc["a_1+l_2_2", "ligands.id"] == "l_2"
+        assert structures.loc["b+x+l_2_1", "proteins.id"] == "b+x", "a + inside an input id is not a separator"
+        pae = pd.read_csv(out / "pae" / "pae_map.csv").set_index("id")
+        assert pae.loc["a_1+l_2_1", "proteins.id"] == "a_1"
+        confidence = pd.read_csv(out / "tables" / "c.csv").set_index("id")
+        assert list(confidence.columns[-2:]) == ["proteins.id", "ligands.id"]
+        assert confidence.loc["lost+l_2_1", "proteins.id"] == "lost", "an id that failed keeps its provenance"
+
+    def test_without_a_provenance_file_no_column_is_added(self, tmp_path):
+        import pandas as pd
+        _write_example(tmp_path / "pred", "ok", [0.5])
+        out, done = self._run(tmp_path, ["ok"])
+        assert done.returncode == 0, done.stderr
+        assert list(pd.read_csv(out / "structures" / "m.csv").columns) == ["id", "file"]
+
+    def test_the_config_step_records_the_provenance_of_every_example_including_the_skipped(self, tmp_path):
+        provenance = {}
+        elements = {
+            "proteins": {"mode": "each", "entity_type": "protein", "static_first": False, "static": [],
+                         "iterated": [{"id": "a_1", "sequence": "MKT"}, {"id": "b+x", "sequence": "MAA"}]},
+            "ligands": {"mode": "each", "entity_type": "ligand", "static_first": False, "static": [],
+                        "iterated": [{"id": "l_2", "smiles": "CCO"}]}}
+        msas = MsaLookup([{"id": "a_1", "file": str(tmp_path / "gone.a3m")}])
+        examples, skipped = pipe_rf3_config.build_examples(elements, msas, provenance)
+        assert not examples and set(skipped) == {"a_1+l_2", "b+x+l_2"}
+        assert provenance == {"a_1+l_2": {"proteins": "a_1", "ligands": "l_2"},
+                              "b+x+l_2": {"proteins": "b+x", "ligands": "l_2"}}
+
     def test_every_example_failing_exits_non_zero(self, tmp_path):
         out, done = self._run(tmp_path, ["lost"])
         assert done.returncode == 1
@@ -414,7 +506,7 @@ class TestTheDeclaredOutputs:
             tables = pipeline.tools[-1].get_output_files()["tables"]
         assert tables["confidence"].info.columns == [
             "id", "plddt", "ptm", "iptm", "pae", "pde", "has_clash", "ranking_score",
-            "early_stopped", "seed", "sample"]
+            "early_stopped", "seed", "sample", "proteins.id"]
         assert tables["missing"].info.columns == ["id", "removed_by", "kind", "cause"]
 
     def test_the_script_runs_config_then_rf3_then_postprocess(self, local_config, isolated_cwd, new_pipeline):
@@ -433,6 +525,13 @@ class TestTheDeclaredOutputs:
         with open(os.path.join(REPO_ROOT, "pipe_scripts", "pipe_rf3_postprocess.py")) as handle:
             known = set(re.findall(r'add_argument\("(--[a-z-]+)"', handle.read()))
         assert sent <= known
+
+    def test_the_config_step_hands_its_provenance_file_to_the_postprocess(self, local_config, isolated_cwd, new_pipeline):
+        import re
+        _tool, script = self._declared(new_pipeline)
+        paths = re.findall(r'--provenance-csv "([^"]+)"', script)
+        assert len(paths) == 2 and paths[0] == paths[1]
+        assert paths[0].endswith(os.path.join("_configuration", "query_provenance.csv"))
 
     def test_the_config_flags_are_all_known_to_the_pipe_script(self, local_config, isolated_cwd, new_pipeline):
         import re
