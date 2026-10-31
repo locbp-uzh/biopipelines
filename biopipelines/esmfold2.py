@@ -37,7 +37,7 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import (
-        generate_combinatorics_config, get_mode,
+        generate_combinatorics_config, generate_multiplied_ids_pattern, get_mode,
         predict_output_ids_with_provenance, Bundle, Each,
     )
     from .datastream_resolver import resolve_input_to_datastream
@@ -48,7 +48,7 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import (
-        generate_combinatorics_config, get_mode,
+        generate_combinatorics_config, generate_multiplied_ids_pattern, get_mode,
         predict_output_ids_with_provenance, Bundle, Each,
     )
     from datastream_resolver import resolve_input_to_datastream
@@ -182,8 +182,9 @@ class ESMFold2(BaseConfig):
         msa_max_depth: MSA subsampling depth per loop
         include_pae: also tabulate PAE (max PAE in the confidence table) and write the
                     full PAE matrix of each structure to the `pae` stream
-        top_only:   keep only the best sample per complex (True) or surface every
-                    diffusion sample as <id>_1..N (False)
+        top_only:   keep only the best sample per complex (True) or surface its best
+                    num_diffusion_samples samples, ranked across all seeds, as <id>_1..N
+                    (False; <id>_1 is the best). With num_seeds > 1 the other samples are dropped.
         model_name: HuggingFace checkpoint id (default biohub/ESMFold2)
 
     Chain ids for modifications and covalent_bonds are assigned in axis order —
@@ -230,7 +231,7 @@ class ESMFold2(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold2"
-    TOOL_VERSION = "2.11"
+    TOOL_VERSION = "2.12"
     ENV_NAME = "esmfold2"
 
     @classmethod
@@ -343,9 +344,7 @@ fi
         if ligands is not None:
             self.ligands_stream = resolve_input_to_datastream(ligands, fallback_stream="compounds")
 
-        # BaseConfig reads kwargs with .get() and ignores the rest, so an
-        # unsupported `pocket=` would be swallowed in silence — which is the
-        # failure mode the parameter was removed to avoid.
+        # BaseConfig ignores unknown kwargs, so an unsupported `pocket=` would be swallowed in silence.
         if "pocket" in kwargs:
             raise ValueError(
                 "ESMFold2 has no pocket parameter. Upstream defines "
@@ -589,8 +588,8 @@ fi
         structure_files = [self.stream_path("structures", "<id>.cif")]
         structure_ids = predicted_ids
         if not self.top_only:
-            k = self.num_diffusion_samples
-            structure_ids = [f"{pid}_<1..{k}>" for pid in predicted_ids]
+            structure_ids = generate_multiplied_ids_pattern(
+                predicted_ids, f"<1..{self.num_diffusion_samples}>")
 
         structures = DataStream(
             name="structures",

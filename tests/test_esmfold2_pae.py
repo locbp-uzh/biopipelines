@@ -344,6 +344,15 @@ class TestTheDeclaration:
         tool, _script = _fold(new_pipeline, include_pae=True, top_only=False, num_diffusion_samples=3)
         assert tool.streams.pae.ids == tool.streams.structures.ids == ["p1_<1..3>"]
 
+    def test_the_sample_ids_are_composed_by_the_shared_helper(
+            self, local_config, isolated_cwd, new_pipeline, monkeypatch):
+        import biopipelines.esmfold2 as module
+        calls = []
+        monkeypatch.setattr(module, "generate_multiplied_ids_pattern",
+                            lambda ids, suffix: calls.append(suffix) or [f"{i}#{suffix}" for i in ids])
+        tool, _script = _fold(new_pipeline, top_only=False, num_diffusion_samples=3)
+        assert "<1..3>" in calls and tool.streams.structures.ids == ["p1#<1..3>"]
+
     def test_the_scripts_hand_the_same_folder_to_inference_and_post_processing(
             self, local_config, isolated_cwd, new_pipeline):
         tool, script = _fold(new_pipeline, include_pae=True)
@@ -388,7 +397,7 @@ class TestAComplexThatFailsToFold:
              "--predictions-dir", str(predictions),
              "--structures-map", str(tmp_path / "out" / "structures_map.csv"),
              "--confidence-csv", str(tmp_path / "out" / "confidence.csv"),
-             "--local-missing-csv", str(tmp_path / "exec" / "local_missing.csv")],
+             "--local-missing-csv", str(tmp_path / "002_ESMFold2" / "execution" / "local_missing.csv")],
             capture_output=True, text=True)
         assert done.returncode == 0, done.stderr
 
@@ -404,9 +413,17 @@ class TestAComplexThatFailsToFold:
 
     def test_the_local_missing_file_names_it_as_a_failure_with_the_reason(self, tmp_path):
         self._postprocess_with_a_failure(tmp_path)
-        rows = pd.read_csv(tmp_path / "exec" / "local_missing.csv")
-        assert rows.to_dict("records") == [{"id": "p2", "removed_by": "ESMFold2", "kind": "failure",
+        rows = pd.read_csv(tmp_path / "002_ESMFold2" / "execution" / "local_missing.csv")
+        assert rows.to_dict("records") == [{"id": "p2", "removed_by": "002_ESMFold2", "kind": "failure",
                                             "cause": "position 60 is past the end of chain A"}]
+
+    def test_the_failure_names_its_step_so_a_later_step_of_the_same_tool_excuses_it(self, tmp_path):
+        """Stamped with the bare tool name, the row of an upstream ESMFold2 step reads as a local failure of the next one."""
+        self._postprocess_with_a_failure(tmp_path)
+        checker = _load(os.path.join(REPO_ROOT, "pipe_scripts", "pipe_check_completion.py"), "pipe_check_completion")
+        expected = {"tables": {"missing": {"path": str(tmp_path / "002_ESMFold2" / "execution" / "local_missing.csv")}}}
+        assert checker._load_expected_missing_ids(expected, "002_ESMFold2", "ESMFold2") == []
+        assert checker._load_expected_missing_ids(expected, "004_ESMFold2", "ESMFold2") == ["p2"]
 
     def test_the_local_missing_file_is_written_even_when_nothing_failed(self, tmp_path):
         done = _postprocess(tmp_path, "--local-missing-csv", str(tmp_path / "exec" / "local_missing.csv"))

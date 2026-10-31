@@ -24,13 +24,8 @@ import os
 import sys
 import traceback
 
-# Let the caching allocator grow a segment instead of demanding one contiguous
-# block. Folding many complexes of DIFFERENT sizes in one process fragments the
-# pool badly (a 718-residue complex at 20 diffusion samples leaves holes that a
-# 644-residue one cannot use), and PyTorch's own OOM message recommends exactly
-# this setting for that pattern. Must be set before torch initialises CUDA,
-# hence here rather than in the batch script. Complements the explicit
-# empty_cache() in the per-complex loop; neither alone was sufficient.
+# Expandable segments: complexes of different sizes in one process fragment the allocator pool.
+# Must be set before torch initializes CUDA.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import pandas as pd
@@ -41,8 +36,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "
 from biopipelines.combinatorics import predict_single_output_id
 from biopipelines.id_map_utils import MsaLookup
 
-# Double-stranded axes add a reverse-complement chain; ligand axes drive the
-# affinity/first-ligand bookkeeping (none here, but kept for symmetry).
+# Double-stranded axes add a reverse-complement chain.
 DOUBLE_STRANDED = {"dsdna", "dsrna"}
 LIGAND_TYPES = {"ligand"}
 _DNA_COMPLEMENT = str.maketrans("ACGT", "TGCA")
@@ -87,18 +81,7 @@ def load_axis_records(axis):
         if not path or not os.path.exists(path):
             print(f"WARNING: source file not found: {path}", file=sys.stderr)
             continue
-        # keep_default_na=False: a blank cell (e.g. the `ccd` column of a SMILES
-        # ligand row) must read back as "", not NaN. Every consumer below tests
-        # truthiness with `item.get(x) or ""`, and NaN is truthy in Python
-        # (`bool(float("nan"))` is True), so the default read left a blank ccd
-        # as NaN, which then satisfied `if ch.get("ccd"):` at the branch below
-        # and got wrapped as `ccd=[nan]` -- crashing downstream in the ESM
-        # library with "TypeError: sequence item 0: expected str instance,
-        # float found" when it tried to `','.join(item.ccd)`. This surfaced
-        # only after fixing the ccd/code column mix-up two commits back: `code`
-        # always holds a real string ("LIG" by default) so it never hit the
-        # NaN branch, but the correct `ccd` column is genuinely blank for every
-        # SMILES ligand.
+        # keep_default_na=False: a blank ccd cell must read back as "", because NaN is truthy and became ccd=[nan].
         records = pd.read_csv(path, keep_default_na=False, dtype={"id": str}).to_dict("records")
         if isinstance(source, dict) and source.get("ids"):
             from id_patterns import select_ids
@@ -198,23 +181,8 @@ def build_complexes(config, msas, glycans=None):
                 add_item(chains, entity_type, member, counter)
             return
         if entity_type in LIGAND_TYPES:
-            # `ccd` comes from the compounds table's `ccd` column, NOT its `code`
-            # column. `ccd` is populated only for a genuine RCSB CCD lookup
-            # (pipe_ligand.py:1058), while `code` is the residue label every
-            # ligand carries and which defaults to "LIG" (pipe_ligand.py:337
-            # leaves `ccd` empty for a SMILES ligand).
-            #
-            # Reading `code` here sent every SMILES ligand down the CCD branch
-            # below, because that branch prefers ccd whenever it is non-empty.
-            # LIG is itself a real CCD entry (C15H11N3, an indazole-pyridine),
-            # so a SMILES-defined dye folded as that heterocycle with the
-            # supplied SMILES sitting unused in the row. The protein folded
-            # fine, so the failure is silent: confidence, ipTM and PAE are all
-            # reported for a complex containing the wrong molecule.
-            #
-            # `format` is what actually distinguishes the two, so gate on it and
-            # only fall back to `code` once the compound is known to be a CCD
-            # entry -- `ccd` is blank for anything defined by SMILES.
+            # ccd comes from the table's ccd column, not code, which is "LIG" for a SMILES ligand and is itself a real CCD entry.
+            # format distinguishes the two, so gate on it and fall back to code only for a CCD compound.
             fmt = str(item.get("format") or "").strip().lower()
             smiles = str(item.get("smiles") or "").strip()
             if fmt == "ccd":
@@ -406,8 +374,7 @@ def to_structure_input(chains, input_builder, MSA, max_depth, constraints):
                 raise ValueError(
                     f"{grouped_mods[ch['id']][0][0]}: chain {ch['id']} is a ligand; "
                     "modifications apply to polymer chains only")
-            # ccd is only set when the compound's format is ccd (see add_item),
-            # so these two are mutually exclusive and the order is not a policy.
+            # ccd is set only for a ccd-format compound (see add_item), so the two branches are exclusive.
             if ch.get("ccd"):
                 print(f"ligand chain {ch['id']}: CCD {'-'.join(ch['ccd'])}", flush=True)
                 sequences.append(input_builder.LigandInput(id=ch["id"], ccd=list(ch["ccd"])))
@@ -487,8 +454,7 @@ def main():
             spi = to_structure_input(chains, input_builder, MSA, args.msa_max_depth, constraints)
             is_monomer = sum(1 for c in chains if c["entity_type"] != "ligand") <= 1
 
-            # fold() returns a list of per-diffusion-sample results (a single
-            # MolecularComplexResult when num_diffusion_samples==1); normalize to a list.
+            # fold() returns a list of per-sample results, or one result when num_diffusion_samples is 1.
             samples = []  # (rank, metrics, result) across all seeds x diffusion samples
             for seed in range(args.seed_offset,
                               args.seed_offset + args.num_seeds):
@@ -508,28 +474,8 @@ def main():
                              iptm=float(getattr(res, "interface_ptm", getattr(res, "iptm", float("nan")))))
                     if args.include_pae and getattr(res, "pae", None) is not None:
                         m["max_pae"] = float(res.pae.max())
-                    # PER-CHAIN-PAIR ipTM, e.g. iptm_chain_0_2 for chain A vs C.
-                    #
-                    # The scalar `iptm` above is max-over-tokens of each token's
-                    # mean inter-chain TM, pooled across ALL chain pairs, so in a
-                    # protein+protein+ligand complex it is decided by the large
-                    # protein-protein interface and carries essentially no
-                    # information about the ligand (34 atoms cannot move a max
-                    # taken over ~700 tokens). The model computes the full
-                    # chain x chain matrix on every forward pass anyway; without
-                    # this it was discarded, and recovering it needs a refold
-                    # because the PAE logits it derives from are not saved.
-                    #
-                    # Boltz2 already reports the equivalent (ligand_iptm,
-                    # pair_chains_iptm-i-j) and there it correlates +0.52 with
-                    # dye pLDDT against +0.15 for the scalar -- i.e. the chain
-                    # pair is the part that knows about the ligand.
-                    #
-                    # NOT comparable in absolute value to protein-protein ipTM:
-                    # d0 is computed complex-wide, then averaged over only
-                    # (n_ligand_atoms x n_chain_tokens) pairs, so ligand pairs
-                    # sit systematically lower. Use it to rank designs, not as
-                    # an absolute score.
+                    # Per-chain-pair ipTM (iptm_chain_<a>_<b>): the scalar iptm is pooled over all chain pairs and says little about a ligand.
+                    # Not comparable in absolute value to protein-protein ipTM; use it to rank designs.
                     pci = getattr(res, "pair_chains_iptm", None)
                     if pci is not None:
                         try:
@@ -571,27 +517,7 @@ def main():
             traceback.print_exc()
             failed[cid] = str(e).splitlines()[0] if str(e) else type(e).__name__
         finally:
-            # RELEASE THE PER-DESIGN GPU TENSORS BEFORE THE NEXT COMPLEX.
-            #
-            # `samples` holds one result per diffusion sample, and each result
-            # carries CUDA tensors (coordinates, pLDDT, PAE) plus the pair
-            # representation they were decoded from. Rebinding it on the next
-            # iteration drops the references, but the caching allocator keeps
-            # the freed blocks — and they are large and badly shaped, so the
-            # next complex fails on an allocation far smaller than the memory
-            # nominally available.
-            #
-            # Invisible at 1-5 samples, which is why it survived this long.
-            # Measured at 20 samples on an H200 (139.80 GiB): after a few
-            # designs the process held 136.66 GiB, of which 17-26 GiB was
-            # reserved-but-unallocated fragmentation, and a 10.93 GiB request
-            # died. Ten of seventeen runs lost 34-85% of their designs this
-            # way; the survivors were the ones whose binders happened to be
-            # short enough to stay under the ceiling.
-            #
-            # Order-dependent by nature: a long binder early fragments the pool
-            # for everything after it, so the same job can succeed or fail on
-            # the same inputs in a different order.
+            # Release the per-design GPU tensors: the caching allocator keeps the freed blocks, and later complexes fail on allocations far below the free memory.
             samples = None
             spi = None
             try:

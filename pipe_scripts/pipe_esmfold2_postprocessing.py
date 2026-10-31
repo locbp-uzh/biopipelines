@@ -26,6 +26,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from biopipelines.biopipelines_io import step_id_from_table_path  # noqa: E402
 
 
 def provenance_lookup(config):
@@ -95,12 +96,8 @@ def main():
                 "ptm": s.get("ptm"), "iptm": s.get("iptm")}
         if "max_pae" in s:
             crow["max_pae"] = s["max_pae"]
-        # Per-chain-pair ipTM (iptm_chain_<a>_<b>), when the inference script
-        # emitted it. Carried through by prefix rather than by name so the
-        # number of chains does not have to be known here; the fixed column
-        # list above would otherwise silently drop them. Absent for complexes
-        # the model did not return a pair matrix for, which is why these are
-        # copied only when present rather than defaulted to a column of NaN.
+        # Per-chain-pair ipTM (iptm_chain_<a>_<b>) is carried through by prefix, since the number of chains is not known here.
+        # They are copied only when present, not defaulted to a column of NaN.
         for k, v in s.items():
             if k.startswith("iptm_chain_"):
                 crow[k] = v
@@ -120,7 +117,8 @@ def main():
         conf_rows.append({"id": cid})
     if args.local_missing_csv:
         os.makedirs(os.path.dirname(args.local_missing_csv), exist_ok=True)
-        pd.DataFrame([{"id": cid, "removed_by": "ESMFold2", "kind": "failure", "cause": cause}
+        step_id = step_id_from_table_path(args.local_missing_csv)
+        pd.DataFrame([{"id": cid, "removed_by": step_id, "kind": "failure", "cause": cause}
                       for cid, cause in failures.items()],
                      columns=["id", "removed_by", "kind", "cause"]).to_csv(args.local_missing_csv, index=False)
 

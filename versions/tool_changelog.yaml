@@ -748,8 +748,12 @@ ESMFold2:
   - pipe_scripts/pipe_esmfold2_inference.py
   - pipe_scripts/pipe_esmfold2_postprocessing.py
   - pipe_scripts/pipe_axis_data.py
-  current: "2.11"
+  current: "2.12"
   history:
+  - version: '2.12'
+    date: '2026-10-31'
+    note: >-
+      A `failure` row of `missing` names its step (`<NNN>_ESMFold2`) in `removed_by`, where it carried the bare tool name, so a later ESMFold2 step of the same pipeline read the failures of an earlier one as its own and was marked FAILED for ids it never received. The ids of `top_only=False` are composed with `generate_multiplied_ids_pattern`. `top_only` states what it does with several seeds: the best `num_diffusion_samples` samples across all seeds are surfaced as `<id>_1..N` and the rest are dropped; the docs said every sample. The comments of the inference script that split a sentence over several lines are collapsed; no behavior changes.
   - version: '2.11'
     date: '2026-10-31'
     note: >-
