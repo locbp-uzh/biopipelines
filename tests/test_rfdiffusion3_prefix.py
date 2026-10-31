@@ -18,12 +18,16 @@ REPO = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def rfd3(local_config, isolated_cwd):
+    """A local parent file: a four-character id would make PDB query RCSB, and this suite stays offline."""
+    parent_file = isolated_cwd / "parent.pdb"
+    parent_file.write_text("ATOM\n")
+
     def _make(**kwargs):
         from biopipelines import PDB, RFdiffusion3
         from biopipelines.pipeline import Pipeline, Resources
         with Pipeline(project="TestSuite", job="rfd3_prefix"):
             Resources(gpu=None)
-            parent = PDB("4AKE")
+            parent = PDB(str(parent_file))
             out = RFdiffusion3(pdb=parent, contig="A1-50,10-20,A51-100",
                                num_designs=3, **kwargs)
         return out.producer
@@ -33,12 +37,12 @@ def rfd3(local_config, isolated_cwd):
 class TestTheDeclaredIdsCarryThePrefix:
 
     def test_a_prefix_prepends_to_every_declared_id(self, rfd3):
-        ids = rfd3(prefix="op7").get_output_files()["structures"].ids
-        assert all("op7_" in str(i) for i in ids), ids
+        ids = [str(i) for i in rfd3(prefix="op7").get_output_files()["structures"].ids]
+        assert ids == ["op7_parent_<1..3>"]
 
     def test_without_a_prefix_the_ids_are_unchanged(self, rfd3):
-        ids = rfd3().get_output_files()["structures"].ids
-        assert all("4AKE" in str(i) for i in ids), ids
+        ids = [str(i) for i in rfd3().get_output_files()["structures"].ids]
+        assert ids == ["parent_<1..3>"]
 
     def test_two_steps_on_one_parent_no_longer_collide(self, rfd3):
         first = rfd3(prefix="op7").get_output_files()["structures"].ids
@@ -92,9 +96,9 @@ class TestProvenanceStillRecoversTheParent:
         return {r["id"]: r["structures.id"] for r in csv.DictReader(open(cfg.stream_map_path("structures")))}
 
     def test_the_parent_id_survives_a_prefix(self, rfd3):
-        rows = self._rows(rfd3, "op7", ["op7_4AKE_3"])
-        assert rows == {"op7_4AKE_3": "4AKE"}
+        rows = self._rows(rfd3, "op7", ["op7_parent_3"])
+        assert rows == {"op7_parent_3": "parent"}
 
     def test_a_prefix_with_a_regex_metacharacter_is_taken_literally(self, rfd3):
-        rows = self._rows(rfd3, "38-40.55-59", ["38-40.55-59_4AKE_3", "38-40X55-59_4AKE_3"])
-        assert rows == {"38-40.55-59_4AKE_3": "4AKE", "38-40X55-59_4AKE_3": ""}
+        rows = self._rows(rfd3, "38-40.55-59", ["38-40.55-59_parent_3", "38-40X55-59_parent_3"])
+        assert rows == {"38-40.55-59_parent_3": "parent", "38-40X55-59_parent_3": ""}
