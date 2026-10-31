@@ -10,7 +10,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import (generate_combinatorics_config,
+    from .combinatorics import (generate_combinatorics_config, generate_multiplied_ids_pattern,
                                 predict_output_ids_with_provenance)
     from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
@@ -19,7 +19,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import (generate_combinatorics_config,
+    from combinatorics import (generate_combinatorics_config, generate_multiplied_ids_pattern,
                                predict_output_ids_with_provenance)
     from datastream_resolver import resolve_input_to_datastream
 
@@ -86,19 +86,20 @@ class Protenix(BaseConfig):
     Outputs:
         Streams:
             structures: one `<id>.cif` per predicted complex.
+                        Its map, the `pae` map and the `confidence` table carry one `<axis>.id` column per input axis (`proteins.id`, `ligands.id`, ...) naming the input of that axis the row was built from.
             pae:        one `<id>.npz` per structure, with the same ids as `structures`.
                         The array key is `pae`, a float32 N_token x N_token matrix in Angstrom, the layout Boltz2 writes.
                         Rows and columns are Protenix's tokens over all chains: one per standard residue, one per atom for ligands and modified residues.
                         Absent when `include_pae=False`.
         Tables:
-            confidence: id | plddt | ptm | iptm | gpde | has_clash | disorder | ranking_score | seed | sample
+            confidence: id | plddt | ptm | iptm | gpde | has_clash | disorder | ranking_score | seed | sample | <axis>.id ...
                         plddt is 0 to 100, ptm and iptm 0 to 1.
                         `seed` and `sample` identify the structure the row describes; `sample` is upstream's index within the seed, 0 for the highest ranking score of that seed.
             missing:    id | removed_by | kind | cause
     """
 
     TOOL_NAME = "Protenix"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
     ENV_NAME = "protenix"
 
     PREDICT_COMMAND = "protenix pred"
@@ -442,7 +443,8 @@ python "{self.postprocess_py}" \\
         if self.top_only:
             structure_ids = predicted_ids
         else:
-            structure_ids = [f"{i}_<1..{self._structures_per_query()}>" for i in predicted_ids]
+            structure_ids = generate_multiplied_ids_pattern(
+                predicted_ids, f"<1..{self._structures_per_query()}>")
 
         structures = DataStream(
             name="structures",
@@ -467,7 +469,8 @@ python "{self.postprocess_py}" \\
                 name="confidence",
                 path=self.confidence_csv,
                 columns=["id", "plddt", "ptm", "iptm", "gpde", "has_clash",
-                         "disorder", "ranking_score", "seed", "sample"],
+                         "disorder", "ranking_score", "seed", "sample",
+                         *[f"{axis}.id" for axis in provenance]],
                 description="Per-complex confidence scores from Protenix",
             ),
             "missing": self.missing_table_info(self.missing_csv),

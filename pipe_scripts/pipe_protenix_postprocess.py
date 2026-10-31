@@ -11,6 +11,7 @@ With --need_atom_confidence it also writes `<query>_full_data_sample_<K>.json`, 
 A query that fails is recorded under `<out>/ERR/<query>.txt` and the command still exits 0.
 
 This turns that into one `<id>` per complex (or `<id>_1..N` when the user asked for every structure), a structures map_table, a confidence table and, with --pae-dir, one `<id>.npz` per structure.
+Each row also carries the `<axis>.id` provenance columns the config step recorded for its query in --query-ids-csv.
 
 Three artifacts, kept separate on purpose.
 The confidence table has a row for every id that ENTERED, with NaN where a number is unavailable.
@@ -30,7 +31,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import read_skipped_queries  # noqa: E402
+from biopipelines.biopipelines_io import read_skipped_queries, step_id_from_table_path  # noqa: E402
+from pipe_query_provenance import provenance_columns, read_query_provenance  # noqa: E402
 
 CONFIDENCE_COLUMNS = ["id", "plddt", "ptm", "iptm", "gpde", "has_clash",
                       "disorder", "ranking_score", "seed", "sample"]
@@ -159,6 +161,9 @@ def main():
 
     top_only = parse_bool(args.top_only)
     queries = read_ids(args.query_ids_csv)
+    provenance = read_query_provenance(args.query_ids_csv)
+    extra = provenance_columns(provenance)
+    step_id = step_id_from_table_path(args.local_missing_csv)
     skipped = read_skipped_queries(args.skipped_csv)
     if not queries:
         print(f"ERROR: {args.query_ids_csv} lists no queries")
@@ -174,8 +179,8 @@ def main():
     produced = 0
 
     def fail(query: str, cause: str) -> None:
-        confidence_rows.append({"id": query})
-        missing_rows.append({"id": query, "removed_by": "Protenix", "kind": "failure", "cause": cause})
+        confidence_rows.append({"id": query, **provenance.get(query, {})})
+        missing_rows.append({"id": query, "removed_by": step_id, "kind": "failure", "cause": cause})
 
     for query in queries:
         if query in skipped:
@@ -198,7 +203,7 @@ def main():
             out_id = query if top_only else f"{query}_{index}"
             destination = os.path.join(args.structures_dir, f"{out_id}.cif")
             shutil.copyfile(path, destination)
-            map_rows.append({"id": out_id, "file": destination})
+            map_rows.append({"id": out_id, "file": destination, **provenance.get(query, {})})
 
             if args.pae_dir:
                 matrix, reason = read_pae(sibling(path, prefix, "full_data", sample))
@@ -207,9 +212,9 @@ def main():
                 else:
                     pae_destination = os.path.join(args.pae_dir, f"{out_id}.npz")
                     np.savez_compressed(pae_destination, pae=matrix)
-                    pae_rows.append({"id": out_id, "file": pae_destination})
+                    pae_rows.append({"id": out_id, "file": pae_destination, **provenance.get(query, {})})
 
-            row = {"id": out_id, "seed": seed, "sample": sample}
+            row = {"id": out_id, "seed": seed, "sample": sample, **provenance.get(query, {})}
             row.update({k: v for k, v in scores.items() if v is not None})
             confidence_rows.append(row)
             produced += 1
@@ -217,10 +222,10 @@ def main():
         if args.pae_dir:
             remove_full_data(args.prediction_folder, query)
 
-    write_rows(args.structures_map_csv, ["id", "file"], map_rows)
+    write_rows(args.structures_map_csv, ["id", "file", *extra], map_rows)
     if args.pae_map_csv:
-        write_rows(args.pae_map_csv, ["id", "file"], pae_rows)
-    write_rows(args.confidence_csv, CONFIDENCE_COLUMNS, confidence_rows)
+        write_rows(args.pae_map_csv, ["id", "file", *extra], pae_rows)
+    write_rows(args.confidence_csv, [*CONFIDENCE_COLUMNS, *extra], confidence_rows)
     write_rows(args.local_missing_csv, ["id", "removed_by", "kind", "cause"], missing_rows)
 
     print(f"Collected {produced} structure(s) for {len(queries)} quer(y/ies); "

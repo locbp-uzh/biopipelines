@@ -222,6 +222,14 @@ class TestTheDeclaredOutputs:
         out = self._declare(tool(top_only=False), monkeypatch)
         assert out["structures"].ids == ["q_<1..5>"]
 
+    def test_the_sample_ids_are_composed_by_the_shared_helper(self, tool, monkeypatch):
+        import biopipelines.protenix as module
+        calls = []
+        monkeypatch.setattr(module, "generate_multiplied_ids_pattern",
+                            lambda ids, suffix: calls.append((list(ids), suffix)) or [f"{i}#{suffix}" for i in ids])
+        out = self._declare(tool(top_only=False), monkeypatch)
+        assert calls == [(["q"], "<1..5>")] and out["structures"].ids == ["q#<1..5>"]
+
     def test_every_seed_is_counted_in_the_declared_sample_ids(self, tool, monkeypatch):
         """seeds=[100, 101] at 3 samples writes six structures; declaring three wired downstream to half."""
         out = self._declare(tool(top_only=False, seeds=[100, 101], num_diffusion_samples=3), monkeypatch)
@@ -477,14 +485,16 @@ def _sample(pred, query, seed, sample, ranking, pae=True, n_token=3, layout="cur
         (folder / f"{prefix}_full_data_sample_{sample}.json").write_text(json.dumps(pae))
 
 
-def _postprocess(tmp_path, queries, *flags, skipped=None, with_pae=True):
+def _postprocess(tmp_path, queries, *flags, skipped=None, with_pae=True, ids_text=None, step=None):
+    """`step` puts the local missing file where a real run writes it, `<step>/execution/local_missing.csv`."""
     out = tmp_path / "out"
-    (tmp_path / "ids.csv").write_text("id\n" + "".join(f"{q}\n" for q in queries))
+    missing = out / step / "execution" / "local_missing.csv" if step else out / "x.csv"
+    (tmp_path / "ids.csv").write_text(ids_text or "id\n" + "".join(f"{q}\n" for q in queries))
     args = [sys.executable, POSTPROCESS, "--prediction-folder", str(tmp_path / "pred"),
             "--query-ids-csv", str(tmp_path / "ids.csv"),
             "--structures-dir", str(out / "structures"),
             "--structures-map-csv", str(out / "structures" / "m.csv"),
-            "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(out / "x.csv")]
+            "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(missing)]
     if skipped is not None:
         (tmp_path / "skipped.csv").write_text("id,cause\n" + "".join(f"{k},{v}\n" for k, v in skipped.items()))
         args += ["--skipped-csv", str(tmp_path / "skipped.csv")]
@@ -593,12 +603,12 @@ class TestThePostprocess:
         (pred / "ERR").mkdir(parents=True)
         (pred / "ERR" / "big.txt").write_text(
             "[Rank 0] big failed: protenix-v2 model does not support n_token > 2560.\nTraceback ...\n")
-        out, done = _postprocess(tmp_path, ["ok", "big", "silent"])
+        out, done = _postprocess(tmp_path, ["ok", "big", "silent"], step="002_Protenix")
         assert done.returncode == 0, done.stdout + done.stderr
         assert pd.read_csv(out / "c.csv")["id"].tolist() == ["ok", "big", "silent"]
-        missing = pd.read_csv(out / "x.csv")
+        missing = pd.read_csv(out / "002_Protenix" / "execution" / "local_missing.csv")
         assert missing["id"].tolist() == ["big", "silent"]
-        assert set(missing["kind"]) == {"failure"} and set(missing["removed_by"]) == {"Protenix"}
+        assert set(missing["kind"]) == {"failure"} and set(missing["removed_by"]) == {"002_Protenix"}
         assert "n_token > 2560" in missing.loc[0, "cause"]
         assert "no structure" in missing.loc[1, "cause"]
         assert pd.read_csv(out / "structures" / "m.csv")["id"].tolist() == ["ok"]
@@ -656,6 +666,91 @@ class TestThePostprocess:
     def test_an_empty_id_list_is_a_step_error(self, tmp_path):
         out, done = _postprocess(tmp_path, [])
         assert done.returncode == 1
+
+    def test_a_failure_row_names_its_step_so_a_later_step_of_the_same_tool_excuses_it(self, tmp_path):
+        """Stamped with the bare tool name, the row of an upstream Protenix step reads as a local failure of the next one."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "pipe_check_completion", os.path.join(SCRIPTS, "pipe_check_completion.py"))
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+
+        out, done = _postprocess(tmp_path, ["lost"], step="001_Protenix")
+        assert done.returncode == 1
+        expected = {"tables": {"missing": {"path": str(out / "001_Protenix" / "execution" / "local_missing.csv")}}}
+        assert checker._load_expected_missing_ids(expected, "001_Protenix", "Protenix") == []
+        assert checker._load_expected_missing_ids(expected, "003_Protenix", "Protenix") == ["lost"]
+
+
+class TestProvenanceColumns:
+    """`<axis>.id` columns on the maps and the confidence table, read by exact query id and never by splitting it."""
+
+    IDS = "id,proteins.id,ligands.id\na_1+l_2,a_1,l_2\nb+x+l_2,b+x,l_2\nbad+l_2,bad,l_2\n"
+
+    def test_every_row_names_the_input_of_each_axis_it_was_built_from(self, tmp_path):
+        pred = tmp_path / "pred"
+        _sample(pred, "a_1+l_2", 101, 0, ranking=0.5)
+        _sample(pred, "b+x+l_2", 101, 0, ranking=0.5)
+        out, done = _postprocess(tmp_path, [], ids_text=self.IDS, skipped={"bad+l_2": "letter U not allowed"})
+        assert done.returncode == 0, done.stdout + done.stderr
+        for table in (out / "structures" / "m.csv", out / "pae" / "pae_map.csv"):
+            frame = pd.read_csv(table).set_index("id")
+            assert frame.loc["a_1+l_2", "proteins.id"] == "a_1" and frame.loc["a_1+l_2", "ligands.id"] == "l_2"
+            assert frame.loc["b+x+l_2", "proteins.id"] == "b+x", "a + inside an input id is not a separator"
+        confidence = pd.read_csv(out / "c.csv").set_index("id")
+        assert list(confidence.columns[-2:]) == ["proteins.id", "ligands.id"]
+        assert confidence.loc["bad+l_2", "proteins.id"] == "bad", "a skipped query keeps its provenance"
+
+    def test_every_sample_of_a_query_carries_the_provenance_of_that_query(self, tmp_path):
+        pred = tmp_path / "pred"
+        for sample in (0, 1):
+            _sample(pred, "a_1+l_2", 101, sample, ranking=0.5 - 0.1 * sample)
+        ids = "id,proteins.id,ligands.id\na_1+l_2,a_1,l_2\n"
+        out, done = _postprocess(tmp_path, [], "--top-only", "False", ids_text=ids)
+        assert done.returncode == 0, done.stdout + done.stderr
+        frame = pd.read_csv(out / "structures" / "m.csv")
+        assert frame["id"].tolist() == ["a_1+l_2_1", "a_1+l_2_2"]
+        assert set(frame["proteins.id"]) == {"a_1"} and set(frame["ligands.id"]) == {"l_2"}
+
+    def test_a_query_list_without_provenance_adds_no_column(self, tmp_path):
+        _sample(tmp_path / "pred", "q", 101, 0, ranking=0.5)
+        out, done = _postprocess(tmp_path, ["q"])
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert list(pd.read_csv(out / "structures" / "m.csv").columns) == ["id", "file"]
+
+    def test_the_config_step_records_the_provenance_of_every_query_including_the_skipped(self, tmp_path):
+        from biopipelines.combinatorics import AxisConfig, CombinatoricsConfig
+        pd.DataFrame([{"id": "a_1", "sequence": PROTEIN}, {"id": "b+x", "sequence": "MK*"}]).to_csv(
+            tmp_path / "proteins.csv", index=False)
+        pd.DataFrame([{"id": "l_2", "smiles": "CCO"}]).to_csv(tmp_path / "ligands.csv", index=False)
+        CombinatoricsConfig(axes={
+            "proteins": AxisConfig(name="proteins", mode="each", entity_type="protein",
+                                   sources=[{"path": str(tmp_path / "proteins.csv"), "iterate": True}]),
+            "ligands": AxisConfig(name="ligands", mode="each", entity_type="ligand",
+                                  sources=[{"path": str(tmp_path / "ligands.csv"), "iterate": True}]),
+        }).save(str(tmp_path / "combinatorics.json"))
+        done = subprocess.run(
+            [sys.executable, CONFIG, "--combinatorics-config", str(tmp_path / "combinatorics.json"),
+             "--queries-dir", str(tmp_path / "queries"), "--query-ids-csv", str(tmp_path / "ids.csv"),
+             "--skipped-csv", str(tmp_path / "skipped.csv")], capture_output=True, text=True)
+        assert done.returncode == 0, done.stdout + done.stderr
+        ids = pd.read_csv(tmp_path / "ids.csv")
+        assert ids.to_dict("records") == [
+            {"id": "a_1+l_2", "proteins.id": "a_1", "ligands.id": "l_2"},
+            {"id": "b+x+l_2", "proteins.id": "b+x", "ligands.id": "l_2"}]
+
+    def test_the_confidence_table_declares_the_columns(self, tool, monkeypatch):
+        import biopipelines.protenix as module
+        monkeypatch.setattr(module, "predict_output_ids_with_provenance",
+                            lambda **k: (["a+l"], {"proteins": ["a"], "ligands": ["l"]}))
+        made = tool()
+        made._axis_kwargs = lambda: {}
+        made.stream_path = lambda name, f: f"/x/{name}/{f}"
+        made.structures_map_csv = made.pae_map_csv = made.confidence_csv = made.missing_csv = "/x/m.csv"
+        made.output_folder = "/x"
+        made.missing_table_info = lambda path: None
+        columns = made.get_output_files()["tables"]["confidence"].info.columns
+        assert columns[-2:] == ["proteins.id", "ligands.id"]
 
 
 # -- install ---------------------------------------------------------------------

@@ -14,7 +14,6 @@ The postprocess turns those into rows of the confidence and missing tables.
 """
 
 import argparse
-import csv
 import itertools
 import json
 import os
@@ -26,12 +25,13 @@ _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..
 sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from combinatorics import CombinatoricsConfig, predict_single_output_id
+from combinatorics import CombinatoricsConfig, predict_single_output_id, predict_single_provenance
 from biopipelines.biopipelines_io import write_skipped_queries
 from biopipelines.id_map_utils import MissingAlignment, MsaLookup
 from ligand_utils import auth_ligand_field
 from nucleic_acids import DOUBLE_STRANDED_ENTITY_TYPES, reverse_complement
 from pipe_axis_data import load_axis_data
+from pipe_query_provenance import write_query_provenance
 
 # Entity order is chain order, so it is fixed: covalent_bonds names entities by their position in it.
 AXIS_ORDER = ("proteins", "ssDNA", "dsDNA", "ssRNA", "dsRNA", "ligands")
@@ -194,8 +194,12 @@ def build_job(query_id: str, items: List, msas: Optional[MsaLookup],
 
 
 def build_queries(elements: Dict[str, Dict], msas: Optional[MsaLookup],
-                  bonds: Optional[List[Dict]]) -> Tuple[Dict[str, Dict], Dict[str, str]]:
-    """({query id: upstream job}, {query id: cause}) for the queries written and the ones skipped."""
+                  bonds: Optional[List[Dict]], provenance: Optional[Dict[str, Dict[str, str]]] = None
+                  ) -> Tuple[Dict[str, Dict], Dict[str, str]]:
+    """({query id: upstream job}, {query id: cause}) for the queries written and the ones skipped.
+
+    When a dict is passed as `provenance`, every query that entered, skipped or not, is recorded in it with the input each axis contributed.
+    """
     iteration, static_only = plan_iteration(elements)
     # One empty combination only when nothing iterates; an iterating axis with no records yields no query.
     combinations = (list(itertools.product(*[list(enumerate(iterated))
@@ -210,19 +214,13 @@ def build_queries(elements: Dict[str, Dict], msas: Optional[MsaLookup],
             continue
         # The id comes from the framework's own helper: it is what the wrapper predicted at configuration time.
         query_id = predict_single_output_id(**selections)
+        if provenance is not None:
+            provenance[query_id] = predict_single_provenance(**selections)
         try:
             jobs[query_id] = build_job(query_id, items, msas, bonds)
         except ValueError as exc:
             skipped[query_id] = str(exc)
     return jobs, skipped
-
-
-def write_csv(path: str, header: List[str], rows: List[List]) -> None:
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(header)
-        writer.writerows(rows)
 
 
 def main():
@@ -242,12 +240,13 @@ def main():
         with open(args.covalent_bonds_json) as handle:
             bonds = json.load(handle)
 
-    jobs, skipped = build_queries(axis_elements(config), msas, bonds)
+    provenance: Dict[str, Dict[str, str]] = {}
+    jobs, skipped = build_queries(axis_elements(config), msas, bonds, provenance)
     if not jobs and not skipped:
         print("ERROR: no queries were built; every input axis resolved to zero records")
         sys.exit(1)
 
-    write_csv(args.query_ids_csv, ["id"], [[query_id] for query_id in [*jobs, *skipped]])
+    write_query_provenance(args.query_ids_csv, {query_id: provenance[query_id] for query_id in [*jobs, *skipped]})
     write_skipped_queries(args.skipped_csv, skipped)
     for query_id, cause in skipped.items():
         print(f"WARNING: query {query_id} skipped: {cause}")
