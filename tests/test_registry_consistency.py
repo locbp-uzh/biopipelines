@@ -45,6 +45,10 @@ ENV_EXEMPT = {
     "config.daint.yaml": "aarch64: x86-64-only binaries and PyG wheels are unavailable",
 }
 
+# Base-env tools the Daint block lists although the other variants leave them on the implicit `biopipelines` fallback (its own comment says why).
+DAINT_BASE_ONLY = {"Angle", "Consensus", "EnsembleAnalysis", "LoadMultiple", "MSA", "Pool", "RCSB", "ReMap",
+                   "Scripting", "StructureCluster", "Table"}
+
 _PAIR = re.compile(
     r'TOOL_NAME\s*=\s*["\']([^"\']+)["\'](?:(?!TOOL_NAME).)*?TOOL_VERSION\s*=\s*["\']([^"\']+)["\']',
     re.S)
@@ -141,20 +145,24 @@ def test_every_tool_has_a_readme_row(tools):
 def test_env_mappings_agree_across_variants():
     """A tool mapped on one variant and absent on another is usually a bug.
 
-    OpenMM's ligand stack lived on Daint alone for exactly this reason. Daint is
-    exempt because it is aarch64 and genuinely cannot run some tools.
+    OpenMM's ligand stack lived on Daint alone for exactly this reason, and SequenceIdentityGate
+    was mapped on Daint alone again. Daint is exempt from having every tool, because it is aarch64
+    and genuinely cannot run some, but not from naming a tool the others lack.
     """
     mapped = {}
     for config in CONFIGS:
         cfg = yaml.safe_load(_read(config))
         mapped[config] = set(((cfg or {}).get("environments", {}) or {}))
 
-    reference = "config.cluster.yaml"
+    required = [config for config in CONFIGS if config not in ENV_EXEMPT]
     gaps = []
-    for config in CONFIGS:
-        if config == reference or config in ENV_EXEMPT:
-            continue
-        for tool in sorted(mapped[reference] - mapped[config]):
-            gaps.append(f"{tool}: in {reference}, absent from {config}")
+    for config in required:
+        for other in required:
+            if config != other:
+                gaps += [f"{tool}: in {config}, absent from {other}" for tool in sorted(mapped[config] - mapped[other])]
+    everywhere = set.union(*(mapped[config] for config in required))
+    for config in ENV_EXEMPT:
+        gaps += [f"{tool}: in {config}, absent from every variant that is not exempt"
+                 for tool in sorted(mapped[config] - everywhere - DAINT_BASE_ONLY)]
     assert not gaps, (
         "environment mappings diverge between variants:\n  " + "\n  ".join(gaps))

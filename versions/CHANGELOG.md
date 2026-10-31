@@ -13,6 +13,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Framework
 
+- `config.cluster.yaml`, `config.colab.yaml` and `config.container.yaml` name `SequenceIdentityGate` under `environments:`, as `config.daint.yaml` already did; elsewhere it worked only through the implicit `biopipelines` fallback. `tests/test_registry_consistency.py` compares every variant that is not exempt against every other, and holds a key that only the exempt Daint config has to a named list of base-env tools.
+
+- `config.daint.yaml` no longer routes ESMFold2, and the README and `daint_backend.md` stop counting it, or BioEmu2, as verified on aarch64. The wrapper needs esm >= 3.4 (torch 2.11) and the EDF image ships torch 2.8, so the environment cannot be built, and `ESMFold2.install()` is refused there by name. The platform badges of Foldseek, TMalign, USalign, PPIDdG, LigandDdG, Foldcomp, SelectionTransfer and SequenceIdentityGate keep only the platforms a run is recorded for, and four x86-64 badges take the legend colour.
+
 - No prose states a tool count or a tag count any more: the MCP server instructions, `SKILL.md` and the `tool_schemas` docstring point at the generated catalog, whose header counts the tools, and the tag count in `bp_tools` and the generated index is `len(tool_tags.ALL_TAGS)`. The MCP instructions said 86 tools and `SKILL.md` 86 and 88 while the index listed 108.
 
 - `id_map_utils.MsaLookup` is the one place that answers which alignment belongs to a protein: its exact id, then the `sequences.id` provenance column, then the legacy `<id>_msa` row id of maps written before the rule, then, when the caller passes the protein's sequence, the row whose `sequence` column equals it. Nothing looser is tried. A stream that is 1:1 with its input keeps the input's id, and a provenance column that only repeats the id is not written; both are stated in the developer manual next to the output id rules. `tests/test_msas_ids.py` pins the lookup, the producers and a lint that no module builds an id with the `_msa` suffix.

@@ -191,6 +191,7 @@ environments:
   Selection: "ProteinEnv"
   SelectionTransfer: "biopipelines"
   Sequence: "biopipelines"
+  SequenceIdentityGate: "biopipelines"
   SequenceMetricCorrelation: "MutationEnv"
   StitchSequences: "biopipelines"
   ThermoMPNN: "thermompnn"
