@@ -9,7 +9,7 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
-    from .combinatorics import (generate_combinatorics_config, get_mode,
+    from .combinatorics import (generate_combinatorics_config, generate_multiplied_ids_pattern, get_mode,
                                 predict_output_ids_with_provenance)
     from .datastream_resolver import resolve_input_to_datastream
 except ImportError:
@@ -18,7 +18,7 @@ except ImportError:
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
-    from combinatorics import (generate_combinatorics_config, get_mode,
+    from combinatorics import (generate_combinatorics_config, generate_multiplied_ids_pattern, get_mode,
                                predict_output_ids_with_provenance)
     from datastream_resolver import resolve_input_to_datastream
 
@@ -65,10 +65,14 @@ class OpenFold3(BaseConfig):
         devices: GPUs to distribute over (upstream default 1).
         runner_yaml: a user-supplied runner YAML, merged under what the wrapper writes. The
             escape hatch for upstream settings this wrapper does not name.
+            With `top_only=False` it needs `num_diffusion_samples`, and an `experiment_settings.seeds` in it
+            has to be a list (it wins over `seeds`), so the per-sample ids can be declared.
 
     Outputs:
         Streams:
             structures: one `<id>.cif` (or `.pdb`) per predicted complex.
+                        Its map, the `pae` map and the `confidence` table carry one `<axis>.id` column per input
+                        axis (`proteins.id`, `ligands.id`, ...) naming the input of that axis the row was built from.
             pae:        one `<id>.json` per structure, with the same ids as `structures`.
                         Upstream's full confidence file for the kept sample (`*_confidences.json`) is copied unchanged.
                         It is a JSON object with keys `plddt` (N_atom floats), `pde` and `pae` (N_token x N_token nested lists).
@@ -78,17 +82,15 @@ class OpenFold3(BaseConfig):
                         The stream is absent when a user `runner_yaml` sets `write_full_confidence_scores: false` or a `full_confidence_output_format` other than json.
         Tables:
             confidence: id | plddt | ptm | iptm | gpde | has_clash | disorder |
-                        ranking_score | seed | sample
+                        ranking_score | seed | sample | <axis>.id ...
             missing:    id | removed_by | kind | cause
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.8"
     ENV_NAME = "openfold3"
 
-    # Upstream spells its flags with underscores. The auto-generated option table in the docs
-    # renders them with dashes, but both worked examples -- the README quick start and the
-    # precomputed-MSA how-to -- use underscores, so that is what is emitted.
+    # Upstream spells its flags with underscores; the docs' option table renders them with dashes, but both worked examples use underscores.
     PREDICT_COMMAND = "run_openfold predict"
 
     @classmethod
@@ -98,11 +100,7 @@ class OpenFold3(BaseConfig):
         remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
         env_block = cls._env_install_block(env, env_manager, biopipelines)
         run = cls._env_run(env, env_manager)
-        # The weights are NOT fetched on first prediction: run_openfold validates the checkpoint
-        # up front and refuses ("cowardly refusing to perform inference"), so a pipeline that
-        # installed cleanly still dies at the first query. `setup_openfold` is the downloader,
-        # and it runs on every install -- including the already-installed path, or an env made
-        # before this step existed never acquires its weights.
+        # The weights are not fetched on first prediction: run_openfold refuses to run without them, so setup_openfold runs on every install, the already-installed path included.
         weights = f"""
 echo "Ensuring OpenFold3 parameters"
 if ! {run}setup_openfold --non-interactive; then
@@ -134,10 +132,10 @@ fi
     # Configuration-time artifacts
     combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
     runner_yaml_file = Path(lambda self: self.configuration_path("runner.yaml"))
-    # Written at EXECUTION time: one JSON holding every query, since run_openfold folds a whole
-    # batch in one process rather than one file at a time.
+    # Written at execution time: one JSON holding every query, since run_openfold folds a whole batch in one process.
     queries_json = Path(lambda self: self.configuration_path("queries.json"))
     skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
+    provenance_csv = Path(lambda self: self.configuration_path("query_provenance.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
 
@@ -236,8 +234,7 @@ fi
                 raise ValueError("seeds must be a non-empty list of integers")
             if any(not isinstance(s, int) or isinstance(s, bool) for s in self.seeds):
                 raise ValueError("seeds must contain integers only")
-            # Upstream takes both, and disagreeing values are not reconcilable: the count says
-            # how many seeds to draw, the list says which. Refuse rather than pick one.
+            # Upstream takes both and disagreeing values cannot be reconciled, so refuse rather than pick one.
             if self.num_model_seeds is not None and self.num_model_seeds != len(self.seeds):
                 raise ValueError(
                     f"num_model_seeds ({self.num_model_seeds}) contradicts the {len(self.seeds)} "
@@ -255,10 +252,12 @@ fi
         if self.template_chain_ids and not self.template:
             raise ValueError("template_chain_ids has no effect without template")
 
-        if not self.top_only and self.runner_yaml and self.num_diffusion_samples is None:
+        if not self.top_only and self.runner_yaml:
             # The sample count then lives in a YAML read only at run time, and the declared ids would guess it.
-            raise ValueError("top_only=False with runner_yaml needs num_diffusion_samples, so the "
-                             "per-sample ids can be declared")
+            if self.num_diffusion_samples is None:
+                raise ValueError("top_only=False with runner_yaml needs num_diffusion_samples, so the "
+                                 "per-sample ids can be declared")
+            self._validate_runner_seeds()
 
         if self.msas is not None:
             fmt = getattr(getattr(self, "msas_stream", None), "format", None)
@@ -311,17 +310,45 @@ fi
                      (self.proteins, self.ssDNA, self.dsDNA, self.ssRNA, self.dsRNA, self.ligands)
                      if axis is not None)
 
+    def _supplied_runner(self) -> Dict[str, Any]:
+        """The user's runner YAML, or empty when none was given or the file is not there yet."""
+        if not self.runner_yaml or not os.path.exists(self.runner_yaml):
+            return {}
+        import yaml
+
+        with open(self.runner_yaml) as handle:
+            return yaml.safe_load(handle) or {}
+
+    def _supplied_seeds(self):
+        """`experiment_settings.seeds` of the user's runner YAML, or None when it names none."""
+        return (self._supplied_runner().get("experiment_settings") or {}).get("seeds")
+
+    def _validate_runner_seeds(self):
+        """Refuse a seed setting in runner_yaml from which the number of structures per query cannot be declared."""
+        named = self._supplied_seeds()
+        if named is None:
+            return
+        if not isinstance(named, (list, tuple)) or not named:
+            raise ValueError("top_only=False needs experiment_settings.seeds of runner_yaml to be a "
+                             "non-empty list, so the per-sample ids can be declared")
+        if self.num_model_seeds is not None and self.num_model_seeds != len(named):
+            raise ValueError(
+                f"num_model_seeds ({self.num_model_seeds}) contradicts the {len(named)} value(s) in "
+                f"experiment_settings.seeds of runner_yaml; pass one or the other")
+
+    def _seeds_per_query(self) -> int:
+        """How many seeds a query runs: the runner YAML's own list when it names one, since it wins over `seeds`."""
+        named = self._supplied_seeds()
+        if isinstance(named, (list, tuple)) and named:
+            return len(named)
+        return len(self.seeds) if self.seeds else (self.num_model_seeds or 1)
+
     def _writes_full_confidence_json(self) -> bool:
         """Whether run_openfold writes the `*_confidences.json` the pae stream is copied from.
 
         Only a user runner_yaml can turn it off; the writer's defaults are on and json.
         """
-        if not self.runner_yaml or not os.path.exists(self.runner_yaml):
-            return True
-        import yaml
-
-        with open(self.runner_yaml) as handle:
-            writer = (yaml.safe_load(handle) or {}).get("output_writer_settings") or {}
+        writer = self._supplied_runner().get("output_writer_settings") or {}
         return (writer.get("write_full_confidence_scores", True) is not False
                 and writer.get("full_confidence_output_format", "json") == "json")
 
@@ -346,8 +373,7 @@ fi
         if self.runner_yaml:
             with open(self.runner_yaml) as handle:
                 supplied = yaml.safe_load(handle) or {}
-            # The user's file wins: it is the escape hatch, and a wrapper default silently
-            # overriding what someone wrote explicitly is the opposite of an escape hatch.
+            # The user's file wins: it is the escape hatch, and a wrapper default overriding what someone wrote explicitly would defeat that.
             for key, value in supplied.items():
                 if isinstance(value, dict) and isinstance(runner.get(key), dict):
                     runner[key].update(value)
@@ -394,7 +420,8 @@ fi
 python "{self.config_py}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
     --queries-json "{self.queries_json}" \\
-    --skipped-csv "{self.skipped_csv}"{msa_flag}{template_flag}
+    --skipped-csv "{self.skipped_csv}" \\
+    --provenance-csv "{self.provenance_csv}"{msa_flag}{template_flag}
 
 """
 
@@ -431,6 +458,7 @@ python "{self.postprocess_py}" \\
     --combinatorics-config "{self.combinatorics_config_file}" \\
     --queries-json "{self.queries_json}" \\
     --skipped-csv "{self.skipped_csv}" \\
+    --provenance-csv "{self.provenance_csv}" \\
     --structures-dir "{self.stream_folder('structures')}" \\
     --structures-map-csv "{self.structures_map_csv}" \\
     --confidence-csv "{self.confidence_csv}" \\
@@ -444,15 +472,13 @@ python "{self.postprocess_py}" \\
         predicted_ids, provenance = predict_output_ids_with_provenance(**self._axis_kwargs())
 
         extension = ".pdb" if self.output_format == "pdb" else ".cif"
-        # With top_only off every sample is surfaced as <id>_1..N, so the declared ids have to
-        # say so or the completion check demands files that were never meant to exist.
+        # With top_only off every sample is surfaced as <id>_1..N, so the declared ids have to say so or the completion check demands files that were never meant to exist.
         if self.top_only:
             structure_ids = predicted_ids
         else:
             # The postprocess numbers every sample of every seed, so the count is their product.
-            seeds = len(self.seeds) if self.seeds else (self.num_model_seeds or 1)
-            samples = (self.num_diffusion_samples or 5) * seeds
-            structure_ids = [f"{i}_<1..{samples}>" for i in predicted_ids]
+            samples = (self.num_diffusion_samples or 5) * self._seeds_per_query()
+            structure_ids = generate_multiplied_ids_pattern(predicted_ids, f"<1..{samples}>")
 
         structures = DataStream(
             name="structures",
@@ -477,7 +503,8 @@ python "{self.postprocess_py}" \\
                 name="confidence",
                 path=self.confidence_csv,
                 columns=["id", "plddt", "ptm", "iptm", "gpde", "has_clash",
-                         "disorder", "ranking_score", "seed", "sample"],
+                         "disorder", "ranking_score", "seed", "sample",
+                         *[f"{axis}.id" for axis in provenance]],
                 description="Aggregated per-complex confidence scores from OpenFold3",
             ),
             "missing": self.missing_table_info(self.missing_csv),

@@ -413,3 +413,195 @@ class TestThePaeStream:
             runner="output_writer_settings:\n  write_full_confidence_scores: True\n"
                    "  full_confidence_output_format: json\n")
         assert tool.streams.pae.ids == ["p1"]
+
+
+class TestFindingsFromThe160Review:
+
+    @staticmethod
+    def _declare(made, monkeypatch, runner_text=None, tmp_path=None):
+        import biopipelines.openfold3 as module
+        monkeypatch.setattr(module, "predict_output_ids_with_provenance", lambda **k: (["q"], {}))
+        if runner_text is not None:
+            (tmp_path / "runner.yaml").write_text(runner_text)
+            made.runner_yaml = str(tmp_path / "runner.yaml")
+        made._axis_kwargs = lambda: {}
+        made.stream_path = lambda name, f: f
+        made.structures_map_csv = made.confidence_csv = made.missing_csv = "x.csv"
+        made.output_folder = "out"
+        made.missing_table_info = lambda path: None
+        return made.get_output_files()
+
+    def test_the_seeds_of_runner_yaml_are_counted_in_the_declared_sample_ids(self, tool, monkeypatch, tmp_path):
+        """The runner YAML's seeds replace `seeds`, so three of them at two samples write six structures per query."""
+        made = tool(top_only=False, num_diffusion_samples=2)
+        out = self._declare(made, monkeypatch, "experiment_settings:\n  seeds: [1, 2, 3]\n", tmp_path)
+        assert out["structures"].ids == ["q_<1..6>"]
+
+    def test_the_seeds_of_runner_yaml_win_over_the_seeds_argument(self, tool, monkeypatch, tmp_path):
+        made = tool(top_only=False, num_diffusion_samples=2, seeds=[9])
+        out = self._declare(made, monkeypatch, "experiment_settings:\n  seeds: [1, 2, 3]\n", tmp_path)
+        assert out["structures"].ids == ["q_<1..6>"]
+
+    def test_a_runner_yaml_without_seeds_leaves_the_count_to_the_arguments(self, tool, monkeypatch, tmp_path):
+        made = tool(top_only=False, num_diffusion_samples=2, num_model_seeds=3)
+        out = self._declare(made, monkeypatch, "model_update:\n  presets: [predict]\n", tmp_path)
+        assert out["structures"].ids == ["q_<1..6>"]
+
+    @pytest.mark.parametrize("seeds", ["3", "[]"])
+    def test_seeds_in_runner_yaml_that_are_not_a_list_are_refused_for_per_sample_ids(self, tool, tmp_path, seeds):
+        (tmp_path / "runner.yaml").write_text(f"experiment_settings:\n  seeds: {seeds}\n")
+        made = tool(top_only=False, num_diffusion_samples=2, runner_yaml=str(tmp_path / "runner.yaml"))
+        with pytest.raises(ValueError, match="non-empty list"):
+            OpenFold3.validate_params(made)
+
+    def test_a_seed_count_that_contradicts_the_seeds_of_runner_yaml_is_refused(self, tool, tmp_path):
+        (tmp_path / "runner.yaml").write_text("experiment_settings:\n  seeds: [1, 2]\n")
+        made = tool(top_only=False, num_diffusion_samples=2, num_model_seeds=3,
+                    runner_yaml=str(tmp_path / "runner.yaml"))
+        with pytest.raises(ValueError, match="contradicts"):
+            OpenFold3.validate_params(made)
+
+    def test_the_seeds_of_runner_yaml_do_not_matter_while_only_the_best_sample_is_kept(self, tool, tmp_path):
+        (tmp_path / "runner.yaml").write_text("experiment_settings:\n  seeds: 3\n")
+        OpenFold3.validate_params(tool(top_only=True, runner_yaml=str(tmp_path / "runner.yaml")))
+
+    def test_an_alignment_the_model_cannot_read_skips_only_its_query(self, tmp_path):
+        import biopipelines.id_map_utils as id_map_utils
+        (tmp_path / "p1.a3m").write_text(">p1\nMKT\n")
+        (tmp_path / "p2.csv").write_text("key,sequence\n-1,MKT\n")
+        msas = id_map_utils.MsaLookup([{"id": "p1", "file": str(tmp_path / "p1.a3m")},
+                                       {"id": "p2", "file": str(tmp_path / "p2.csv")}])
+        elements = {"proteins": {"entity_type": "protein", "mode": "each", "static_first": False, "static": [],
+                                 "iterated": [{"id": "p1", "sequence": "MKT"}, {"id": "p2", "sequence": "MAA"}]}}
+        payload, skipped = pipe_openfold3_config.build_queries(
+            elements, pipe_openfold3_config.Alignments(msas, str(tmp_path / "msas")), None, None)
+        assert list(payload["queries"]) == ["p1"]
+        assert list(skipped) == ["p2"] and "a3m" in skipped["p2"]
+
+    def test_the_sample_ids_are_composed_by_the_shared_helper(self, tool, monkeypatch):
+        import biopipelines.openfold3 as module
+        calls = []
+        monkeypatch.setattr(module, "generate_multiplied_ids_pattern",
+                            lambda ids, suffix: calls.append((list(ids), suffix)) or [f"{i}#{suffix}" for i in ids])
+        out = self._declare(tool(top_only=False, num_diffusion_samples=3), monkeypatch)
+        assert calls == [(["q"], "<1..3>")] and out["structures"].ids == ["q#<1..3>"]
+
+    def test_a_failure_row_names_its_step_so_a_later_step_of_the_same_tool_excuses_it(self, tmp_path):
+        import importlib.util
+        import subprocess
+        spec = importlib.util.spec_from_file_location(
+            "pipe_check_completion", os.path.join(REPO_ROOT, "pipe_scripts", "pipe_check_completion.py"))
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+
+        (tmp_path / "pred").mkdir()
+        queries = tmp_path / "queries.json"
+        queries.write_text(json.dumps({"queries": {"lost": {}}}))
+        out = tmp_path / "out"
+        missing = out / "001_OpenFold3" / "execution" / "local_missing.csv"
+        script = os.path.join(REPO_ROOT, "pipe_scripts", "pipe_openfold3_postprocess.py")
+        done = subprocess.run([sys.executable, script, "--prediction-folder", str(tmp_path / "pred"),
+                               "--combinatorics-config", str(tmp_path / "none.json"),
+                               "--queries-json", str(queries), "--structures-dir", str(out / "s"),
+                               "--structures-map-csv", str(out / "m.csv"), "--confidence-csv", str(out / "c.csv"),
+                               "--local-missing-csv", str(missing)], capture_output=True, text=True)
+        assert done.returncode == 1 and missing.exists(), done.stdout + done.stderr
+        expected = {"tables": {"missing": {"path": str(missing)}}}
+        assert checker._load_expected_missing_ids(expected, "001_OpenFold3", "OpenFold3") == []
+        assert checker._load_expected_missing_ids(expected, "003_OpenFold3", "OpenFold3") == ["lost"]
+
+
+class TestProvenanceColumns:
+    """`<axis>.id` columns on the maps and the confidence table, read by exact query id and never by splitting it."""
+
+    PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
+
+    @staticmethod
+    def _axis(entity_type, records):
+        return {"entity_type": entity_type, "mode": "each", "iterated": records, "static": [],
+                "static_first": False}
+
+    def _elements(self):
+        return {"proteins": self._axis("protein", [{"id": "a_1", "sequence": self.PROTEIN},
+                                                   {"id": "b+x", "sequence": self.PROTEIN}]),
+                "ligands": self._axis("ligand", [{"id": "l_2", "smiles": "CCO"}])}
+
+    def test_the_builder_records_what_each_axis_contributed_to_every_query(self):
+        provenance = {}
+        pipe_openfold3_config.build_queries(self._elements(), None, None, None, provenance)
+        assert provenance == {"a_1+l_2": {"proteins": "a_1", "ligands": "l_2"},
+                              "b+x+l_2": {"proteins": "b+x", "ligands": "l_2"}}
+
+    def test_a_skipped_query_is_recorded_too(self):
+        import biopipelines.id_map_utils as id_map_utils
+        provenance = {}
+        _payload, skipped = pipe_openfold3_config.build_queries(
+            self._elements(), pipe_openfold3_config.Alignments(
+                id_map_utils.MsaLookup([{"id": "a_1", "file": "/nowhere/a_1.a3m"}]), "/x"),
+            None, None, provenance)
+        assert set(skipped) == set(provenance) == {"a_1+l_2", "b+x+l_2"}
+
+    @staticmethod
+    def _collect(tmp_path, ids, provenance_text, *flags):
+        import subprocess
+        pred = tmp_path / "pred"
+        for query in ids:
+            (pred / query / "seed_1").mkdir(parents=True, exist_ok=True)
+            (pred / query / "seed_1" / f"{query}_seed_1_sample_1_model.cif").write_text("data_x\n")
+            (pred / query / "seed_1" / f"{query}_seed_1_sample_1_confidences.json").write_text('{"pae": [[0.0]]}')
+        (tmp_path / "queries.json").write_text(json.dumps({"queries": {q: {} for q in ids}}))
+        (tmp_path / "provenance.csv").write_text(provenance_text)
+        out = tmp_path / "out"
+        script = os.path.join(REPO_ROOT, "pipe_scripts", "pipe_openfold3_postprocess.py")
+        return out, subprocess.run(
+            [sys.executable, script, "--prediction-folder", str(pred),
+             "--combinatorics-config", str(tmp_path / "none.json"),
+             "--queries-json", str(tmp_path / "queries.json"),
+             "--provenance-csv", str(tmp_path / "provenance.csv"),
+             "--structures-dir", str(out / "structures"), "--structures-map-csv", str(out / "m.csv"),
+             "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(out / "x.csv"), *flags],
+            capture_output=True, text=True)
+
+    def test_every_row_names_the_input_of_each_axis_it_was_built_from(self, tmp_path):
+        import pandas as pd
+        text = "id,proteins.id,ligands.id\na_1+l_2,a_1,l_2\nb+x+l_2,b+x,l_2\n"
+        out, done = self._collect(tmp_path, ["a_1+l_2", "b+x+l_2"], text,
+                                  "--pae-dir", str(tmp_path / "out" / "pae"),
+                                  "--pae-map-csv", str(tmp_path / "out" / "pae" / "pae_map.csv"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        frame = pd.read_csv(out / "m.csv").set_index("id")
+        assert frame.loc["b+x+l_2", "proteins.id"] == "b+x", "a + inside an input id is not a separator"
+        assert frame.loc["a_1+l_2", "ligands.id"] == "l_2"
+        assert list(pd.read_csv(out / "c.csv").columns[-2:]) == ["proteins.id", "ligands.id"]
+        pae = pd.read_csv(out / "pae" / "pae_map.csv").set_index("id")
+        assert list(pae.columns) == ["file", "proteins.id", "ligands.id"]
+        assert pae.loc["b+x+l_2", "proteins.id"] == "b+x"
+
+    def test_a_failed_query_keeps_its_provenance_in_the_confidence_table(self, tmp_path):
+        import pandas as pd
+        (tmp_path / "skipped.csv").write_text("id,cause\nlost+l_2,no alignment\n")
+        text = "id,proteins.id,ligands.id\na_1+l_2,a_1,l_2\nlost+l_2,lost,l_2\n"
+        out, done = self._collect(tmp_path, ["a_1+l_2"], text, "--skipped-csv", str(tmp_path / "skipped.csv"))
+        assert done.returncode == 0, done.stdout + done.stderr
+        confidence = pd.read_csv(out / "c.csv").set_index("id")
+        assert confidence.loc["lost+l_2", "proteins.id"] == "lost"
+
+    def test_the_pipeline_hands_the_provenance_file_from_the_config_step_to_the_postprocess(
+            self, local_config, isolated_cwd, new_pipeline):
+        import re
+        _tool, script = TestThePaeStream._declared(new_pipeline, isolated_cwd)
+        paths = re.findall(r'--provenance-csv "([^"]+)"', script)
+        assert len(paths) == 2 and paths[0] == paths[1]
+        assert paths[0].endswith(os.path.join("_configuration", "query_provenance.csv"))
+
+    def test_the_confidence_table_declares_the_columns(self, tool, monkeypatch):
+        import biopipelines.openfold3 as module
+        monkeypatch.setattr(module, "predict_output_ids_with_provenance",
+                            lambda **k: (["a+l"], {"proteins": ["a"], "ligands": ["l"]}))
+        made = tool()
+        made._axis_kwargs = lambda: {}
+        made.stream_path = lambda name, f: f
+        made.structures_map_csv = made.confidence_csv = made.missing_csv = "x.csv"
+        made.output_folder = "out"
+        made.missing_table_info = lambda path: None
+        assert made.get_output_files()["tables"]["confidence"].info.columns[-2:] == ["proteins.id", "ligands.id"]

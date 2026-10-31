@@ -24,16 +24,15 @@ _biopipelines_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..
 sys.path.insert(0, _biopipelines_dir)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from combinatorics import CombinatoricsConfig, predict_single_output_id
+from combinatorics import CombinatoricsConfig, predict_single_output_id, predict_single_provenance
 from biopipelines.biopipelines_io import write_skipped_queries
 from biopipelines.id_map_utils import MissingAlignment, MsaLookup
 from ligand_utils import auth_ligand_field
 from nucleic_acids import DOUBLE_STRANDED_ENTITY_TYPES, RNA_ENTITY_TYPES, reverse_complement
 from pipe_axis_data import load_axis_data
+from pipe_query_provenance import write_query_provenance
 
-# The order chains are written in, so a query's chain ids are stable across runs. An unstable
-# chain order would change `chains_ptm:0` from one run to the next and make two runs of the same
-# campaign look different when nothing was.
+# The order chains are written in, so a query's chain ids (and `chains_ptm:0`) are stable across runs.
 AXIS_ORDER = ("proteins", "ssDNA", "dsDNA", "ssRNA", "dsRNA", "ligands")
 
 MOLECULE_TYPES = {
@@ -108,12 +107,15 @@ class Alignments:
         self._staged: Dict[str, str] = {}
 
     def paths_for(self, protein_id: str, sequence: Optional[str]) -> List[str]:
-        """The staged alignment of one protein chain; raises MissingAlignment when it has none."""
+        """The staged alignment of one protein chain; raises MissingAlignment when it has none that can be used."""
         if protein_id not in self._staged:
             path = self.lookup.require(protein_id, sequence)
             if not os.path.exists(path):
                 raise MissingAlignment(f"the alignment {path} of {protein_id} does not exist")
-            self._staged[protein_id] = stage_alignment(path, protein_id, self.directory)
+            try:
+                self._staged[protein_id] = stage_alignment(path, protein_id, self.directory)
+            except ValueError as exc:
+                raise MissingAlignment(str(exc)) from None
         return [self._staged[protein_id]]
 
 
@@ -124,8 +126,7 @@ def build_chain(entity_type: str, record: Dict, label: str, alignments: Optional
     chain: Dict = {"molecule_type": MOLECULE_TYPES[entity_type], "chain_ids": [label]}
 
     if entity_type == "ligand":
-        # auth_ligand_field decides CCD-vs-SMILES from the row's own provenance, the same way
-        # Boltz2 does, so the two models are handed the same chemistry for the same input.
+        # auth_ligand_field decides CCD-vs-SMILES from the row's own provenance, as Boltz2 does, so both models get the same chemistry.
         field, value = auth_ligand_field(record)
         if field == "ccd":
             chain["ccd_codes"] = [value]
@@ -163,11 +164,13 @@ def axis_elements(config: CombinatoricsConfig) -> Dict[str, Dict]:
 
 
 def build_queries(elements: Dict[str, Dict], alignments: Optional[Alignments],
-                  template: Optional[str], template_chains: Optional[List[str]]
+                  template: Optional[str], template_chains: Optional[List[str]],
+                  provenance: Optional[Dict[str, Dict[str, str]]] = None
                   ) -> Tuple[Dict, Dict[str, str]]:
     """({"queries": {query id: query}}, {query id: cause}) for the queries written and the ones skipped.
 
     A query with a protein chain that has no supplied alignment is skipped with that cause, so it folds nowhere instead of folding single-sequence.
+    When a dict is passed as `provenance`, every query that entered, skipped or not, is recorded in it with the input each axis contributed.
     """
     import itertools
 
@@ -215,9 +218,7 @@ def build_queries(elements: Dict[str, Dict], alignments: Optional[Alignments],
                     chains.append(build_chain(entity_type, member, label2, alignments,
                                               template, template_chains, rev_comp=True))
 
-        # The id is composed by the framework's own helper, not by joining strings here: it is
-        # what the wrapper predicted at configuration time, and a second spelling of the same
-        # rule is a second thing to keep in step.
+        # The id comes from the framework's helper, so it is what the wrapper predicted at configuration time.
         axis_selections = {}
         for index, (name, entity_type, items, extra, static_first) in enumerate(iteration):
             position, record = combination[index]
@@ -245,6 +246,8 @@ def build_queries(elements: Dict[str, Dict], alignments: Optional[Alignments],
         if not axis_selections:
             continue
         query_id = predict_single_output_id(**axis_selections)
+        if provenance is not None:
+            provenance[query_id] = predict_single_provenance(**axis_selections)
         if causes:
             skipped[query_id] = "; ".join(dict.fromkeys(causes))
         else:
@@ -258,6 +261,7 @@ def main():
     parser.add_argument("--combinatorics-config", required=True)
     parser.add_argument("--queries-json", required=True)
     parser.add_argument("--skipped-csv", required=True)
+    parser.add_argument("--provenance-csv")
     parser.add_argument("--msas-json")
     parser.add_argument("--template")
     parser.add_argument("--template-chains")
@@ -270,8 +274,12 @@ def main():
                                 os.path.join(os.path.dirname(os.path.abspath(args.queries_json)), "msas"))
     template_chains = args.template_chains.split(",") if args.template_chains else None
 
-    payload, skipped = build_queries(axis_elements(config), alignments, args.template, template_chains)
+    provenance: Dict[str, Dict[str, str]] = {}
+    payload, skipped = build_queries(axis_elements(config), alignments, args.template, template_chains,
+                                     provenance)
     write_skipped_queries(args.skipped_csv, skipped)
+    if args.provenance_csv:
+        write_query_provenance(args.provenance_csv, provenance)
     for query_id, cause in skipped.items():
         print(f"WARNING: query {query_id} skipped: {cause}")
     # Written even when empty, so a stale file from an earlier run is never mistaken for this one's queries.
