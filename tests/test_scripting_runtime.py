@@ -131,6 +131,15 @@ def test_drop_writes_filter_kind(scenario):
     assert list(dropped["removed_by"]) == ["Scripting"]
 
 
+def test_drop_names_the_step_when_the_manifest_carries_it(scenario):
+    """A chain of two Scripting steps must not read the first one's `unmatched` row as the second one's own."""
+    manifest = json.loads(scenario["outputs"].read_text())
+    manifest["step_id"] = "007_Scripting"
+    scenario["outputs"].write_text(json.dumps(manifest))
+    _run(scenario)
+    assert list(pd.read_csv(scenario["dropped"])["removed_by"]) == ["007_Scripting"]
+
+
 def test_whole_table_input(tmp_path):
     """A whole-table input (kind='table_full') exposes rows/columns/value(id, col)."""
     sf = tmp_path / "sf"

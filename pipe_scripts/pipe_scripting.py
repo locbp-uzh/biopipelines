@@ -163,7 +163,7 @@ class _Outputs:
         for name, info in manifest["tables"].items():
             self._handles[name] = _OutputHandle(name, "table", info["path"])
         self._table_columns = {n: i["columns"] for n, i in manifest["tables"].items()}
-        self._removed_by = manifest.get("tool_name", "Scripting")
+        self._removed_by = manifest.get("step_id") or manifest.get("tool_name", "Scripting")
         self._missing_csv = manifest.get("missing_csv")
         self.max_dropped = manifest.get("max_dropped")
         self._dropped = []

@@ -2504,8 +2504,12 @@ Sequence:
 Scripting:
   files:
   - biopipelines/scripting.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-31'
+    note: >-
+      A row recorded through `outputs.drop` names the step in `removed_by` (`007_Scripting`), as the user manual documents and every other tool does; it named the bare tool, `Scripting`. The completion check treats a bare tool name as local, so the `unmatched` row of one Scripting step read as the own failure of a second Scripting step behind it, and that step was marked FAILED. The output manifest carries the step id (`step_id`), and the runner falls back to the tool name for a manifest without it.
   - version: '1.4'
     date: '2026-10-27'
     note: >-

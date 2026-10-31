@@ -107,7 +107,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 95 | PDB | Inputs & I/O                   | 1.6 | `biopipelines/pdb.py` |
 | 96 | Plot                      | Inputs & I/O                   | 1.0 | `biopipelines/plot.py` |
 | 97 | PyMOL | Inputs & I/O                   | 2.1 | `biopipelines/pymol.py` |
-| 98 | Scripting | Inputs & I/O                   | 1.4 | `biopipelines/scripting.py` |
+| 98 | Scripting | Inputs & I/O                   | 1.5 | `biopipelines/scripting.py` |
 | 99 | RCSB                      | Inputs & I/O                   | 1.5 | `biopipelines/rcsb.py` |
 | 100 | Sequence                  | Inputs & I/O                   | 1.1 | `biopipelines/sequence.py` |
 | 101 | Table                     | Inputs & I/O                   | 1.1 | `biopipelines/table.py` |

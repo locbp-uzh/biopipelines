@@ -59,7 +59,7 @@ class Scripting(BaseConfig):
     """
 
     TOOL_NAME = "Scripting"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
 
     # The user script's configuration() names its own streams.
     USER_STREAM_NAMES = True
@@ -294,8 +294,9 @@ python "{self.runner_py}" \\
         from .scripting_api import Stream as _Stream, Table as _Table
         streams = {}
         tables = {}
-        manifest_meta = {"tool_name": self.TOOL_NAME, "missing_csv": self.dropped_csv,
-                         "max_dropped": self.max_dropped}
+        # step_id is what drop() stamps into removed_by, as every other tool does
+        manifest_meta = {"tool_name": self.TOOL_NAME, "step_id": os.path.basename(self.output_folder),
+                         "missing_csv": self.dropped_csv, "max_dropped": self.max_dropped}
         for key, val in declared.items():
             if isinstance(val, _Stream):
                 streams[key] = {

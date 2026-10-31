@@ -89,6 +89,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Scripting** 1.4 → 1.5. A row recorded through `outputs.drop` names the step in `removed_by` (`007_Scripting`), as the user manual documents and every other tool does; it named the bare tool, `Scripting`. The completion check treats a bare tool name as local, so the `unmatched` row of one Scripting step read as the own failure of a second Scripting step behind it, and that step was marked FAILED. The output manifest carries the step id (`step_id`), and the runner falls back to the tool name for a manifest without it.
+
 - **Pool** 1.5 → 1.6. In default mode an `original.id` the input already carried is kept as it was, as the documentation says; it was suffixed with `_<pool_idx>` like an `<axis>.id` column, so `parent` came out as `parent_2`, an id that names nothing. The table and the stream path share one rule (`_is_axis_id`), and `recounted_id` moved to `combinatorics.py`, where every id is spelled; `biopipelines.pool.recounted_id` still imports.
 
 - **MutationComposer** 1.2 → 1.3. Documentation only: the docstring and `docs/tool/sequence_design.md` said the step fails only when it wrote no sequence at all, but the pipe also raises when it wrote sequences and every one is identical to the reference (a mode that finds no mutation at or above `min_frequency`, for instance `top_mutations` with a threshold above every frequency, writes the reference under the description `none`), which points at the frequency data or the threshold and not at a short table. Both statements now name the two ways the step fails and say the sequences are still written in the second. The behavior is unchanged and `tests/test_mutation_composer_exit.py` pins it.

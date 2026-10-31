@@ -837,7 +837,7 @@ Runs a user-authored script as a typed, two-phase pipeline step — an escape ha
 **Streams**: whatever `configuration()` declares — `Stream(format, ids)` for each (file-based when format is `pdb`/`cif`/`sdf`/...; value-based when format is `csv` and rows carry no `file` column).
 
 **Tables**: whatever `configuration()` declares via `Table(columns=[...])`, plus one the tool always adds:
-- `missing`: | id | removed_by | kind | cause | — the ids recorded through `outputs.drop(id, cause=..., kind=...)`, merged with any upstream manifest. `kind` is `filter` (a deliberate drop, excused by the completion check) or `unmatched` (a lookup found no partner for the id; not excused, so the step is flagged like a failure).
+- `missing`: | id | removed_by | kind | cause | — the ids recorded through `outputs.drop(id, cause=..., kind=...)`, merged with any upstream manifest. `removed_by` is the step id (`007_Scripting`), as for every other tool. `kind` is `filter` (a deliberate drop, excused by the completion check) or `unmatched` (a lookup found no partner for the id; not excused, so the step is flagged like a failure).
 
 **Script API** (`from biopipelines.scripting_api import Stream, Table`). `execution()` returns nothing; every output is filled through its `outputs[name]` handle, where `name` is a key the `configuration` dict declared:
 

@@ -124,3 +124,17 @@ def test_output_streams_carry_their_producers_manifest(tmp_path, local_config,
     stamped = m.streams.structures.metadata.get("missing_table")
     assert stamped, "no missing_table stamped on the output stream"
     assert stamped.endswith(os.path.join("tables", "missing.csv")), stamped
+
+
+def test_the_step_manifest_names_the_step_for_removed_by(tmp_path, local_config,
+                                                         isolated_cwd, new_pipeline):
+    """`removed_by` is the step id `<NNN>_Scripting`, which tells a chain of two Scripting steps apart."""
+    _helper, script_path = _build(tmp_path, new_pipeline)
+
+    run_root = os.path.dirname(os.path.dirname(script_path))
+    manifests = glob.glob(os.path.join(run_root, "**", "_configuration", "scripting_outputs.json"),
+                          recursive=True)
+    assert manifests, f"no output manifest under {run_root}"
+    step_folder = os.path.dirname(os.path.dirname(manifests[0]))
+    with open(manifests[0], encoding="utf-8") as fh:
+        assert json.load(fh)["step_id"] == os.path.basename(step_folder)
