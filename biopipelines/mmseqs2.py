@@ -67,7 +67,7 @@ class MMseqs2(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2"
-    TOOL_VERSION = "1.11"
+    TOOL_VERSION = "1.12"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -394,7 +394,7 @@ class MMseqs2Server(BaseConfig):
     """
 
     TOOL_NAME = "MMseqs2Server"
-    TOOL_VERSION = "1.10"
+    TOOL_VERSION = "1.11"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False,

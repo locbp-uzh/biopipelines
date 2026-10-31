@@ -93,6 +93,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **MMseqs2Server** 1.10 → 1.11. No change to the server. Version follows MMseqs2 1.12, with which it shares `biopipelines/mmseqs2.py`.
+
+- **MMseqs2** 1.11 → 1.12. Two comments of `pipe_mmseqs2_sequences.py` that split a sentence over several lines are one line each; no behavior changes.
+
 - **AlphaFold** 1.15 → 1.16. A comment of the `msas` copy section that split a sentence over three lines is one line; no behavior changes.
 
 - **Boltz2** 2.13 → 2.14. With `msas`, a step that left no config (every protein had no usable alignment) printed `Generated 0 config files` and went on, so `boltz predict` ran on an empty folder and the step failed later with a vaguer error; the config script exits 1 with `every config was skipped` now, after writing the skipped-query file, as the RF3, OpenFold3 and Protenix config steps do. The ids of `top_only=False` are composed with `generate_multiplied_ids_pattern`, and three comments that split a sentence over several lines are collapsed.
