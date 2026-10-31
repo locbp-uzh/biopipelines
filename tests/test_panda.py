@@ -24,6 +24,8 @@ import sys
 
 import pytest
 
+from tests._helpers import sys_path_prepended
+
 
 # ── runtime helpers ──────────────────────────────────────────────────────────
 
@@ -65,8 +67,8 @@ def _check_completion(tool):
     passes — and calls `check_expected_outputs` in process, as
     `test_completion_all_filtered.py` does. Returns `(ok, missing_by_category)`.
     """
-    sys.path.insert(0, os.path.join(_repo_root(), "pipe_scripts"))
-    import pipe_check_completion
+    with sys_path_prepended(os.path.join(_repo_root(), "pipe_scripts")):
+        import pipe_check_completion
 
     with open(os.path.join(tool.output_folder, ".expected_outputs.json")) as f:
         manifest = json.load(f)

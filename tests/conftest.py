@@ -408,6 +408,25 @@ def tool_order_in_script():
     return _order
 
 
+# ── pipe scripts ──────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def pipe_scripts_on_path(monkeypatch):
+    """pipe_scripts first on sys.path for one test, for a test that imports a pipe script while it runs."""
+    monkeypatch.syspath_prepend(str(REPO_ROOT / "pipe_scripts"))
+
+
+@pytest.fixture(scope="module")
+def pipe_gnina():
+    """Load the pipe script directly; pipe_scripts is not an importable package."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("pipe_gnina", REPO_ROOT / "pipe_scripts" / "pipe_gnina.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 # ── record_case fixture (adds input/expected/actual to the report) ────────────
 
 @pytest.fixture

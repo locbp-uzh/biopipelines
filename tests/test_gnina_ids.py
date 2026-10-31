@@ -8,7 +8,6 @@ ids the runtime writes now both come from the shared axis composition, and the c
 the pose each append one suffix to their parent.
 """
 
-import importlib.util
 import os
 import pathlib
 import subprocess
@@ -18,18 +17,7 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
-
-PROTEIN_LINE = "ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00  0.00           C\n"
-
-
-@pytest.fixture(scope="module")
-def pipe_gnina():
-    """Load the pipe script directly; pipe_scripts is not an importable package."""
-    spec = importlib.util.spec_from_file_location("pipe_gnina", REPO / "pipe_scripts" / "pipe_gnina.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+from tests._helpers import PROTEIN_LINE, declared_stream
 
 
 def _write_sdf(path, affinities):
@@ -109,29 +97,13 @@ def _dock(pipe_gnina, monkeypatch, tmp_path, proteins, conformers, scores, num_r
     }
 
 
-def _declared_stream(new_pipeline, protein_ids, ligand_ids, cls="Gnina", **kwargs):
-    """The structures stream a Gnina or Vina step declares at configuration time."""
-    from biopipelines import gnina as gnina_module
-    from biopipelines.mock import Mock
-
-    pipeline = new_pipeline("gnina_ids")
-    with pipeline:
-        struct = Mock(ids=list(protein_ids), streams={"structures": {"format": "pdb", "file": "<id>.pdb"}},
-                      map_table_strategy="config")
-        comp = Mock(ids=list(ligand_ids), streams={"compounds": {"format": "csv", "file": "<id>.csv"}},
-                    map_table_strategy="config")
-        out = getattr(gnina_module, cls)(structures=struct.streams.structures,
-                                         compounds=comp.streams.compounds, **kwargs)
-    return out.streams.structures, struct.streams.structures, comp.streams.compounds
-
-
 # ── configuration time ──────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("cls", ["Gnina", "Vina"])
 def test_declared_ids_are_the_axes_joined_with_plus(local_config, isolated_cwd, new_pipeline, cls, record_case):
     from biopipelines.combinatorics import predict_output_ids
 
-    declared, structures, compounds = _declared_stream(new_pipeline, ["p_1", "p2"], ["l_1", "c2"], cls=cls)
+    declared, structures, compounds = declared_stream(new_pipeline, ["p_1", "p2"], ["l_1", "c2"], cls=cls)
     shared = predict_output_ids(structures=(structures, "structures"), compounds=(compounds, "compounds"))
     expected = ["p_1+l_1", "p_1+c2", "p2+l_1", "p2+c2"]
     record_case(input="structures p_1,p2 x compounds l_1,c2", expected=expected, actual=list(declared.ids))
@@ -143,7 +115,7 @@ def test_declared_ids_are_the_axes_joined_with_plus(local_config, isolated_cwd, 
 @pytest.mark.parametrize("mode", ["score", "minimize"])
 def test_no_search_modes_keep_the_complex_id(local_config, isolated_cwd, new_pipeline, mode):
     """One row per complex: the stream is 1:1 with its input, so it keeps the input's id."""
-    declared, _, _ = _declared_stream(new_pipeline, ["s_1", "s2"], ["l_1"], mode=mode)
+    declared, _, _ = declared_stream(new_pipeline, ["s_1", "s2"], ["l_1"], mode=mode)
 
     assert list(declared.ids) == ["s_1", "s2"]
     assert declared.files[0].endswith(f"<id>_{mode}.pdb")
@@ -207,7 +179,7 @@ def test_declared_ids_equal_the_ids_the_runtime_writes(
     ligands = ["l_1", "c2"]
     from biopipelines.combinatorics import predict_output_ids
 
-    declared, structures, compounds = _declared_stream(new_pipeline, proteins, ligands)
+    declared, structures, compounds = declared_stream(new_pipeline, proteins, ligands)
     shared = predict_output_ids(structures=(structures, "structures"), compounds=(compounds, "compounds"))
 
     conformers = [(lig, 0, "") for lig in ligands]

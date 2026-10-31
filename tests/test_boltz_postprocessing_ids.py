@@ -14,7 +14,7 @@ import sys
 import pandas as pd
 import pytest
 
-from tests.test_pae_stream import BOLTZ_POST, _boltz_prediction
+from tests._helpers import BOLTZ_POST, boltz_prediction
 
 
 def _postprocess(root, ids):
@@ -36,7 +36,7 @@ def _postprocess(root, ids):
 
 def test_every_exact_folder_maps_to_its_own_id(tmp_path):
     for config_id in ("p1+l1", "p1+l2"):
-        _boltz_prediction(tmp_path, config_id)
+        boltz_prediction(tmp_path, config_id)
 
     done = _postprocess(tmp_path, ["p1+l1", "p1+l2"])
 
@@ -50,7 +50,7 @@ def test_every_exact_folder_maps_to_its_own_id(tmp_path):
 ])
 def test_a_folder_that_only_contains_an_expected_id_is_refused(tmp_path, expected, foreign):
     for config_id in (*expected, foreign):
-        _boltz_prediction(tmp_path, config_id)
+        boltz_prediction(tmp_path, config_id)
 
     done = _postprocess(tmp_path, expected)
 

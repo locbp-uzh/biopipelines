@@ -8,11 +8,12 @@ structure's real chain or they silently drop.
 """
 
 import os
-import sys
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pipe_scripts"))
-from pipe_selection import plane_side_selection, remap_chainless_residues  # noqa: E402
+from tests._helpers import sys_path_prepended
+
+with sys_path_prepended(os.path.join(os.path.dirname(__file__), "..", "pipe_scripts")):
+    from pipe_selection import plane_side_selection, remap_chainless_residues
 
 
 def _atom(serial, name, resname, chain, resnum, x, y, z, hetatm=False):

@@ -16,6 +16,8 @@ import sys
 import pandas as pd
 import pytest
 
+from tests._helpers import sys_path_prepended
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 POSITIONS = os.path.join(REPO_ROOT, "pipe_scripts", "pipe_lmpnn_runtime_positions.py")
 RESOLVER = os.path.join(REPO_ROOT, "pipe_scripts", "resolve_lmpnn_positions.py")
@@ -252,8 +254,8 @@ def test_the_completion_check_on_a_step_with_one_failed_structure(
 
     The packed structures are per-id files, which a local failure row does not excuse, so that stream is the one a failed structure still leaves unmet.
     """
-    sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
-    import pipe_check_completion as check
+    with sys_path_prepended(os.path.join(REPO_ROOT, "pipe_scripts")):
+        import pipe_check_completion as check
 
     tool, _ = _build(tmp_path, new_pipeline, {"a": GOOD_PDB, "b": GOOD_PDB}, pack_side_chains=pack_side_chains)
     declared = json.load(open(os.path.join(tool.output_folder, ".expected_outputs.json")))["output_structure"]

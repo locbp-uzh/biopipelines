@@ -16,16 +16,11 @@ here instead: if you feed Boltz2 output to a chain-addressed tool, make the
 chain explicit and do not assume the first protein is A.
 """
 
-import sys
-from pathlib import Path
 import types
 
 import pytest
 
-PIPE_SCRIPTS = Path(__file__).resolve().parent.parent / "pipe_scripts"
-if str(PIPE_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(PIPE_SCRIPTS))
-
+pytestmark = pytest.mark.usefixtures("pipe_scripts_on_path")
 
 BINDER = "MEEKVEEIKK"
 TARGET = "QVCTGTDMKL"

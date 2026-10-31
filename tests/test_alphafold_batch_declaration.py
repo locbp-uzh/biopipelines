@@ -11,15 +11,15 @@ check marked a step that did exactly what it was asked as FAILED.
 import csv
 import json
 import os
-import sys
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
+from biopipelines import id_patterns
+from tests._helpers import sys_path_prepended
 
-import pipe_check_completion  # noqa: E402
-from biopipelines import id_patterns  # noqa: E402
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+with sys_path_prepended(os.path.join(REPO_ROOT, "pipe_scripts")):
+    import pipe_check_completion
 
 FULL = [f"design_{i}" for i in range(1, 11)]
 BATCH = FULL[:4]

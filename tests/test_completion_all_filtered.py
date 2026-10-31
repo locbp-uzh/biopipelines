@@ -17,14 +17,14 @@ from a broken one — if only some ids were filtered, the survivors' files are s
 
 import json
 import os
-import sys
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
+from tests._helpers import sys_path_prepended
 
-import pipe_check_completion  # noqa: E402
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+with sys_path_prepended(os.path.join(REPO_ROOT, "pipe_scripts")):
+    import pipe_check_completion
 
 
 def build(tmp_path, ids, dropped, write_files=(), shared=None):

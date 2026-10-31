@@ -20,14 +20,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests._helpers import BOLTZ_POST, boltz_prediction, sys_path_prepended
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
-BOLTZ_POST = os.path.join(SCRIPTS, "pipe_boltz_postprocessing.py")
 AF_CONFIDENCE = os.path.join(SCRIPTS, "pipe_alphafold_confidence.py")
 AF_UNSANITIZE = os.path.join(SCRIPTS, "pipe_unsanitize_ids.py")
 
-sys.path.insert(0, SCRIPTS)
-import pipe_check_completion  # noqa: E402
+with sys_path_prepended(SCRIPTS):
+    import pipe_check_completion
 
 
 def _run(script, *args):
@@ -41,19 +42,6 @@ def _run(script, *args):
 
 BOLTZ_CONFIDENCE_COLUMNS = ["id", "input_file", "confidence_score", "ptm", "iptm",
                             "complex_plddt", "complex_iplddt"]
-
-
-def _boltz_prediction(root, config_id, samples=1, pae_for=None):
-    """boltz_results_<id>/predictions/<id>/ with `samples` models; model k carries a PAE matrix filled with k."""
-    folder = root / "execution" / f"boltz_results_{config_id}" / "predictions" / config_id
-    folder.mkdir(parents=True)
-    for k in range(samples):
-        (folder / f"{config_id}_model_{k}.pdb").write_text(f"MODEL {k}\nEND\n")
-        scores = {"confidence_score": 0.9 - 0.1 * k, "ptm": 0.8, "iptm": 0.7,
-                  "complex_plddt": 0.85, "complex_iplddt": 0.8}
-        (folder / f"confidence_{config_id}_model_{k}.json").write_text(json.dumps(scores))
-        if pae_for is None or k in pae_for:
-            np.savez_compressed(folder / f"pae_{config_id}_model_{k}.npz", pae=np.full((6, 6), float(k)))
 
 
 def _boltz_postprocess(root, ids, *flags, pae_args=True, provenance=None):
@@ -85,14 +73,14 @@ def _matrix(path):
 
 class TestBoltzPostprocessing:
     def test_top_only_keeps_the_top_models_matrix_as_the_bare_id(self, tmp_path):
-        _boltz_prediction(tmp_path, "p1", samples=2)
+        boltz_prediction(tmp_path, "p1", samples=2)
         _boltz_postprocess(tmp_path, ["p1"])
         assert sorted(os.listdir(tmp_path / "pae")) == ["p1.npz", "pae_map.csv"]
         assert float(_matrix(tmp_path / "pae" / "p1.npz")[0, 0]) == 0.0
 
     def test_the_ids_mirror_the_structures_stream(self, tmp_path):
-        _boltz_prediction(tmp_path, "c1", samples=1)
-        _boltz_prediction(tmp_path, "c2", samples=1)
+        boltz_prediction(tmp_path, "c1", samples=1)
+        boltz_prediction(tmp_path, "c2", samples=1)
         _boltz_postprocess(tmp_path, ["c1", "c2"])
         structures = pd.read_csv(tmp_path / "structures" / "structures_map.csv")
         pae = pd.read_csv(tmp_path / "pae" / "pae_map.csv")
@@ -100,7 +88,7 @@ class TestBoltzPostprocessing:
         assert all(os.path.exists(f) for f in pae["file"])
 
     def test_every_sample_has_its_own_matrix_when_all_samples_are_kept(self, tmp_path):
-        _boltz_prediction(tmp_path, "p1", samples=3)
+        boltz_prediction(tmp_path, "p1", samples=3)
         _boltz_postprocess(tmp_path, ["p1"], "--all-samples")
         structures = pd.read_csv(tmp_path / "structures" / "structures_map.csv")
         pae = pd.read_csv(tmp_path / "pae" / "pae_map.csv")
@@ -110,12 +98,12 @@ class TestBoltzPostprocessing:
 
     def test_a_single_kept_sample_still_gets_the_numbered_id(self, tmp_path):
         """top_only=False with one diffusion sample declares `<id>_<1..1>`, so the matrix must be `<id>_1`."""
-        _boltz_prediction(tmp_path, "p1", samples=1)
+        boltz_prediction(tmp_path, "p1", samples=1)
         _boltz_postprocess(tmp_path, ["p1"], "--all-samples")
         assert list(pd.read_csv(tmp_path / "pae" / "pae_map.csv")["id"]) == ["p1_1"]
 
     def test_a_sample_boltz_wrote_no_matrix_for_is_left_out_of_the_map(self, tmp_path):
-        _boltz_prediction(tmp_path, "p1", samples=3, pae_for={0, 2})
+        boltz_prediction(tmp_path, "p1", samples=3, pae_for={0, 2})
         out = _boltz_postprocess(tmp_path, ["p1"], "--all-samples")
         assert list(pd.read_csv(tmp_path / "pae" / "pae_map.csv")["id"]) == ["p1_1", "p1_3"]
         assert not (tmp_path / "pae" / "p1_2.npz").exists()
@@ -123,13 +111,13 @@ class TestBoltzPostprocessing:
         assert list(pd.read_csv(tmp_path / "structures" / "structures_map.csv")["id"]) == ["p1_1", "p1_2", "p1_3"]
 
     def test_no_matrix_at_all_writes_no_map_and_changes_nothing_else(self, tmp_path):
-        _boltz_prediction(tmp_path, "p1", samples=1, pae_for=set())
+        boltz_prediction(tmp_path, "p1", samples=1, pae_for=set())
         _boltz_postprocess(tmp_path, ["p1"])
         assert not (tmp_path / "pae" / "pae_map.csv").exists()
         assert list(pd.read_csv(tmp_path / "tables" / "confidence.csv")["id"]) == ["p1"]
 
     def test_the_existing_outputs_keep_their_shape(self, tmp_path):
-        _boltz_prediction(tmp_path, "p1", samples=2)
+        boltz_prediction(tmp_path, "p1", samples=2)
         _boltz_postprocess(tmp_path, ["p1"])
         structures = pd.read_csv(tmp_path / "structures" / "structures_map.csv")
         assert list(structures.columns) == ["id", "file", "value"]
@@ -140,13 +128,13 @@ class TestBoltzPostprocessing:
 
     def test_the_pae_arguments_are_optional(self, tmp_path):
         """A caller that predates them keeps working; the matrices go to <output>/pae."""
-        _boltz_prediction(tmp_path, "p1", samples=1)
+        boltz_prediction(tmp_path, "p1", samples=1)
         _boltz_postprocess(tmp_path, ["p1"], pae_args=False)
         assert (tmp_path / "pae" / "p1.npz").exists()
         assert list(pd.read_csv(tmp_path / "tables" / "confidence.csv")["id"]) == ["p1"]
 
     def test_the_map_carries_the_same_provenance_columns_as_structures(self, tmp_path):
-        _boltz_prediction(tmp_path, "p1+l1", samples=2)
+        boltz_prediction(tmp_path, "p1+l1", samples=2)
         provenance = {"predicted_ids": ["p1+l1"], "provenance": {"proteins": ["p1"], "ligands": ["l1"]}}
         _boltz_postprocess(tmp_path, ["p1+l1"], "--all-samples", provenance=provenance)
         structures = pd.read_csv(tmp_path / "structures" / "structures_map.csv")

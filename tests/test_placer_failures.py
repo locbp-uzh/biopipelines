@@ -21,7 +21,7 @@ pd = pytest.importorskip("pandas")
 
 from biopipelines.datastream import DataStream, create_map_table
 from biopipelines.placer import PLACER
-from tests.test_id_construction_pair_sites import SCRIPTS, _run
+from tests._helpers import SCRIPTS, run_pipe_script
 
 WITH_LIGAND = (
     "ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00  0.00           N\n"
@@ -141,7 +141,7 @@ class TestThePostProcessingNamesEveryRunThatGaveNoModel:
             {"name": "compounds", "ids": ["l_1"], "files": [], "map_table": str(tmp_path / "compounds.csv"), "format": "csv"}))
         (tmp_path / "compounds.csv").write_text("id,code\nl_1,LDP\n")
         step = tmp_path / "003_PLACER"
-        done = _run("pipe_placer_postprocess.py", "--mode", "ligand", "--runs-folder", str(runs),
+        done = run_pipe_script("pipe_placer_postprocess.py", "--mode", "ligand", "--runs-folder", str(runs),
                     "--structures-folder", str(step / "structures"),
                     "--structures-map", str(step / "structures" / "structures_map.csv"),
                     "--scores-csv", str(step / "tables" / "scores.csv"),

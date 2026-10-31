@@ -15,10 +15,8 @@ import sys
 import pandas as pd
 import pytest
 
-from tests.test_gnina_conformer_selection import _write_sdf
-from tests.test_gnina_ids import PROTEIN_LINE, pipe_gnina  # noqa: F401 (a fixture)
-from tests.test_gnina_missing_table import (
-    _configured_step, _fake_the_tools, _materialize,
+from tests._helpers import (
+    PROTEIN_LINE, configured_gnina_step, fake_the_gnina_tools, materialize_gnina_inputs, write_pose_sdf,
 )
 
 UNPARSEABLE_LINE = "ATOM      1  CA  GLY A   1         x.xxx   y.yyy   z.zzz  1.00  0.00           C\n"
@@ -49,15 +47,15 @@ def test_a_pair_of_an_unprepared_protein_carries_the_cause(pipe_gnina):
 @pytest.mark.parametrize("cls_name", ["Gnina", "Vina"])
 def test_an_unparseable_receptor_fails_its_pair_and_the_rest_of_the_batch_goes_on(
         pipe_gnina, monkeypatch, local_config, isolated_cwd, new_pipeline, cls_name):
-    config_path, config, _script, step_id = _configured_step(new_pipeline, cls_name, "docking", False)
-    _materialize(config, False)
+    config_path, config, _script, step_id = configured_gnina_step(new_pipeline, cls_name, "docking", False)
+    materialize_gnina_inputs(config, False)
     with open(config["structures_json"]) as handle:
         template = json.load(handle)["files"][0]
     pathlib.Path(template.replace("<id>", "bad")).write_text(PROTEIN_LINE + UNPARSEABLE_LINE + "END\n")
-    _fake_the_tools(pipe_gnina, monkeypatch, cls_name, "docking")
+    fake_the_gnina_tools(pipe_gnina, monkeypatch, cls_name, "docking")
     # Binaries that accept every receptor, so only the pipe script itself can refuse this one.
     monkeypatch.setattr(pipe_gnina.subprocess, "run", lambda cmd, **kw: (
-        _write_sdf(cmd[cmd.index("-o") + 1], [(-7.0, 0.8, 5.0)]) or subprocess.CompletedProcess(cmd, 0, "", "")))
+        write_pose_sdf(cmd[cmd.index("-o") + 1], [(-7.0, 0.8, 5.0)]) or subprocess.CompletedProcess(cmd, 0, "", "")))
     monkeypatch.setattr(pipe_gnina.vina_backend, "receptor_pdbqt", lambda src, dst: dst)
     monkeypatch.setattr(sys, "argv", ["pipe_gnina.py", str(config_path)])
 
@@ -73,9 +71,9 @@ def test_an_unparseable_receptor_fails_its_pair_and_the_rest_of_the_batch_goes_o
 @pytest.mark.parametrize("cls_name, mode", [("Gnina", "score"), ("Gnina", "minimize"), ("Vina", "score")])
 def test_a_failed_complex_keeps_a_nan_row_of_scores(
         pipe_gnina, monkeypatch, local_config, isolated_cwd, new_pipeline, cls_name, mode):
-    config_path, config, _script, _step = _configured_step(new_pipeline, cls_name, mode, False)
-    _materialize(config, False)
-    _fake_the_tools(pipe_gnina, monkeypatch, cls_name, mode)
+    config_path, config, _script, _step = configured_gnina_step(new_pipeline, cls_name, mode, False)
+    materialize_gnina_inputs(config, False)
+    fake_the_gnina_tools(pipe_gnina, monkeypatch, cls_name, mode)
     monkeypatch.setattr(pipe_gnina.vina_backend, "run", lambda *a, **k: subprocess.CompletedProcess(
         ["vina"], 0, "Estimated Free Energy of Binding   :  -7.0 (kcal/mol)\n", ""))
     monkeypatch.setattr(sys, "argv", ["pipe_gnina.py", str(config_path)])

@@ -14,13 +14,14 @@ import sys
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
-
 from biopipelines.id_map_utils import MsaLookup
 from biopipelines.rf3 import RF3
-import pipe_rf3_config  # noqa: E402
-import pipe_rf3_postprocess as post  # noqa: E402
+from tests._helpers import sys_path_prepended
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+with sys_path_prepended(os.path.join(REPO_ROOT, "pipe_scripts")):
+    import pipe_rf3_config
+    import pipe_rf3_postprocess as post
 
 
 @pytest.fixture

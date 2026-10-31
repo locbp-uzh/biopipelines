@@ -12,29 +12,12 @@ PLACER, Gnina's conformer choice and HBDesigner have files of their own.
 Nothing here runs a model or a cluster job; the pipe scripts are driven on synthetic inputs.
 """
 
-import importlib.util
 import os
 import re
-import subprocess
-import sys
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
-
-
-def _load(name, filename):
-    sys.path.insert(0, SCRIPTS)
-    spec = importlib.util.spec_from_file_location(name, os.path.join(SCRIPTS, filename))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _script_text(name):
-    with open(os.path.join(SCRIPTS, name)) as handle:
-        return handle.read()
+from tests._helpers import LIGANDS, PAIRS, PROTEINS, load_pipe_script, pipe_script_text, run_pipe_script
 
 
 # ── Gnina / Vina: a failure names the step that ran ───────────────────────────
@@ -72,7 +55,7 @@ class TestDockingFailuresNameTheirStep:
     def test_a_vina_receptor_failure_names_the_vina_step(self, monkeypatch, tmp_path):
         """`removed_by` was the literal "Gnina", which no Vina step is, so the completion check read the row as one an upstream tool had left behind."""
         step = tmp_path / "004_Vina"
-        failures = _receptor_that_fails(_load("pipe_gnina_under_test", "pipe_gnina.py"), monkeypatch, step, tmp_path)
+        failures = _receptor_that_fails(load_pipe_script("pipe_gnina_under_test", "pipe_gnina.py"), monkeypatch, step, tmp_path)
         assert [(row["id"], row["removed_by"], row["kind"]) for row in failures] == [
             ("prot+lig", "004_Vina", "failure")]
         assert "receptor has no atoms" in failures[0]["cause"]
@@ -81,9 +64,9 @@ class TestDockingFailuresNameTheirStep:
         """The failed pair's file is absent, and a `failure` of this step must leave that a FAILED step instead of an excused one."""
         import pandas as pd
 
-        checker = _load("pipe_check_completion_under_test", "pipe_check_completion.py")
+        checker = load_pipe_script("pipe_check_completion_under_test", "pipe_check_completion.py")
         step = tmp_path / "004_Vina"
-        failures = _receptor_that_fails(_load("pipe_gnina_under_test", "pipe_gnina.py"), monkeypatch, step, tmp_path)
+        failures = _receptor_that_fails(load_pipe_script("pipe_gnina_under_test", "pipe_gnina.py"), monkeypatch, step, tmp_path)
         missing = step / "tables" / "missing.csv"
         pd.DataFrame(failures, columns=["id", "removed_by", "kind", "cause"]).to_csv(missing, index=False)
         structures = step / "structures"
@@ -100,7 +83,7 @@ class TestDockingFailuresNameTheirStep:
 
     def test_an_upstream_row_is_still_excused(self, tmp_path):
         """Only this step's own rows lose the excuse; a row an earlier step stamped keeps it."""
-        checker = _load("pipe_check_completion_under_test", "pipe_check_completion.py")
+        checker = load_pipe_script("pipe_check_completion_under_test", "pipe_check_completion.py")
         missing = tmp_path / "missing.csv"
         missing.write_text("id,removed_by,kind,cause\nprot,002_Boltz2,failure,upstream\nother,004_Vina,failure,own\n")
         excused = checker._load_expected_missing_ids(
@@ -146,18 +129,6 @@ def _stream(tmp_path, name, ids, fmt, with_files):
     return DataStream(name=name, ids=list(ids), files=files, map_table=str(table), format=fmt)
 
 
-# Ids as upstream tools make them: a protein that is itself a pair (`a+b`), a ligand with `+` and one with `_`.
-PROTEINS = ["a+b", "c"]
-LIGANDS = ["l+1", "m_2"]
-PAIRS = {
-    "a+b+l+1": ("a+b", "l+1"), "a+b+m_2": ("a+b", "m_2"), "c+l+1": ("c", "l+1"), "c+m_2": ("c", "m_2"),
-}
-
-
-def _run(script, *args):
-    return subprocess.run([sys.executable, os.path.join(SCRIPTS, script), *args], capture_output=True, text=True)
-
-
 class TestPocketGenPairs:
 
     HETATM_SCAFFOLD = (
@@ -175,7 +146,7 @@ class TestPocketGenPairs:
         structures.save_json(str(tmp_path / "structures.json"))
         compounds.save_json(str(tmp_path / "ligand.json"))
         staging = tmp_path / "staging"
-        result = _run("pipe_pocketgen_stage.py", "--structures-json", str(tmp_path / "structures.json"),
+        result = run_pipe_script("pipe_pocketgen_stage.py", "--structures-json", str(tmp_path / "structures.json"),
                       "--ligand-json", str(tmp_path / "ligand.json"), "--staging-folder", str(staging),
                       "--extras-dir", str(tmp_path / "extras"))
         return staging, result, structures, compounds
@@ -188,7 +159,7 @@ class TestPocketGenPairs:
                 (staging / pair / f"{sample}_whole_relaxed.pdb").write_text(
                     "ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00  0.00           N\nEND\n")
         out = tmp_path / "step" / "structures"
-        result = _run("pipe_pocketgen_postprocess.py", "--staging-folder", str(staging),
+        result = run_pipe_script("pipe_pocketgen_postprocess.py", "--staging-folder", str(staging),
                       "--structures-folder", str(out), "--sequences-folder", str(tmp_path / "step" / "sequences"),
                       "--structures-map", str(out / "structures_map.csv"),
                       "--sequences-csv", str(tmp_path / "step" / "sequences" / "sequences.csv"),
@@ -243,7 +214,7 @@ class TestPocketGenPairs:
 
     def test_neither_script_joins_or_splits_an_id_itself(self):
         for name in ("pipe_pocketgen_stage.py", "pipe_pocketgen_postprocess.py"):
-            text = _script_text(name)
+            text = pipe_script_text(name)
             assert not re.search(r"""f['"]\{\w+\}\+\{""", text), name
             assert not re.search(r"""split\(['"]\+['"]""", text), name
             assert not re.search(r"""f['"]\{\w*pair_id\}_\{""", text), name

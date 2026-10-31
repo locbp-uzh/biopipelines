@@ -14,24 +14,24 @@ import re
 
 import pytest
 
-from tests.test_id_construction_pair_sites import LIGANDS, PAIRS, PROTEINS, _load, _run, _script_text
+from tests._helpers import LIGANDS, PAIRS, PROTEINS, load_pipe_script, pipe_script_text, run_pipe_script
 
 
 class TestPlacerUnits:
 
     def test_the_manifest_gives_each_run_its_parents_and_its_id_is_the_shared_composition(self):
-        driver = _load("pipe_placer_driver_under_test", "pipe_placer_driver.py")
+        driver = load_pipe_script("pipe_placer_driver_under_test", "pipe_placer_driver.py")
         manifest = driver.unit_manifest(PROTEINS, LIGANDS)
         assert manifest == {pair: {"structures.id": s, "compounds.id": l} for pair, (s, l) in PAIRS.items()}
         assert list(manifest) == list(PAIRS), "a run's id is the structure then the ligand, joined by +"
 
     def test_sidechain_mode_has_the_structure_axis_alone(self):
-        driver = _load("pipe_placer_driver_under_test", "pipe_placer_driver.py")
+        driver = load_pipe_script("pipe_placer_driver_under_test", "pipe_placer_driver.py")
         assert driver.unit_manifest(["a+b", "c"], [None]) == {
             "a+b": {"structures.id": "a+b"}, "c": {"structures.id": "c"}}
 
     def test_two_runs_that_join_to_one_id_are_refused(self):
-        driver = _load("pipe_placer_driver_under_test", "pipe_placer_driver.py")
+        driver = load_pipe_script("pipe_placer_driver_under_test", "pipe_placer_driver.py")
         with pytest.raises(ValueError, match=r"a\+b\+c"):
             driver.unit_manifest(["a+b", "a"], ["c", "b+c"])
 
@@ -56,12 +56,12 @@ class TestPlacerUnits:
             (tmp_path / "compounds.csv").write_text("id,code\nl+1,LIG\nm_2,LIG\n")
             args += ["--ligand-json", str(tmp_path / "ligand.json"),
                      "--compounds-map", str(step / "compounds" / "compounds_map.csv")]
-        return _run("pipe_placer_postprocess.py", *args), step
+        return run_pipe_script("pipe_placer_postprocess.py", *args), step
 
     def test_postprocess_reads_the_parents_from_the_manifest_not_from_the_id(self, tmp_path):
         import pandas as pd
 
-        driver = _load("pipe_placer_driver_under_test", "pipe_placer_driver.py")
+        driver = load_pipe_script("pipe_placer_driver_under_test", "pipe_placer_driver.py")
         manifest = driver.unit_manifest(PROTEINS, LIGANDS)
         result, step = self._run_postprocess(tmp_path, "ligand", list(manifest), manifest)
         assert result.returncode == 0, result.stderr
@@ -76,7 +76,7 @@ class TestPlacerUnits:
 
     def test_neither_script_joins_or_splits_an_id_itself(self):
         for name in ("pipe_placer_driver.py", "pipe_placer_postprocess.py"):
-            text = _script_text(name)
+            text = pipe_script_text(name)
             assert not re.search(r"""f['"]\{\w+\}\+\{""", text), name
             assert not re.search(r"""split\(['"]\+['"]""", text), name
             assert not re.search(r"""f['"]\{unit_id\}_\{""", text), name

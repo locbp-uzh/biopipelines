@@ -80,6 +80,10 @@ def test_the_entry_points_are_still_the_ones_pipe_scripts_import():
     assert not missed, f"pipe scripts import these package modules by bare name but they are unchecked: {sorted(missed)}"
 
 
+def test_id_map_utils_is_checked_as_a_shared_module():
+    assert "id_map_utils" in REACHABLE
+
+
 def _run_standalone(code):
     """A fresh interpreter with only biopipelines/ on sys.path, exactly as a pipe script sets itself up."""
     script = f"import sys; sys.path.insert(0, {str(PKG)!r})\n" + textwrap.dedent(code)

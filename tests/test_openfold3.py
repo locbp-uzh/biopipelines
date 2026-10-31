@@ -17,11 +17,14 @@ import sys
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
-
 from biopipelines.openfold3 import OpenFold3
-import pipe_openfold3_config  # noqa: E402
+from tests._helpers import sys_path_prepended
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+with sys_path_prepended(os.path.join(REPO_ROOT, "pipe_scripts")):
+    import pipe_openfold3_config
+
+pytestmark = pytest.mark.usefixtures("pipe_scripts_on_path")
 
 
 @pytest.fixture

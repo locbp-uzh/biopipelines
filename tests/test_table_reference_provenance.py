@@ -11,16 +11,13 @@ Two related concerns:
    silent forms turned a matching failure into structurally wrong selections.
 """
 
-import os
-import sys
-
 import pandas as pd
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipe_scripts"))
-
 from biopipelines.biopipelines_io import load_table, lookup_table_value, clear_table_cache
 from biopipelines.id_map_utils import get_mapped_ids
+
+pytestmark = pytest.mark.usefixtures("pipe_scripts_on_path")
 
 
 @pytest.fixture(autouse=True)

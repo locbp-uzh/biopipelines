@@ -9,11 +9,9 @@ The wrapper declares `num_sequences` ids, and a short frequency table gives fewe
 Nothing here needs the cluster: the pipe, the propagation and the completion check run on the files the wrapper planned.
 """
 
-import importlib.util
 import json
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 
@@ -22,6 +20,7 @@ import pytest
 
 from biopipelines import combinatorics
 from biopipelines.mock import Mock
+from tests._helpers import load_pipe_script, propagate_missing
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "pipe_scripts"
@@ -43,14 +42,6 @@ def _frequency_table(path, bias=0):
         rows.append(row)
     pd.DataFrame(rows).to_csv(path, index=False)
     return str(path)
-
-
-def _load(name, filename):
-    sys.path.insert(0, str(SCRIPTS))
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / filename)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _configured_step(new_pipeline, mode, strategy, tables, upstream, min_frequency=0.01):
@@ -85,29 +76,6 @@ def _run(config_path):
     return subprocess.run([sys.executable, str(PIPE), "--config", str(config_path)], capture_output=True, text=True)
 
 
-def _propagate(script, config, upstream_rows):
-    """What the generated script does after the pipe: merge the upstream manifests and the local file into tables/missing.csv."""
-    script = script.replace("\r\n", "\n")
-    block = script[script.rindex("python", 0, script.index("pipe_propagate_missing.py")):].split("\n\n")[0]
-    command = shlex.split(block.replace("\\\n", " "))
-    arguments = {}
-    for token in command[2:]:
-        if token.startswith("--"):
-            arguments[token] = []
-        else:
-            arguments[list(arguments)[-1]].append(token)
-    for folder in arguments["--upstream-folders"]:
-        if folder:
-            pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
-            pathlib.Path(folder, "missing.csv").write_text(upstream_rows)
-    propagate = _load("pipe_propagate_missing_under_test", "pipe_propagate_missing.py")
-    propagate.propagate_missing_table(
-        upstream_folders=arguments["--upstream-folders"], output_folder=arguments["--output-folder"][0],
-        missing_csv_path=arguments["--missing-csv"][0],
-        local_missing=(arguments.get("--local-missing") or [None])[0])
-    return pd.read_csv(arguments["--missing-csv"][0], dtype=str, keep_default_na=False)
-
-
 UPSTREAM_ROWS = "id,removed_by,kind,cause\nup,001_Mock,filter,dropped upstream\n"
 # (mode, strategy, tables): every case here has fewer mutations than the ten sequences asked for.
 SHORT_CASES = [
@@ -130,7 +98,7 @@ def test_a_declared_id_without_a_sequence_is_a_failure_row_of_the_final_missing_
     declared = [combinatorics.numbered_id(config["prefix"], i) for i in range(1, NUM_SEQUENCES + 1)]
     assert 0 < len(written) < NUM_SEQUENCES
 
-    missing = _propagate(script, config, UPSTREAM_ROWS)
+    missing = propagate_missing(script, UPSTREAM_ROWS)
     own = missing[missing["removed_by"] == step_id]
     assert sorted(own["id"]) == sorted(set(declared) - set(written))
     assert set(own["kind"]) == {"failure"}
@@ -144,10 +112,10 @@ def test_a_declared_id_without_a_sequence_is_a_failure_row_of_the_final_missing_
 
 def test_the_completion_check_excuses_the_upstream_row_and_not_the_failure(
         local_config, isolated_cwd, new_pipeline, tmp_path):
-    checker = _load("pipe_check_completion_under_test", "pipe_check_completion.py")
+    checker = load_pipe_script("pipe_check_completion_under_test", "pipe_check_completion.py")
     config_path, config, script, step_id = _configured_step(new_pipeline, "single_point", "average", 1, True)
     assert _run(config_path).returncode == 0
-    missing = _propagate(script, config, UPSTREAM_ROWS)
+    missing = propagate_missing(script, UPSTREAM_ROWS)
     path = tmp_path / "missing.csv"
     missing.to_csv(path, index=False)
     excused = checker._load_expected_missing_ids({"tables": {"missing": {"path": str(path)}}}, step_id, "MutationComposer")

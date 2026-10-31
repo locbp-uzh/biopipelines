@@ -420,11 +420,11 @@ def test_view_in_extras_does_not_change_the_completion_verdict(
     directory, which is what makes writing a view into _extras/ safe. Pinned here
     because "put the page beside the outputs" is only a good default while that holds.
     """
-    import sys
+    from tests._helpers import sys_path_prepended
 
-    sys.path.insert(0, os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipe_scripts"))
-    import pipe_check_completion
+    with sys_path_prepended(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipe_scripts")):
+        import pipe_check_completion
 
     from biopipelines.visualize import write_view
 

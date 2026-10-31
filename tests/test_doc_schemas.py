@@ -33,14 +33,14 @@ one is a decision rather than an oversight.
 
 import io
 import pathlib
-import sys
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "versions"))
+from tests._helpers import sys_path_prepended
 
-import extract_output_schemas as schemas  # noqa: E402  (needs the sys.path entry above)
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+with sys_path_prepended(ROOT / "versions"):
+    import extract_output_schemas as schemas
 
 
 @pytest.fixture(scope="module")

@@ -20,6 +20,8 @@ import sys
 
 import pytest
 
+from tests._helpers import sys_path_prepended
+
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
 XTC = b"XTC-" + b"x" * 4096
 
@@ -36,8 +38,8 @@ def _run_panda(tool):
 
 
 def _check_completion(tool):
-    sys.path.insert(0, os.path.join(_repo_root(), "pipe_scripts"))
-    import pipe_check_completion
+    with sys_path_prepended(os.path.join(_repo_root(), "pipe_scripts")):
+        import pipe_check_completion
 
     with open(os.path.join(tool.output_folder, ".expected_outputs.json")) as handle:
         manifest = json.load(handle)

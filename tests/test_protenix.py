@@ -19,14 +19,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from biopipelines.id_map_utils import MsaLookup
+from biopipelines.protenix import MODEL_NAMES, Protenix
+from tests._helpers import sys_path_prepended
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
-sys.path.insert(0, SCRIPTS)
-
-from biopipelines.id_map_utils import MsaLookup  # noqa: E402
-from biopipelines.protenix import MODEL_NAMES, Protenix  # noqa: E402
-import pipe_protenix_config as config_script  # noqa: E402
-import pipe_protenix_weights  # noqa: E402
+with sys_path_prepended(SCRIPTS):
+    import pipe_protenix_config as config_script
+    import pipe_protenix_weights
 
 POSTPROCESS = os.path.join(SCRIPTS, "pipe_protenix_postprocess.py")
 CONFIG = os.path.join(SCRIPTS, "pipe_protenix_config.py")

@@ -10,7 +10,6 @@ Not covered, because it needs a cluster: a real MMseqs2 search, and the predicto
 """
 
 import ast
-import importlib.util
 import json
 import os
 import subprocess
@@ -19,14 +18,13 @@ import sys
 import pandas as pd
 import pytest
 
-from biopipelines import id_map_utils
 from biopipelines.id_map_utils import (MissingAlignment, MsaLookup, get_msa_paths,
                                        prune_redundant_provenance_columns)
+from tests._helpers import load_pipe_script
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
 PACKAGE = os.path.join(REPO_ROOT, "biopipelines")
-sys.path.insert(0, SCRIPTS)
 
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
 
@@ -39,10 +37,7 @@ LAYOUTS = {
 
 
 def _module(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(SCRIPTS, f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_pipe_script(name, f"{name}.py")
 
 
 def _write_table(tmp_path, rows, name="msas_map.csv"):
@@ -313,10 +308,3 @@ class TestNoModuleBuildsTheSuffix:
                  if any(isinstance(node, ast.ClassDef) and node.name == "MsaLookup"
                         for node in ast.walk(_tree(path)))]
         assert homes == [os.path.join("biopipelines", "id_map_utils.py")]
-
-
-class TestTheStandaloneModuleList:
-
-    def test_id_map_utils_is_checked_as_a_shared_module(self):
-        from tests.test_standalone_module_imports import REACHABLE
-        assert id_map_utils.__name__.rsplit(".", 1)[-1] in REACHABLE

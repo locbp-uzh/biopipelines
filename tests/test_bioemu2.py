@@ -24,15 +24,16 @@ import yaml
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
-sys.path.insert(0, SCRIPTS)
 
-from biopipelines.bioemu2 import (BioEmu2, COVALENT_LINKAGE_KEYS, MIN_PYTHON, PHYSICALITY_MODES,  # noqa: E402
-                                  SAMPLERS)
+from biopipelines.bioemu2 import BioEmu2, COVALENT_LINKAGE_KEYS, MIN_PYTHON, PHYSICALITY_MODES, SAMPLERS  # noqa: E402
 from biopipelines.combinatorics import Bundle, CombinatoricsConfig, generate_combinatorics_config  # noqa: E402
 from biopipelines.datastream import DataStream  # noqa: E402
 from biopipelines.id_map_utils import MsaLookup  # noqa: E402
-import pipe_bioemu2 as pipe  # noqa: E402
-import pipe_bioemu2_weights as weights  # noqa: E402
+from tests._helpers import sys_path_prepended  # noqa: E402
+
+with sys_path_prepended(SCRIPTS):
+    import pipe_bioemu2 as pipe
+    import pipe_bioemu2_weights as weights
 
 PIPE_SCRIPT = os.path.join(SCRIPTS, "pipe_bioemu2.py")
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"

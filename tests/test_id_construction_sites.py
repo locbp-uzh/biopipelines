@@ -13,7 +13,6 @@ import importlib.util
 import itertools
 import os
 import re
-import sys
 from types import SimpleNamespace
 
 import pandas as pd
@@ -26,13 +25,13 @@ from biopipelines.combinatorics import (Bundle, CombinatoricsConfig, Each, gener
 from biopipelines.datastream import DataStream, create_map_table
 from biopipelines.fuse import Fuse
 from biopipelines.mock import Mock
+from tests._helpers import sys_path_prepended
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
-sys.path.insert(0, SCRIPTS)
-
-import pipe_bioemu2 as bioemu2_pipe  # noqa: E402
-import pipe_fuse_queries as fuse_pipe  # noqa: E402
+with sys_path_prepended(SCRIPTS):
+    import pipe_bioemu2 as bioemu2_pipe
+    import pipe_fuse_queries as fuse_pipe
 
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
 

@@ -18,13 +18,11 @@ import subprocess
 
 import pandas as pd
 import pytest
-from rdkit import Chem
-from rdkit.Chem import AllChem
 
 from biopipelines import id_patterns
 from biopipelines.datastream import DataStream, create_map_table
 from biopipelines.gnina import CONFORMER_RANK_METRICS, Gnina, Vina
-from tests.test_gnina_ids import PROTEIN_LINE, _declared_stream, pipe_gnina  # noqa: F401 (a fixture)
+from tests._helpers import PROTEIN_LINE, declared_stream, write_pose_sdf
 
 SEED = 1
 
@@ -43,25 +41,13 @@ WINNER = {"auto": 2, "pseudo_binding_energy": 2, "best_vina": 0, "mean_vina": 1,
           "best_cnn_score": 1, "mean_cnn_affinity": 2}
 
 
-def _write_sdf(path, poses):
-    mol = Chem.AddHs(Chem.MolFromSmiles("CCO"))
-    AllChem.EmbedMolecule(mol, randomSeed=7)
-    writer = Chem.SDWriter(str(path))
-    for vina, cnn_score, cnn_affinity in poses:
-        mol.SetProp("minimizedAffinity", str(vina))
-        mol.SetProp("CNNscore", str(cnn_score))
-        mol.SetProp("CNNaffinity", str(cnn_affinity))
-        writer.write(mol)
-    writer.close()
-
-
 class _FakeGnina:
     """Stands in for the binary: the poses of run r of conformer c are POSES[c][r], whichever protein it docks into."""
 
     def __call__(self, cmd, **kwargs):
         conformer = int(pathlib.Path(cmd[cmd.index("-l") + 1]).stem.rsplit("_conf", 1)[1])
         run = int(cmd[cmd.index("--seed") + 1]) - SEED
-        _write_sdf(cmd[cmd.index("-o") + 1], POSES[conformer][run])
+        write_pose_sdf(cmd[cmd.index("-o") + 1], POSES[conformer][run])
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
 
@@ -169,7 +155,7 @@ def test_auto_falls_back_to_best_vina_where_an_energy_is_missing(pipe_gnina, mon
 def test_top_only_false_declares_every_conformer_and_writes_it(
         pipe_gnina, monkeypatch, tmp_path, local_config, isolated_cwd, new_pipeline, record_case):
     proteins, ligands = ["p_1", "p2"], ["l_1"]
-    declared, _, _ = _declared_stream(new_pipeline, proteins, ligands, top_only=False)
+    declared, _, _ = declared_stream(new_pipeline, proteins, ligands, top_only=False)
     assert list(declared.ids) == ["p_1+l_1[_conf<#>]", "p2+l_1[_conf<#>]"]
 
     args = _dock(pipe_gnina, monkeypatch, tmp_path, proteins, ligands, top_only=False,
@@ -189,7 +175,7 @@ def test_top_only_false_declares_every_conformer_and_writes_it(
 
 
 def test_top_only_true_still_declares_the_bare_pair(local_config, isolated_cwd, new_pipeline):
-    declared, _, _ = _declared_stream(new_pipeline, ["p_1", "p2"], ["l_1"], top_only=True)
+    declared, _, _ = declared_stream(new_pipeline, ["p_1", "p2"], ["l_1"], top_only=True)
     assert list(declared.ids) == ["p_1+l_1", "p2+l_1"]
 
 
@@ -250,7 +236,7 @@ def test_pseudo_binding_energy_is_accepted_once_energies_exist(construct):
 
 def test_the_choices_reach_the_pipe_script_through_its_config(local_config, isolated_cwd, new_pipeline):
     import json
-    _declared_stream(new_pipeline, ["p"], ["l"], top_only=False)
+    declared_stream(new_pipeline, ["p"], ["l"], top_only=False)
     (config_path,) = pathlib.Path.cwd().rglob("gnina_config.json")
     with open(config_path) as handle:
         written = json.load(handle)

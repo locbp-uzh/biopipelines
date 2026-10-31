@@ -15,11 +15,12 @@ from types import SimpleNamespace
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "pipe_scripts"))
-
 from biopipelines.foundry_mpnn import FoundryMPNN
-import pipe_foundry_mpnn as pipe  # noqa: E402
+from tests._helpers import sys_path_prepended
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+with sys_path_prepended(os.path.join(REPO_ROOT, "pipe_scripts")):
+    import pipe_foundry_mpnn as pipe
 
 
 @pytest.fixture

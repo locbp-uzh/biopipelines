@@ -11,18 +11,18 @@ import sys
 
 import pytest
 
-from tests.test_gnina_ids import _declared_stream, pipe_gnina  # noqa: F401 (a fixture)
+from tests._helpers import declared_stream
 
 
 @pytest.mark.parametrize("cls", ["Gnina", "Vina"])
 def test_the_wrapper_refuses_two_pairs_with_one_id(local_config, isolated_cwd, new_pipeline, cls):
     with pytest.raises(ValueError, match=r"p1\+b\+c"):
-        _declared_stream(new_pipeline, ["p1", "p1+b"], ["b+c", "c"], cls=cls)
+        declared_stream(new_pipeline, ["p1", "p1+b"], ["b+c", "c"], cls=cls)
 
 
 @pytest.mark.parametrize("cls", ["Gnina", "Vina"])
 def test_distinct_pair_ids_with_a_plus_inside_an_id_are_kept(local_config, isolated_cwd, new_pipeline, cls):
-    declared, _, _ = _declared_stream(new_pipeline, ["p1", "p2"], ["b+c", "c"], cls=cls)
+    declared, _, _ = declared_stream(new_pipeline, ["p1", "p2"], ["b+c", "c"], cls=cls)
 
     assert list(declared.ids) == ["p1+b+c", "p1+c", "p2+b+c", "p2+c"]
 

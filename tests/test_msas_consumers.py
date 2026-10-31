@@ -10,7 +10,6 @@ Not covered, because it needs a cluster: the predictors accepting the alignments
 """
 
 import ast
-import importlib.util
 import json
 import os
 import subprocess
@@ -22,19 +21,16 @@ import pytest
 
 from biopipelines.biopipelines_io import read_skipped_queries, write_skipped_queries
 from biopipelines.id_map_utils import MsaLookup
+from tests._helpers import load_pipe_script
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO_ROOT, "pipe_scripts")
-sys.path.insert(0, SCRIPTS)
 
 PROTEIN = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
 
 
 def _module(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(SCRIPTS, f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_pipe_script(name, f"{name}.py")
 
 
 def _write_table(tmp_path, rows, name="msas_map.csv"):

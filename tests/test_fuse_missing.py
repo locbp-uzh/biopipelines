@@ -19,7 +19,7 @@ import pytest
 
 from biopipelines.fuse import Fuse
 from biopipelines.mock import Mock
-from tests.test_mutation_composer_missing import _load, _propagate
+from tests._helpers import propagate_missing
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PIPE = REPO_ROOT / "pipe_scripts" / "pipe_fuse_queries.py"
@@ -69,7 +69,7 @@ def test_a_fusion_id_that_was_not_built_is_an_unmatched_row_naming_the_missing_s
     assert done.returncode == 0, done.stdout + done.stderr
     written = list(pd.read_csv(config["output_csv"])["id"])
     assert written == ["a1+2+b1", "a1+2+b2", "a3+2+b1", "a3+2+b2"]
-    missing = _propagate(script, config, UPSTREAM_ROWS)
+    missing = propagate_missing(script, UPSTREAM_ROWS)
     own = missing[missing["removed_by"] == step_id]
     assert sorted(own["id"]) == sorted(set(DECLARED) - set(written)) == ["a2+2+b1", "a2+2+b2"]
     assert set(own["kind"]) == {"unmatched"}
