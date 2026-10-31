@@ -197,7 +197,7 @@ Concatenates multiple sequences with flexible linkers. Creates fusion sequences 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
 
-  Fuse declares every combination of the slot ids. A slot sequence that its producer never wrote (it made fewer than it declared, or an upstream filter dropped it) has no row in the slot's map table, so each combination built on it is a `failure` row of `missing` whose cause names the slot and the sequence id (`slot 2 sequence 'mut_007' has no row in its upstream stream`), and the rows the producer's own `missing` table carries are merged in. The step fails only when it built no fusion.
+  Fuse declares every combination of the slot ids. A slot sequence that its producer never wrote (it made fewer than it declared, or an upstream filter dropped it) has no row in the slot's map table, so each combination built on it is an `unmatched` row of `missing` (a lookup that found no partner, which the completion check does not excuse, as it does not excuse a `failure`) whose cause names the slot and the sequence id (`slot 2 sequence 'mut_007' has no row in its upstream stream`), and the rows the producer's own `missing` table carries are merged in. The step fails only when it built no fusion.
 
 **Example**:
 ```python

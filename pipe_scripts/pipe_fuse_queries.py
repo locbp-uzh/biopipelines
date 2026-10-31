@@ -269,8 +269,8 @@ def generate_fusion_sequences(
 
 
 def write_local_missing(path: str, skipped: List[Dict[str, str]], step_id: str) -> None:
-    """This step's own failures, which the propagation merges with the upstream manifests into tables/missing.csv."""
-    rows = [{"id": item["id"], "removed_by": step_id, "kind": "failure", "cause": item["cause"]} for item in skipped]
+    """This step's own rows, which the propagation merges with the upstream manifests into tables/missing.csv; a slot sequence with no row is a lookup that found no partner, so `unmatched`."""
+    rows = [{"id": item["id"], "removed_by": step_id, "kind": "unmatched", "cause": item["cause"]} for item in skipped]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     pd.DataFrame(rows, columns=MISSING_COLUMNS).to_csv(path, index=False)
     print(f"Wrote local missing manifest: {path} ({len(rows)} rows)")

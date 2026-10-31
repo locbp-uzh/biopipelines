@@ -906,8 +906,12 @@ Fuse:
   files:
   - biopipelines/fuse.py
   - pipe_scripts/pipe_fuse_queries.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-10-31'
+    note: >-
+      A declared fusion id built on a slot sequence that has no row upstream is an `unmatched` row of `missing`, not a `failure` row. The lookup of the slot's id in its producer's map found no partner, which is the case the controlled `kind` vocabulary (`failure` a raise, `unmatched` a lookup that found no partner, `filter` a deliberate drop) names; the completion check treats `unmatched` as it treats `failure`, neither is excused, so no step changes its outcome. The cause, the ids and the exit status are unchanged. The docstring, `docs/tool/sequence_design.md` and `tests/test_fuse_missing.py` say `unmatched`.
   - version: '1.6'
     date: '2026-10-30'
     note: >-

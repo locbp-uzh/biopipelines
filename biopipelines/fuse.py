@@ -68,7 +68,7 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
     # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Fuse step. The retired spelling still sets the label and now also reaches the framework.
 
     @classmethod
@@ -119,7 +119,7 @@ echo "=== Fuse ready ==="
             Streams: sequences (.csv), fasta (.fasta — shared multi-record artifact)
             Tables:
                 sequences: id | sequence | lengths | sequences_1.id | sequences_2.id | ... | S1 | L1 | S2 | L2 | ... | Sn
-                missing: id | removed_by | kind | cause. One `failure` row for each declared fusion id that was not built because a slot sequence has no row upstream, naming the slot and its id; the step fails only when it built none.
+                missing: id | removed_by | kind | cause. One `unmatched` row (a lookup that found no partner; not excused) for each declared fusion id that was not built because a slot sequence has no row upstream, naming the slot and its id; the step fails only when it built none.
         """
         # Resolve input slots
         self.input_slots = self._resolve_slots(sequences)

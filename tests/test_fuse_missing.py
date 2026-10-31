@@ -2,9 +2,11 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
-"""Fuse: a declared fusion id it could not build is a `failure` row of this step's `missing.csv`, naming the slot sequence it lacked.
+"""Fuse: a declared fusion id it could not build is an `unmatched` row of this step's `missing.csv`, naming the slot sequence it lacked.
 
 A slot sequence that the producer never wrote (the producer made fewer than it declared, or an upstream filter dropped it) leaves its row out of the slot's map table. Fuse declared every combination of the slot ids, built the ones it had sequences for and logged "skipping combo" for the rest, so over a short MutationComposer it declared 100 ids, wrote 36 and left the other 64 on no record. The pipe now writes `execution/local_missing.csv` with one row per declared id it did not build, the wrapper always declares `missing` and merges that file with the `missing` table of every slot's producer, and the step fails only when it built no fusion at all.
+
+The kind is `unmatched`, not `failure`: the lookup of a declared slot id in the slot's map found no partner row, the case the controlled `kind` vocabulary names (`failure` is a raise). Neither is excused by the completion check.
 """
 
 import json
@@ -57,7 +59,7 @@ def _run(config_path):
 
 
 @pytest.mark.parametrize("upstream", [False, True], ids=["no upstream table", "upstream table"])
-def test_a_fusion_id_that_was_not_built_is_a_failure_row_naming_the_missing_slot_sequence(
+def test_a_fusion_id_that_was_not_built_is_an_unmatched_row_naming_the_missing_slot_sequence(
         local_config, isolated_cwd, new_pipeline, upstream):
     config_path, config, script, step_id = _configured_step(new_pipeline, upstream)
     _write_slots(config, [["a1", "a3"], ["b1", "b2"]])
@@ -70,7 +72,7 @@ def test_a_fusion_id_that_was_not_built_is_a_failure_row_naming_the_missing_slot
     missing = _propagate(script, config, UPSTREAM_ROWS)
     own = missing[missing["removed_by"] == step_id]
     assert sorted(own["id"]) == sorted(set(DECLARED) - set(written)) == ["a2+2+b1", "a2+2+b2"]
-    assert set(own["kind"]) == {"failure"}
+    assert set(own["kind"]) == {"unmatched"}
     assert all("slot 1 sequence 'a2'" in cause for cause in own["cause"]), list(own["cause"])
     if upstream:
         assert [(row["removed_by"], row["kind"]) for _, row in missing.iterrows() if row["id"] == "a2"] == [
@@ -100,7 +102,7 @@ def test_the_step_fails_only_when_no_fusion_was_built(local_config, isolated_cwd
     assert done.returncode != 0
     local = pd.read_csv(config["local_missing_csv"], dtype=str, keep_default_na=False)
     assert sorted(local["id"]) == sorted(DECLARED)
-    assert set(local["removed_by"]) == {step_id} and set(local["kind"]) == {"failure"}
+    assert set(local["removed_by"]) == {step_id} and set(local["kind"]) == {"unmatched"}
 
 
 def test_a_complete_slot_leaves_no_failure_row(local_config, isolated_cwd, new_pipeline):
