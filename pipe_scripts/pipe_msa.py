@@ -20,6 +20,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from biopipelines.biopipelines_io import MISSING_COLUMNS, step_id_from_table_path  # noqa: E402
 from biopipelines.id_map_utils import prune_redundant_provenance_columns  # noqa: E402
 
 
@@ -173,6 +174,7 @@ def main():
     convert = config['convert']
     output_folder = config['output_folder']
     output_msas_csv = config['output_msas_csv']
+    local_missing_csv = config['local_missing_csv']
 
     os.makedirs(output_folder, exist_ok=True)
 
@@ -188,15 +190,20 @@ def main():
 
     ext = ".a3m" if convert == "a3m" else ".csv"
     output_rows = []
+    failures = []
+    step_id = step_id_from_table_path(local_missing_csv)
 
     for _, row in df.iterrows():
         msa_file = row['file']
+        msa_file = '' if pd.isna(msa_file) else str(msa_file)
         out_id = str(row.get('id', '') or '')
         provenance = row.get('sequences.id', '')
         provenance = '' if pd.isna(provenance) else str(provenance)
 
         if not msa_file or not os.path.exists(msa_file):
-            print(f"Warning: MSA file not found: {msa_file}")
+            cause = f"MSA file not found: {msa_file}" if msa_file else "no file is listed for this id in the input MSA table"
+            print(f"Warning: {out_id}: {cause}")
+            failures.append({"id": out_id, "removed_by": step_id, "kind": "failure", "cause": cause})
             continue
 
         output_file = os.path.join(output_folder, f"{out_id}{ext}")
@@ -218,7 +225,9 @@ def main():
     output_df = prune_redundant_provenance_columns(
         pd.DataFrame(output_rows, columns=['id', 'sequences.id', 'sequence', 'file']))
     output_df.to_csv(output_msas_csv, index=False)
-    print(f"\nConverted {len(output_rows)} MSA files to {convert} format")
+    os.makedirs(os.path.dirname(local_missing_csv), exist_ok=True)
+    pd.DataFrame(failures, columns=MISSING_COLUMNS).to_csv(local_missing_csv, index=False)
+    print(f"\nConverted {len(output_rows)} MSA files to {convert} format; {len(failures)} listed without a file")
     print(f"Output table: {output_msas_csv}")
 
 

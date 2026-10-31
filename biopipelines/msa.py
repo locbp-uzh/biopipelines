@@ -49,7 +49,7 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -65,6 +65,8 @@ echo "=== MSA ready ==="
     output_msas_csv = Path(lambda self: self.stream_map_path("msas"))
     config_json = Path(lambda self: self.configuration_path("msa_config.json"))
     msa_py = Path(lambda self: self.pipe_script_path("pipe_msa.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     def __init__(self,
                  msas: StandardizedOutput,
@@ -82,6 +84,8 @@ echo "=== MSA ready ==="
             Tables:
                 msas: id | sequence | file
                       One row per input row, under the input row's id; `sequences.id` is carried only when the input had one that its id does not already spell.
+                missing: id | removed_by | kind | cause
+                      A `failure` row for an id the input table lists whose alignment file is gone or whose `file` cell is empty, plus the upstream manifest forwarded.
         """
         self.msas_input = msas
         self.msas_stream = resolve_input_to_datastream(msas, fallback_stream="msas")
@@ -126,6 +130,7 @@ echo "=== MSA ready ==="
             "convert": self.convert,
             "output_folder": self.output_msas_folder,
             "output_msas_csv": self.output_msas_csv,
+            "local_missing_csv": self.local_missing_csv,
         }
 
         with open(self.config_json, 'w') as f:
@@ -142,6 +147,8 @@ echo "Output folder: {self.output_msas_folder}"
 python "{self.msa_py}" --config "{self.config_json}"
 
 """
+        script_content += self.generate_missing_propagation(
+            self.msas_input, missing_csv=self.missing_csv, local_missing=self.local_missing_csv)
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -168,7 +175,8 @@ python "{self.msa_py}" --config "{self.config_json}"
                 path=self.output_msas_csv,
                 columns=["id", "sequence", "file"],
                 description="Converted MSA files"
-            )
+            ),
+            "missing": self.missing_table_info(self.missing_csv),
         }
 
         return {

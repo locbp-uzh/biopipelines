@@ -81,6 +81,8 @@ Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFol
 **Tables**:
 - `msas`: | id | sequence | file |
   One row per input row, under the input row's id. `sequences.id` is carried only when the input row had one that its id does not already spell.
+- `missing`: | id | removed_by | kind | cause |
+  A `failure` row for an id the input table lists whose alignment file is gone (a cleaned folder, a moved run; the cause names the path) or whose `file` cell is empty, plus the upstream manifest forwarded. The step is still marked FAILED for the alignments it did not convert.
 
 **MSA Recycling Compatibility**:
 

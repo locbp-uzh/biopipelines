@@ -92,7 +92,7 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 
 - **MMseqs2** v1.11 · CPU · x86-64 — Generates multiple sequence alignments for structure prediction by querying a local MMseqs2 server. `docs/tool/msas.md#mmseqs2` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: build-msa, fetch, msa, protein
 - **MMseqs2Server** v1.10 · CPU · x86-64 — Starts and manages a local MMseqs2 server process (CPU or GPU mode) so repeated MSA queries hit a warm local server instead of the public endpoint. `docs/tool/msas.md#mmseqs2server` [repo](https://github.com/soedinglab/MMseqs2) [paper](https://www.nature.com/articles/nbt.3988) · tags: data, build-msa, msa, protein
-- **MSA** v1.5 · CPU · x86-64, aarch64, Colab — Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). `docs/tool/msas.md#msa` · tags: data, msa
+- **MSA** v1.6 · CPU · x86-64, aarch64, Colab — Converts MSA files between CSV (Boltz2 / public-server format) and A3M (AlphaFold/ColabFold format). `docs/tool/msas.md#msa` · tags: data, msa
 
 ## Sequence Design
 

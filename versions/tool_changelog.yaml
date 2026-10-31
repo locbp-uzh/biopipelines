@@ -1459,8 +1459,12 @@ MSA:
   files:
   - biopipelines/msa.py
   - pipe_scripts/pipe_msa.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-10-31'
+    note: >-
+      An alignment the input table lists whose file is gone is a `failure` row of this step's `tables/missing.csv`, its cause naming the path. `pipe_msa.py` printed "MSA file not found" and skipped it, so an id its producer's map listed whose file had since gone (a cleaned folder, a moved run) was declared and absent with no cause on record, and an empty `file` cell crashed the script because a NaN reached `os.path.exists`; both now land in `_execution/local_missing.csv`, which `generate_missing_propagation(local_missing=...)` merges with the upstream manifest, and the `missing` table is declared. The conversions, the ids and the exit status are unchanged: the step is still FAILED for the alignments it could not convert, now with the reason. `tests/test_msa_missing.py` pins the rows and the wiring.
   - version: '1.5'
     date: '2026-10-29'
     note: >-

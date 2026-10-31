@@ -100,7 +100,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 88 | SelectionTransfer | Data Management | 1.1 | `biopipelines/selection_transfer.py` |
 | 89 | MMseqs2                   | MSAs                           | 1.11 | `biopipelines/mmseqs2.py` |
 | 90 | MMseqs2Server             | MSAs                           | 1.10 | `biopipelines/mmseqs2.py` |
-| 91 | MSA                       | MSAs                           | 1.5 | `biopipelines/msa.py` |
+| 91 | MSA                       | MSAs                           | 1.6 | `biopipelines/msa.py` |
 | 92 | CompoundLibrary           | Inputs & I/O                   | 1.0 | `biopipelines/compound_library.py` |
 | 93 | Ligand                    | Inputs & I/O                   | 1.5 | `biopipelines/ligand.py` |
 | 94 | Load | Inputs & I/O                   | 1.7 | `biopipelines/load.py` |
