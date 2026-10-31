@@ -97,7 +97,8 @@ def test_a_pair_without_a_prediction_is_a_failure_under_its_own_id(gems, tmp_pat
 
     rows, missing = gems.affinity_rows(meta, predictions, step_id="004")
 
-    assert [r["id"] for r in rows] == ["a__b+c"]
+    assert [r["id"] for r in rows] == ["a__b+c", "a__b+b__c", "a+c", "a+b__c"]
+    assert [r["pkd_pred"] == r["pkd_pred"] for r in rows] == [True, False, False, False]
     assert [(m["id"], m["kind"]) for m in missing] == [
         ("a__b+b__c", "failure"), ("a+c", "failure"), ("a+b__c", "failure")]
     assert all(m["removed_by"] == "004" for m in missing)

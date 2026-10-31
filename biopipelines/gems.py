@@ -53,12 +53,12 @@ class GEMS(BaseConfig):
     Outputs:
         Streams: (none)
         Tables:
-            affinity: id | structures.id | ligands.id | pkd_pred (id is `<structure>+<ligand>`)
+            affinity: id | structures.id | ligands.id | pkd_pred (id is `<structure>+<ligand>`; one row per pair, pkd_pred NaN for a pair GEMS did not predict)
             missing:  id | removed_by | kind | cause
     """
 
     TOOL_NAME = "GEMS"
-    TOOL_VERSION = "2.2"
+    TOOL_VERSION = "2.3"
     ENV_NAME = "gems"
 
     @classmethod

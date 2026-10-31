@@ -78,20 +78,20 @@ def stage_pairs(prot_pairs, lig_pairs, work_dir, smiles_lookup):
 
 
 def affinity_rows(pair_meta, pred_lookup, step_id):
-    """(affinity rows, missing rows): each staged pair is looked up by its stage name and written under its pair id."""
+    """(affinity rows, missing rows): each staged pair is looked up by its stage name and written under its pair id.
+
+    Every pair keeps a row; a pair GEMS did not predict has a NaN pKd and a `failure` row of `missing`.
+    """
     rows, missing = [], []
     for meta in pair_meta:
         pair_id = meta["id"]
+        row = {"id": pair_id, "structures.id": meta["structures.id"], "ligands.id": meta["ligands.id"]}
         if meta["stage_name"] in pred_lookup:
             pkd = pred_lookup[meta["stage_name"]]
-            rows.append({
-                "id": pair_id,
-                "structures.id": meta["structures.id"],
-                "ligands.id": meta["ligands.id"],
-                "pkd_pred": round(pkd, 4),
-            })
+            rows.append({**row, "pkd_pred": round(pkd, 4)})
             print(f"  {pair_id}: pKd = {pkd:.3f}")
         else:
+            rows.append({**row, "pkd_pred": float("nan")})
             missing.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": "GEMS produced no prediction for this pair"})
     return rows, missing
 
@@ -186,7 +186,8 @@ def main():
     print(f"Affinity: {args.affinity_csv} ({len(rows)} rows)")
     print(f"Missing: {args.missing_csv} ({len(all_missing)} rows)")
 
-    if not rows:
+    if len(missing) == len(rows):
+        print("ERROR: GEMS gave no prediction for any pair", file=sys.stderr)
         sys.exit(1)
 
 

@@ -933,8 +933,12 @@ GEMS:
   files:
   - biopipelines/gems.py
   - pipe_scripts/pipe_gems.py
-  current: "2.2"
+  current: "2.3"
   history:
+  - version: '2.3'
+    date: '2026-10-31'
+    note: >-
+      A pair GEMS gave no prediction for keeps its row of `affinity`, with a NaN `pkd_pred`, beside its `failure` row of `missing`. The table dropped the row, so a `Panda` merge of `affinity` against the table that fed it silently came back shorter. The step exits non-zero when no pair at all got a prediction, which an empty table used to decide. No id changes.
   - version: '2.2'
     date: '2026-10-30'
     note: >-
