@@ -1072,14 +1072,3 @@ class MsaLookup:
         if found is None:
             raise MissingAlignment(self.cause(protein_id))
         return found
-
-
-def get_msa_paths(msas: Union[str, Dict], protein_ids: Iterable[str],
-                  sequences: Optional[Dict[str, str]] = None) -> Dict[str, Optional[str]]:
-    """{protein id: alignment path, or None} for the given proteins, matched as :class:`MsaLookup` does.
-
-    ``msas`` is the stream JSON, the stream dict or the map_table CSV. ``sequences`` optionally maps a protein id to its sequence, for the last tier. A caller that looks proteins up as it discovers them loads :class:`MsaLookup` once instead of calling this per protein.
-    """
-    lookup = MsaLookup.load(msas)
-    sequences = sequences or {}
-    return {pid: lookup.path(pid, sequences.get(pid)) for pid in protein_ids}

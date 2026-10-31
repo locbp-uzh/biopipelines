@@ -18,8 +18,8 @@ import sys
 import pandas as pd
 import pytest
 
-from biopipelines.id_map_utils import (MissingAlignment, MsaLookup, get_msa_paths,
-                                       prune_redundant_provenance_columns)
+from biopipelines import id_map_utils
+from biopipelines.id_map_utils import MissingAlignment, MsaLookup, prune_redundant_provenance_columns
 from tests._helpers import load_pipe_script
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,7 +75,8 @@ class TestTheSharedLookup:
         source = {"stream_json": _stream_json(tmp_path, table),
                   "stream_dict": {"map_table": table},
                   "table_csv": table}[how]
-        assert get_msa_paths(source, ["p1", "p2"]) == {"p1": "/x/p1.a3m", "p2": None}
+        lookup = MsaLookup.load(source)
+        assert (lookup.path("p1"), lookup.path("p2")) == ("/x/p1.a3m", None)
 
     def test_the_exact_id_wins_over_a_provenance_or_legacy_row(self, tmp_path):
         rows = [{"id": "p1_msa", "sequences.id": "p1", "file": "/x/legacy.a3m"},
