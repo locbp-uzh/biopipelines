@@ -73,7 +73,7 @@ class RFdiffusionAllAtom(BaseConfig):
     """
 
     TOOL_NAME = "RFdiffusionAllAtom"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
     # RFdiffusion-AllAtom's hydra entry point takes far more overrides than the wrapper types; an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     ENV_NAME = "SE3nv"
@@ -198,7 +198,11 @@ fi
             ligand: Ligand as a compounds stream (Ligand(codes="ZIT") or any
                     compounds-producing tool). The 3-letter residue code is
                     read from the stream's `code` column at runtime and passed
-                    to RFdiffusion-AllAtom's inference.ligand= hydra flag.
+                    to RFdiffusion-AllAtom's inference.ligand= hydra flag. An input
+                    structure named after a ligand of the stream is designed against
+                    that ligand; with one ligand it is used for every structure; a
+                    structure that matches none of several ligands is a `failure` row
+                    of `missing` (its cause names the ligands) and the rest go on.
             pdb: Input PDB structure as DataStream or StandardizedOutput
             contigs: Contig specification (e.g., "A1-100,10-20")
             inpaint: Inpainting specification (same format as contigs)
@@ -532,15 +536,12 @@ fi
         input ids (resolved at runtime). Per-PDB contigs / inpaint / inpaint_str
         are pre-resolved into contig_options.json by pipe_rfdiffusion_contigs.py.
         Each run takes the `code` of the ligand named like its structure, or of the
-        first ligand when none is (one ligand broadcast over several proteins).
+        only ligand when the stream holds one (broadcast over several proteins); a
+        structure that matches none of several ligands is skipped and recorded as a
+        failure by the update step, from the resolver's message in its stderr file.
         Without a PDB it is a single unconditional run with the first ligand's code.
         """
-        # The unconditional run has no structure id, so it reads the first ligand
-        # at runtime (not ids[0] at config time) and its `code` value.
         self.ligand_stream.save_json(self.ligand_json)
-        ligand_snippet = f"""LIGAND_ID={Resolve.stream_ids(self.ligand_json, index=0)}
-LIGAND_CODE={Resolve.stream_item(self.ligand_json, '$LIGAND_ID', column='code')}
-"""
 
         common_args = self._build_common_inference_args()
         common = ' '.join(common_args)
@@ -551,7 +552,11 @@ LIGAND_CODE={Resolve.stream_item(self.ligand_json, '$LIGAND_ID', column='code')}
         mode = "container" if self.uses_container() else "environment"
 
         if not self.pdb_stream:
-            # Unconditional — single run, contigs is a literal.
+            # The unconditional run has no structure id, so it reads the first ligand at runtime (not ids[0] at config time).
+            ligand_snippet = f"""LIGAND_ID={Resolve.stream_ids(self.ligand_json, index=0)}
+LIGAND_CODE={Resolve.stream_item(self.ligand_json, '$LIGAND_ID', column='code')}
+"""
+            # Single run, contigs is a literal.
             contigs = self._contigs_arg[1]
             aa = f"contigmap.contigs=[\\\'{contigs}\\\'] inference.input_pdb=null"
             aa += f" inference.output_prefix={self.stream_path('structures', self.pipeline_name)}"
@@ -592,7 +597,12 @@ cd {repo_dir}
 
 for STRUCT_ID in {Resolve.stream_ids(self.pdb_ds_json)}; do
     INPUT_PDB={Resolve.stream_item(self.pdb_ds_json, '$STRUCT_ID')}
-    LIGAND_CODE=$(python {self.ligand_code_py} "{self.ligand_json}" "$STRUCT_ID")
+    LIGAND_ERR="{self.stderr_folder}/$STRUCT_ID.stderr"
+    if ! LIGAND_CODE=$(python {self.ligand_code_py} "{self.ligand_json}" "$STRUCT_ID" 2> "$LIGAND_ERR"); then
+        cat "$LIGAND_ERR" >&2
+        echo "Skipping RFdiffusion-AllAtom for $STRUCT_ID"
+        continue
+    fi
     OPTS=$(python {self.contigs_reader_py} "{self.contigs_json}" "$STRUCT_ID")
     CONTIGS=$(echo "$OPTS" | sed -n '1p')
     INPAINT_SEL=$(echo "$OPTS" | sed -n '2p')
@@ -728,7 +738,7 @@ class RFDAA_PrepareLigand(BaseConfig):
     """
 
     TOOL_NAME = "RFDAA_PrepareLigand"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
 
     # Lazy path descriptors
     #   structures_csv  — standalone TableInfo (tables/structures.csv).

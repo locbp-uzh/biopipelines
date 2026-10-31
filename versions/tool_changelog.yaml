@@ -2173,8 +2173,12 @@ RFDAA_PrepareLigand:
   files:
   - biopipelines/rfdiffusion_allatom.py
   - pipe_scripts/pipe_rfdaa_prepare_ligand.py
-  current: "2.7"
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-10-31'
+    note: >-
+      No behavioural change; the version moves because the shared `rfdiffusion_allatom.py` did. See the RFdiffusionAllAtom 2.8 entry.
   - version: '2.7'
     date: '2026-10-30'
     note: >-
@@ -2347,8 +2351,12 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
   - biopipelines/rfdiffusion_allatom.py
-  current: "2.7"
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-10-31'
+    note: >-
+      A structure that matches none of several ligands is a `failure` row of `missing`, not a design against the first ligand. `resolve_rfdaa_ligand_code.py` gave every structure whose id was not a ligand's the first ligand's code, which is right for one ligand broadcast over several proteins and wrong for a stream of several ligands, where the structure was designed against `ids[0]` with nothing on stderr and nothing in `missing`. It now answers: the ligand named like the structure, else the only ligand of a one-ligand stream, else an error naming the structure and the ligands. The run loop writes that error to the structure's stderr file and skips the structure, so `pipe_update_structures_map.py` records its designs as `failure` rows with it as the cause and the other structures go on. The unconditional run still reads the first ligand, and the unused first-ligand snippet is no longer built for a pdb-conditioned run. Ids and the one-ligand broadcast are unchanged.
   - version: '2.7'
     date: '2026-10-30'
     note: >-
