@@ -272,7 +272,7 @@ def test_main_exits_non_zero_when_every_id_raised(pipe, tmp_path, monkeypatch):
 # -- PyRosetta-dependent ------------------------------------------------------------------------------
 
 def test_the_pyrosetta_api_the_pipes_call_exists():
-    pyr = pytest.importorskip("pyrosetta")
+    pyr = pytest.importorskip("pyrosetta", reason="pyrosetta is not installed in this environment (it needs its own licensed one): the Rosetta API the pipes call is not checked")
     ros = pyr.rosetta
     assert callable(pyr.create_score_function) and callable(pyr.pose_from_file)
     assert callable(pyr.generate_nonstandard_residue_set)

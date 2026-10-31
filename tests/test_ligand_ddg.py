@@ -722,7 +722,7 @@ def test_the_ligand_selection_uses_the_pose_index_and_the_hard_scheme_passes_it(
 # -- PyRosetta-dependent ------------------------------------------------------------------------------------
 
 def test_the_hard_protocol_parses_in_rosetta_and_exposes_its_movers_and_filter(pipe):
-    pyr = pytest.importorskip("pyrosetta")
+    pyr = pytest.importorskip("pyrosetta", reason="pyrosetta is not installed in this environment (it needs its own licensed one): Rosetta does not parse the hard protocol")
     from biopipelines.rosetta_scoring import HARD_INIT_OPTIONS, init_pyrosetta
 
     init_pyrosetta(HARD_INIT_OPTIONS)

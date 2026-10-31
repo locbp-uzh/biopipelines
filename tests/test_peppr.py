@@ -382,7 +382,7 @@ def library():
     # With biopipelines/ on sys.path, a missing library resolves to the wrapper module of the same name.
     if not hasattr(package, "Evaluator"):
         pytest.skip("peppr is not installed; the metric values are not checked")
-    pytest.importorskip("biotite")
+    pytest.importorskip("biotite", reason="biotite is not installed in this environment: the metric values are not checked")
 
 
 @pytest.fixture(scope="module")

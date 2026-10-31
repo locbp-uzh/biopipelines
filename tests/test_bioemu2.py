@@ -806,7 +806,7 @@ class TestTheTrajectorySplit:
         assert [atom.serial for atom in Topology.atoms] == [1, 2, 3]
 
     def test_a_single_chain_cif_is_written_as_one_pdb_per_frame(self, tmp_path):
-        md = pytest.importorskip("mdtraj")
+        md = pytest.importorskip("mdtraj", reason="mdtraj is not installed in this environment: the trajectory split is not run")
         cif = tmp_path / "topology.cif"
         cif.write_text(SINGLE_CHAIN_CIF)
         frames = md.load(str(cif))
