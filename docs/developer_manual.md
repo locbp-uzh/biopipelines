@@ -30,6 +30,7 @@
   - [Output Prediction](#output-prediction)
     - [File Templates with \<id\>](#file-templates-with-id)
   - [Map Table Contract](#map-table-contract)
+  - [Missing Manifests](#missing-manifests)
   - [Install Scripts and the `$INSTALL_SUCCESS` Contract](#install-scripts-and-the-install_success-contract)
   - [Environments and `ENV_NAME`](#environments-and-env_name)
 - [Shell Safety](#shell-safety)
@@ -1002,6 +1003,23 @@ File templates with `<id>` are the preferred form for the declared stream — co
 Outside these, write the map from the pipe script.
 
 `Load` resolves against the upstream **map_table**, not by globbing: the map lists one row per id the producer actually wrote, so it is the authoritative answer to what exists. Two things follow. First, a `files` entry containing `<id>` is a *template*, not a path — statting it always fails, so it must be expanded via the map before any existence check. Second, `Load` narrows the stream's ids to the map's rows, so a stream declaring 300 ids whose producer emitted 290 loads as 290 and downstream tools never inherit the 10 phantom ids. A value-based stream (`files == []`, such as ProteinMPNN's `sequences`) is narrowed the same way, to the declared ids its map lists: its map is its only record, so a batch cut from a finished step by narrowing the tables declares only its own rows, and a tool that declares outputs from that stream's ids stays accurate. Globbing is the fallback only when a stream has no readable map_table, and that case is reported as *unresolved* rather than as missing files. With `validate_files=False` none of this runs — ids propagate as declared, and downstream tools must consume `missing.csv` themselves.
+
+### Missing Manifests
+
+A step that ends with fewer ids than it was handed records every absent id in `tables/missing.csv`, schema `id | removed_by | kind | cause` (`BaseConfig.missing_table_info()`). `pipe_check_completion` reads it to tell a correctly absent output from a lost one. Without it, every id an upstream filter dropped counts as a failed output, and the step writes `_FAILED` and strands every job queued behind it.
+
+**Who writes it.** Exactly one writer per step:
+
+- **The completion footer**, for every tool that does not own the file. `generate_completion_check_footer()` walks the instance's attributes (attribute names are not a usable key, so it reads `__dict__` and looks inside `Bundle`/`Each`), collects the manifest of every input that has one, and emits a `pipe_propagate_missing.py` block that merges them into this step's `tables/missing.csv`. It also adds the `missing` table to `.expected_outputs.json`, the only place `pipe_check_completion` reads it. A tool that only consumes ids needs no code.
+- **The tool itself**, when it drops or fails ids. (A) `generate_missing_propagation(*inputs, local_missing=..., missing_csv=...)` merges the upstream manifests with the rows the pipe wrote to `local_missing` (`_execution/local_missing.csv`); the pipe never reads an upstream manifest. (B) `upstream_missing_flag(*inputs)` hands the upstream paths to the pipe as `--upstream-missing`, and the pipe writes the merged file in one pass (`dssp.py`, `gnina.py`). Such a tool declares `missing_table_info()` in `get_output_files()`.
+
+Calling `generate_missing_propagation`, `upstream_missing_flag` or `_get_upstream_missing_table_path` while building the script claims the manifest, and so does `claim_missing_manifest()` for a tool that reads the manifests some other way. A claimed manifest, or a declared one, makes the footer stand down: `pipe_propagate_missing.py` rewrites its destination and would erase the tool's own rows. Declaring the table without writing it is therefore a bug: the footer stands down and nothing writes the file.
+
+**How far a manifest reaches.** An input carries a manifest when its producer either declares a `missing` table in `get_output_files()` or will have one written by its own footer, that is, when the producer itself has an input carrying a manifest. `BaseConfig._written_missing_path()` asks this recursively and caches the answer per producer, so in `Panda.filter → Reduce → Reduce → DSSP` each step receives the filter's rows, whatever the tools in between. An id generator with no filtered input writes no manifest, and neither do its consumers: the canonical path stamped on every stream (`metadata["missing_table"]`) does not count as evidence that the file is written.
+
+**What `.tables` shows.** `.tables` lists what `get_output_files()` declares. The footer's declaration lives only in `.expected_outputs.json`, so the manifest of a tool that does not own one is read from `<step output folder>/tables/missing.csv`, which exists whenever some step upstream could drop an id.
+
+**`removed_by` and `kind`.** `removed_by` is the step id `<NNN>_<Tool>` (`biopipelines_io.step_id_from_table_path`), so a chain of the same tool keeps an upstream step's rows apart from this step's own. `kind` is controlled: `filter` (a deliberate drop, excused), `failure` (the tool tried and raised) and `unmatched` (a lookup found no partner). `pipe_check_completion` excuses every row propagated from an upstream step and the `filter` rows of this step; this step's `failure` and `unmatched` rows mark it FAILED. The reason goes in `cause`. Rows stay in the upstream id space; `pipe_check_completion` maps them onto this step's output ids (products, `_<N>` multipliers, group keys) when it excuses files.
 
 ### Install Scripts and the `$INSTALL_SUCCESS` Contract
 

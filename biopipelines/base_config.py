@@ -1662,11 +1662,9 @@ fi
 
         completion_environment = self.activate_environment(name="biopipelines")
 
-        return f"""# Capture the main command's status if nothing already did. A tool that emits
-# the missing-propagation block has it set there, right after its own command;
-# one that does not reaches this footer directly, so $? is still its own.
+        return f"""# Capture the main command's status if the tool's own propagation block did not.
 BP_MAIN_RC=${{BP_MAIN_RC:-$?}}
-{auto_propagation}{completion_environment}
+{completion_environment}{auto_propagation}
 # Check completion and create status files
 echo "Checking outputs and creating completion status..."
 
@@ -1678,9 +1676,7 @@ else
     echo "{self.TOOL_NAME} - some outputs missing"
 fi
 
-# The step's own status is what the failure guard reads. Trailing blocks run
-# whatever happened -- a partly-successful tool still owes downstream a missing
-# manifest -- but they must not overwrite the verdict.
+# The failure guard reads the step's own status, never the trailing blocks' status.
 if [ "${{BP_MAIN_RC:-0}}" -ne 0 ]; then
     echo "ERROR: {self.TOOL_NAME} exited ${{BP_MAIN_RC}}"
     exit "${{BP_MAIN_RC}}"
@@ -1695,23 +1691,8 @@ fi
         return self.__str__()
     
     @staticmethod
-    def _missing_path_of(input_source) -> Optional[str]:
-        """Extract one input source's `missing` table path, or None.
-
-        A `DataStream` carries no ``.tables``, so it resolves through the producer
-        that stamped it. The stamped ``metadata["missing_table"]`` is a canonical
-        path every producer has, written or not, so it is trusted only once the
-        producer is seen to DECLARE the table — otherwise an id generator would
-        look like a filter.
-        """
-        if input_source is None:
-            return None
-        try:
-            tables = input_source.tables
-        except AttributeError:
-            return BaseConfig._stream_missing_path(input_source)
-        except Exception:  # noqa: BLE001 — `tables` is a property that runs the producer
-            return None
+    def _table_entry_path(tables) -> Optional[str]:
+        """The path of the `missing` entry in a tables container or dict, or None."""
         if hasattr(tables, '_tables') and 'missing' in tables._tables:
             missing_info = tables._tables['missing']
             return missing_info.info.path if hasattr(missing_info, 'info') else str(missing_info)
@@ -1725,32 +1706,62 @@ fi
         return None
 
     @staticmethod
+    def _missing_path_of(input_source) -> Optional[str]:
+        """Extract one input source's `missing` table path, or None.
+
+        A declared table answers directly.
+        Otherwise the producer is asked, since the footer of a silent tool writes a manifest it never declares.
+        A `DataStream` carries no ``.tables`` and always resolves through its producer.
+        """
+        if input_source is None:
+            return None
+        try:
+            tables = input_source.tables
+        except AttributeError:
+            return BaseConfig._stream_missing_path(input_source)
+        except Exception as exc:  # noqa: BLE001 — `tables` is a property that runs the producer
+            print(f"Warning: could not read the tables of {type(input_source).__name__} "
+                  f"to find its `missing` manifest: {exc}")
+            return None
+        declared = BaseConfig._table_entry_path(tables)
+        if declared:
+            return declared
+        producer = producer_of(input_source)
+        if isinstance(producer, BaseConfig):
+            return producer._written_missing_path()
+        return None
+
+    @staticmethod
     def _stream_missing_path(stream) -> Optional[str]:
         """A `DataStream`'s producer's `missing` manifest, or None."""
-        metadata = getattr(stream, "metadata", None)
-        if not isinstance(metadata, dict):
-            return None
-        stamped = metadata.get("missing_table")
-        if not stamped:
-            return None
         producer = getattr(stream, "_producer", None)
-        if producer is None or not hasattr(producer, "get_output_files"):
+        if not isinstance(producer, BaseConfig):
             return None
-        cached = getattr(producer, "_declares_missing_cache", None)
-        if cached is None:
-            try:
-                tables = producer.get_output_files().get("tables") or {}
-            except Exception:  # noqa: BLE001 — an upstream that cannot describe itself propagates nothing
-                return None
-            # Cached because get_output_files can write to disk, and discovery asks repeatedly
-            cached = isinstance(tables, dict) and "missing" in tables
-            try:
-                producer._declares_missing_cache = cached
-            except Exception:  # noqa: BLE001 — a producer that refuses the attribute is simply re-asked
-                pass
-        if not cached:
+        return producer._written_missing_path()
+
+    def _written_missing_path(self) -> Optional[str]:
+        """Where this step's `missing` manifest is written at run time, or None when it writes none.
+
+        A table the tool declares counts, and so does the one the footer writes for a tool fed by an upstream manifest.
+        Asking recursively is what lets a manifest cross any number of silent steps.
+        A canonical path alone does not count, or an id generator would look like a filter.
+        """
+        cached = self.__dict__.get("_written_missing_cache", False)
+        if cached is not False:
+            return cached
+        # Cached because get_output_files can write to disk; None first guards against a cycle
+        self._written_missing_cache = None
+        try:
+            tables = self.get_output_files().get("tables") or {}
+        except Exception as exc:  # noqa: BLE001 — an upstream that cannot describe itself propagates nothing
+            print(f"Warning: {self.TOOL_NAME} could not describe its outputs, so its "
+                  f"`missing` manifest is not propagated: {exc}")
             return None
-        return stamped
+        path = self._table_entry_path(tables)
+        if path is None and self.auto_missing_paths():
+            path = self.missing_table_info(getattr(self, "missing_csv", None)).info.path
+        self._written_missing_cache = path
+        return path
 
     @staticmethod
     def _unwrap_combinatorics(input_source) -> List[Any]:
@@ -1814,21 +1825,16 @@ fi
     def claim_missing_manifest(self) -> None:
         """Declare that this tool writes its own ``tables/missing.csv``.
 
-        Keeps the completion footer's central propagation out of the way, since
-        ``pipe_propagate_missing.py`` rewrites its destination and would erase
-        rows the tool produced itself. ``generate_missing_propagation``,
-        ``upstream_missing_flag`` and ``_get_upstream_missing_table_path`` claim
-        it implicitly; a tool that reads the manifests some other way calls this.
+        Keeps the footer's central propagation away, since ``pipe_propagate_missing.py`` rewrites its destination and would erase the tool's own rows.
+        ``generate_missing_propagation``, ``upstream_missing_flag`` and ``_get_upstream_missing_table_path`` claim it implicitly; a tool that reads the manifests some other way calls this.
         """
         self._missing_propagation_emitted = True
 
     def _discovered_missing_sources(self) -> List[Any]:
         """Every attribute this instance retained that could carry an upstream manifest.
 
-        Attribute NAMES are not a usable key: the same input is `structures`,
-        `structures_input`, `pdbs_input` or `stream_input` depending on the tool.
-        The filter is the one ``_missing_path_of`` already applies — an object
-        carrying a `missing` table, or a stream whose producer declares one.
+        Attribute NAMES are not a usable key: the same input is `structures`, `structures_input`, `pdbs_input` or `stream_input` depending on the tool.
+        The filter is ``_missing_path_of``: an input whose producer declares a `missing` table or has its footer write one.
         `__dict__` is insertion-ordered, so the result is deterministic.
         """
         found: List[Any] = []
@@ -1852,9 +1858,8 @@ fi
     def _with_declared_missing_table(self, expected_outputs: Any) -> Any:
         """A copy of the expected outputs carrying the `missing` table the footer will write.
 
-        `pipe_check_completion` excuses a dropped id only through
-        ``tables.missing.path``, so the central propagation is useless unless the
-        manifest is declared alongside it. A tool that declares one already keeps it.
+        `pipe_check_completion` excuses a dropped id only through ``tables.missing.path``, so the central propagation needs the declaration beside it.
+        A tool that declares one already keeps it.
         """
         if not isinstance(expected_outputs, dict):
             return expected_outputs
@@ -1871,14 +1876,9 @@ fi
     def _auto_missing_propagation(self, expected_outputs: Any) -> str:
         """The propagation block the footer emits for a tool that owns no manifest of its own.
 
-        ``pipe_propagate_missing.py`` rewrites its destination, so the central
-        block must stay out of the way of a tool that writes that file itself:
-        a raw upstream merge would erase the tool's own rows, and an erased
-        ``kind="filter"`` row turns a legitimate absence back into a FAILED
-        marker. A tool declares ownership by DECLARING the table — explicitly,
-        or implicitly by consulting ``generate_missing_propagation`` /
-        ``upstream_missing_flag`` / ``_get_upstream_missing_table_path`` while
-        building its script.
+        ``pipe_propagate_missing.py`` rewrites its destination, so the central block stays away from a tool that writes that file itself.
+        A raw upstream merge would erase the tool's own rows, and an erased ``kind="filter"`` row turns a legitimate absence back into a FAILED marker.
+        A tool declares ownership by declaring the table, or by calling ``generate_missing_propagation`` / ``upstream_missing_flag`` / ``_get_upstream_missing_table_path`` while building its script.
         """
         if getattr(self, "_missing_propagation_emitted", False):
             return ""

@@ -1020,7 +1020,7 @@ Available operations: `filter`, `sort`, `head`, `tail`, `sample`, `rank`, `drop_
 
 A pipeline step can finish successfully with **fewer ids than it started with**. A filter drops rows, a structure fails to converge, a compound has no SMILES — and the ids concerned simply stop appearing downstream. This is normal and intended, but it is also the usual answer to "my run finished, so why do I have 260 designs instead of 300?"
 
-The mechanism is a standard table called `missing`, written to `<tool folder>/tables/missing.csv` by over forty tools. Its schema is fixed:
+The mechanism is a standard table called `missing`, written to `<tool folder>/tables/missing.csv` by every step that can drop ids itself and by every step anywhere behind one that can. Its schema is fixed:
 
 | Column | Meaning |
 |---|---|
@@ -1034,10 +1034,12 @@ Two things follow from this being a real table rather than a log message.
 **It propagates.** Each tool merges its inputs' `missing` tables into its own, de-duplicating by id, so the `missing.csv` of the *last* step in a chain is a complete account of everything lost anywhere upstream, with the step that lost it named. You do not have to walk back through the pipeline — read the last one:
 
 ```python
+import os
 import pandas as pd
 
-if "missing" in final_step.tables:                       # not declared when nothing upstream lost an id
-    lost = pd.read_csv(final_step.tables.missing.info.path)
+path = os.path.join(final_step.output_folder, "tables", "missing.csv")
+if os.path.exists(path):                                 # absent when no step upstream could drop an id
+    lost = pd.read_csv(path)
     print(lost.groupby(["removed_by", "kind"]).size())   # who dropped how many, and why
     print(lost[lost["kind"].isin(["failure", "unmatched"])])   # the ones that are actually errors
 ```

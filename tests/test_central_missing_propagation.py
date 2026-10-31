@@ -116,6 +116,83 @@ def test_discovery_looks_inside_bundle_and_each(sources):
     assert (_blocks(script), "missing" in declared) == (1, True)
 
 
+# ── a manifest the footer writes reaches every later step ───────────────────
+
+@pytest.mark.parametrize("by_stream", [False, True], ids=["source", "stream"])
+@pytest.mark.parametrize("silent_steps", [1, 2])
+def test_a_footer_written_manifest_reaches_the_next_step(sources, by_stream, silent_steps,
+                                                          record_case):
+    """Panda.filter -> Reduce [-> Reduce] -> Reduce: the last step still excuses the filtered ids.
+
+    The footer writes `missing.csv` for a silent tool but never adds it to that tool's
+    `get_output_files()`, so discovery used to stop one step after the filter, and every step
+    behind a silent wrapper counted the filtered ids as lost outputs and wrote `_FAILED`.
+    """
+    from biopipelines.reduce import Reduce
+
+    _generator, upstream = sources
+    for _ in range(silent_steps):
+        upstream = Reduce(structures=upstream)
+    previous = _config(upstream)
+    script, declared = _generate(Reduce(structures=upstream.streams.structures if by_stream
+                                        else upstream))
+
+    actual = (_blocks(script), "missing" in declared,
+              os.path.dirname(previous.table_path("missing")).replace("\\", "/")
+              in script.replace("\\", "/"))
+    record_case(input=f"Panda.filter -> {silent_steps} x Reduce -> Reduce "
+                      f"({'stream' if by_stream else 'source'})",
+                expected=(1, True, True), actual=actual)
+    assert actual == (1, True, True)
+
+
+def test_a_tool_owning_its_manifest_reads_a_footer_written_one(sources):
+    """Panda.filter -> Reduce -> DSSP: DSSP merges the upstream rows in its own pipe script."""
+    from biopipelines.dssp import DSSP
+    from biopipelines.reduce import Reduce
+
+    _generator, filtered = sources
+    reduced = Reduce(structures=filtered)
+    script, declared = _generate(DSSP(structures=reduced))
+
+    expected = _config(reduced).table_path("missing").replace("\\", "/")
+    assert f'--upstream-missing "{expected}"' in script.replace("\\", "/")
+    assert _blocks(script) == 0 and "missing" in declared
+
+
+def test_an_upstream_that_cannot_describe_itself_is_named(sources, capsys):
+    """Discovery propagates nothing for such a producer, so it must say which one and why."""
+    from biopipelines.base_config import BaseConfig
+    from biopipelines.reduce import Reduce
+
+    _generator, filtered = sources
+    reduced = Reduce(structures=filtered)
+    stream = reduced.streams.structures
+    upstream = _config(reduced)
+    upstream.__dict__.pop("_written_missing_cache", None)
+
+    def broken():
+        raise RuntimeError("cannot list outputs")
+    # Set by hand, not by monkeypatch: the pipeline's exit still needs the real method
+    upstream.get_output_files = broken
+    try:
+        assert BaseConfig._missing_path_of(stream) is None
+    finally:
+        del upstream.get_output_files
+    out = capsys.readouterr().out
+    assert "Warning: Reduce could not describe its outputs" in out and "cannot list outputs" in out
+
+
+def test_an_unfiltered_chain_still_gets_no_manifest(sources):
+    """generator -> Reduce -> Reduce: nothing upstream writes a manifest, so nothing is promised."""
+    from biopipelines.reduce import Reduce
+
+    generator, _filtered = sources
+    script, declared = _generate(Reduce(structures=Reduce(structures=generator)))
+
+    assert (_blocks(script), "missing" in declared) == (0, False)
+
+
 # ── an id generator must be left alone ───────────────────────────────────────
 
 @pytest.mark.parametrize("by_stream", [False, True], ids=["source", "stream"])
@@ -213,3 +290,17 @@ def test_the_footers_block_runs_after_the_status_is_captured(sources):
     assert capture < script.index("pipe_propagate_missing.py")
     # And it captures once: a second would report the propagation's own success.
     assert script.count("BP_MAIN_RC=$?") == 0
+
+
+def test_the_footers_block_runs_in_the_biopipelines_env(sources):
+    """The propagator imports pandas, which a tool's own env need not provide."""
+    from biopipelines.reduce import Reduce
+
+    _generator, filtered = sources
+    built = Reduce(structures=filtered)
+    script, _declared = _generate(built)
+
+    footer = script[script.index("BP_MAIN_RC=${BP_MAIN_RC:-$?}"):]
+    activation = _config(built).activate_environment(name="biopipelines").strip()
+    assert activation and activation in footer
+    assert footer.index(activation) < footer.index("pipe_propagate_missing.py")
