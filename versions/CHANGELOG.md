@@ -93,6 +93,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **BioEmu2** 1.9 → 1.10. An existing env gets the tool's own `environments/bioemu2.pip.txt` applied, whatever name the config gives the env. The path was named after the env, so an env redirected to another name (a hand-built one, say) made `pip install -r` run on a file that does not exist.
+
 - **RFdiffusion3** 3.12 → 3.13. The "already installed" shortcut of the install runs `import rfd3.engine` as well as checking the env and the checkpoint folder. The atomworks pin only helps an env built after it, and a `foundry` env built before it (atomworks 3.x, where `rfd3.engine` does not import) still had an env and a populated folder, so it was reported as installed and the step failed at import on the compute node. An env that fails the import now has `environments/foundry.pip.txt` applied to it again, in place, and the final verification decides.
 
 - **RF3** 1.5 → 1.6. The "already installed" shortcut of the install runs `import rf3.inference_engines.rf3` as well as checking the env and the checkpoint, so a `foundry` env built before atomworks was pinned below 3 is no longer reported as installed. An env that fails the import has `environments/foundry.pip.txt` applied to it again, in place, and the final verification decides.

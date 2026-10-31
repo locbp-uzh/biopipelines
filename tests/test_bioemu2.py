@@ -1121,6 +1121,13 @@ class TestTheInstall:
         script = self._script()
         assert f'pip install -r "{REPO_ROOT}/environments/bioemu2.pip.txt"' in script
 
+    def test_a_redirected_env_gets_the_tools_own_requirements_not_a_file_named_after_it(self, monkeypatch):
+        """The spec of the tool is bioemu2.pip.txt whatever the config names the env; a file named after a hand-built env does not exist."""
+        monkeypatch.setattr(BioEmu2, "_install_env", classmethod(lambda cls, env_manager, env_name=None: "my_bioemu"))
+        script = self._script()
+        reapply = script.split("installing its requirements into it")[1].splitlines()[1]
+        assert reapply.strip() == f'mamba run -n my_bioemu pip install -r "{REPO_ROOT}/environments/bioemu2.pip.txt"'
+
     def test_the_checkpoint_is_fetched_and_a_failed_fetch_warns_instead_of_failing_the_install(self):
         script = self._script()
         assert "pipe_bioemu2_weights.py" in script

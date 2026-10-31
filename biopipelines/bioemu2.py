@@ -103,7 +103,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.9"
+    TOOL_VERSION = "1.10"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}
@@ -117,7 +117,7 @@ class BioEmu2(BaseConfig):
         env_check = cls._env_exists_check(env, env_manager)
         pipe_scripts = folders.get("pipe_scripts") or f"{biopipelines}/pipe_scripts"
         weights_py = f"{pipe_scripts}/pipe_bioemu2_weights.py"
-        requirements = f"{biopipelines}/environments/{env}.pip.txt"
+        requirements = f"{biopipelines}/environments/{cls.ENV_NAME}.pip.txt"
 
         python_ok = f'{run}python -c "{PYTHON_CHECK}" >/dev/null 2>&1'
         installed = (f'{python_ok} && {run}python -c "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub" >/dev/null 2>&1'

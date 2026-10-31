@@ -256,8 +256,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.9"
+  current: "1.10"
   history:
+  - version: '1.10'
+    date: '2026-10-31'
+    note: >-
+      An existing env gets the tool's own `environments/bioemu2.pip.txt` applied, whatever name the config gives the env. The path was named after the env, so an env redirected to another name (a hand-built one, say) made `pip install -r` run on a file that does not exist.
   - version: '1.9'
     date: '2026-10-31'
     note: >-
