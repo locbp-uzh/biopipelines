@@ -252,8 +252,12 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.7"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-10-31'
+    note: >-
+      The Daint execution path and the example pipelines of the 1.5.4 release branch, ported onto the rewritten wrapper. `BIOEMU2_SRUN_ENVIRONMENT=<EDF>`, read by the helper at runtime, makes the `bioemu2 sample-equilibrium` call run as `srun --environment=<EDF> bioemu2 ...` and cuts the helper's environment to what SLURM, enroot and bioemu2 read (the host's CUDA, Triton and `PYTHONPATH` variables poisoned bioemu2's torch and triton init inside the image); the four cache variables bioemu2 reads, `BIOEMU2_MSA_CACHE`, `BIOEMU2_EMBEDS_CACHE`, `BIOEMU2_CCD_CACHE` and `BIOEMU2_TEMPLATE_CACHE`, are kept, and nothing of it is written into the generated script. The input system YAML is written to `<run>/cfg/system.yaml`; it was `<run>/system.yaml`, the path bioemu2 overwrites with its own resolved system (a `mode` key appended), which an upstream build that rejects its own output would then fail to read back. `config.daint.yaml` now leaves `environments: BioEmu2` empty, so the `edf:` image supplies the interpreter as for BioEmu, and `BioEmu2.install()` is refused by name under `daint`; it named a venv no step builds. `environments/daint/provision_venv.sh bioemu2` builds a bare-node conda env from `environments/bioemu2.pip.txt`, untested on a GH200. The class docstring, `docs/tool/analysis.md` and the Daint reference document the runtime variables, the alignment cache override and the image route. `example_pipelines/bioemu2.py` (apo, holo, a recycled alignment, Each and Bundle, a covalent bond, a restraint under a steered sampler), the `BioEmu2.install()` line of `install_tools.py` and `tests/tool_parameters/test_bioemu2_params.py` are new.
   - version: '1.7'
     date: '2026-10-30'
     note: >-

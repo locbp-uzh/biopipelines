@@ -79,6 +79,13 @@ class BioEmu2(BaseConfig):
 
     Install:
         BioEmu2.install()   # Python 3.12 env, bioemu2[cuda], and the bioemu2-preview checkpoint from Hugging Face
+                   Under the `daint` variant the entry is empty, because a prebuilt image supplies the interpreter, and install is refused by name there.
+
+    Runtime environment:
+        BIOEMU2_SRUN_ENVIRONMENT: an EDF path of the CSCS Container Engine. Where the helper runs, the `bioemu2 sample-equilibrium` call becomes `srun --environment=<EDF> bioemu2 ...` and the helper's own environment is cut to what SLURM, enroot and bioemu2 read.
+                   The host's CUDA, Triton and PYTHONPATH variables would otherwise reach the image and break bioemu2's torch and triton init. Unset (the default), the call is made as it is, and nothing about the variable is written into the generated script.
+                   It is for a helper that runs outside the image (its Python then needs mdtraj, pandas and pyyaml, because the trajectory is split there). When the whole step already runs in the image, as the `edf:` entry of the `daint` variant does, leave it unset.
+        BIOEMU2_MSA_CACHE: the directory bioemu2 keeps ColabFold alignments in (default `~/.cache/bioemu2/colabfold_msa`). Export it to keep that cache on storage that is not purged; a run with a supplied `msas` alignment uses the step's own cache directory instead.
 
     Outputs:
         Streams:
@@ -96,7 +103,7 @@ class BioEmu2(BaseConfig):
     """
 
     TOOL_NAME = "BioEmu2"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.8"
     ENV_NAME = "bioemu2"
 
     PARAMETER_ALIASES = {"precomputed_msa": "msas"}
@@ -320,7 +327,7 @@ fi
         script += "# BioEmu2 ligand-capable equilibrium-ensemble sampling\n"
         script += self.generate_completion_check_header()
         script += self.activate_environment()
-        # The helper imports biopipelines and stays on the host; only the bioemu2 CLI it calls takes the prefix.
+        # The helper imports biopipelines and stays on the host; only the bioemu2 CLI it calls takes the prefix or the BIOEMU2_SRUN_ENVIRONMENT wrap, which the helper reads at runtime.
         script += f"""echo "BioEmu2: sampling {self.num_samples} conformers per run"
 python "{self.helper_py}" \\
     --config-yaml "{self.config_yaml}" \\

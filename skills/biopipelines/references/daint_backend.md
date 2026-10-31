@@ -76,7 +76,7 @@ The cost of envs on scratch is the 30-day access-time purge — a tool unused fo
 
 Daint is a SLURM cluster, so `cluster_backend.md` applies for the ssh/scp workflow. This file covers what differs: aarch64, whole-node billing, and a container runtime that is neither apptainer nor plain podman.
 
-Select the variant with `BIOPIPELINES_CONFIG_VARIANT=daint` or `Pipeline(config="daint")`. `config.daint.yaml` carries the paths and the environment mapping. Its `environments:` block is a **routing table, not a verification record**: each of its ~51 keys says which venv (or, when empty, which EDF image's interpreter) a tool activates here. A tool absent from it falls back to the `biopipelines` venv, which is correct for any BP-native tool but unverified for one needing its own env. Presence in the block does *not* mean the tool has been run — the verified list is the much shorter one under *What runs here* below (17 tools at last probe), and *Blocked, with the reason* lists what cannot work here at all.
+Select the variant with `BIOPIPELINES_CONFIG_VARIANT=daint` or `Pipeline(config="daint")`. `config.daint.yaml` carries the paths and the environment mapping. Its `environments:` block is a **routing table, not a verification record**: each of its ~51 keys says which venv (or, when empty, which EDF image's interpreter) a tool activates here. A tool absent from it falls back to the `biopipelines` venv, which is correct for any BP-native tool but unverified for one needing its own env. Presence in the block does *not* mean the tool has been run — the verified list is the much shorter one under *What runs here* below (19 tools at last probe), and *Blocked, with the reason* lists what cannot work here at all.
 
 ## One-time setup
 
@@ -264,7 +264,7 @@ Server startup is not instant, which is why the server belongs in a packed block
 
 ## What runs here
 
-These 18 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2, ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold.
+These 19 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2, ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold, BioEmu2 (under 1.0 only; see its section below).
 
 **AlphaFold folds here; it does not search here.** The venv carries `alphafold-colabfold 2.3.20` and `colabfold 1.6.3`, `colabfold_batch --help` exits 0, and `jax 0.11.2` reports `[CudaDevice(id=0)]` on a GH200. `colabfold_search` is installed but shells out to an `mmseqs` binary the wheel does not ship, and the databases are gone — so alignments come from the other cluster and arrive through `msas=`.
 
@@ -279,3 +279,27 @@ Blocked, with the reason:
 - **PLM_Sol** — pins `python=3.8` with hard-pinned deps that cannot coexist with a 3.11+ env.
 
 An import check is not a run. BioEmu passed `import bioemu.sample` and still failed on a real sampling job — twice, on different causes.
+
+## BioEmu2
+
+BioEmu2 (microsoft/bioemu2) is the ligand-capable successor of BioEmu, and it runs from a prebuilt image here for the same reason BioEmu does: its install pulls `cuequivariance_torch` and `cuequivariance_ops_torch` wheels that exist only for one CUDA, torch and aarch64 combination, beside `mdtraj`. A run on a GH200 was reported to work on 2026-10-24 under BioEmu2 1.0. It has not been repeated since the wrapper was rewritten (a new system YAML, ids, tables and install), and the recipe of the image is not in the repo.
+
+**Two routes, and they exclude each other.**
+
+- **The `daint` variant runs the whole step in the image.** `environments: BioEmu2: ""` says the image supplies the interpreter, as for BioEmu, and `edf: BioEmu2: "<group>/edf/bioemu2.toml"` points at it. Nothing is activated and `BioEmu2.install()` is refused by name. The helper then runs on the image's Python, which needs `pandas` (bioemu2 does not require it; it does bring `mdtraj`, `pyyaml` and `huggingface_hub`), and the EDF has to mount the biopipelines checkout like any image that runs a whole step (see `ngc-pytorch-bp.toml` above).
+- **A helper outside the image wraps only the sampler.** With `BIOEMU2_SRUN_ENVIRONMENT=<EDF>` exported where the helper runs, the helper calls `srun --environment=<EDF> bioemu2 sample-equilibrium ...` for each run, so the pipeline's own Python stays outside. The shape it was reported to work in, with the EDFs by absolute path:
+
+  ```bash
+  export BIOEMU2_SRUN_ENVIRONMENT=<group>/edf/bioemu2.toml
+  srun --environment=<group>/edf/bp-base.toml micromamba run -n biopipelines python my_pipeline.py
+  ```
+
+  The helper still splits the trajectory into conformers, so its Python needs `mdtraj`. Leave the variable unset under the `daint` variant, whose `edf:` entry already puts the step in the image. Nothing about it is written into the generated script.
+
+**The host environment is cut before enroot.** When `BIOEMU2_SRUN_ENVIRONMENT` is set, the helper passes on only HOME, USER, PATH, TERM, SHELL, LANG, LC_ALL, SCRATCH, the SLURM job variables, the four cache directories bioemu2 reads (`BIOEMU2_MSA_CACHE`, `BIOEMU2_EMBEDS_CACHE`, `BIOEMU2_CCD_CACHE`, `BIOEMU2_TEMPLATE_CACHE`), HF_HOME, HF_TOKEN and TRITON_CACHE_DIR. Without that, the host env's `CUDA_HOME`, `LD_LIBRARY_PATH`, `PYTHONPATH` and Triton cache paths reach the image and poison bioemu2's own torch and triton init: the first bring-up jobs failed with `No module named 'triton.ops'` and `undefined symbol: __cudaRegisterLinkedBinary`, errors that point at the wrong env.
+
+**The input system YAML is kept out of `--out`'s own `system.yaml`.** bioemu2 writes the resolved system to `<out>/system.yaml` with a `mode` key appended. 0.1.0rc0 drops that key when it reads a system back (checked in its source), but the image of the first bring-up rejected it with a `ConfigDict(extra="forbid")` error, so the wrapper writes its input to `<run>/cfg/system.yaml` and leaves that path to bioemu2.
+
+**The alignment cache.** `BIOEMU2_MSA_CACHE` moves the ColabFold cache of the searched sequences, and bioemu2 reads it itself. On Daint, scratch purges at 30 days and a new search takes minutes against the MMseqs2 server, so a cache on the group store survives the purge. A run with a supplied `msas` alignment uses the step's own cache directory instead.
+
+**A bare node.** `provision_venv.sh bioemu2` builds a conda env at `<conda_env_root>/bioemu2` from `environments/bioemu2.pip.txt` with conda-forge's `mdtraj`, and checks the imports and the CLI. The framework does not activate it, because the daint entry is empty; call its `bin/bioemu2` directly. Like the image, it is not verified here.

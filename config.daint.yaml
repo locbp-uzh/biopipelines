@@ -133,9 +133,9 @@ environments:
   # Empty + an edf: entry means the image supplies the interpreter, so there
   # is no env to activate. Our venv cannot carry BioEmu — see skills/biopipelines/references/daint_backend.md.
   BioEmu: ""
-  # bioemu2 on Daint: a dedicated env, with the container EDF supplying the interpreter.
-  # Reported to run end to end on a GH200 on 2026-10-24; the spec has changed since (Python 3.12, bioemu2[cuda]) and is not re-verified here.
-  BioEmu2: "bioemu2"
+  # bioemu2 on Daint: a prebuilt image supplies the interpreter (its CUDA kernels exist only for one CUDA, torch and aarch64 combination), so nothing is activated and `BioEmu2.install()` is refused here.
+  # Reported to run end to end on a GH200 on 2026-10-24 under BioEmu2 1.0; not re-verified since the wrapper was rewritten. See skills/biopipelines/references/daint_backend.md.
+  BioEmu2: ""
   Boltz2: "Boltz2Env"
   BoltzGen: "boltzgen"
   BoltzGenImport: "boltzgen"

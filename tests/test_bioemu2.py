@@ -561,6 +561,50 @@ class TestTheCommand:
         assert command[:5] == ["apptainer", "exec", "--nv", "x.sif", "bioemu2"]
 
 
+class TestTheSrunEnvironment:
+    """BIOEMU2_SRUN_ENVIRONMENT runs only the bioemu2 call in a Container Engine image, from the helper's own env."""
+
+    COMMAND = ["bioemu2", "sample-equilibrium", "--system", "s.yaml"]
+    HOST = {"HOME": "/home/u", "PATH": "/usr/bin", "SCRATCH": "/scratch/u", "SLURM_JOB_ID": "7",
+            "CUDA_HOME": "/opt/cuda", "LD_LIBRARY_PATH": "/opt/cuda/lib", "PYTHONPATH": "/repo",
+            "TRITON_PTXAS_PATH": "/opt/ptxas", "VIRTUAL_ENV": "/venv", "BIOEMU2_MSA_CACHE": "/cache/msa"}
+
+    def test_without_the_variable_the_call_and_its_environment_are_left_alone(self):
+        assert pipe.in_srun_environment(self.COMMAND, dict(self.HOST)) == (self.COMMAND, self.HOST)
+
+    def test_an_empty_variable_is_the_same_as_none(self):
+        host = {**self.HOST, "BIOEMU2_SRUN_ENVIRONMENT": "  "}
+        assert pipe.in_srun_environment(self.COMMAND, host) == (self.COMMAND, host)
+
+    def test_the_call_runs_in_the_named_image(self):
+        host = {**self.HOST, "BIOEMU2_SRUN_ENVIRONMENT": "/store/edf/bioemu2.toml"}
+        command, _env = pipe.in_srun_environment(self.COMMAND, host)
+        assert command == ["srun", "--environment=/store/edf/bioemu2.toml"] + self.COMMAND
+
+    def test_the_hosts_cuda_triton_and_python_variables_do_not_cross_into_the_image(self):
+        host = {**self.HOST, "BIOEMU2_SRUN_ENVIRONMENT": "/store/edf/bioemu2.toml"}
+        _command, env = pipe.in_srun_environment(self.COMMAND, host)
+        for name in ("CUDA_HOME", "LD_LIBRARY_PATH", "PYTHONPATH", "TRITON_PTXAS_PATH", "VIRTUAL_ENV",
+                     "BIOEMU2_SRUN_ENVIRONMENT"):
+            assert name not in env, name
+
+    def test_what_slurm_enroot_and_bioemu2_read_does_cross(self):
+        host = {**self.HOST, "BIOEMU2_SRUN_ENVIRONMENT": "/store/edf/bioemu2.toml"}
+        _command, env = pipe.in_srun_environment(self.COMMAND, host)
+        assert env == {"HOME": "/home/u", "PATH": "/usr/bin", "SCRATCH": "/scratch/u", "SLURM_JOB_ID": "7",
+                       "BIOEMU2_MSA_CACHE": "/cache/msa"}
+
+    def test_every_cache_variable_bioemu2_reads_is_kept(self):
+        """Read off the 0.1.0rc0 sources: msa/colabfold.py, embedding_cache.py and structure/templates.py."""
+        for name in ("BIOEMU2_MSA_CACHE", "BIOEMU2_EMBEDS_CACHE", "BIOEMU2_CCD_CACHE", "BIOEMU2_TEMPLATE_CACHE"):
+            assert name in pipe.SRUN_KEPT_VARIABLES, name
+
+    def test_the_container_prefix_stays_between_srun_and_the_binary(self):
+        command = pipe.build_command("apptainer exec x.sif ", "s", "o", TestTheCommand.CONFIG)
+        wrapped, _env = pipe.in_srun_environment(command, {"BIOEMU2_SRUN_ENVIRONMENT": "e.toml"})
+        assert wrapped[:6] == ["srun", "--environment=e.toml", "apptainer", "exec", "x.sif", "bioemu2"]
+
+
 class TestTheCauseOfAFailedSampler:
     """`sample` runs a real subprocess here, standing in for upstream: the cause has to name what upstream said."""
 
@@ -945,6 +989,58 @@ class TestTheRunner:
         assert self._main(monkeypatch, argv + ["--container-prefix", "apptainer exec x.sif "]) == 0
         assert seen[0]["command"][:3] == ["apptainer", "exec", "x.sif"]
 
+    def test_the_system_yaml_given_to_bioemu2_is_not_the_file_it_writes_into_out(self, tmp_path, monkeypatch):
+        """Upstream writes <out>/system.yaml with a `mode` key; an input at that path is overwritten under it."""
+        out, argv = self._world(tmp_path, sequences=("ok",))
+        seen = []
+        self._fake(monkeypatch)
+        inner = pipe.sample
+
+        def sample(command, env):
+            system = command[command.index("--system") + 1]
+            out_dir = command[command.index("--out") + 1]
+            seen.append({"system": system, "out": out_dir, "text": open(system).read()})
+            inner(command, env)
+            with open(os.path.join(out_dir, "system.yaml"), "w") as handle:
+                handle.write("mode: equilibrium\n")
+            assert open(system).read() == seen[-1]["text"]
+        monkeypatch.setattr(pipe, "sample", sample)
+        assert self._main(monkeypatch, argv) == 0
+        (entry,) = seen
+        assert os.path.abspath(entry["system"]) != os.path.abspath(os.path.join(entry["out"], "system.yaml"))
+        assert "mode" not in yaml.safe_load(entry["text"])
+
+    def test_the_srun_variable_wraps_the_call_and_strips_the_hosts_environment(self, tmp_path, monkeypatch):
+        out, argv = self._world(tmp_path, sequences=("ok",))
+        seen = []
+        self._fake(monkeypatch, seen=seen)
+        monkeypatch.setenv("BIOEMU2_SRUN_ENVIRONMENT", "/store/edf/bioemu2.toml")
+        monkeypatch.setenv("CUDA_HOME", "/opt/cuda")
+        assert self._main(monkeypatch, argv) == 0
+        assert seen[0]["command"][:3] == ["srun", "--environment=/store/edf/bioemu2.toml", "bioemu2"]
+        assert "CUDA_HOME" not in seen[0]["env"] and "BIOEMU2_SRUN_ENVIRONMENT" not in seen[0]["env"]
+
+    def test_without_the_srun_variable_the_binary_is_called_directly(self, tmp_path, monkeypatch):
+        out, argv = self._world(tmp_path, sequences=("ok",))
+        seen = []
+        self._fake(monkeypatch, seen=seen)
+        monkeypatch.delenv("BIOEMU2_SRUN_ENVIRONMENT", raising=False)
+        assert self._main(monkeypatch, argv) == 0
+        assert seen[0]["command"][0] == "bioemu2"
+
+    def test_a_supplied_alignments_cache_survives_the_srun_strip(self, tmp_path, monkeypatch):
+        (tmp_path / "ok.a3m").write_text(f">101\n{PROTEIN}\n")
+        table = tmp_path / "msas_map.csv"
+        pd.DataFrame([["ok", "ok", str(tmp_path / "ok.a3m")]], columns=["id", "sequences.id", "file"]).to_csv(
+            table, index=False)
+        (tmp_path / "msas.json").write_text(json.dumps({"map_table": str(table)}))
+        out, argv = self._world(tmp_path, sequences=("ok",), msas=tmp_path / "msas.json")
+        seen = []
+        self._fake(monkeypatch, seen=seen)
+        monkeypatch.setenv("BIOEMU2_SRUN_ENVIRONMENT", "/store/edf/bioemu2.toml")
+        assert self._main(monkeypatch, argv) == 0
+        assert seen[0]["env"]["BIOEMU2_MSA_CACHE"] == str(out / "msa_cache")
+
     def test_an_unexpected_error_is_recorded_with_its_type(self, tmp_path, monkeypatch):
         out, argv = self._world(tmp_path, sequences=("ok", "bad"))
         self._fake(monkeypatch)
@@ -1089,3 +1185,135 @@ class TestTheCheckpointFetch:
 
     def test_the_default_checkpoint_is_the_one_upstream_loads(self):
         assert weights.DEFAULT_CHECKPOINT == "bioemu2-preview"
+
+
+@pytest.fixture
+def daint_config(monkeypatch):
+    """The shipped config.daint.yaml behind ConfigManager, reset on both sides."""
+    from biopipelines.config_manager import ConfigManager
+
+    def reset():
+        ConfigManager._instance = None
+        ConfigManager._config = None
+        ConfigManager._variant = None
+
+    path = os.path.join(REPO_ROOT, "config.daint.yaml")
+    reset()
+    monkeypatch.setattr(ConfigManager, "_get_config_path", classmethod(lambda cls, variant=None, _p=path: _p))
+    yield ConfigManager(variant="daint")
+    reset()
+
+
+class TestTheDaintRoute:
+    """On daint BioEmu2 runs in a prebuilt image, as BioEmu does: it activates nothing and installs nothing there."""
+
+    def test_the_environment_entry_is_empty_and_an_image_is_named(self):
+        with open(os.path.join(REPO_ROOT, "config.daint.yaml")) as handle:
+            config = yaml.safe_load(handle)
+        assert config["environments"]["BioEmu2"] == ""
+        assert config["edf"]["BioEmu2"].endswith("bioemu2.toml")
+
+    def test_the_configured_image_is_the_one_the_step_runs_in(self, daint_config):
+        assert daint_config.get_environment("BioEmu2") == ""
+        assert daint_config.get_edf("BioEmu2").endswith("/edf/bioemu2.toml")
+
+    def test_installing_under_daint_is_refused_by_name_not_attempted(self, daint_config, tmp_path):
+        with pytest.raises(ValueError, match="image supplies the interpreter"):
+            BioEmu2._install_script({"biopipelines": str(tmp_path)}, daint_config.get_env_manager())
+
+    def test_the_other_variants_still_build_the_env(self):
+        for variant in ("cluster", "colab", "container"):
+            with open(os.path.join(REPO_ROOT, f"config.{variant}.yaml")) as handle:
+                assert yaml.safe_load(handle)["environments"]["BioEmu2"] == "bioemu2", variant
+
+
+class TestTheDaintProvisioning:
+    """provision_venv.sh builds a bare-node env for BioEmu2 from the repo's own spec, for use without the image."""
+
+    SCRIPT = os.path.join(REPO_ROOT, "environments", "daint", "provision_venv.sh")
+
+    @classmethod
+    def _stage(cls):
+        with open(cls.SCRIPT, encoding="utf-8") as handle:
+            text = handle.read()
+        match = re.search(r'if \[ "\$STAGE" = "bioemu2" \]; then\n(.*?)\nfi\n', text, re.S)
+        assert match, "no bioemu2 stage in provision_venv.sh"
+        return match.group(1), text
+
+    def test_the_stage_is_listed_in_the_usage_header(self):
+        _stage, text = self._stage()
+        assert "provision_venv.sh bioemu2" in text.split("THE INTERPRETER TRAP")[0]
+
+    def test_it_pins_the_python_the_wrapper_requires(self):
+        stage, _text = self._stage()
+        assert f"python={MIN_PYTHON[0]}.{MIN_PYTHON[1]}" in stage
+
+    def test_it_installs_the_requirements_file_the_wrapper_installs(self):
+        """A bare `pip install bioemu2` finds nothing: the only release is a release candidate, which the file's specifier admits."""
+        stage, _text = self._stage()
+        code = "\n".join(line for line in stage.splitlines() if not line.lstrip().startswith("#"))
+        assert "-r environments/bioemu2.pip.txt" in code
+        assert not re.search(r"pip\"? install bioemu2\b", code)
+
+    def test_it_verifies_the_imports_and_the_cli_the_wrapper_verifies(self):
+        stage, _text = self._stage()
+        assert "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub" in stage
+        assert "sample-equilibrium --help" in stage
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+    def test_the_script_is_valid_bash(self):
+        done = subprocess.run(["bash", "-n", self.SCRIPT], capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+
+
+class TestTheExamples:
+    """The example pipeline and the install pipeline name BioEmu2 by what the class takes now."""
+
+    EXAMPLE = os.path.join(REPO_ROOT, "example_pipelines", "bioemu2.py")
+    INSTALL = os.path.join(REPO_ROOT, "example_pipelines", "install_tools.py")
+
+    @staticmethod
+    def _tree(path):
+        import ast
+        with open(path, encoding="utf-8") as handle:
+            return ast.parse(handle.read())
+
+    @classmethod
+    def _calls(cls, path, name):
+        import ast
+        return [node for node in ast.walk(cls._tree(path))
+                if isinstance(node, ast.Call) and getattr(node.func, "id", None) == name]
+
+    def test_every_keyword_of_every_call_is_a_parameter_of_the_class(self):
+        import inspect
+        accepted = set(inspect.signature(BioEmu2.__init__).parameters)
+        calls = self._calls(self.EXAMPLE, "BioEmu2")
+        assert len(calls) >= 5
+        for call in calls:
+            assert {k.arg for k in call.keywords} <= accepted, [k.arg for k in call.keywords]
+
+    def test_it_shows_every_way_of_using_the_tool(self):
+        used = {k.arg for call in self._calls(self.EXAMPLE, "BioEmu2") for k in call.keywords}
+        assert {"ligands", "msas", "contacts", "covalent_linkage", "sampler"} <= used
+
+    def test_the_deprecated_spelling_is_not_taught(self):
+        with open(self.EXAMPLE, encoding="utf-8") as handle:
+            assert "precomputed_msa" not in handle.read()
+
+    def test_the_covalent_case_gives_its_ligand_by_ccd_code(self):
+        """A bond names the ligand's residue, so a ligand given by SMILES alone fails its run."""
+        import ast
+        (call,) = [c for c in self._calls(self.EXAMPLE, "BioEmu2")
+                   if "covalent_linkage" in {k.arg for k in c.keywords}]
+        ligand = next(k.value for k in call.keywords if k.arg == "ligands")
+        if isinstance(ligand, ast.Name):
+            (assign,) = [n for n in ast.walk(self._tree(self.EXAMPLE))
+                         if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", None) == ligand.id]
+            ligand = assign.value
+        code = ligand.args[0].value
+        assert not ligand.keywords and code.isalnum() and code.isupper() and len(code) <= 5
+
+    def test_the_install_pipeline_installs_it(self):
+        with open(self.INSTALL, encoding="utf-8") as handle:
+            text = handle.read()
+        assert "    BioEmu2,\n" in text and "BioEmu2.install()" in text

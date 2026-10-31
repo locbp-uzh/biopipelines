@@ -56,6 +56,18 @@ OUTPUT_TAIL = 200
 # Count columns of the summary table: integers, blank where a run failed.
 INTEGER_COLUMNS = ("n_samples", "n_residues")
 
+# The variable naming an EDF (CSCS Container Engine) that runs only the bioemu2 call, while the helper stays on the host.
+SRUN_ENVIRONMENT_VARIABLE = "BIOEMU2_SRUN_ENVIRONMENT"
+# What crosses into that image; the rest of the host's variables (CUDA, Triton, PYTHONPATH) poison bioemu2's own torch and triton init.
+SRUN_KEPT_VARIABLES = frozenset({
+    "HOME", "USER", "PATH", "TERM", "SHELL", "LANG", "LC_ALL", "SCRATCH",
+    "SLURM_JOB_ID", "SLURM_JOBID", "SLURM_NODELIST", "SLURM_NODEID", "SLURM_PROCID", "SLURM_LOCALID",
+    "SLURM_TASK_PID", "SLURM_CPUS_ON_NODE", "SLURM_JOB_PARTITION",
+    # The four cache directories bioemu2 reads from the environment (msa/colabfold.py, embedding_cache.py, structure/templates.py).
+    "BIOEMU2_MSA_CACHE", "BIOEMU2_EMBEDS_CACHE", "BIOEMU2_CCD_CACHE", "BIOEMU2_TEMPLATE_CACHE",
+    "HF_HOME", "HF_TOKEN", "TRITON_CACHE_DIR",
+})
+
 # The name a bond names a residue by; X is upstream's letter for an unidentified residue.
 THREE_LETTER = {
     "A": "ALA", "C": "CYS", "D": "ASP", "E": "GLU", "F": "PHE", "G": "GLY", "H": "HIS",
@@ -221,6 +233,19 @@ def build_command(prefix: str, system_yaml: str, out_dir: str, config: Dict) -> 
     return command
 
 
+def in_srun_environment(command: List[str], env: Dict[str, str]) -> Tuple[List[str], Dict[str, str]]:
+    """The call and environment to launch with: as given, or run by `srun --environment=<EDF>` when BIOEMU2_SRUN_ENVIRONMENT names one.
+
+    The EDF is read from the helper's own environment and never written into the generated script, so one script serves every site.
+    The environment is cut to SRUN_KEPT_VARIABLES, because the host's CUDA, Triton and PYTHONPATH variables reach the image and break bioemu2's own torch and triton init there.
+    """
+    image = env.get(SRUN_ENVIRONMENT_VARIABLE, "").strip()
+    if not image:
+        return command, env
+    kept = {name: value for name, value in env.items() if name in SRUN_KEPT_VARIABLES}
+    return ["srun", f"--environment={image}"] + command, kept
+
+
 def msa_cache_entry(sequence: str, a3m: str) -> Tuple[str, Dict]:
     """(file name, JSON content) of the cache entry bioemu2's ColabFold client reads for one protein chain.
 
@@ -371,10 +396,11 @@ def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
 
     work = os.path.join(paths.runs_dir, run_id)
     shutil.rmtree(work, ignore_errors=True)
-    os.makedirs(work)
-    system_yaml = os.path.join(work, "system.yaml")
+    # bioemu2 writes its own system.yaml, with a `mode` key, into --out, so the input is kept apart from that path.
+    os.makedirs(os.path.join(work, "cfg"))
+    system_yaml = os.path.join(work, "cfg", "system.yaml")
     write_system_yaml(system_yaml, system)
-    sample(build_command(paths.container_prefix, system_yaml, work, config), env)
+    sample(*in_srun_environment(build_command(paths.container_prefix, system_yaml, work, config), env))
 
     topology_cif = os.path.join(work, "topology.cif")
     samples_xtc = os.path.join(work, "samples.xtc")

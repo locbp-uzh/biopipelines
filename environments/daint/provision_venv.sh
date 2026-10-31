@@ -11,6 +11,7 @@
 #   sbatch -p normal -t 04:00:00 environments/daint/provision_venv.sh base
 #   sbatch -p normal -t 08:00:00 environments/daint/provision_venv.sh tools
 #   sbatch -p normal -t 02:00:00 environments/daint/provision_venv.sh boltz2env
+#   sbatch -p normal -t 02:00:00 environments/daint/provision_venv.sh bioemu2
 #   sbatch -p debug  -t 00:20:00 environments/daint/provision_venv.sh verify
 #
 # THE INTERPRETER TRAP, which dictates the whole approach. A venv records the
@@ -167,6 +168,32 @@ print('  import: boltz', boltz.__version__ if hasattr(boltz,'__version__') else 
   ( . "$B_VENV/bin/activate" && command -v boltz >/dev/null && echo "  cli: $(command -v boltz)" ) \
     || { echo "[boltz2env] boltz CLI NOT on PATH after activation" >&2; exit 1; }
   echo "[boltz2env] done"
+fi
+
+# --------------------------------------------------------------- bioemu2
+# Production runs BioEmu2 in an EDF image that an operator provisions on the group store (config.daint.yaml: BioEmu2: "" and edf: BioEmu2).
+# This stage is the fallback for a bare node, so the install is reproducible from the repo and not hand-built.
+# It makes a conda env that the framework does not activate, because the daint entry is empty: call its bin/bioemu2 directly.
+# conda-forge supplies mdtraj, and bioemu2[cuda] (environments/bioemu2.pip.txt) brings torch and the cuequivariance kernels.
+# Those kernels may build from source where no aarch64 wheel is published, and bp-base carries the compiler. Not verified on a GH200.
+if [ "$STAGE" = "bioemu2" ]; then
+  B2_ENV="$CONDA_ROOT/bioemu2"
+  if [ ! -x "$B2_ENV/bin/python" ]; then
+    echo "[bioemu2] creating the conda env (python 3.12, which bioemu2 requires)"
+    "$MAMBA" create -y -p "$B2_ENV" -c conda-forge python=3.12 pip "mdtraj>=1.9" pandas numpy || exit 1
+  else
+    echo "[bioemu2] conda env already present"
+  fi
+  # Not a bare `pip install bioemu2`: its only release is a release candidate, which the specifier in the file admits.
+  echo "[bioemu2] installing environments/bioemu2.pip.txt"
+  "$B2_ENV/bin/pip" install -r environments/bioemu2.pip.txt || exit 1
+
+  echo "[bioemu2] verifying on THIS node"
+  "$B2_ENV/bin/python" -c "import bioemu2, mdtraj, torch, pandas, yaml, huggingface_hub; print('  imports OK')" \
+    || { echo "[bioemu2] import verification FAILED" >&2; exit 1; }
+  "$B2_ENV/bin/bioemu2" sample-equilibrium --help >/dev/null \
+    || { echo "[bioemu2] the bioemu2 CLI does not run" >&2; exit 1; }
+  echo "[bioemu2] done"
 fi
 
 # --------------------------------------------------------------- verify
