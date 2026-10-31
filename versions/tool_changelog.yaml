@@ -2702,8 +2702,12 @@ IPSAE:
   files:
   - biopipelines/ipsae.py
   - pipe_scripts/pipe_ipsae.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-10-31'
+    note: >-
+      Documentation and messages. Says where the cutoffs come from: `pae_cutoff` 10 is Chaperone's, `dist_cutoff` 10 is the value of upstream's AlphaFold3 and Boltz examples, while upstream's README uses 15 and 15 for AlphaFold2 and its usage message 10 and 15, so 10 and 10 is a choice to confirm. Says that the `ipsae` row takes the target with the highest ipSAE where Chaperone's headline takes the lowest. The docstring no longer says every column of a failed id is NaN (`binder_chain` is kept). The refusal of an empty `pae` stream names `include_pae`, since ESMFold2 leaves the stream empty without `include_pae=True`. An id with no PAE entry or no PAE file is kind="unmatched" in `missing`; an upstream error stays "failure".
   - version: '1.4'
     date: '2026-10-29'
     note: >-

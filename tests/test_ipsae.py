@@ -308,7 +308,7 @@ def test_no_declared_id_having_a_file_is_a_step_failure(pipe, monkeypatch, tmp_p
     assert raised.value.code == 1
 
 
-def test_an_id_absent_from_the_pae_stream_is_a_failure_naming_it(pipe, monkeypatch, tmp_path, stand_in):
+def test_an_id_absent_from_the_pae_stream_is_unmatched_naming_it(pipe, monkeypatch, tmp_path, stand_in):
     import pandas as pd
 
     out = run_main(pipe, monkeypatch, tmp_path, stand_in, ["a", "b"], [write_json(tmp_path / "a.json", mode="ok")] * 2)
@@ -317,6 +317,18 @@ def test_an_id_absent_from_the_pae_stream_is_a_failure_naming_it(pipe, monkeypat
     pipe.main()
     missing = pd.read_csv(out / "_execution" / "local_missing.csv")
     assert list(missing["id"]) == ["b"] and "'b'" in missing.loc[0, "cause"]
+    assert list(missing["kind"]) == ["unmatched"]
+
+
+def test_a_declared_pae_file_that_is_absent_is_unmatched_and_an_upstream_crash_is_a_failure(pipe, monkeypatch, tmp_path, stand_in):
+    import pandas as pd
+
+    pae = [write_json(tmp_path / "a.json", mode="ok"), tmp_path / "gone.json", write_json(tmp_path / "c.json", mode="crash")]
+    out = run_main(pipe, monkeypatch, tmp_path, stand_in, ["a", "b", "c"], [str(p) for p in pae])
+    pipe.main()
+    missing = pd.read_csv(out / "_execution" / "local_missing.csv")
+    assert dict(zip(missing["id"], missing["kind"])) == {"b": "unmatched", "c": "failure"}
+    assert "PAE file not found" in missing.loc[0, "cause"]
 
 
 def test_a_structure_that_is_not_pdb_or_cif_is_a_failure(pipe, monkeypatch, tmp_path, stand_in):
@@ -368,6 +380,29 @@ def test_a_predictor_without_a_pae_stream_is_refused_naming_it(local_config, iso
         source = predictor(Mock, with_pae=False)
         with pytest.raises(ValueError, match="no 'pae' stream.*structures"):
             IPSAE(structures=source, pae=source)
+
+
+def test_an_empty_pae_stream_names_the_predictor_option_that_fills_it(local_config, isolated_cwd, new_pipeline):
+    """ESMFold2 declares `pae` empty unless include_pae=True; the refusal used to say only that the stream was empty."""
+    from biopipelines.datastream import DataStream
+    from biopipelines.ipsae import IPSAE
+    from biopipelines.mock import Mock
+
+    with new_pipeline("ipsae_emptypae"):
+        source = predictor(Mock)
+        with pytest.raises(ValueError, match="must not be empty.*ESMFold2.*include_pae=True"):
+            IPSAE(structures=source, pae=DataStream.empty("pae", "npz"))
+
+
+def test_the_docstring_states_where_the_cutoffs_come_from_and_what_a_failed_row_holds():
+    from biopipelines.ipsae import IPSAE
+
+    doc = IPSAE.__doc__
+    for phrase in ("Park & Cong", "15 and 15 for AlphaFold2", "10 and 10 for AlphaFold3 and Boltz",
+                   "10 and 15 for all three formats", "a second choice to confirm",
+                   "`binder_chain` keeps the configured chain"):
+        assert phrase in doc, phrase
+    assert "Every column is NaN when the id failed" not in doc
 
 
 def test_a_bare_value_for_pae_is_refused(local_config, isolated_cwd, new_pipeline):

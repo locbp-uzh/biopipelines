@@ -46,17 +46,17 @@ class IPSAE(BaseConfig):
         pae: per-id PAE matrices, from a predictor that exposes a `pae` stream (`predictor.streams.pae`) or a DataStream of PAE files. Format `npz` (Boltz layout, key `pae`) or `json` (ColabFold or AlphaFold3 layout, key `pae` or `predicted_aligned_error`). A StandardizedOutput without a `pae` stream is refused.
         binder_chain: the chain whose interface is summarized (default "A").
         target_chains: chain id or list of chain ids scored against `binder_chain` (default None: every other chain).
-        pae_cutoff: residue pairs with PAE below this value (A) enter the score (default 10.0).
-        dist_cutoff: distance cutoff (A) upstream uses to count interface residues (`dist1`, `dist2`; default 10.0).
-    The defaults for `binder_chain`, `target_chains` and `pae_cutoff` are those of the `ipsae` block of RosettaCommons Chaperone (https://github.com/RosettaCommons/chaperone); `dist_cutoff` is the 10 A used in upstream's AlphaFold3 and Boltz examples.
+        pae_cutoff: residue pairs with PAE below this value (A) enter the score (default 10.0, Chaperone's; see CUTOFFS).
+        dist_cutoff: distance cutoff (A) upstream uses to count interface residues (`dist1`, `dist2`; default 10.0, from upstream's AlphaFold3 and Boltz examples; see CUTOFFS).
+    CUTOFFS. The defaults for `binder_chain`, `target_chains` and `pae_cutoff` are those of the `ipsae` block of RosettaCommons Chaperone (https://github.com/RosettaCommons/chaperone), whose `pae_cutoff` row reads "Default 10.0 per Park & Cong"; that block has no `dist_cutoff`. Upstream `ipsae.py` states no default for either cutoff (both are required arguments) and its own examples disagree: its README uses 15 and 15 for AlphaFold2, and 10 and 10 for AlphaFold3 and Boltz; the script's usage message uses 10 and 15 for all three formats. So 10 and 10 is a choice, applied here to every predictor, ColabFold json included (upstream's AlphaFold2 example uses 15 and 15). Scores computed at other cutoffs are not comparable with these, and you should confirm the values for your question. The `ipsae` table reports the target chain with the highest ipSAE, where Chaperone's headline `ipsae` is the lowest per-target score; that is a second choice to confirm, and every target's row is in `ipsae_pairs` for either reading.
 
     Outputs:
         Tables:
             ipsae:        id | binder_chain | target_chain | ipsae | ipsae_d0chn | ipsae_d0dom | iptm_af | iptm_d0chn | pdockq | pdockq2 | lis
-                          exactly one row per id that entered. The row is the `max`-type result for `binder_chain` against the target chain with the highest ipsae; `target_chain` names it. Every column is NaN when the id failed.
+                          exactly one row per id that entered. The row is the `max`-type result for `binder_chain` against the target chain with the highest ipsae; `target_chain` names it. When the id failed, `binder_chain` keeps the configured chain and every other column is NaN or empty.
             ipsae_pairs:  id | chain1 | chain2 | type | pae_cutoff | dist_cutoff | ipsae | ipsae_d0chn | ipsae_d0dom | iptm_af | iptm_d0chn | pdockq | pdockq2 | lis | n0res | n0chn | n0dom | d0res | d0chn | d0dom | nres1 | nres2 | dist1 | dist2
                           every row upstream printed: both directions of each chain pair (`asym`) and their maximum (`max`), for all chains of the structure. An id that failed has no rows.
-            missing:      id | removed_by | kind | cause
+            missing:      id | removed_by | kind | cause   (kind="unmatched" for an id with no PAE entry or file, kind="failure" for upstream or chain errors)
 
     `pdockq` and `pdockq2` need pLDDT and `iptm_af` needs the predictor's own ipTM. A PAE file that does not carry them (every `npz`, whose Boltz-layout siblings are not staged; an AlphaFold3 json without `atom_plddts`; a ColabFold json without `iptm`) leaves the column NaN rather than the zero upstream would compute from an absent input.
 
@@ -66,7 +66,7 @@ class IPSAE(BaseConfig):
     """
 
     TOOL_NAME = "IPSAE"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -150,7 +150,9 @@ fi
             raise ValueError(
                 f"structures must be PDB or mmCIF, got format {self.structures_stream.format!r}")
         if not self.pae_stream or len(self.pae_stream) == 0:
-            raise ValueError("pae parameter is required and must not be empty")
+            raise ValueError(
+                "pae parameter is required and must not be empty; ESMFold2 writes its `pae` stream only with "
+                "include_pae=True, and Protenix leaves it empty with include_pae=False")
         if not self.pae_stream.has_only_formats(*PAE_FORMATS):
             raise ValueError(
                 f"pae must be npz (Boltz layout) or json (ColabFold / AlphaFold3 layout), "

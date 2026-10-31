@@ -1453,13 +1453,22 @@ Each chain pair is scored in both directions (`asym`: chain 1's residues as the 
 
 **Parameters**:
 - `structures`: DataStream | StandardizedOutput (required) - predicted complexes, PDB or mmCIF.
-- `pae`: DataStream | StandardizedOutput (required) - per-id PAE matrices: a predictor output carrying a `pae` stream (`predictor.streams.pae`) or a DataStream of PAE files. Format `npz` (Boltz layout, key `pae`) or `json` (ColabFold or AlphaFold3 layout, key `pae` or `predicted_aligned_error`). A predictor that exposes no `pae` stream is refused at configuration time, naming the streams it does have. The file is paired with the structure by id.
+- `pae`: DataStream | StandardizedOutput (required) - per-id PAE matrices: a predictor output carrying a `pae` stream (`predictor.streams.pae`) or a DataStream of PAE files. Format `npz` (Boltz layout, key `pae`) or `json` (ColabFold or AlphaFold3 layout, key `pae` or `predicted_aligned_error`). A predictor that exposes no `pae` stream is refused at configuration time, naming the streams it does have, and one whose `pae` stream is empty is refused too: ESMFold2 writes it only with `include_pae=True`, and Protenix leaves it empty with `include_pae=False`. The file is paired with the structure by id.
 - `binder_chain`: str = "A" - the chain whose interface the `ipsae` table summarizes. Must be a chain of the structures, otherwise that id is recorded as a failure listing the chains it has.
 - `target_chains`: str | List[str] = None - chains scored against `binder_chain`. `None` means every other chain of the structure.
 - `pae_cutoff`: float = 10.0 - residue pairs with PAE below this (A) enter the score.
 - `dist_cutoff`: float = 10.0 - distance cutoff (A) upstream uses when counting interface residues (`dist1`, `dist2`).
 
-The defaults of `binder_chain`, `target_chains` and `pae_cutoff` are those of the `ipsae` block of RosettaCommons Chaperone (https://github.com/RosettaCommons/chaperone); `dist_cutoff` is the 10 A of upstream's AlphaFold3 and Boltz usage examples. Chaperone's headline `ipsae` is the lowest per-target score (its `ipsae_max` is the highest) where this tool reports the highest; the per-target rows are in `ipsae_pairs` for either reading.
+**Where the cutoffs come from, and what to consider.** The defaults of `binder_chain`, `target_chains` and `pae_cutoff` are those of the `ipsae` block of RosettaCommons Chaperone (https://github.com/RosettaCommons/chaperone), whose `pae_cutoff` row reads "Default 10.0 per Park & Cong"; that block has no `dist_cutoff`. Upstream `ipsae.py` states no default for either cutoff, both are required arguments, and its own examples disagree:
+
+| Source | `pae_cutoff` | `dist_cutoff` |
+|---|---|---|
+| upstream README, AlphaFold2 | 15 | 15 |
+| upstream README, AlphaFold3 and Boltz | 10 | 10 |
+| upstream script's usage message, all three formats | 10 | 15 |
+| this tool's default | 10 | 10 |
+
+So 10 and 10 is a choice, applied to every predictor, ColabFold `json` included (upstream's AlphaFold2 example uses 15 and 15). Scores computed at other cutoffs are not comparable with these, so keep the cutoffs fixed across a comparison and confirm them for your question. The `ipsae` table reports the target chain with the highest ipSAE, where Chaperone's headline `ipsae` is the lowest per-target score (its `ipsae_max` is the highest); that is a second choice to confirm, and the per-target rows are in `ipsae_pairs` for either reading.
 
 **Tables**:
 - `ipsae`:
@@ -1478,7 +1487,7 @@ The defaults of `binder_chain`, `target_chains` and `pae_cutoff` are those of th
 
 - `missing`: | id | removed_by | kind | cause |
 
-An id is recorded in `missing` as a failure when its PAE file is absent, when `binder_chain` or a listed target chain is not in the structure, when the structure has no chain besides `binder_chain`, or when upstream raises or writes no score table (it exits 0 after printing a message when an input file is unusable, so the table, not the exit code, decides). Ids already dropped upstream are carried over.
+An id is recorded in `missing` as `kind="unmatched"` when the `pae` stream has no entry or no file for it, and as `kind="failure"` when `binder_chain` or a listed target chain is not in the structure, when the structure has no chain besides `binder_chain`, or when upstream raises or writes no score table (it exits 0 after printing a message when an input file is unusable, so the table, not the exit code, decides). Ids already dropped upstream are carried over.
 
 **Values upstream cannot compute from the supplied PAE file are NaN.** `pdockq` and `pdockq2` need pLDDT, and `iptm_af` the predictor's own ipTM. An `npz` PAE file carries neither (upstream looks for `plddt_*.npz` and `confidence_*.json` beside it, which are not staged), so those three columns are NaN for every `npz`. A ColabFold `json` supplies them through its `plddt` and `iptm` keys; an AlphaFold3 `json` supplies pLDDT through `atom_plddts` but its ipTM lives in a separate summary file, so `iptm_af` is NaN there. Left alone, upstream prints a number computed from zeros in all these cases. `ipsae`, `ipsae_d0chn`, `ipsae_d0dom`, `iptm_d0chn` and `lis` come from the PAE matrix alone and are always present.
 

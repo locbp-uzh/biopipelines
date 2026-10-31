@@ -75,6 +75,23 @@ def parse_ipsae_output(text):
     return rows
 
 
+class PaeNotFound(Exception):
+    """An id with no PAE entry or no PAE file: a lookup that found no partner, recorded as kind="unmatched"."""
+
+
+def find_pae(pae_ds, sid):
+    """The PAE file of an id; PaeNotFound when the stream has no entry or no file for it."""
+    if sid not in pae_ds.ids_expanded:
+        raise PaeNotFound(f"'{sid}' is not in the pae stream")
+    try:
+        path = resolve_file(pae_ds, sid)
+    except FileNotFoundError as e:
+        raise PaeNotFound(str(e)) from e
+    if not os.path.exists(path):
+        raise PaeNotFound(f"PAE file not found: {path}")
+    return path
+
+
 def structure_extension(path):
     """The extension upstream dispatches on: .pdb or .cif."""
     ext = os.path.splitext(path)[1].lower()
@@ -220,9 +237,7 @@ def main():
     for sid, structure_path in iterate_files(structures_ds):
         attempted += 1
         try:
-            pae_path = resolve_file(pae_ds, sid)
-            if not os.path.exists(pae_path):
-                raise FileNotFoundError(f"PAE file not found: {pae_path}")
+            pae_path = find_pae(pae_ds, sid)
             rows = run_ipsae(args.ipsae_script, os.path.join(args.runs_dir, sid),
                              structure_path, pae_path, pae_cutoff, dist_cutoff)
             summary = summarize(rows, binder_chain, target_chains)
@@ -234,8 +249,9 @@ def main():
             print(f"WARNING: {sid} failed: {e}", file=sys.stderr)
             failures += 1
             summary_rows.append({"id": sid, "binder_chain": binder_chain})
+            kind = "unmatched" if isinstance(e, PaeNotFound) else "failure"
             local_missing_rows.append({"id": sid, "removed_by": step_id,
-                                       "kind": "failure", "cause": str(e)[:200]})
+                                       "kind": kind, "cause": str(e)[:200]})
 
     for path in (args.ipsae_csv, args.pairs_csv, args.local_missing_csv):
         os.makedirs(os.path.dirname(path), exist_ok=True)
