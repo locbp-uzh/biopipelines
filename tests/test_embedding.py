@@ -163,19 +163,45 @@ def _write_pairs(tmp_path, first, second, extra=None):
     return str(path)
 
 
-def test_pairs_are_read_in_order_with_repeats_as_text(pipe, tmp_path):
-    path = _write_pairs(tmp_path, ["a", "a", 7], ["b", "b", 8])
-    assert pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:target") == [("a", "b"), ("a", "b"), ("7", "8")]
+def test_pairs_are_read_in_first_seen_order_and_a_repeated_pair_is_one(pipe, tmp_path):
+    path = _write_pairs(tmp_path, ["a", "a", "c", "b"], ["b", "b", "d", "a"])
+    assert pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:target") == [
+        ("a", "b"), ("c", "d"), ("b", "a")]
 
 
-def test_an_empty_cell_of_the_pair_table_is_none(pipe, tmp_path):
+def test_the_pair_reader_is_the_one_the_aligners_use(pipe):
+    from biopipelines import pair_alignment
+
+    assert pipe.read_pairs is pair_alignment.read_pairs and pipe.pair_id is pair_alignment.pair_id
+
+
+def test_ids_that_look_numeric_or_like_na_are_read_as_the_text_they_are(pipe, tmp_path):
+    """A plain read_csv turned `007` into `7.0` and `NA` into an empty cell, so the pair of two ids that exist failed under another name."""
+    path = tmp_path / "pairs.csv"
+    path.write_text("query,target\n007,12\nNA,x1\nnull,None\n")
+    pairs = pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:target")
+    assert pairs == [("007", "12"), ("NA", "x1"), ("null", "None")]
+    rows, failures = pipe.pair_rows(pairs, {"007": unit(1, 0), "12": unit(1, 1), "NA": unit(0, 1), "x1": unit(1, 0)},
+                                    {"007", "12", "NA", "x1"}, {"007", "12", "NA", "x1"})
+    assert [r["id"] for r in rows[:2]] == ["007+12", "NA+x1"]
+    assert not any(math.isnan(r["cosine_similarity"]) for r in rows[:2])
+    assert [f[0] for f in failures] == ["null+None"] and "'null' is not in the input stream" in failures[0][2]
+
+
+def test_an_empty_cell_of_the_pair_table_is_an_empty_id(pipe, tmp_path):
     path = _write_pairs(tmp_path, ["a", None], [None, "b"])
-    assert pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:target") == [("a", None), (None, "b")]
+    assert pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:target") == [("a", ""), ("", "b")]
+
+
+def test_two_pairs_that_would_share_a_similarities_id_are_refused(pipe, tmp_path):
+    path = _write_pairs(tmp_path, ["a", "a+b"], ["b+c", "c"])
+    with pytest.raises(ValueError, match=r"both have the id 'a\+b\+c'"):
+        pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:target")
 
 
 def test_a_pair_table_without_the_named_column_lists_its_columns(pipe, tmp_path):
     path = _write_pairs(tmp_path, ["a"], ["b"])
-    with pytest.raises(ValueError, match=r"no column \['absent'\].*\['query', 'target'\]"):
+    with pytest.raises(ValueError, match=r"Column 'absent' is not in the pair table.*\['query', 'target'\]"):
         pipe.read_pairs(f"TABLE_REFERENCE:{path}:query", f"TABLE_REFERENCE:{path}:absent")
 
 
@@ -194,19 +220,27 @@ def test_every_pair_row_is_kept_and_a_member_without_an_embedding_gives_nan_and_
     vectors = {"a": unit(1, 0), "b": unit(1, 1), "c": unit(0, 1)}
     declared = {"a", "b", "c", "failed", "filtered"}
     attempted = {"a", "b", "c", "failed"}
-    pairs = [("a", "b"), ("a", "ghost"), ("failed", "c"), ("c", "filtered"), (None, "a"), ("b", "a"), ("a", "b")]
+    pairs = [("a", "b"), ("a", "ghost"), ("failed", "c"), ("c", "filtered"), ("", "a"), ("b", "a")]
     rows, failures = pipe.pair_rows(pairs, vectors, declared, attempted)
-    assert [r["id"] for r in rows] == ["a+b", "a+ghost", "failed+c", "c+filtered", "None+a", "b+a", "a+b"]
-    assert [list(r) for r in rows] == [pipe.SIMILARITY_COLUMNS] * 7
+    assert [r["id"] for r in rows] == ["a+b", "a+ghost", "failed+c", "c+filtered", "+a", "b+a"]
+    assert [list(r) for r in rows] == [pipe.SIMILARITY_COLUMNS] * 6
     sims = [r["cosine_similarity"] for r in rows]
-    assert sims[0] == pytest.approx(math.sqrt(2) / 2) and sims[5] == sims[0] and sims[6] == sims[0]
+    assert sims[0] == pytest.approx(math.sqrt(2) / 2) and sims[5] == sims[0]
     assert all(math.isnan(s) for s in sims[1:5])
-    causes = dict(failures)
+    causes = {pid: cause for pid, _kind, cause in failures}
     assert causes["a+ghost"] == "'ghost' is not in the input stream"
     assert causes["failed+c"] == "'failed' failed to embed"
     assert causes["c+filtered"] == "'filtered' was dropped upstream (no file)"
-    assert causes["None+a"] == "a pair has an empty id"
+    assert causes["+a"] == "a pair has an empty id"
     assert len(failures) == 4
+
+
+def test_a_member_with_no_partner_in_the_stream_is_unmatched_and_one_that_failed_to_embed_is_a_failure(pipe):
+    vectors = {"a": unit(1, 0), "c": unit(0, 1)}
+    pairs = [("a", "ghost"), ("failed", "c"), ("c", "filtered"), ("", "a")]
+    _, failures = pipe.pair_rows(pairs, vectors, {"a", "c", "failed", "filtered"}, {"a", "c", "failed"})
+    assert {pid: kind for pid, kind, _cause in failures} == {
+        "a+ghost": "unmatched", "failed+c": "failure", "c+filtered": "unmatched", "+a": "unmatched"}
 
 
 def test_a_pair_of_a_structure_with_itself_is_one(pipe):
@@ -376,15 +410,28 @@ def test_the_similarity_table_has_a_row_per_pair_and_failed_pairs_reach_the_miss
 
     sims = pd.read_csv(out / "tables" / "similarities.csv")
     assert list(sims.columns) == ["id", "first", "second", "cosine_similarity"]
-    assert list(sims["id"]) == ["a+b", "a+c", "b+ghost", "bad+a", "a+b"]
+    assert list(sims["id"]) == ["a+b", "a+c", "b+ghost", "bad+a"]
+    assert sims["id"].is_unique
     assert sims.loc[0, "cosine_similarity"] == pytest.approx(math.sqrt(2) / 2)
     assert sims.loc[1, "cosine_similarity"] == pytest.approx(0.0)
-    assert sims.loc[4, "cosine_similarity"] == sims.loc[0, "cosine_similarity"]
-    assert sims["cosine_similarity"].isna().tolist() == [False, False, True, True, False]
+    assert sims["cosine_similarity"].isna().tolist() == [False, False, True, True]
 
     missing = pd.read_csv(out / "_execution" / "local_missing.csv")
-    assert list(missing["id"]) == ["bad", "b+ghost", "bad+a"] and set(missing["kind"]) == {"failure"}
+    assert list(missing["id"]) == ["bad", "b+ghost", "bad+a"]
+    assert dict(zip(missing["id"], missing["kind"])) == {"bad": "failure", "b+ghost": "unmatched", "bad+a": "failure"}
     assert "'ghost' is not in the input stream" in list(missing["cause"])
+
+
+def test_pair_ids_that_look_numeric_survive_the_step(pipe, fake, monkeypatch, tmp_path):
+    """Through the step, not just the reader: `007` and `NA` are ids of the input stream and their pair is compared."""
+    import pandas as pd
+
+    argv, out = write_inputs(tmp_path, ["007", "NA", "b"], pairs=[("007", "NA"), ("NA", "b")])
+    run_main(pipe, monkeypatch, argv)
+    sims = pd.read_csv(out / "tables" / "similarities.csv", dtype=str, keep_default_na=False)
+    assert list(sims["id"]) == ["007+NA", "NA+b"] and list(sims["first"]) == ["007", "NA"]
+    assert (sims["cosine_similarity"] != "").all()
+    assert len(pd.read_csv(out / "_execution" / "local_missing.csv")) == 0
 
 
 def test_a_pair_of_structures_that_both_exist_is_not_a_failure_even_if_another_id_failed(pipe, fake, monkeypatch, tmp_path):
@@ -401,7 +448,7 @@ def test_a_bad_pair_table_stops_the_step_before_anything_is_embedded(pipe, fake,
     config = yaml.safe_load(open(argv[2]))
     config["second"] = config["second"].rsplit(":", 1)[0] + ":absent"
     open(argv[2], "w").write(yaml.safe_dump(config))
-    with pytest.raises(ValueError, match="no column"):
+    with pytest.raises(ValueError, match="not in the pair table"):
         run_main(pipe, monkeypatch, argv)
     assert fake.created == [] and not (out / "embeddings").exists()
 

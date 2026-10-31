@@ -5,7 +5,7 @@
 
 """Execution half of USalign and TMalign: align every pair of the pair table in every mode and write one row per (pair, mode).
 
-An alignment that gives nothing keeps its row with NaN values and adds a kind="failure" row to the local missing file. The pair handling itself lives in biopipelines/pair_alignment.py.
+An alignment that gives nothing keeps its row with NaN values and adds a row to the local missing file: kind="unmatched" for a pair whose structure id is not in the stream, kind="failure" for an aligner that gave nothing. The pair handling itself lives in biopipelines/pair_alignment.py.
 """
 
 import argparse

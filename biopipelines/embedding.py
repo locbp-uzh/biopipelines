@@ -120,7 +120,7 @@ class Embedding(BaseConfig):
         inputs:          the structures to embed (a stream or a standardized output with a `structures` stream; PDB or mmCIF). Only the first chain of the first model is read, from its C-alpha atoms of ATOM records; HETATM records, other chains and other models are ignored without a warning, so pass one chain per id.
         model:           registered model, one of progres, cirpin. Required: the two share one network, so the name is what records which weights you meant.
         weights:         path to the checkpoint file of that model (a torch file whose `model` key is the state dict). Must exist when the pipeline is configured; the step exports it as TRAINED_MODEL_FP. No default is downloaded.
-        first, second:   the two members of each pair to compare, as columns of one table, e.g. first=pairs.tables.data.query, second=pairs.tables.data.target. Both or neither; both must come from the same table (a pair per row). Ids are compared as text with the ids of `inputs`. Omit both for no similarity table.
+        first, second:   the two members of each pair to compare, as columns of one table, e.g. first=pairs.tables.data.query, second=pairs.tables.data.target. Both or neither; both must come from the same table (a pair per row). Ids are read as text, so `007` and `NA` stay as written, and compared with the ids of `inputs`; a pair listed twice is one pair, and two different pairs that would join to one id are refused. Omit both for no similarity table.
         node_embeddings: also write the `node_embeddings` stream, one `.npy` per input of shape (residues, dimension) (default: False). It is the output of the per-node decoder before the sum over residues, not normalized. The pip package of Progres has no such option; CIRPIN's own progres.py returns this tensor from `embed_nodes`.
         device:          "cpu", "cuda" or "auto" (cuda when available, else cpu) (default: "cpu", upstream's own default). "cuda" without a GPU fails the step rather than falling back.
 
@@ -133,12 +133,12 @@ class Embedding(BaseConfig):
             embeddings:      <id>.npy per input, the vector above (format npy).
             node_embeddings: <id>.npy per input, shape (residues, dimension) (format npy). Empty unless node_embeddings=True.
         Tables:
-            similarities: id | first | second | cosine_similarity   (one row per pair row, in the table's order; id is `<first>+<second>`. NaN when either member has no embedding: not in the input stream, dropped upstream, or its embedding failed. Absent without `first` and `second`.)
-            missing:      id | removed_by | kind | cause   (an input that failed to embed, under its own id; a pair that could not be compared, under its pair id; both kind="failure")
+            similarities: id | first | second | cosine_similarity   (one row per distinct pair of the table, in first-seen order; id is `<first>+<second>`. NaN when either member has no embedding: empty, not in the input stream, dropped upstream, or its embedding failed. Absent without `first` and `second`.)
+            missing:      id | removed_by | kind | cause   (an input that failed to embed, under its own id, kind="failure"; a pair that could not be compared, under its pair id: kind="unmatched" when a member is empty, not in the input stream or dropped upstream, kind="failure" when a member failed to embed)
     """
 
     TOOL_NAME = "Embedding"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "Embedding"
 
     @classmethod

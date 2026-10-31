@@ -77,6 +77,10 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Embedding** 1.1 → 1.2. Pair ids are read as text through the shared pair reader of `pair_alignment.py`: a plain `read_csv` had turned `007` into `7.0` and `NA` into an empty cell, so a pair of two ids that exist failed under another name. A pair listed twice is now one row of `similarities` (it was two rows with one id), two different pairs that would join to one id are refused, and the pair id comes from `join_axis_ids`. A pair member that is empty, outside the stream or dropped upstream is `unmatched` in `missing`; one that failed to embed stays `failure`. The registry is unchanged.
+
+- **USalign** 1.2 → 1.3, **TMalign** 1.2 → 1.3. The pair id and the row id come from `combinatorics.join_axis_ids` and `generate_multiplied_ids`, with the same ids as before. A pair whose structure id is empty, absent from `structures` or without a file is `unmatched` in `missing`, not `failure`; an aligner that gave nothing stays `failure`. `pair_alignment.read_pairs` is also the reader of Embedding's pair table.
+
 - **Peppr** 1.2 → 1.3. A prediction with no matching reference is `unmatched` in `missing`, not `failure`, because it is a lookup that found no partner. The completion check treats the two alike and the table values are unchanged.
 
 - **IPSAE** 1.4 → 1.5. Documentation and messages. Says where the cutoffs come from (`pae_cutoff` 10 is Chaperone's, `dist_cutoff` 10 is the value of upstream's AlphaFold3 and Boltz examples, while upstream's README uses 15 and 15 for AlphaFold2 and its usage message 10 and 15, so 10 and 10 is a choice to confirm) and that the `ipsae` row takes the highest target where Chaperone's headline takes the lowest. The docstring no longer says every column of a failed id is NaN. The refusal of an empty `pae` stream names `include_pae`. An id with no PAE entry or file is `unmatched` in `missing`.

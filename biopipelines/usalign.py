@@ -46,42 +46,23 @@ class USalign(PairAligner):
     """
     USalign: align every pair of a table of structure pairs three ways with US-align.
 
-    For each pair (structure_1, structure_2) the tool runs the sequential alignment
-    (`-mm 0`), the circularly permuted alignment (`-mm 3`) and the non-sequential
-    alignment (`-mm 5`, or `-mm 6` with `non_sequential_variant="sNS"`), and reports
-    one row per pair and alignment. Use it to ask whether a permuted or rearranged
-    design keeps the fold of its parent: a circularly permuted protein aligns
-    poorly in sequence order and well in the other two.
+    For each pair (structure_1, structure_2) the tool runs the sequential alignment (`-mm 0`), the circularly permuted alignment (`-mm 3`) and the non-sequential alignment (`-mm 5`, or `-mm 6` with `non_sequential_variant="sNS"`), and reports one row per pair and alignment. Use it to ask whether a permuted or rearranged design keeps the fold of its parent: a circularly permuted protein aligns poorly in sequence order and well in the other two.
 
-    Structure_1 is the one that is rotated onto structure_2. Each TM-score is
-    normalized by the length of one structure: `tm_score_1` by structure_1,
-    `tm_score_2` by structure_2. US-align recommends the one normalized by the
-    reference structure, `tm_score_2`.
+    Structure_1 is the one that is rotated onto structure_2. Each TM-score is normalized by the length of one structure: `tm_score_1` by structure_1, `tm_score_2` by structure_2. US-align recommends the one normalized by the reference structure, `tm_score_2`.
 
-    Only the first chain of each structure is aligned (US-align's default for a
-    pair of monomers). A pair whose ids are not both in `structures`, or whose
-    alignment fails, keeps its rows with NaN values and is recorded in `missing`.
+    Only the first chain of each structure is aligned (US-align's default for a pair of monomers). A pair whose ids are not both in `structures` keeps its rows with NaN values and is recorded in `missing` as `unmatched`; a pair whose alignment fails is recorded as `failure`.
 
     Inputs:
         structures: PDB or mmCIF structures; every id used in the pair table must be one of them.
-        structure_1: column of the pair table holding the id of the structure that is rotated,
-            as `pairs.tables.data.<column>` or `(pairs.tables.data, "<column>")`.
+        structure_1: column of the pair table holding the id of the structure that is rotated, as `pairs.tables.data.<column>` or `(pairs.tables.data, "<column>")`.
         structure_2: column of the same table holding the id of the structure it is rotated onto.
-        non_sequential_variant: "fNS" (fully non-sequential, `-mm 5`) or "sNS" (semi-non-sequential,
-            `-mm 6`, which keeps the sequence order within secondary-structure elements) (default "fNS").
+        non_sequential_variant: "fNS" (fully non-sequential, `-mm 5`) or "sNS" (semi-non-sequential, `-mm 6`, which keeps the sequence order within secondary-structure elements) (default "fNS").
 
     Outputs:
         Tables:
-            alignments: id | structure_1 | structure_2 | mode | length_1 | length_2 |
-                aligned_length | rmsd | tm_score_1 | tm_score_2 | rotation_11 ... rotation_33 |
-                translation_1 ... translation_3 | aligned_1 | aligned_2
-                One row per distinct pair and mode. `id` is `<structure_1>+<structure_2>_<mode>`,
-                `mode` one of sequential, circular_permutation, non_sequential. `rotation_ij` and
-                `translation_i` are the matrix u and vector t of US-align, so a coordinate x of
-                structure_1 lands at t + u x. `aligned_1` and `aligned_2` are the two aligned
-                sequences, `-` for a gap; a `*` in `aligned_1` marks the circular permutation
-                point of a permuted alignment.
-            missing: id | removed_by | kind | cause
+            alignments: id | structure_1 | structure_2 | mode | length_1 | length_2 | aligned_length | rmsd | tm_score_1 | tm_score_2 | rotation_11 ... rotation_33 | translation_1 ... translation_3 | aligned_1 | aligned_2
+                One row per distinct pair and mode. `id` is `<structure_1>+<structure_2>_<mode>`, `mode` one of sequential, circular_permutation, non_sequential. `rotation_ij` and `translation_i` are the matrix u and vector t of US-align, so a coordinate x of structure_1 lands at t + u x. `aligned_1` and `aligned_2` are the two aligned sequences, `-` for a gap; a `*` in `aligned_1` marks the circular permutation point of a permuted alignment.
+            missing: id | removed_by | kind | cause   (kind="unmatched" for a pair with an id absent from `structures`, kind="failure" for an alignment that failed)
 
     Usage::
 
@@ -100,7 +81,7 @@ class USalign(PairAligner):
     """
 
     TOOL_NAME = "USalign"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "usalign"
     BINARY = "USalign"
 

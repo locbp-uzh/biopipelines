@@ -13,7 +13,7 @@ import argparse
 import hashlib
 import os
 import sys
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Set
 
 import numpy as np
 import pandas as pd
@@ -23,11 +23,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from biopipelines.biopipelines_io import (  # noqa: E402
     load_datastream,
-    load_table,
     iterate_files,
     step_id_from_table_path,
 )
 from biopipelines.embedding import SIMILARITY_COLUMNS, registry_entry  # noqa: E402
+from biopipelines.pair_alignment import pair_id, read_pairs  # noqa: E402
 
 NAN = float("nan")
 MISSING_COLUMNS = ["id", "removed_by", "kind", "cause"]
@@ -88,43 +88,34 @@ def check_embedding(vector, dimension):
     return vector
 
 
-def read_pairs(first_reference, second_reference) -> List[Tuple[Optional[str], Optional[str]]]:
-    """(first, second) of every row of the pair table as text, None for an empty cell."""
-    table, first_column = load_table(first_reference)
-    _, second_column = load_table(second_reference)
-    absent = [c for c in (first_column, second_column) if c not in table.columns]
-    if absent:
-        raise ValueError(f"the pair table has no column {absent}; its columns are {list(table.columns)}")
-    return [(None if pd.isna(a) else str(a), None if pd.isna(b) else str(b))
-            for a, b in zip(table[first_column], table[second_column])]
-
-
 def pair_rows(pairs, vectors: Dict[str, np.ndarray], declared: Set[str], attempted: Set[str]):
-    """One similarities row per pair, and (pair id, cause) for every pair that could not be compared.
+    """One similarities row per pair, and (pair id, kind, cause) for every pair that could not be compared.
 
-    `declared` are the ids of the input stream, `attempted` those whose file was present and embedded or failed; a member without an embedding is named by which of the three it is.
+    `pairs` come from `pair_alignment.read_pairs` (distinct, ids as text, "" for an empty cell). `declared` are the ids of the input stream, `attempted` those whose file was present and embedded or failed; a member without an embedding is named by which of the three it is. An empty member, one outside the stream and one dropped upstream are lookups with no partner (kind "unmatched"); a member that failed to embed, or vectors the cosine rejects, are a "failure".
     """
     rows, failures = [], []
     for first, second in pairs:
-        pair_id = f"{first}+{second}"
+        pid = pair_id(first, second)
+        kind = "failure"
         try:
             for member in (first, second):
-                if member is None:
+                if not member:
+                    kind = "unmatched"
                     raise ValueError("a pair has an empty id")
                 if member not in vectors:
                     if member not in declared:
-                        why = "is not in the input stream"
+                        kind, why = "unmatched", "is not in the input stream"
                     elif member not in attempted:
-                        why = "was dropped upstream (no file)"
+                        kind, why = "unmatched", "was dropped upstream (no file)"
                     else:
                         why = "failed to embed"
                     raise ValueError(f"'{member}' {why}")
             similarity = cosine_similarity(vectors[first], vectors[second])
         except ValueError as e:
-            rows.append({"id": pair_id, "first": first, "second": second, "cosine_similarity": NAN})
-            failures.append((pair_id, str(e)))
+            rows.append({"id": pid, "first": first, "second": second, "cosine_similarity": NAN})
+            failures.append((pid, kind, str(e)))
             continue
-        rows.append({"id": pair_id, "first": first, "second": second, "cosine_similarity": similarity})
+        rows.append({"id": pid, "first": first, "second": second, "cosine_similarity": similarity})
     return rows, failures
 
 
@@ -251,8 +242,8 @@ def main():
     if want_pairs:
         rows, pair_failures = pair_rows(pairs, vectors, set(ds.ids_expanded), attempted_ids)
         pd.DataFrame(rows, columns=SIMILARITY_COLUMNS).to_csv(args.similarities_csv, index=False)
-        for pair_id, cause in pair_failures:
-            local_missing_rows.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": cause[:200]})
+        for pid, kind, cause in pair_failures:
+            local_missing_rows.append({"id": pid, "removed_by": step_id, "kind": kind, "cause": cause[:200]})
         print(f"similarities: {args.similarities_csv} ({len(rows)} rows, {len(pair_failures)} NaN)")
     pd.DataFrame(local_missing_rows, columns=MISSING_COLUMNS).to_csv(args.local_missing_csv, index=False)
     print(f"Local failures: {failures} input(s)")

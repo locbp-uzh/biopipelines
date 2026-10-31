@@ -2,7 +2,7 @@
 #
 # Licensed under the MIT License. See LICENSE file in the project root for details.
 
-"""Pair handling shared by the structure aligners that take a table of pairs (USalign, TMalign).
+"""Pair handling shared by the structure aligners that take a table of pairs (USalign, TMalign), and by the tools that take the same pair table (Embedding reads it through `read_pairs`).
 
 Reading the pair table, checking both ids of a pair against the structures stream, running the aligner once per pair and mode, parsing its compact output (`-outfmt 1 -m -`) and the rule that an unavailable value is NaN and a row is never dropped live here, so the two tools differ only in the binary, the modes and a few columns.
 
@@ -20,6 +20,7 @@ import pandas as pd
 try:
     from .base_config import BaseConfig, StandardizedOutput, resolve_table_reference
     from .biopipelines_io import TableReference, container_argv_prefix
+    from .combinatorics import generate_multiplied_ids, join_axis_ids
     from .file_paths import Path
     from .datastream import DataStream
 except ImportError:
@@ -27,6 +28,7 @@ except ImportError:
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, resolve_table_reference
     from biopipelines_io import TableReference, container_argv_prefix
+    from combinatorics import generate_multiplied_ids, join_axis_ids
     from file_paths import Path
     from datastream import DataStream
 
@@ -67,13 +69,13 @@ class PairError(ValueError):
 
 
 def pair_id(structure_1: str, structure_2: str) -> str:
-    """Id of a pair: the two structure ids joined with '+', the framework's combinatorics separator."""
-    return f"{structure_1}+{structure_2}"
+    """Id of a pair: the two structure ids joined by the axis separator ('+'), through `join_axis_ids`."""
+    return join_axis_ids([structure_1, structure_2])
 
 
 def row_id(structure_1: str, structure_2: str, mode: str) -> str:
-    """Id of one (pair, mode) row: the pair id with the mode appended after '_', as for any fanned-out id."""
-    return f"{pair_id(structure_1, structure_2)}_{mode}"
+    """Id of one (pair, mode) row: the pair id multiplied by the mode as a suffix ('_'), through `generate_multiplied_ids`."""
+    return generate_multiplied_ids([pair_id(structure_1, structure_2)], [mode])[0][0]
 
 
 # ── pair table ───────────────────────────────────────────────────────────────
@@ -258,7 +260,7 @@ def align_pairs(pairs: List[Tuple[str, str]], files: Dict[str, str], declared: s
                 log: Callable[[str], None] = print, report_every: int = 100):
     """Align every pair in every mode; return (alignment rows, local missing rows).
 
-    Each (pair, mode) gives exactly one row, and no two share an id. One that could not be aligned keeps its row with NaN values and adds a kind="failure" row, with the same id, to the missing rows.
+    Each (pair, mode) gives exactly one row, and no two share an id. One that could not be aligned keeps its row with NaN values and adds a row with the same id to the missing rows: kind="unmatched" when a structure id of the pair is empty, not in the structures stream or has no file (the lookup found no partner), kind="failure" when the aligner itself gave nothing.
     """
     check_row_ids(pairs, modes)
     rows: List[Dict[str, Any]] = []
@@ -279,7 +281,8 @@ def align_pairs(pairs: List[Tuple[str, str]], files: Dict[str, str], declared: s
                 row.update(align_one(cmd, run))
             except Exception as error:  # noqa: BLE001 - one pair must not stop the others
                 log(f"WARNING: {row['id']} failed: {error}")
-                missing.append({"id": row["id"], "removed_by": step_id, "kind": "failure",
+                kind = "unmatched" if isinstance(error, PairError) else "failure"
+                missing.append({"id": row["id"], "removed_by": step_id, "kind": kind,
                                 "cause": str(error)[:200]})
             rows.append(row)
         if number % report_every == 0 or number == len(pairs):

@@ -730,7 +730,7 @@ Aligns every pair of a table of structure pairs three ways with US-align: in seq
 
 **Environment**: `usalign` (bioconda `usalign`, which ships both `USalign` and `TMalign`; `USalign.install()` builds it from `environments/usalign.yaml` and TMalign runs in the same env). bioconda also builds it for aarch64, so a `config.daint.yaml` entry exists, but the env has not been built on Daint yet.
 
-**Pairs and ids.** The pair table is any table with one row per pair, such as a CSV loaded with `Table`. `structure_1` and `structure_2` name its two columns as references, `pairs.tables.data.<column>` or `(pairs.tables.data, "<column>")`, and must come from the same table. Both ids of a pair must be ids of `structures`. A pair with an id that is not there, or whose structure file an upstream tool removed, keeps its rows with NaN values and one `kind="failure"` row per alignment in `missing`. A pair listed twice is aligned once. `(a, b)` and `(b, a)` are different pairs: structure_1 is the one that is rotated onto structure_2, and the circular permutation is searched in structure_1.
+**Pairs and ids.** The pair table is any table with one row per pair, such as a CSV loaded with `Table`. `structure_1` and `structure_2` name its two columns as references, `pairs.tables.data.<column>` or `(pairs.tables.data, "<column>")`, and must come from the same table. Both ids of a pair must be ids of `structures`. A pair with an empty id, an id that is not there, or whose structure file an upstream tool removed, keeps its rows with NaN values and one `kind="unmatched"` row per alignment in `missing` (the lookup found no partner); an aligner that gives nothing for a pair that was found is a `kind="failure"` row instead. A pair listed twice is aligned once. `(a, b)` and `(b, a)` are different pairs: structure_1 is the one that is rotated onto structure_2, and the circular permutation is searched in structure_1.
 
 **Alignments.** One row per pair and mode:
 
@@ -772,7 +772,7 @@ cp = Pool(runs=runs, keep_ids=True)                  # cp.tables.alignments, cp.
 - `alignments`: | id | structure_1 | structure_2 | mode | length_1 | length_2 | aligned_length | rmsd | tm_score_1 | tm_score_2 | rotation_11 | rotation_12 | rotation_13 | rotation_21 | rotation_22 | rotation_23 | rotation_31 | rotation_32 | rotation_33 | translation_1 | translation_2 | translation_3 | aligned_1 | aligned_2 |
 - `missing`: | id | removed_by | kind | cause |
 
-`id` is `<structure_1>+<structure_2>_<mode>`. One row per distinct pair and mode; a pair or alignment that could not be run carries NaN in every number and empty aligned sequences, and a row of the same `id` in `missing`. The step fails only when every alignment failed. The tool filters nothing: apply `Panda.filter` to the table.
+`id` is `<structure_1>+<structure_2>_<mode>`, the pair joined by the framework's axis separator and the mode appended as a suffix (`combinatorics.join_axis_ids` and `generate_multiplied_ids`); Embedding reads its pair table with the same reader, so the pair rules are identical there. One row per distinct pair and mode; a pair or alignment that could not be run carries NaN in every number and empty aligned sequences, and a row of the same `id` in `missing`. The step fails only when every alignment failed. The tool filters nothing: apply `Panda.filter` to the table.
 
 **Example**:
 ```python
@@ -820,7 +820,7 @@ Aligns every pair of a table of structure pairs in sequence order and with a cir
 - `delta`: | id | structure_1 | structure_2 | delta_tm_1 | delta_tm_2 |
 - `missing`: | id | removed_by | kind | cause |
 
-`alignments` ids are `<structure_1>+<structure_2>_<mode>`; `delta` has one row per distinct pair, with `id` `<structure_1>+<structure_2>`, and NaN where either alignment of the pair gave no TM-score. The ids in `missing` are those of the `alignments` rows that failed.
+`alignments` ids are `<structure_1>+<structure_2>_<mode>`; `delta` has one row per distinct pair, with `id` `<structure_1>+<structure_2>`, and NaN where either alignment of the pair gave no TM-score. The ids in `missing` are those of the `alignments` rows that failed, with `kind="unmatched"` for a pair whose structure id was empty or not found and `kind="failure"` for an alignment that gave nothing.
 
 **Example**:
 ```python
@@ -1243,7 +1243,7 @@ One fixed-length vector per input from a registered embedding model, and the cos
 - `inputs`: DataStream | StandardizedOutput (required) - the structures to embed, PDB or mmCIF. From a standardized output the `structures` stream is read (the stream the registry entry names as its `input_kind`). Only the first chain of the first model is read, from the C-alpha atoms of its `ATOM` records; `HETATM` records, further chains and further models are ignored without a warning, so give one chain per id. A structure with fewer than 3 C-alpha atoms fails its id. The reader guesses the format from the extension (`.cif` or `.mmcif` is read as mmCIF, anything else as PDB), so a structure file must carry its real extension.
 - `model`: str (required) - `"progres"` or `"cirpin"`. Required, with no default, because the two share one network and the name is what records which weights you meant.
 - `weights`: str (required) - path to the checkpoint file of that model: a torch file holding a dict whose `model` key is the state dict. It must exist when the pipeline is configured, and a URL or a directory is refused. The step exports it as `TRAINED_MODEL_FP` and prints the first 12 digits of its SHA-256 in the log, so the log names the weights that ran. No default is downloaded. The file is read with `weights_only=True`.
-- `first`, `second`: column references (default `None`) - the two members of each pair to compare, as columns of one table: `first=pairs.tables.data.query, second=pairs.tables.data.target` (or `(table, "column")` tuples). Both or neither, and both from the same table. Ids are compared as text with the ids of `inputs`; a pair is one table row, in the table's order, repeats included. Omit both for no `similarities` table.
+- `first`, `second`: column references (default `None`) - the two members of each pair to compare, as columns of one table: `first=pairs.tables.data.query, second=pairs.tables.data.target` (or `(table, "column")` tuples). Both or neither, and both from the same table. The table is read by the pair reader that USalign and TMalign use: ids are read as text, so `007` and `NA` stay as written (a plain numeric read would turn them into `7.0` and an empty cell), surrounding blanks are stripped, and they are compared with the ids of `inputs`. A pair listed twice is one pair, the pairs come in first-seen order, and two different pairs that would join to one id (a structure id that itself holds a `+`) are refused. Omit both for no `similarities` table.
 - `node_embeddings`: bool = False - also write the `node_embeddings` stream. For the three registered models it is the output of the per-node decoder (`node_dec`) before the sum over residues, not normalized.
 - `device`: str = `"cpu"` - `"cpu"`, `"cuda"` (fails the step when no GPU is visible rather than falling back) or `"auto"`.
 
@@ -1277,8 +1277,8 @@ Adding a model is one `EmbeddingModel` in the registry and, when its network or 
   | id | first | second | cosine_similarity |
   |----|-------|--------|-------------------|
 
-  One row per row of the pair table; `id` is `<first>+<second>`. `cosine_similarity` is NaN when either member has no embedding, and the pair is then a `kind="failure"` row in `missing` under its pair id, with the cause naming the member and whether it is not in the input stream, was dropped upstream, or failed to embed.
-- `missing`: | id | removed_by | kind | cause | - an input that failed to embed (no C-alpha atoms, fewer than 3, a non-finite vector) under its own id, and an uncomparable pair under its pair id; both `kind="failure"`.
+  One row per distinct pair of the pair table, in first-seen order; `id` is `<first>+<second>` (the framework's axis-separator join). `cosine_similarity` is NaN when either member has no embedding, and the pair is then a row in `missing` under its pair id, with the cause naming the member and whether it is empty, not in the input stream, was dropped upstream, or failed to embed.
+- `missing`: | id | removed_by | kind | cause | - an input that failed to embed (no C-alpha atoms, fewer than 3, a non-finite vector) under its own id, `kind="failure"`, and an uncomparable pair under its pair id: `kind="unmatched"` when a member is empty, not in the input stream or dropped upstream (the lookup found no partner), `kind="failure"` when a member failed to embed.
 
 **Cosine versus the Progres score.** `cosine_similarity` is the plain cosine in [-1, 1]. Progres's own score is `(1 + cosine) / 2`, running 0 to 1, and its search threshold (0.8 by default) is on that scale; convert with `Panda.calculate({"progres_score": "(1 + cosine_similarity) / 2"})`.
 

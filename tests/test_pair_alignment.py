@@ -263,7 +263,7 @@ def test_every_pair_and_mode_gives_one_row():
     assert (rows[0]["structure_1"], rows[0]["structure_2"]) == ("a", "b")
 
 
-def test_a_pair_with_an_id_outside_the_stream_keeps_nan_rows_and_a_failure_per_row():
+def test_a_pair_with_an_id_outside_the_stream_keeps_nan_rows_and_an_unmatched_row_each():
     files = {"a": "a.pdb", "b": "b.pdb"}
     rows, missing = pa.align_pairs([("a", "b"), ("a", "ghost")], files, set(files), MODES, "USalign",
                                    "007_USalign", run=replay, log=lambda m: None)
@@ -275,8 +275,33 @@ def test_a_pair_with_an_id_outside_the_stream_keeps_nan_rows_and_a_failure_per_r
         assert row["aligned_1"] == "" and row["aligned_2"] == ""
         assert row["id"].startswith("a+ghost_")
     assert [m["id"] for m in missing] == [r["id"] for r in ghost]
-    assert {m["kind"] for m in missing} == {"failure"} and {m["removed_by"] for m in missing} == {"007_USalign"}
+    assert {m["kind"] for m in missing} == {"unmatched"} and {m["removed_by"] for m in missing} == {"007_USalign"}
     assert "'ghost' is not in the structures stream" in missing[0]["cause"]
+
+
+def test_a_structure_removed_upstream_and_an_empty_id_are_unmatched_too():
+    files = {"a": "a.pdb"}
+    rows, missing = pa.align_pairs([("a", "b"), ("a", "")], files, {"a", "b"}, MODES[:1], "USalign", "s",
+                                   run=replay, log=lambda m: None)
+    assert [m["kind"] for m in missing] == ["unmatched", "unmatched"] and len(rows) == 2
+
+
+def test_an_aligner_that_gives_nothing_is_a_failure_not_unmatched():
+    files = {"a": "a.pdb", "b": "b.pdb"}
+    _, missing = pa.align_pairs([("a", "b")], files, set(files), MODES[:1], "USalign", "s",
+                                run=lambda cmd: (0, "", "Sequence is too short <3!"), log=lambda m: None)
+    assert [m["kind"] for m in missing] == ["failure"]
+
+
+def test_the_pair_and_row_ids_come_from_the_shared_combinatorics_functions():
+    import inspect
+    from biopipelines import combinatorics as cb
+
+    assert pa.pair_id("a", "b+c") == cb.join_axis_ids(["a", "b+c"]) == "a+b+c"
+    assert pa.row_id("a", "b", "non_sequential") == cb.generate_multiplied_ids(["a+b"], ["non_sequential"])[0][0] == "a+b_non_sequential"
+    source = inspect.getsource(pa)
+    assert "join_axis_ids" in source and "generate_multiplied_ids" in source
+    assert 'f"{structure_1}+{structure_2}"' not in source and '_{mode}"' not in source
 
 
 def test_one_mode_failing_leaves_the_others_intact():
@@ -407,7 +432,7 @@ def test_the_pipe_keeps_the_rows_of_a_pair_with_an_unknown_id_as_nan(pipe, monke
     ghost = table[table["structure_2"] == "ghost"]
     assert len(ghost) == 3 and ghost["tm_score_1"].isna().all() and ghost["aligned_1"].isna().all()
     assert table[table["structure_2"] == "b"]["tm_score_1"].notna().all()
-    assert sorted(missing["id"]) == sorted(ghost["id"]) and set(missing["kind"]) == {"failure"}
+    assert sorted(missing["id"]) == sorted(ghost["id"]) and set(missing["kind"]) == {"unmatched"}
 
 
 def test_length_columns_stay_whole_numbers_beside_a_failed_row(pipe, monkeypatch, tmp_path):
