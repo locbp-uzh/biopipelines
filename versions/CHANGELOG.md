@@ -77,6 +77,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **PoseBusters** 2.3 → 2.4. The tool declares a `missing` table, as the tools that consume streams do. A structure with no ligand residue of the stream's code to extract, one on which PoseBusters raised, and one whose file was not found each get a `failure` row of `missing` naming the reason; the first two keep their `all_pass` False row of `posebusters` as before. The failures go to `execution/local_missing.csv` and are merged with the upstream manifests of `structures` and `ligand` into `tables/missing.csv`. Before, both inputs could be filtered upstream and a structure that could not be read left no trace. A pose that fails a check is a result and has no `missing` row, and the step's exit status is unchanged.
+
 - **ProLIF** 2.2 → 2.3. The step exits non-zero when no complex was attempted or every attempted complex failed, not when `fingerprints` has no row. The table is long format, so a complex whose ligand makes no interaction ProLIF detects succeeds and writes no row, and a batch made only of such complexes used to fail the step. The `Failed: n/m` line counts attempted complexes.
 
 - **RTMScore** 2.3 → 2.4. The step exits non-zero when every pair failed, not when `scores` has no row. The table is long format, so a pair RTMScore answers with no pose succeeds and writes no row, and a batch made only of such pairs used to fail the step.

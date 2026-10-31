@@ -1878,6 +1878,12 @@ Validates computationally generated molecule poses by checking bond lengths, bon
 - Boolean check columns: Each PoseBusters test (True = pass, False = fail)
 - `all_pass`: True only if all checks selected by `check=` pass
 
+A structure the tool could not validate, either because no ligand residue with the stream's code could be extracted from it or because PoseBusters raised on it, keeps its row with `all_pass` False and no check columns, and has a `failure` row in `missing` giving the reason. A pose that was validated and failed a check is a result, not a failure, and has no `missing` row.
+
+- `missing`: | id | removed_by | kind | cause |
+
+  The ids dropped upstream from `structures` or `ligand`, and this step's own failures (the structures above) as `failure` rows with `removed_by` the step id and the reason in `cause`.
+
 **Example**:
 ```python
 from biopipelines.posebusters import PoseBusters

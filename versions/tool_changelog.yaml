@@ -1912,8 +1912,12 @@ PoseBusters:
   files:
   - biopipelines/posebusters.py
   - pipe_scripts/pipe_posebusters.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-10-31'
+    note: >-
+      The tool declares a `missing` table, as the tools that consume streams do. A structure with no ligand residue of the stream's code to extract, one on which PoseBusters raised, and one whose file was not found each get a `failure` row of `missing` naming the reason; the first two keep their `all_pass` False row of `posebusters` as before. The failures go to `execution/local_missing.csv` and are merged with the upstream manifests of `structures` and `ligand` into `tables/missing.csv`. Before, both inputs could be filtered upstream and a structure that could not be read left no trace. A pose that fails a check is a result and has no `missing` row, and the step's exit status is unchanged.
   - version: '2.3'
     date: '2026-10-28'
     note: >-

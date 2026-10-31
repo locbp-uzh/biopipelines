@@ -112,7 +112,7 @@ class PoseBusters(BaseConfig):
     """
 
     TOOL_NAME = "PoseBusters"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     ENV_NAME = "posebusters"
 
     @classmethod
@@ -158,6 +158,8 @@ fi
     structures_ds_json = Path(lambda self: self.configuration_path("structures.json"))
     ligand_json = Path(lambda self: self.configuration_path("input_ligand.json"))
     posebusters_py = Path(lambda self: self.pipe_script_path("pipe_posebusters.py"))
+    missing_csv = Path(lambda self: self.table_path("missing"))
+    local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     def __init__(self,
                  structures: Union[DataStream, StandardizedOutput],
@@ -225,7 +227,14 @@ fi
                 posebusters: id | source_structure | <included checks...> | all_pass | <excluded checks...>
                 In redock mode the column set additionally includes mol_true_loaded,
                 identity columns, and rmsd_≤_2å.
+                A structure the tool could not validate (no ligand to extract, or PoseBusters raised
+                on it) keeps its row with all_pass False and has a ``failure`` row in missing.
+            missing: id | removed_by | kind | cause
         """
+        # Keep the original inputs to find their upstream `missing` tables.
+        self.structures_input = structures
+        self.ligand_input = ligand
+
         # Resolve structures input to DataStream
         if isinstance(structures, StandardizedOutput):
             self.structures_stream: DataStream = structures.streams.structures
@@ -351,6 +360,10 @@ fi
         script_content += self.generate_completion_check_header()
         script_content += self.activate_environment()
         script_content += self.generate_script_run_posebusters()
+        script_content += self.generate_missing_propagation(
+            self.structures_input, self.ligand_input,
+            missing_csv=self.missing_csv, local_missing=self.local_missing_csv,
+        )
         script_content += self.generate_completion_check_footer()
 
         return script_content
@@ -378,6 +391,7 @@ fi
             "output_csv": self.analysis_csv,
             "execution_dir": self.execution_folder,
             "check_columns": self._check_columns,
+            "local_missing_csv": self.local_missing_csv,
         }
 
         with open(self.config_file, 'w') as f:
@@ -414,7 +428,8 @@ python "{self.posebusters_py}" --config "{self.config_file}"
                 path=self.analysis_csv,
                 columns=columns,
                 description=f"PoseBusters validation ({self.mode} mode)"
-            )
+            ),
+            "missing": self.missing_table_info(self.missing_csv),
         }
 
         return {

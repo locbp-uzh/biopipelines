@@ -20,7 +20,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 # Import unified I/O utilities
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from biopipelines.biopipelines_io import load_datastream, iterate_files
+from biopipelines.biopipelines_io import load_datastream, iterate_files, MISSING_COLUMNS, step_id_from_table_path
 from biopipelines.ligand_utils import resolve_ligand_code, resolve_ligand_smiles as _resolve_ligand_smiles
 
 
@@ -232,6 +232,8 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
     output_csv = config_data['output_csv']
     execution_dir = config_data['execution_dir']
     check_columns = list(config_data.get('check_columns') or [])
+    local_missing_csv = config_data['local_missing_csv']
+    step_id = step_id_from_table_path(local_missing_csv)
 
     print(f"PoseBusters validation")
     print(f"Structures: {len(structures_ds.ids_expanded)}")
@@ -253,12 +255,14 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
             print(f"Reference ligand SDF: {reference_sdf}")
 
     # Process structures
-    results = []
+    results, failures = [], []
     structure_items = list(iterate_files(structures_ds))
     total = len(structure_items)
     for i, (structure_id, structure_path) in enumerate(structure_items):
         if not os.path.exists(structure_path):
             print(f"Warning: Structure file not found: {structure_path}")
+            failures.append({"id": structure_id, "removed_by": step_id, "kind": "failure",
+                             "cause": "the structure file was not found"})
             continue
 
         print(f"\nProcessing structure {i + 1}/{total}: {structure_path}")
@@ -278,6 +282,8 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
                 'source_structure': structure_path,
                 'all_pass': False
             })
+            failures.append({"id": structure_id, "removed_by": step_id, "kind": "failure",
+                             "cause": f"no ligand residue {ligand_name} could be extracted from the structure"})
             continue
 
         for ligand_sdf, protein_pdb, suffix in extractions:
@@ -340,6 +346,13 @@ def run_posebusters(config_data: Dict[str, Any]) -> None:
                     'source_structure': structure_path,
                     'all_pass': False
                 })
+                failures.append({"id": entry_id, "removed_by": step_id, "kind": "failure",
+                                 "cause": f"PoseBusters failed: {e}"[:200]})
+
+    # This step's own failures; the propagation merges them with the upstream manifests into tables/missing.csv.
+    os.makedirs(os.path.dirname(local_missing_csv), exist_ok=True)
+    pd.DataFrame(failures, columns=MISSING_COLUMNS).to_csv(local_missing_csv, index=False)
+    print(f"Wrote local missing manifest: {local_missing_csv} ({len(failures)} rows)")
 
     # Assemble and save results
     if results:
@@ -394,7 +407,7 @@ def main():
         sys.exit(1)
 
     # Validate required parameters
-    required_params = ['structures_json', 'ligand_json', 'mode', 'output_csv']
+    required_params = ['structures_json', 'ligand_json', 'mode', 'output_csv', 'local_missing_csv']
     for param in required_params:
         if param not in config_data:
             print(f"Error: Missing required parameter: {param}")
