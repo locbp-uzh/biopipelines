@@ -25,6 +25,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     step_id_from_table_path,
     container_argv_prefix,
 )
+from biopipelines.ligand_utils import ligand_chemistry  # noqa: E402
 from biopipelines.reinvent4 import (  # noqa: E402
     CONDITIONAL_GENERATORS,
     PROVENANCE_COLUMN,
@@ -86,10 +87,7 @@ def read_samples(path, generator):
 
 def input_text(smiles):
     """The input SMILES as one line of REINVENT's input file, or None if it cannot be one."""
-    if smiles is None or (isinstance(smiles, float) and pd.isna(smiles)):
-        return None
-    text = str(smiles).strip()
-    return text or None
+    return ligand_chemistry({"smiles": smiles})["smiles"] or None
 
 
 def cuda_available(container_prefix):
@@ -152,7 +150,7 @@ def main():
     step_id = step_id_from_table_path(cfg["local_missing_csv"])
     os.makedirs(cfg["sampling_dir"], exist_ok=True)
 
-    # An input with no SMILES is a deliberate drop and one REINVENT cannot run is a failure; both keep a row in inputs.
+    # An input with no SMILES, or one REINVENT cannot run, is a failure; both keep a row in inputs.
     jobs, input_rows, local_missing_rows = [], [], []
     if conditional:
         compounds_ds = load_datastream(cfg["compounds_json"])
@@ -162,7 +160,7 @@ def main():
                 print(f"WARNING: skipping {input_id} (no smiles)", file=sys.stderr)
                 input_rows.append({"id": input_id, "smiles": "", "num_compounds": None})
                 local_missing_rows.append({
-                    "id": input_id, "removed_by": step_id, "kind": "filter",
+                    "id": input_id, "removed_by": step_id, "kind": "failure",
                     "cause": "no smiles in compounds stream",
                 })
             elif any(ch.isspace() for ch in smiles):

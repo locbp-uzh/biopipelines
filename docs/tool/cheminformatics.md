@@ -297,7 +297,7 @@ The priors come from Zenodo record 15641297 (version 1 of the public priors, the
 
   `scaffold` is the scaffold as given to the model and `r_groups` the R-groups generated for it; `warheads` and `linker` likewise for `linkinvent`; `input_smiles` is the input as given to the model and `tanimoto` REINVENT's Tanimoto similarity of the analogue to it. `compounds.id` is the input compound the molecule came from. REINVENT writes isomeric SMILES for `mol2mol` only: for the other generators `isomeric_smiles` is at its upstream default (false), so the molecules carry no stereochemistry.
 - `inputs` — `id | smiles | num_compounds`. `libinvent`, `linkinvent` and `mol2mol` only; one row per input compound, with the number of molecules it yielded (empty when its run failed or it had no SMILES).
-- `missing` — `id | removed_by | kind | cause`. An input with no SMILES, or that yielded no valid molecule, is `kind="filter"`; an input REINVENT could not run (its message is the `cause`) is `kind="failure"`.
+- `missing` — `id | removed_by | kind | cause`. An input that yielded no valid molecule is `kind="filter"`; an input with no SMILES (a blank cell, whatever its spelling) or with whitespace in it, and an input REINVENT could not run (its message is the `cause`), are `kind="failure"`: the compound was asked for and was not processed.
 
 Every REINVENT run leaves its configuration, input file, raw CSV and log in the step's `execution/sampling/` folder, named after the input id (`denovo` for `reinvent`).
 

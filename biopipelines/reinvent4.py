@@ -162,7 +162,7 @@ class REINVENT4(BaseConfig):
             inputs:     id | smiles | num_compounds
                         (libinvent, linkinvent and mol2mol only; one row per input compound; num_compounds is how many molecules it yielded, empty if its run failed)
             missing:    id | removed_by | kind | cause
-                        (an input with no SMILES, or that yielded no molecule, is kind="filter"; one REINVENT could not run is kind="failure")
+                        (an input that yielded no molecule is kind="filter"; an input with no SMILES, or one REINVENT could not run, is kind="failure")
 
     Install:
         REINVENT4.install()                        # PyTorch build for CUDA 12.6
@@ -181,7 +181,7 @@ class REINVENT4(BaseConfig):
     """
 
     TOOL_NAME = "REINVENT4"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "REINVENT4"
 
     @classmethod

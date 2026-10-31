@@ -2871,8 +2871,12 @@ REINVENT4:
   files:
   - biopipelines/reinvent4.py
   - pipe_scripts/pipe_reinvent4.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-10-31'
+    note: >-
+      An input compound with no SMILES is a `failure` row of `missing`, not a `filter` row: the compound was asked for and nothing was deliberately dropped, and `filter` is the kind that is excused and so counted as intended. The blank is read through `ligand_utils.ligand_chemistry`, so `none`, `NAN` or spaces count as no SMILES where only an empty cell and a float NaN did. An input REINVENT ran and that yielded no molecule stays a `filter`.
   - version: '1.1'
     date: '2026-10-29'
     note: >-

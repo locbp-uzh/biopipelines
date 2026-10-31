@@ -437,6 +437,8 @@ def test_input_text():
     assert helper.input_text("") is None
     assert helper.input_text(None) is None
     assert helper.input_text(float("nan")) is None
+    for blank in ("nan", "NaN", "None", "none", "<NA>", "   "):
+        assert helper.input_text(blank) is None, blank
 
 
 def test_last_line_of_a_log(tmp_path):
@@ -634,14 +636,26 @@ def test_every_input_yielding_nothing_still_exits_zero(tmp_path, monkeypatch):
     assert set(pd.read_csv(paths["local_missing_csv"])["kind"]) == {"filter"}
 
 
-def test_input_without_smiles_is_dropped_and_none_usable_fails_the_step(tmp_path, monkeypatch):
+def test_input_without_smiles_is_a_failure_and_none_usable_fails_the_step(tmp_path, monkeypatch):
     code, paths, calls = _run_helper(tmp_path, monkeypatch, "mol2mol", lambda s, p: [],
                                      inputs={"a": ""})
     assert code == 1
     assert calls == []
     missing = pd.read_csv(paths["local_missing_csv"])
-    assert list(missing["kind"]) == ["filter"] and "no smiles" in missing.loc[0, "cause"]
+    assert list(missing["kind"]) == ["failure"] and "no smiles" in missing.loc[0, "cause"]
     assert list(pd.read_csv(paths["inputs_csv"])["id"]) == ["a"]
+
+
+@pytest.mark.parametrize("blank", ["", "none", "NAN", "   "])
+def test_a_blank_spelling_is_no_smiles_and_never_reaches_reinvent(tmp_path, monkeypatch, blank):
+    code, paths, calls = _run_helper(tmp_path, monkeypatch, "mol2mol",
+                                     lambda s, p: [["CCN", "1", "CCO", "0.7", "2.5"]],
+                                     inputs={"a": "CCO", "b": blank})
+    assert code == 0
+    assert len(calls) == 1
+    missing = pd.read_csv(paths["local_missing_csv"])
+    assert list(missing["id"]) == ["b"] and list(missing["kind"]) == ["failure"]
+    assert "no smiles" in missing.loc[0, "cause"]
 
 
 def test_input_with_whitespace_is_a_failure_that_never_reaches_reinvent(tmp_path, monkeypatch):

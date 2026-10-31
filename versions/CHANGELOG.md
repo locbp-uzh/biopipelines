@@ -77,6 +77,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **REINVENT4** 1.1 → 1.2. An input compound with no SMILES is a `failure` row of `missing`, not a `filter` row: the compound was asked for and nothing was deliberately dropped, and `filter` is the kind that is excused and so counted as intended. The blank is read through `ligand_utils.ligand_chemistry`, so `none`, `NAN` or spaces count as no SMILES where only an empty cell and a float NaN did. An input REINVENT ran and that yielded no molecule stays a `filter`.
+
 - **GEMS** 2.2 → 2.3. A pair GEMS gave no prediction for keeps its row of `affinity`, with a NaN `pkd_pred`, beside its `failure` row of `missing`. The table dropped the row, so a `Panda` merge of `affinity` against the table that fed it silently came back shorter. The step exits non-zero when no pair at all got a prediction, which an empty table used to decide. No id changes.
 
 - **Vina** 2.9 → 2.10. The changes of Gnina 2.10 that apply without a CNN, whose wrapper and pipe script Vina shares. In `score` and `minimize` mode a compound with no SMILES or no residue code fails only the complexes paired with it (a NaN row of `scores` and a `failure` row of `missing`) and every other complex is scored. The docking-only parameters that `mode="score"` refuses are compared against the signature defaults instead of a copy of them. Both SMILES reads of the pipe script go through `ligand_utils.ligand_chemistry`, so a blank that pandas leaves as text (spaces, `NAN`, `none`) is no chemistry. `seed` is also the seed of the RDKit conformer embedding, which was fixed at 42 whatever `seed` was; the default is 42, so a run that never set it docks the same conformers. The docs list `dock_timeout`.

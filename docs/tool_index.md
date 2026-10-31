@@ -88,7 +88,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 76 | AiZynthFinder | Cheminformatics                | 2.5 | `biopipelines/aizynthfinder.py` |
 | 77 | OpenBabel                 | Cheminformatics                | 1.1 | `biopipelines/openbabel.py` |
 | 78 | RDKit                     | Cheminformatics                | 1.2 | `biopipelines/rdkit_descriptors.py` |
-| 79 | REINVENT4                 | Cheminformatics                | 1.1 | `biopipelines/reinvent4.py` |
+| 79 | REINVENT4                 | Cheminformatics                | 1.2 | `biopipelines/reinvent4.py` |
 | 80 | BayesianAdjuster          | Sequence Statistics            | 1.0 | `biopipelines/bayesian_adjuster.py` |
 | 81 | MutationProfiler | Sequence Statistics            | 2.0 | `biopipelines/mutation_profiler.py` |
 | 82 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
