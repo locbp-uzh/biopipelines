@@ -1872,17 +1872,16 @@ Validates computationally generated molecule poses by checking bond lengths, bon
 
   Columns to the left of `all_pass` are the checks selected by `check=` (default preset `"pose"` shown). Columns to the right are still computed but excluded from `all_pass`. In `redock` mode, additional columns `mol_true_loaded`, `molecular_formula`, `molecular_bonds`, `double_bond_stereochemistry`, `tetrahedral_chirality`, `stereochemistry_preserved`, and `rmsd_≤_2å` are also included.
 
+  A structure the tool could not validate, either because no ligand residue with the stream's code could be extracted from it or because PoseBusters raised on it, keeps its row with `all_pass` False and no check columns, and has a `failure` row in `missing` giving the reason. A pose that was validated and failed a check is a result, not a failure, and has no `missing` row.
+- `missing`: | id | removed_by | kind | cause |
+
+  The ids dropped upstream from `structures` or `ligand`, and this step's own failures (the structures above) as `failure` rows with `removed_by` the step id and the reason in `cause`.
+
 **Output Columns**:
 - `id`: Structure identifier (suffixed with `_lig1`, `_lig2` etc. when multiple ligand copies exist)
 - `source_structure`: Path to input structure file
 - Boolean check columns: Each PoseBusters test (True = pass, False = fail)
 - `all_pass`: True only if all checks selected by `check=` pass
-
-A structure the tool could not validate, either because no ligand residue with the stream's code could be extracted from it or because PoseBusters raised on it, keeps its row with `all_pass` False and no check columns, and has a `failure` row in `missing` giving the reason. A pose that was validated and failed a check is a result, not a failure, and has no `missing` row.
-
-- `missing`: | id | removed_by | kind | cause |
-
-  The ids dropped upstream from `structures` or `ligand`, and this step's own failures (the structures above) as `failure` rows with `removed_by` the step id and the reason in `cause`.
 
 **Example**:
 ```python
