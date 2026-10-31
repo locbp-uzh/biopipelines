@@ -417,7 +417,7 @@ Predicts all-atom **biomolecular complexes** (proteins, DNA, RNA, ligands; antib
 - `seed_offset`: int = 0 — First seed value, so seeds run `seed_offset` .. `seed_offset + num_seeds - 1`; a non-negative integer. Peak GPU memory is set by `num_diffusion_samples`, so a complex too large to sample deeply in one run can be sampled across several runs that differ only in `seed_offset`, and the samples pooled. Without it every run starts at seed 0 and repeating a fold reproduces the same sample, to within GPU numerical noise (measured on a 36-residue protein: 0.04 Å CA-RMSD between repeats, against 33.7 Å between adjacent seeds). Give each run a range of seeds that does not overlap the others.
 - `msa_max_depth`: int = 1024 — MSA subsampling depth per loop.
 - `include_pae`: bool = False — Also tabulate PAE (adds `max_pae` to the confidence table) and write each structure's full PAE matrix to the `pae` stream.
-- `top_only`: bool = True — Keep only the best sample per complex. When False, surface every diffusion sample as `<id>_1..N` (pair with `num_diffusion_samples=N`).
+- `top_only`: bool = True — Keep only the best sample per complex. When False, surface the best `num_diffusion_samples` samples, ranked by ipTM (complex) or pLDDT (monomer) across all seeds, as `<id>_1..N`, so `<id>_1` is the best. With `num_seeds > 1` the other `num_seeds x num_diffusion_samples - N` samples are dropped.
 - `model_name`: str = "biohub/ESMFold2" — HuggingFace checkpoint id (e.g. a Fast variant).
 
 **Streams**: `structures` (mmCIF), `pae` (only with `include_pae=True`), `compounds` (ligand passthrough when ligands are folded)
@@ -698,7 +698,7 @@ The whole batch folds in one process — `run_openfold predict` takes a single J
 - `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement
 - `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them, so both models receive the same chemistry for the same input
-- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA server off; passing `use_msa_server=True` as well is refused. Every protein chain of a query needs one, matched to its protein id: a query with a chain that has none is not predicted, keeps a blank row of `confidence` and lands in `missing` as a `failure`
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments (`.a3m`, `.sto` or `.npz`). Supplying them turns the MSA server off; passing `use_msa_server=True` as well is refused. Every protein chain of a query needs one, matched to its protein id: a query with a chain that has none, whose file is gone or whose format upstream cannot read is not predicted, keeps a blank row of `confidence` and lands in `missing` as a `failure`
 - `use_msa_server`: Optional[bool] = None - generate alignments through the ColabFold server; unset means on, unless `msas` is given
 - `num_diffusion_samples`: Optional[int] = None - structures sampled per query (upstream default 5)
 - `num_model_seeds`: Optional[int] = None - random seeds per query (upstream default 1)
@@ -711,7 +711,7 @@ The whole batch folds in one process — `run_openfold predict` takes a single J
 - `template_chain_ids`: Optional[List[str]] = None - which chains the template applies to
 - `low_mem`: bool = False - add upstream's `low_mem` preset, for a GPU that cannot hold the default
 - `devices`: Optional[int] = None - GPUs to distribute over (upstream default 1)
-- `runner_yaml`: Optional[str] = None - a user-supplied runner YAML merged over the wrapper's. The escape hatch for upstream settings this wrapper does not name; the user's keys win
+- `runner_yaml`: Optional[str] = None - a user-supplied runner YAML merged over the wrapper's. The escape hatch for upstream settings this wrapper does not name; the user's keys win. With `top_only=False` the ids per query are declared from the sample count and the seed count, so it needs `num_diffusion_samples`, and an `experiment_settings.seeds` in it has to be a list (it replaces `seeds`, and a `num_model_seeds` of another length is refused)
 
 **Streams**: `structures`, `pae`
 
@@ -733,6 +733,8 @@ The whole batch folds in one process — `run_openfold predict` takes a single J
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
+
+Provenance: the maps of `structures` and `pae` and the `confidence` table end with one `<axis>.id` column per input axis, named after the parameter (`proteins.id`, `ligands.id`, ...), holding the input of that axis the row was built from: the id `a_1+l_2` has `proteins.id` = `a_1` and `ligands.id` = `l_2`, and a query that failed keeps its provenance. The config step records them from the same selections that compose the id, so an input id that already contains a `+` or an `_` is never split.
 
 With `top_only=True` (the default) the sample with the highest `ranking_score` is kept as
 `<id>` — the best, not the first. With `top_only=False` every sample is surfaced as
@@ -816,7 +818,7 @@ RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `
 - `proteins`: Optional[Union[DataStream, StandardizedOutput]] = None - protein sequences
 - `ssDNA` / `dsDNA` / `ssRNA` / `dsRNA`: Optional[Union[DataStream, StandardizedOutput]] = None - nucleic-acid sequences. A double-stranded axis becomes two chains, the second the reverse complement. The chain type is passed to upstream explicitly, because a string such as "ACGT" is also a valid protein sequence
 - `ligands`: Optional[Union[DataStream, StandardizedOutput]] = None - compounds, expressed by CCD code or SMILES exactly as `Boltz2` expresses them. Upstream's own guidance is that a CCD code folds better than a SMILES string
-- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`). Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence, and then the default early-stopping threshold often abandons them. With `msas`, an input with a protein chain that has no alignment is not predicted and lands in `missing` as a `failure`. Upstream pairs alignments across chains on the fly and does not accept pre-paired ones
+- `msas`: Optional[Union[DataStream, StandardizedOutput]] = None - precomputed alignments for the protein axis, one per protein id (`.a3m`, `.a3m.gz` or `.fasta`). Upstream cannot compute an MSA itself, so without this the proteins fold single-sequence, and then the default early-stopping threshold often abandons them. With `msas`, an input with a protein chain that has no alignment, whose file is gone or whose format upstream cannot read is not predicted and lands in `missing` as a `failure`; the inputs after it are still predicted. Upstream pairs alignments across chains on the fly and does not accept pre-paired ones
 - `n_recycles`: Optional[int] = None - trunk recycles (upstream default 10). A single recycle is refused while early stopping is on, because upstream spends the first recycle on the early-stopping check and has none left to fold with
 - `diffusion_batch_size`: int = 5 - structures sampled per input from one forward pass of the trunk (upstream default 5). Always passed, so the ids declared for `top_only=False` are exact
 - `num_steps`: Optional[int] = None - diffusion sampling steps. Upstream's config default is 50; its README states 200 and says 50 performs similarly and is more than twice as fast. Left to upstream unless given
@@ -846,6 +848,8 @@ RF3 shares the `foundry` environment with `RFdiffusion3`, but not its install: `
   |----|------------|------|-------|
 
   An input stopped by the early-stopping threshold is a `filter` row: you set the threshold, so its absence is expected. An input for which `rf3 fold` wrote no structure for another reason is a `failure` row.
+
+Provenance: the maps of `structures` and `pae` and the `confidence` table end with one `<axis>.id` column per input axis, named after the parameter (`proteins.id`, `ligands.id`, ...), holding the input of that axis the row was built from: the id `a_1+l_2` has `proteins.id` = `a_1` and `ligands.id` = `l_2`, and a query that failed keeps its provenance. The config step records them from the same selections that compose the id, so an input id that already contains a `+` or an `_` is never split.
 
 With `top_only=True` (the default) the sample with the highest `ranking_score` is kept as `<id>`. Newer upstream releases record an early stop as a row in `<id>_ranking_scores.csv`, older ones as a `score.csv`; both are read.
 
@@ -910,6 +914,8 @@ The layer norm always runs in plain PyTorch (`LAYERNORM_TYPE=torch`, exported by
 
   | id | removed_by | kind | cause |
   |----|------------|------|-------|
+
+Provenance: the maps of `structures` and `pae` and the `confidence` table end with one `<axis>.id` column per input axis, named after the parameter (`proteins.id`, `ligands.id`, ...), holding the input of that axis the row was built from: the id `a_1+l_2` has `proteins.id` = `a_1` and `ligands.id` = `l_2`, and a query that failed keeps its provenance. The config step records them from the same selections that compose the id, so an input id that already contains a `+` or an `_` is never split.
 
 With `top_only=True` (the default) the structure with the highest `ranking_score` over all seeds and samples is kept as `<id>`. With `top_only=False` every structure is surfaced as `<id>_1..N`.
 

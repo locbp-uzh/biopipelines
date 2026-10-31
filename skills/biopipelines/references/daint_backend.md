@@ -264,7 +264,7 @@ Server startup is not instant, which is why the server belongs in a packed block
 
 ## What runs here
 
-These 19 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2, ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold, BioEmu2 (under 1.0 only; see its section below).
+These 19 are verified by running, not just importing (the `environments:` block routes many more tools than this — see the note at the top): PDB, Sequence, Ligand, RDKit, Distance, Panda, SASA, PyMOL (SASA 6536.9 Å² on lysozyme, 1LYZ→1AKI at 0.532 Å), DSSP (`mkdssp 4.6.1`), Boltz2, BoltzGen, RFdiffusion3, ESMFold2 (before 2.7 only, with esm pinned to 3.3.0; the current version needs esm >= 3.4, which cannot be installed here, see its section below), ProteinMPNN, LigandMPNN, PoseBusters, Vina, AlphaFold, BioEmu2 (under 1.0 only; see its section below).
 
 **AlphaFold folds here; it does not search here.** The venv carries `alphafold-colabfold 2.3.20` and `colabfold 1.6.3`, `colabfold_batch --help` exits 0, and `jax 0.11.2` reports `[CudaDevice(id=0)]` on a GH200. `colabfold_search` is installed but shells out to an `mmseqs` binary the wheel does not ship, and the databases are gone — so alignments come from the other cluster and arrive through `msas=`.
 
@@ -305,3 +305,7 @@ The helper still splits the trajectory into conformers, so its Python needs `mdt
 **The alignment cache.** `BIOEMU2_MSA_CACHE` moves the ColabFold cache of the searched sequences, and bioemu2 reads it itself. On Daint, scratch purges at 30 days and a new search takes minutes against the MMseqs2 server, so a cache on the group store survives the purge. A run with a supplied `msas` alignment uses the step's own cache directory instead.
 
 **Untested here:** the venv over the image (that the install resolves `bioemu2[cuda]` on aarch64 and that the conda layer's python runs inside the image), the image-only route under the rewritten wrapper, and the nested `srun`.
+
+## ESMFold2
+
+ESMFold2 folded on a GH200 under the wrappers before 2.7, with esm pinned to the 3.3.0 commit of `environments/esmfold2.pip.daint.txt`. The current wrapper needs esm >= 3.4: the model class moved into the package, and the 3.3.0 loader cannot read the current `biohub/ESMFold2` checkpoint. From v3.4.0 upstream requires torch 2.11, which the NGC image of `edf: ESMFold2` does not carry, so `ESMFold2.install()` cannot build the environment on Daint today; the requirements file says so. It works again once the EDF moves to an NGC image with torch 2.11 and the commit pin is dropped. Until then fold on the other cluster, or use Boltz2, which is verified here.
