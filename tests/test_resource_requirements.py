@@ -123,6 +123,28 @@ class TestACompatibleList:
     def test_the_fix_is_the_first_compatible_model_when_no_use_is_given(self):
         assert 'Resources(gpu="A100")' in gpu_warnings("Tool", "H100", self.ONLY_A100, S3IT)[0]
 
+    def test_the_fix_is_the_first_listed_model_not_the_first_alphabetically(self):
+        declared = {"gpu": {"compatible": ["V100", "A100"]}}
+        assert 'Resources(gpu="V100")' in gpu_warnings("Tool", "H100", declared, S3IT)[0]
+
+
+class TestASingleGpuTypeSite:
+    """On a node-exclusive site the scheduler emits an untyped `gpu:N`, so every request lands on the inventory."""
+
+    DAINT = {"GH200": ""}
+    POCKETGEN = {"gpu": {"incompatible": ["GH200"], "use": "A100"}}
+
+    @pytest.mark.parametrize("request_", ["gh", "any", "A100", "4"])
+    def test_every_request_is_judged_against_the_inventory(self, request_):
+        messages = gpu_warnings("PocketGen", request_, self.POCKETGEN, self.DAINT, single_gpu_type=True)
+        assert len(messages) == 1 and "may land on GH200" in messages[0]
+
+    def test_none_is_still_not_judged(self):
+        assert gpu_warnings("PocketGen", "none", self.POCKETGEN, self.DAINT, single_gpu_type=True) == []
+
+    def test_a_typed_site_still_ignores_an_unknown_token(self):
+        assert gpu_warnings("PocketGen", "gh", self.POCKETGEN, self.DAINT) == []
+
 
 class TestTheDeclarationIsChecked:
 
@@ -240,6 +262,16 @@ class TestTheWarningWhenTheScriptsAreGenerated:
             pipeline.generate_job_scripts()
 
         assert capsys.readouterr().out.count("does not support H100") == 1
+
+    def test_a_node_exclusive_site_warns_for_its_own_request(self, slurm, isolated_cwd, capsys, monkeypatch):
+        """Daint pipelines ask for `gpu="gh"`, which names no model, and every node is a GH200."""
+        monkeypatch.setattr(ConfigManager, "get_node_exclusive", lambda self: True)
+        monkeypatch.setattr(ConfigManager, "get_gpu_models", lambda self: {"GH200": ""})
+        from biopipelines.mock import Mock
+        monkeypatch.setattr(Mock, "RESOURCE_REQUIREMENTS", {"gpu": {"incompatible": ["GH200"], "use": "A100"}})
+        _generate("daint", ["gh"])
+
+        assert 'Warning: Mock: Resources(gpu="gh") may land on GH200' in capsys.readouterr().out
 
     def test_the_generated_scripts_do_not_depend_on_the_warning(self, slurm, isolated_cwd, monkeypatch):
         from biopipelines.mock import Mock

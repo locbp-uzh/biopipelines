@@ -710,7 +710,7 @@ with Pipeline("Project", "Job", "Description"):
 
 GPU options: `"T4"`, `"L4"`, `"V100"`, `"A100"`, `"H100"`, `"H200"`, `"24GB"`, `"32GB"`, `"80GB"`, `"96GB"`, `"any"`, `"high-memory"`
 
-A tool that does not run on some GPUs declares them (`RESOURCE_REQUIREMENTS`, e.g. DynamicBind and PocketGen on the H100), and generating the batch scripts prints `Warning: ... may land on H100 ...` when the request is one of them or may land on one; `bp_submit` shows it. A request that names no model (`any`, `80GB`, `!L4`) is judged against `machine.gpu_models` of the config, the GPU models the machine offers as `{model: memory}` with the memory left empty where it is not known. Without that key only a request that names a model is judged.
+A tool that does not run on some GPUs declares them (`RESOURCE_REQUIREMENTS`, e.g. DynamicBind and PocketGen on the H100), and generating the batch scripts prints `Warning: ... may land on H100 ...` when the request is one of them or may land on one; `bp_submit` shows it. A request that names no model (`any`, `80GB`, `!L4`) is judged against `machine.gpu_models` of the config, the GPU models the machine offers as `{model: memory}` with the memory left empty where it is not known. On a machine with `machine.node_exclusive` (Daint), where the scheduler asks for an untyped GPU, every request but `none`, `gpu="gh"` included, is judged against that inventory. Without that key only a request that names a model is judged.
 
 **Batch dependencies**: Multiple `Resources()` calls create sequential batches:
 

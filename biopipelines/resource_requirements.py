@@ -8,17 +8,18 @@ A tool declares ``RESOURCE_REQUIREMENTS`` as a class attribute. Only the ``gpu``
 
     RESOURCE_REQUIREMENTS = {"gpu": {"incompatible": ["H100"], "use": "A100"}}
 
-``incompatible`` lists the GPU models the tool does not run on. ``compatible``, when not empty, lists the only models
-it runs on, so any model outside it counts as incompatible. ``use`` is the request the warning suggests.
+``incompatible`` lists the GPU models the tool does not run on.
+``compatible``, when not empty, lists the only models it runs on, so any model outside it counts as incompatible.
+``use`` is the request the warning suggests; without it, the first ``compatible`` model.
 
 A batch's ``Resources(gpu=...)`` is judged against that declaration when the batch scripts are generated:
 
 * a request that names a model is judged by its name alone;
-* a request that does not pin a model (``any``, ``gpu``, a count, ``high-memory``, a memory such as ``80GB``,
-  ``!X``, ``A|B``) is judged against ``machine.gpu_models`` of the config, the GPU models the machine offers, and
-  warns when it may land on an incompatible one. A model whose memory the config leaves empty can be the answer to
-  any memory request. Without ``machine.gpu_models`` only a request that names a model is judged;
-* ``none``, an empty request and a token that is neither a model nor a memory are not judged.
+* a request that does not pin a model (``any``, ``gpu``, a count, ``high-memory``, a memory such as ``80GB``, ``!X``, ``A|B``) is judged against ``machine.gpu_models``, the GPU models the machine offers, and warns when it may land on an incompatible one;
+* a model whose memory the config leaves empty can be the answer to any memory request;
+* on a single-GPU-type site (``machine.node_exclusive``) the scheduler requests an untyped ``gpu:N``, so every judged request, a model name or an unknown token such as ``gh`` included, may land on any model of the inventory;
+* without ``machine.gpu_models`` only a request that names a model is judged;
+* ``none``, an empty request and, on a typed site, a token that is neither a model nor a memory are not judged.
 
 The result is a list of messages, never an error: the scheduler decides where the job lands, and the tool may run.
 """
@@ -69,7 +70,8 @@ def _is_model(token: str, inventory: Dict[str, str]) -> bool:
     return upper in KNOWN_GPU_MODELS or upper in {model.upper() for model in inventory}
 
 
-def resolve_request(request, inventory: Dict[str, str]) -> Tuple[List[str], List[str]]:
+def resolve_request(request, inventory: Dict[str, str],
+                    single_gpu_type: bool = False) -> Tuple[List[str], List[str]]:
     """(named, possible): the models a GPU request names, and the inventory models it may land on without naming one."""
     if request is None:
         return [], []
@@ -77,6 +79,9 @@ def resolve_request(request, inventory: Dict[str, str]) -> Tuple[List[str], List
     lower = text.lower()
     if lower in NOT_JUDGED:
         return [], []
+    # The scheduler drops the model on such a site, so every request lands on the inventory
+    if single_gpu_type:
+        return [], list(inventory)
     if lower in ANY_REQUESTS or lower.isdigit():
         return [], list(inventory)
     if lower == "high-memory":
@@ -94,7 +99,8 @@ def resolve_request(request, inventory: Dict[str, str]) -> Tuple[List[str], List
     return named, possible
 
 
-def gpu_warnings(tool_name: str, request, requirements: Optional[dict], inventory: Optional[Dict[str, str]] = None) -> List[str]:
+def gpu_warnings(tool_name: str, request, requirements: Optional[dict], inventory: Optional[Dict[str, str]] = None,
+                 single_gpu_type: bool = False) -> List[str]:
     """The messages for one tool's declaration against one batch's GPU request; empty when it can run there."""
     gpu = (requirements or {}).get("gpu") or {}
     incompatible = {name.upper() for name in gpu.get("incompatible", [])}
@@ -105,8 +111,8 @@ def gpu_warnings(tool_name: str, request, requirements: Optional[dict], inventor
     def unsupported(model: str) -> bool:
         return model.upper() in incompatible or (bool(compatible) and model.upper() not in compatible)
 
-    named, possible = resolve_request(request, inventory or {})
-    fix = gpu.get("use") or (sorted(gpu.get("compatible", []))[0] if compatible else None)
+    named, possible = resolve_request(request, inventory or {}, single_gpu_type)
+    fix = gpu.get("use") or (gpu["compatible"][0] if compatible else None)
     advice = f' Request Resources(gpu="{fix}") instead.' if fix else ""
 
     messages: List[str] = []

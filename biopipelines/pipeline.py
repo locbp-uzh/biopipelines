@@ -1507,10 +1507,11 @@ class Pipeline:
         """What the tools of one batch declare in RESOURCE_REQUIREMENTS that the batch's GPU request does not meet, once per tool."""
         request = self.batch_resources[batch_idx]["gpu"]
         inventory = ConfigManager().get_gpu_models()
+        single_gpu_type = ConfigManager().get_node_exclusive()
         messages: List[str] = []
         for name in dict.fromkeys(tool.TOOL_NAME for tool in tools):
             declared = getattr(next(tool for tool in tools if tool.TOOL_NAME == name), "RESOURCE_REQUIREMENTS", {})
-            messages.extend(requirement_warnings(name, request, declared, inventory))
+            messages.extend(requirement_warnings(name, request, declared, inventory, single_gpu_type))
         return messages
 
     def _generate_single_batch(self, email_line):
