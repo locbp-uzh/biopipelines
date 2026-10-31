@@ -7,8 +7,8 @@ For each such tool, require BOTH:
   1. The tool's `current` field in tool_changelog.yaml is also staged
      (i.e. its version was bumped in this commit), and the bumped value
      matches the TOOL_VERSION literal in the wrapper module.
-  2. CHANGELOG.md has a bullet mentioning the tool name in the
-     [unreleased] -> Tools subsection (and CHANGELOG.md is staged).
+  2. CHANGELOG.md has a bullet headed by the tool name (`- **Tool** a -> b.
+     ...`) in the [unreleased] -> Tools subsection (and CHANGELOG.md is staged).
 
 If a wrapper-mapped file is staged without those bumps, exit 1 with a
 message naming the tool and the file that triggered it.
@@ -97,6 +97,18 @@ def changelog_unreleased_tools_section(text: str) -> str:
     after = unreleased[t.end():]
     stop2 = re.search(r"^###\s+", after, re.MULTILINE)
     return after[: stop2.start()] if stop2 else after
+
+
+def section_names_tool(section: str, tool: str) -> bool:
+    """True when a bullet of the section is headed by the tool: `**Tool**` before the first sentence ends.
+
+    The body of a bullet names other tools in passing (a Gnina note that calls Panda.filter), so a substring of the whole section says nothing about who the bullet is for.
+    """
+    for bullet in re.finditer(r"^- (.*)$", section, re.MULTILINE):
+        header = re.split(r"\.\s", bullet.group(1), maxsplit=1)[0]
+        if f"**{tool}**" in header:
+            return True
+    return False
 
 
 def history_problems(tools: dict[str, dict]) -> list[str]:
@@ -215,12 +227,12 @@ def main() -> int:
         if not changelog_staged:
             errors.append(
                 f"  - {tool}: CHANGELOG.md is not staged. Add a bullet under "
-                f"[unreleased] -> Tools mentioning {tool}."
+                f"[unreleased] -> Tools headed `**{tool}**`."
             )
-        elif tool not in tools_section:
+        elif not section_names_tool(tools_section, tool):
             errors.append(
-                f"  - {tool}: no mention under [unreleased] -> Tools in "
-                f"CHANGELOG.md. Add a bullet describing the change."
+                f"  - {tool}: no bullet headed `**{tool}**` under [unreleased] -> Tools in "
+                f"CHANGELOG.md. Add one describing the change."
             )
 
     if errors:
@@ -230,7 +242,7 @@ def main() -> int:
             "To fix:\n"
             "  1. Bump TOOL_VERSION in the wrapper class body.\n"
             "  2. Update `current` in tool_changelog.yaml (and append to history).\n"
-            "  3. Add a bullet under [unreleased] -> Tools in CHANGELOG.md.\n"
+            "  3. Add a bullet headed `**Tool** a -> b.` under [unreleased] -> Tools in CHANGELOG.md.\n"
             "  4. git add the three files and re-commit.\n"
             "Bypass (only when truly unrelated, e.g. typo in a comment): "
             "git commit --no-verify\n"

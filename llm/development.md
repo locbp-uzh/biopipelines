@@ -149,7 +149,7 @@ minimum to understand and use the codebase.
 
 7. **Register the tool.** This is not optional polish: `tests/test_registry_consistency.py` runs in both CI pipelines and fails the build on any of these, and `versions/check_tool_edits.py` runs as a pre-commit hook and rejects the commit. Work `_TEMPLATE_CHECKLIST.md` §9, which lists all of them — the ones most often missed:
    - `versions/tool_changelog.yaml`: a new entry with `files:`, `current:` equal to the class's `TOOL_VERSION` literal, and a `history:` entry.
-   - `versions/CHANGELOG.md`: a bullet naming the tool under `[unreleased]` → `### Tools`. Note the path — there is no `CHANGELOG.md` at the repo root.
+   - `versions/CHANGELOG.md`: a bullet headed `**Tool** a → b.` under `[unreleased]` → `### Tools`. Note the path — there is no `CHANGELOG.md` at the repo root.
    - `docs/tool_index.md`: a table row **and** a bump of the `**Public-API count: N**` line; the row's version cell must equal the source `TOOL_VERSION`.
    - `docs/tool_reference.md`: an entry (the test greps for the tool name).
    - `docs/tool/<category>.md`: a real `##` or `###` heading whose text starts with the tool name. Prose mentioning the tool is not enough.
@@ -172,7 +172,7 @@ minimum to understand and use the codebase.
   pre-commit install
   pre-commit run --all-files   # on demand
   ```
-  The hook fires whenever a staged file is listed under some tool's `files:` in `versions/tool_changelog.yaml`, and then demands the bumped `current`, a matching `TOOL_VERSION` literal in the wrapper class, and a staged `versions/CHANGELOG.md` mentioning the tool under `[unreleased]` → `Tools`.
+  The hook fires whenever a staged file is listed under some tool's `files:` in `versions/tool_changelog.yaml`, and then demands the bumped `current`, a matching `TOOL_VERSION` literal in the wrapper class, and a staged `versions/CHANGELOG.md` with a bullet headed `**Tool**` under `[unreleased]` → `Tools`.
 
 ### Asking questions: format
 

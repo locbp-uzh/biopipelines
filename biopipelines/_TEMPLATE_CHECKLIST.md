@@ -67,7 +67,7 @@ Two gates enforce this section, and both are mechanical. `versions/check_tool_ed
 
 **Version bookkeeping** (the pre-commit hook enforces the last two; `test_source_version_matches_tool_changelog` in CI enforces the first, and would otherwise never fire for this tool at all):
 - [ ] Added the tool to `versions/tool_changelog.yaml` (`files:` = wrapper + pipe_script; `current:` = the `TOOL_VERSION` literal in the class body, character-for-character; a `history:` entry).
-- [ ] Added a bullet naming the tool under `[unreleased]` → `### Tools` in **`versions/CHANGELOG.md`**. Note both parts: the file is `versions/CHANGELOG.md` (there is no `CHANGELOG.md` at the repo root), and the section is `[unreleased]`, not a released `[x.y.z]` one. The hook parses for exactly that heading pair.
+- [ ] Added a bullet headed by the tool (`- **Tool** a → b. ...`) under `[unreleased]` → `### Tools` in **`versions/CHANGELOG.md`**; the hook looks for `**Tool**` in the header, so a mention in the body of another bullet does not count. Note both parts: the file is `versions/CHANGELOG.md` (there is no `CHANGELOG.md` at the repo root), and the section is `[unreleased]`, not a released `[x.y.z]` one. The hook parses for exactly that heading pair.
 - [ ] On any later edit to a file listed under the tool's `files:`: bump `TOOL_VERSION` in the class **and** `current` in the yaml together, and add another `[unreleased]` → `Tools` bullet.
 
 **Registry consistency** (enforced by `tests/test_registry_consistency.py`):
