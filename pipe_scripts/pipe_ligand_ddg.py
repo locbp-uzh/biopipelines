@@ -5,7 +5,7 @@
 
 """Execution half of LigandDdG: protein-ligand binding energy per structure, with the ligand parameterized on the fly.
 
-Follows the Chaperone blocks `ligand_ddg` (scoring="hard") and `ligand_ddg_soft` (scoring="soft"), RosettaCommons/chaperone, MIT license. The soft scheme packs with beta_nov16, scores with beta_nov16_soft and takes a trimmed mean over replicates; the hard scheme runs the minimization protocol below and reads the Ddg filter.
+Follows the Chaperone blocks `ligand_ddg` (scoring="hard") and `ligand_ddg_soft` (scoring="soft"), RosettaCommons/chaperone, MIT license. The soft scheme packs a clone of the structure per replicate with beta_nov16, scores it with beta_nov16_soft and takes a trimmed mean over the replicates; the hard scheme runs the minimization protocol below and reads the Ddg filter.
 
 Rosetta needs a .params file for every non-standard residue. It is generated from the ligand in the structure: bond orders come from the compounds stream's SMILES, hydrogens are added at the requested pH when the structure carries none, atoms are renamed to unique element-first names, and Rosetta's molfile_to_params.py (installed beside the environment) writes the params. A pre-made params file bypasses all of that.
 """
@@ -277,7 +277,10 @@ def check_ligand_names(residue, ligand_lines, params):
 
 
 def soft_ddg(pose, binder_chain, ligand_chain, replicates, seeds):
-    """Pack with beta_nov16, score with beta_nov16_soft, repeat with one seed per replicate; trimmed mean over the replicates."""
+    """Repack a clone of the pose with beta_nov16 and score it with beta_nov16_soft, once per replicate and seed, each replicate starting from the original pose.
+
+    The value is the trimmed mean over the replicates (the best and the worst dropped when there are at least three) and the spread is the population standard deviation (ddof = 0) of the values kept.
+    """
     import pyrosetta as pyr
 
     hard = pyr.create_score_function("beta_nov16")
@@ -285,8 +288,9 @@ def soft_ddg(pose, binder_chain, ligand_chain, replicates, seeds):
     values = []
     for replicate in range(replicates):
         seed_rosetta(seeds[replicate])
-        repack_around_chain(pose, ligand_chain, hard)
-        values.append(unbound_ddg(pose, soft, binder_chain))
+        repacked = pose.clone()
+        repack_around_chain(repacked, ligand_chain, hard)
+        values.append(unbound_ddg(repacked, soft, binder_chain))
     mean, std, used = trimmed_mean_std(values)
     return {"ddg_soft": mean, "ddg_soft_std": std, "n_replicates_used": used}
 

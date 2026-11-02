@@ -463,6 +463,16 @@ def test_the_soft_scheme_parameterizes_from_the_smiles_and_scores_with_the_chain
     assert os.path.isdir(tmp_path / "work" / "s1")
 
 
+class PackablePose:
+    """A stand-in for a PyRosetta pose (PyRosetta is not installed here): it counts the repacks applied to it, and a clone keeps the count."""
+
+    def __init__(self, repacks=0):
+        self.repacks = repacks
+
+    def clone(self):
+        return PackablePose(self.repacks)
+
+
 def test_each_soft_replicate_is_seeded_before_its_repack_and_the_hard_scheme_once(pipe, monkeypatch):
     """The replicate seeds are distinct and fixed, so a rerun repeats exactly; the repack without them drew from /dev/urandom."""
     from biopipelines.rosetta_scoring import replicate_seed
@@ -474,10 +484,46 @@ def test_each_soft_replicate_is_seeded_before_its_repack_and_the_hard_scheme_onc
     monkeypatch.setattr(pipe, "repack_around_chain", lambda *a: events.append(("repack",)))
     monkeypatch.setattr(pipe, "unbound_ddg", lambda *a: -20.0 - len(events))
     seeds = [replicate_seed(9, "s1", r) for r in range(3)]
-    pipe.soft_ddg(object(), "A", "B", 3, seeds)
+    pipe.soft_ddg(PackablePose(), "A", "B", 3, seeds)
     assert [e for e in events if e[0] == "seed"] == [("seed", s) for s in seeds]
     assert [e[0] for e in events] == ["seed", "repack", "seed", "repack", "seed", "repack"]
     assert len(set(seeds)) == 3
+
+
+def test_every_soft_replicate_repacks_a_clone_of_the_original_pose(pipe, monkeypatch):
+    """Repacking in place made replicate k start from what replicate k-1 left, a chain whose spread says nothing about sampling."""
+    started_from, scored = [], []
+    monkeypatch.setitem(sys.modules, "pyrosetta", types.SimpleNamespace(create_score_function=lambda name: name))
+    monkeypatch.setattr(pipe, "seed_rosetta", lambda seed: None)
+
+    def repack(pose, chain, scorefxn):
+        started_from.append(pose.repacks)
+        pose.repacks += 1
+
+    def unbound(pose, scorefxn, chain):
+        scored.append(pose.repacks)
+        return -10.0 - pose.repacks
+
+    monkeypatch.setattr(pipe, "repack_around_chain", repack)
+    monkeypatch.setattr(pipe, "unbound_ddg", unbound)
+    original = PackablePose()
+    result = pipe.soft_ddg(original, "A", "B", 4, [1, 2, 3, 4])
+
+    assert started_from == [0, 0, 0, 0]
+    assert scored == [1, 1, 1, 1]
+    assert original.repacks == 0
+    assert result == {"ddg_soft": -11.0, "ddg_soft_std": 0.0, "n_replicates_used": 2}
+
+
+def test_the_soft_value_is_the_trimmed_mean_with_a_population_deviation_of_the_replicates(pipe, monkeypatch):
+    """The best and the worst replicate are dropped from three on, and the spread is the population deviation (ddof = 0) of what is kept."""
+    values = iter([-9.0, -3.0, -1.0, 40.0])
+    monkeypatch.setitem(sys.modules, "pyrosetta", types.SimpleNamespace(create_score_function=lambda name: name))
+    monkeypatch.setattr(pipe, "seed_rosetta", lambda seed: None)
+    monkeypatch.setattr(pipe, "repack_around_chain", lambda *a: None)
+    monkeypatch.setattr(pipe, "unbound_ddg", lambda *a: next(values))
+    assert pipe.soft_ddg(PackablePose(), "A", "B", 4, [1, 2, 3, 4]) == {
+        "ddg_soft": -2.0, "ddg_soft_std": 1.0, "n_replicates_used": 2}
 
 
 def test_the_hard_scheme_seeds_rosetta_once_from_the_structure_id(pipe, tmp_path, recorders, monkeypatch):

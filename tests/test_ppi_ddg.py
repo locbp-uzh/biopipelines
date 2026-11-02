@@ -180,6 +180,49 @@ def test_the_pipe_seeds_rosetta_before_every_replicate(pipe, monkeypatch):
     assert relaxed == [1, 2, 3]
 
 
+def test_every_relax_replicate_starts_from_the_input_pose_not_from_the_previous_relax(pipe, monkeypatch):
+    """The relax runs on a clone, so the replicates are independent draws and ddg_std is a sampling spread."""
+    import types
+
+    class Pose:
+        def __init__(self, relaxes=0):
+            self.relaxes = relaxes
+
+        def clone(self):
+            return Pose(self.relaxes)
+
+    started_from = []
+
+    class FastRelax:
+        def __init__(self, fxn, rounds):
+            pass
+
+        def constrain_relax_to_start_coords(self, flag):
+            pass
+
+        def apply(self, pose):
+            started_from.append(pose.relaxes)
+            pose.relaxes += 1
+
+    class ScoreFunction:
+        def set_weight(self, *args):
+            pass
+
+        def __call__(self, pose):
+            return -300.0
+
+    rosetta = types.SimpleNamespace(
+        core=types.SimpleNamespace(scoring=types.SimpleNamespace(coordinate_constraint="cc")),
+        protocols=types.SimpleNamespace(relax=types.SimpleNamespace(FastRelax=FastRelax)))
+    monkeypatch.setitem(sys.modules, "pyrosetta", types.SimpleNamespace(
+        create_score_function=lambda name: ScoreFunction(), rosetta=rosetta))
+    monkeypatch.setattr(pipe, "unbound_ddg", lambda pose, scorefxn, chain: -10.0 - pose.relaxes)
+    original = Pose()
+    results = [pipe.relax_and_ddg(original, "A", 1, True, 1.0) for _ in range(3)]
+    assert started_from == [0, 0, 0] and original.relaxes == 0
+    assert [ddg for ddg, _ in results] == [-11.0, -11.0, -11.0]
+
+
 def test_a_failed_id_keeps_its_row_with_nan_and_is_recorded_as_a_failure(pipe):
     from biopipelines.rosetta_scoring import collect_rows
 

@@ -4,7 +4,7 @@
 
 """LigandDdG tool: protein-ligand binding energy with PyRosetta.
 
-Two scoring schemes, both ported from the Chaperone blocks of RosettaCommons: "hard" (`ligand_ddg`, a minimization protocol read through Rosetta's Ddg filter with no repacking) and "soft" (`ligand_ddg_soft`, interface repacked with the hard beta_nov16 score and scored with the soft-repulsive beta_nov16_soft, trimmed mean over replicates). Values are Rosetta energy units, not measured binding free energies, and the two schemes are not numerically comparable.
+Two scoring schemes, both ported from the Chaperone blocks of RosettaCommons: "hard" (`ligand_ddg`, a minimization protocol read through Rosetta's Ddg filter with no repacking) and "soft" (`ligand_ddg_soft`, interface repacked with the hard beta_nov16 score and scored with the soft-repulsive beta_nov16_soft, trimmed mean over independent replicates, each repacking its own clone of the input structure). Values are Rosetta energy units, not measured binding free energies, and the two schemes are not numerically comparable.
 
 Rosetta needs a .params file for a non-standard ligand. It is generated from the ligand in each structure with Rosetta's molfile_to_params.py (fetched at install time, since the PyRosetta wheel does not ship it), using the SMILES of the compounds stream for bond orders; a pre-made params file can be supplied instead.
 
@@ -51,13 +51,13 @@ class LigandDdG(BaseConfig):
         structures: PDB complexes (StandardizedOutput or DataStream); mmCIF is not read. Only `binder_chain` and the ligand are kept; other chains are dropped. Everything else on the binder chain stays as it is, hetero residues and waters included, except hydrogens, which are discarded for Rosetta to rebuild.
         ligand: compounds stream naming the ligand (`Ligand(smiles=..., codes="LIG")` or any compounds-producing tool); a bare string is shorthand for `Ligand(codes=...)`. The residue code is read from the stream's `code` column and must be the residue name of the ligand in the structures (at most 3 characters in a PDB). Unless `params_file` is given, the stream must carry a single SMILES, which supplies the bond orders and charges; a code-only ligand cannot be parameterized.
         scoring: "soft" (default) or "hard".
-            soft: the interface within 10 A of the ligand is repacked with beta_nov16, and the complex is scored with beta_nov16_soft against the separated state; repeated `replicates` times on the same pose, then the best and worst values are dropped when there are at least three and the rest averaged. Forgiving of the small clashes of predicted structures.
+            soft: the interface within 10 A of the ligand is repacked with beta_nov16, and the complex is scored with beta_nov16_soft against the separated state. This is repeated `replicates` times, each replicate repacking its own clone of the input structure with its own seed, so the replicates are independent and none starts from what another left behind. The value is a trimmed mean: from three values on, the lowest and the highest are dropped and the rest averaged. Forgiving of the small clashes of predicted structures.
             hard: backbone-constrained soft-then-hard minimization of the interface followed by Rosetta's Ddg filter (beta_nov16, no repacking) across the ligand's jump. A single run; `replicates` does not apply.
         binder_chain: the protein chain, translated away to give the unbound state (default "A").
         ligand_chain: the chain carrying the ligand (default "B"). Exactly one residue named like the ligand code must sit on it, and it must be a chain of its own, as predictors write it: the ligand of a crystal file usually shares the protein chain and has to be moved to its own first. A ligand with no atom within 6 A of the binder chain (the ligand of another copy in a crystal, say) is a failure for that structure, since no pair of atoms is in range and the ddG would read as exactly zero.
-        replicates: pack + score cycles for scoring="soft" (default 5). Not accepted with scoring="hard".
+        replicates: pack + score cycles for scoring="soft" (default 5), each from the input structure. Not accepted with scoring="hard". The number of repacks is `replicates`; each one first copies the pose, which adds no meaningful time.
         ph: pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for (default 7.4). A ligand that already has hydrogens is used as it is. Ignored with `params_file`.
-        seed: base random seed (default 42). Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With scoring="soft" the seed does not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` is 0): the repack of the interface reaches the same optimum every time, and `replicates=1` gives the same number as 5.
+        seed: base random seed (default 42). Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With scoring="soft" the seed did not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` was 0, and `replicates=1` gave the same number as 5). That was measured while the replicates were chained on one pose; each replicate now repacks the input structure, so whether the replicates still agree on those complexes has not been re-measured.
         params_file: path to a pre-made Rosetta .params file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and no params are generated.
 
     Outputs:
@@ -65,12 +65,12 @@ class LigandDdG(BaseConfig):
         Tables:
             ligand_ddg: scoring="hard": id | ddg_norepack
                         scoring="soft": id | ddg_soft | ddg_soft_std | n_replicates_used
-                        ddg_soft_std is the population standard deviation of the retained replicates and n_replicates_used their count. A structure that fails keeps its row with NaN values.
+                        ddg_soft is the trimmed mean of the replicate values, ddg_soft_std the population standard deviation (divisor n, not n - 1) of the retained ones and n_replicates_used their count, so with three replicates one value is retained and the standard deviation is 0 by construction. A structure that fails keeps its row with NaN values.
             missing: id | removed_by | kind | cause
     """
 
     TOOL_NAME = "LigandDdG"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "PyRosetta"
 
     @classmethod

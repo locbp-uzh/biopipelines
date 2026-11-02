@@ -2013,7 +2013,9 @@ good_poses = Panda(
 
 Protein-ligand binding energy with PyRosetta, with the ligand parameterized on the fly. ddG is the Rosetta score of the complex minus the score with the protein chain translated 10 000 Å away from the ligand; more negative means stronger predicted binding. Two scoring schemes, both ported from [Chaperone](https://github.com/RosettaCommons/chaperone) blocks, selected by `scoring`:
 
-- `"soft"` (`ligand_ddg_soft`, the default): the interface within 10 Å of the ligand is repacked with beta_nov16, then the complex is scored with the soft-repulsive beta_nov16_soft against the separated state. This is repeated `replicates` times on the same pose; with at least three values the best and worst are dropped and the rest averaged. The soft score forgives the small clashes of predicted structures that would otherwise dominate the hard one.
+- `"soft"` (`ligand_ddg_soft`, the default): the interface within 10 Å of the ligand is repacked with beta_nov16, then the complex is scored with the soft-repulsive beta_nov16_soft against the separated state. This is repeated `replicates` times, each replicate repacking its own clone of the input structure with its own seed, so the replicates are independent repacks of the same starting pose and none starts from what another left behind. The soft score forgives the small clashes of predicted structures that would otherwise dominate the hard one.
+
+  The value is a trimmed mean: from three replicates on, the lowest and the highest ddG are dropped and the rest averaged (with one or two replicates nothing is dropped). The spread is the population standard deviation (divisor n, not n - 1) of the values kept, so it is 0 whenever one value is kept, which is the case with three replicates. Both rules are fixed and not options.
 - `"hard"` (`ligand_ddg`): backbone-constrained soft-then-hard minimization of the interface, then Rosetta's Ddg filter (beta_nov16, `repack=0`) across the ligand's jump. A single run. The protocol is the active part of Chaperone's `ddg_protocol.xml`, run through PyRosetta's RosettaScripts parser.
 
 The numbers are Rosetta energy units, not kcal/mol and not measured affinities, and a hard value must not be compared with a soft one.
@@ -2034,10 +2036,10 @@ The numbers are Rosetta energy units, not kcal/mol and not measured affinities, 
 - `scoring`: str = "soft" — `"soft"` or `"hard"`, as above.
 - `binder_chain`: str = "A" — The protein chain, translated away to give the unbound state.
 - `ligand_chain`: str = "B" — The chain carrying the ligand. Exactly one residue named like the ligand code must sit on it, so a structure with several copies of the ligand on that chain fails. It has to be a chain of its own, as predictors write it: the ligand of a crystal file usually shares the protein chain and has to be moved to its own first. A ligand with no atom within 6 Å of `binder_chain` (the ligand of another copy in a crystal, say) is a failure for that structure, since no pair of atoms is in range and the ddG would read as exactly zero.
-- `replicates`: int = None — Pack + score cycles for `scoring="soft"`, default 5. Refused with `scoring="hard"`, which runs once.
+- `replicates`: int = None — Pack + score cycles for `scoring="soft"`, default 5, each repacking its own clone of the input structure. Refused with `scoring="hard"`, which runs once. The number of repacks is `replicates`, as it always was; the only addition is one copy of the pose per replicate, which costs no meaningful time (not timed on the cluster).
 - `ph`: float = 7.4 — pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for. Ignored with `params_file` and for a ligand that already has hydrogens.
 - `params_file`: str = None — Path to a pre-made Rosetta `.params` file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and nothing is generated.
-- `seed`: int = 42 — Base random seed. Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With `scoring="soft"` the seed does not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` is 0): the repack of the interface reaches the same optimum every time, and `replicates=1` gives the same number as 5.
+- `seed`: int = 42 — Base random seed. Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With `scoring="soft"` the seed did not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` was 0, and `replicates=1` gave the same number as 5). That was measured while the replicates were chained on one pose; each replicate now repacks the input structure, so whether the replicates still agree on those complexes has not been re-measured. `replicates=1` is unchanged, since its single repack always started from the input structure.
 
 **Tables**:
 - `ligand_ddg`: the columns follow `scoring`.
@@ -2050,7 +2052,7 @@ The numbers are Rosetta energy units, not kcal/mol and not measured affinities, 
   | id | ddg_soft | ddg_soft_std | n_replicates_used |
   |----|----------|--------------|-------------------|
 
-  `scoring="soft"`: the trimmed mean of the replicate ddG values, the population standard deviation of the retained ones, and how many were retained (`replicates`, minus two when there are at least three). One row per input structure; a structure that fails keeps its row with NaN values, and the reason is in `missing`. No threshold is applied; filter downstream with `Panda.filter`.
+  `scoring="soft"`: the trimmed mean of the replicate ddG values, the population standard deviation of the retained ones, and how many were retained (`replicates`, minus two when there are at least three; see the rules above). One row per input structure; a structure that fails keeps its row with NaN values, and the reason is in `missing`. No threshold is applied; filter downstream with `Panda.filter`.
 
 - `missing`: | id | removed_by | kind | cause |
 

@@ -2861,8 +2861,12 @@ LigandDdG:
   - biopipelines/ligand_ddg.py
   - pipe_scripts/pipe_ligand_ddg.py
   - biopipelines/rosetta_scoring.py
-  current: "1.2"
+  current: "1.3"
   history:
+  - version: '1.3'
+    date: '2026-11-02'
+    note: >-
+      The soft replicates are independent now. `repack_around_chain` packs in place, so replicate k started from the pose replicate k-1 left behind: a chain of repacks, not draws from one starting point, and `ddg_soft_std` a spread over that chain. Each replicate repacks its own clone of the input structure, with its own seed, so `ddg_soft_std` is the spread the column name implies. The number of repacks is unchanged, and `replicates=1` gives the same value as before, since its single repack always started from the input. The trimmed mean (from three replicates on the lowest and the highest are dropped) and the population standard deviation of the kept values (divisor n; 0 whenever one value is kept, as with three replicates) are stated in the docstring and in the documentation. The ten-seed observation is kept with the note that it was measured on chained replicates and not repeated since; PPIDdG already relaxes a clone per replicate and is unchanged.
   - version: '1.2'
     date: '2026-10-28'
     note: >-
