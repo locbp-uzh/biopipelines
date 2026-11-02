@@ -153,6 +153,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 - `pae` is a registered stream name in `KNOWN_STREAM_NAMES`: the per-id predicted aligned error matrix a structure predictor can emit for a downstream scorer to read.
 
+- Both CI pipelines run `tests/tool_parameters` as a second step after the main suite. The 215 tests need no GPU and no network (about 40 s), and the comment that kept them out ("it needs a GPU") was wrong; a parameter that stopped reaching the emitted script now fails the push instead of waiting for someone to run the suite by hand. The marker text in `pyproject.toml`, `llm/development.md`, `docs/developer_manual.md` and `_TEMPLATE_CHECKLIST.md` say so.
+
 ### Tools
 
 - **Aggrescan3D** 2.1 → 2.2. An id an upstream step filtered away is excused instead of flagged. The wrapper owned no `missing` table and declared every id it received, so a gated input left legitimate absences counted as lost outputs: on a 2,799-design campaign 118 structures the geometric gate had rejected were reported as failures and the step wrote a `_FAILED` marker, stranding every job behind it although all 2,682 real outputs were on disk. It now propagates its input's manifest into its own `tables/missing.csv`, which required keeping the input source whole — only the structures stream was retained before.

@@ -1649,7 +1649,7 @@ python -m pytest tests/ -v -m "not tool_parameters"
 
 That is the selection both CI pipelines run, on Python 3.10–3.13 with the same install (the `mcp` extra is what lets `tests/test_mcp_server.py` collect). The `-m` on the command line replaces the default of `pyproject.toml`, `addopts = "-ra -m 'not tool_parameters and not network'"`, so the tests marked `network` (live calls to RCSB and GitHub) run as well. A bare `pytest tests/` therefore skips them and is a weaker gate than CI.
 
-The per-tool suites under `tests/tool_parameters` are opt-in and neither CI pipeline runs them: `python -m pytest tests/tool_parameters -m tool_parameters -v`. They need no GPU and make no network call, and a green `pytest tests/` says nothing about them.
+The per-tool suites under `tests/tool_parameters` are opt-in locally and both CI pipelines run them as a second step: `python -m pytest tests/tool_parameters -m tool_parameters -v`. They need no GPU and make no network call (about 40 s for all of them), and a green `pytest tests/` says nothing about them.
 
 `tests/conftest.py` writes a per-run report to `tests/_results/test_results.csv` (gitignored; the `.xlsx` beside it only when `openpyxl` is installed) with one row per test — `input`, `expected`, `actual`, `matched`, `duration_s`, and any error details — so the suite doubles as a legible artifact of what was tested, not just a pass/fail count.
 

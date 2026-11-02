@@ -103,7 +103,7 @@ See the annotated companion `_pipe_template.py` for the full pattern.
 - [ ] `python -m pytest tests/test_registry_consistency.py -q` is green — the fast check for §9 while wiring the tool up.
 - [ ] Minimal pipelines exploring different inputs and parameters produce the expected outputs.
 - [ ] Installation works on the intended platform.
-- [ ] *(Optional, outside both gates.)* If the tool gets a per-tool parameter suite, it is excluded from the default run by `addopts = "-ra -m 'not tool_parameters and not network'"` in `pyproject.toml`, and neither CI pipeline runs it; run it explicitly with `pytest tests/tool_parameters -m tool_parameters -v`. The suites in the repo need no GPU and make no network call, so a green `pytest tests/` says nothing about yours.
+- [ ] *(Outside the local gate, inside CI.)* If the tool gets a per-tool parameter suite, it is excluded from the default run by `addopts = "-ra -m 'not tool_parameters and not network'"` in `pyproject.toml`, and both CI pipelines run it as a second step; run it with `pytest tests/tool_parameters -m tool_parameters -v` before pushing. The suites in the repo need no GPU and make no network call (about 40 s for all of them), so a green `pytest tests/` says nothing about yours.
 
 ## 12. Documentation
 The registry entries themselves are §9 — this section is the prose quality bar for them.

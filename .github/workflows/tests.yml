@@ -30,6 +30,9 @@ jobs:
           python -m pip install -e ".[test,mcp]"
 
       - name: Run pytest
-        # -m overrides the local addopts deselect: CI has network, so it runs those;
-        # tool_parameters stays out because it needs a GPU.
+        # -m overrides the local addopts deselect, so the network tests run here.
         run: pytest tests/ -v -m "not tool_parameters"
+
+      - name: Run the per-tool parameter suites
+        # They need neither GPU nor network and are opt-in locally, so CI runs them.
+        run: pytest tests/tool_parameters -v -m tool_parameters

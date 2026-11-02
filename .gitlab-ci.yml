@@ -18,9 +18,10 @@ stages:
     # `[mcp]` too: without it tests/test_mcp_server.py skips and bp-mcp ships untested.
     - python -m pip install -e ".[test,mcp]"
   script:
-    # -m overrides the local addopts deselect: CI has network, so it runs those;
-    # tool_parameters stays out because it needs a GPU.
+    # -m overrides the local addopts deselect, so the network tests run here.
     - pytest tests/ -v -m "not tool_parameters"
+    # The per-tool parameter suites need neither GPU nor network and are opt-in locally, so CI runs them.
+    - pytest tests/tool_parameters -v -m tool_parameters
   rules:
     # Run on every push to any branch, and on merge requests.
     - if: '$CI_PIPELINE_SOURCE == "push"'
