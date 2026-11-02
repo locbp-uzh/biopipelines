@@ -71,6 +71,17 @@ CONFORMER_RANK_METRICS = {
 CNN_RANK_METRICS = ("best_cnn_score", "mean_cnn_affinity")
 
 
+# The columns of docking_summary; Vina has no CNN, so its table lacks the three CNN aggregates.
+SUMMARY_LEAD_COLUMNS = ["id", "structures.id", "compounds.id", "conformer_id", "best_vina", "mean_vina", "std_vina"]
+SUMMARY_CNN_COLUMNS = ["best_cnn_score", "mean_cnn_affinity", "std_cnn_affinity"]
+SUMMARY_TRAIL_COLUMNS = ["pose_consistency", "conformer_energy", "pseudo_binding_energy", "best_pose_file"]
+
+
+def docking_summary_columns(is_vina):
+    """The columns of docking_summary in order, for the pipe script that writes the table."""
+    return SUMMARY_LEAD_COLUMNS + ([] if is_vina else SUMMARY_CNN_COLUMNS) + SUMMARY_TRAIL_COLUMNS
+
+
 def refuse_shared_pair_ids(protein_ids, ligand_ids):
     """Refuse two (protein, ligand) pairs whose ids join to the same pair id.
 
@@ -110,7 +121,8 @@ class Gnina(BaseConfig):
         - docking_summary: per-conformer aggregated statistics including
           mean scores across runs, pose consistency (fraction of runs that
           converge to the same pose), and pseudo_binding_energy (best Vina +
-          conformer strain energy).
+          conformer strain energy). A (protein, ligand) pair that failed has one NaN
+          row under its pair id, with no conformer_id and every score empty.
         - structures: one combined protein+ligand PDB per (protein, ligand) pair, id ``<protein>+<ligand>``
           (the pair's best conformer; ``top_only=False`` keeps every conformer instead).
 
@@ -123,7 +135,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.10"
+    TOOL_VERSION = "2.11"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -382,7 +394,7 @@ fi
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | best_cnn_score | mean_cnn_affinity | std_cnn_affinity | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
                     missing: id | removed_by | kind | cause
                 Ids: docking_summary rows are ``<protein>+<ligand>_conf<k>``, docking_results rows ``<protein>+<ligand>_conf<k>_r<run>_p<pose>``.
-                Both tables are keyed on conformers and poses, so a pair that gave no pose has no row in either; its record is the ``failure`` row of ``missing``.
+                A pair that failed (a receptor that could not be prepared, a ligand with no conformer, no accepted pose, or a ``rank_conformers_by`` metric that is absent) is a ``failure`` row of ``missing`` and has one NaN row in ``docking_summary``: its id is the pair id ``<protein>+<ligand>``, ``structures.id`` and ``compounds.id`` name the parents, ``conformer_id`` and every score are empty. ``docking_results`` is keyed on poses, so it has no row for such a pair.
             mode="score"/"minimize":
                 Streams: structures (.pdb) — the scored complex ("score" re-emits
                     the input pose unchanged; "minimize" emits the refined pose).
@@ -854,8 +866,7 @@ python {self.helper_py} {self.config_json}
         # Vina has no CNN, so those columns are absent rather than blank.
         is_vina = self.backend == "vina"
         cnn_pose_cols = [] if is_vina else ["cnn_score", "cnn_affinity"]
-        cnn_summary_cols = [] if is_vina else [
-            "best_cnn_score", "mean_cnn_affinity", "std_cnn_affinity"]
+        cnn_summary_cols = [] if is_vina else SUMMARY_CNN_COLUMNS
         cnn_score_cols = [] if is_vina else [
             "cnn_score", "cnn_affinity", "cnn_vs", "cnn_affinity_variance"]
         engine = "Vina" if is_vina else "GNINA"
@@ -872,11 +883,8 @@ python {self.helper_py} {self.config_json}
                 "docking_summary": TableInfo(
                     name="docking_summary",
                     path=self.docking_summary_csv,
-                    columns=["id", "structures.id", "compounds.id", "conformer_id",
-                             "best_vina", "mean_vina", "std_vina"] + cnn_summary_cols
-                            + ["pose_consistency", "conformer_energy",
-                               "pseudo_binding_energy", "best_pose_file"],
-                    description="Per-conformer aggregated docking statistics across runs"
+                    columns=SUMMARY_LEAD_COLUMNS + cnn_summary_cols + SUMMARY_TRAIL_COLUMNS,
+                    description="Per-conformer aggregated docking statistics across runs, and one NaN row per failed pair"
                 ),
             }
         else:
@@ -980,7 +988,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.10"
+    TOOL_VERSION = "2.11"
     ENV_NAME = "vina"
     BACKEND = "vina"
 
@@ -1064,7 +1072,7 @@ fi
                     docking_summary: id | structures.id | compounds.id | conformer_id | best_vina | mean_vina | std_vina | pose_consistency | conformer_energy | pseudo_binding_energy | best_pose_file
                     missing: id | removed_by | kind | cause
                 Ids: docking_summary rows are ``<protein>+<ligand>_conf<k>``, docking_results rows ``<protein>+<ligand>_conf<k>_r<run>_p<pose>``.
-                Both tables are keyed on conformers and poses, so a pair that gave no pose has no row in either; its record is the ``failure`` row of ``missing``.
+                A pair that failed is a ``failure`` row of ``missing`` and has one NaN row in ``docking_summary``, as in Gnina: its id is the pair id ``<protein>+<ligand>``, ``conformer_id`` and every score are empty. ``docking_results`` is keyed on poses, so it has no row for such a pair.
             mode="score"/"minimize":
                 Streams: structures (.pdb) — the scored complex.
                 Tables:

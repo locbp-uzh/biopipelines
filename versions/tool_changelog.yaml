@@ -993,8 +993,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.10"
+  current: "2.11"
   history:
+  - version: '2.11'
+    date: '2026-11-02'
+    note: >-
+      `docking_summary` keeps a row for every pair that entered. A (protein, ligand) pair that failed (a protein or ligand that could not be prepared, no accepted pose, a binary that failed or timed out, or a `rank_conformers_by` metric a posed conformer lacks) is one NaN row, besides its `failure` row of `missing`: its id is the pair id, `structures.id` and `compounds.id` name the parents, `conformer_id` and every score are empty. The table dropped such a pair, so a `Panda` merge of `docking_summary` against the table that fed it silently came back shorter. The NaN row is appended after the conformers are ranked, so it never stands for a pair, and a pair that posed some conformers keeps their rows beside it. The table is also written with its header when no pose was accepted, where it was an empty file, or absent when no ligand gave a conformer, that no reader could parse. No id changes.
   - version: '2.10'
     date: '2026-10-31'
     note: >-
@@ -1077,8 +1081,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.10"
+  current: "2.11"
   history:
+  - version: '2.11'
+    date: '2026-11-02'
+    note: >-
+      Same change as Gnina, whose wrapper and pipe script it shares: `docking_summary` keeps a row for every pair that entered, and a pair that failed is one NaN row under its pair id, with no `conformer_id` and no score, besides its `failure` row of `missing`. The table dropped such a pair, so a `Panda` merge against the table that fed it silently came back shorter. The table is also written with its header when no pose was accepted. No id changes.
   - version: '2.10'
     date: '2026-10-31'
     note: >-

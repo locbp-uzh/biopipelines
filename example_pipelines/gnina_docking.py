@@ -102,5 +102,5 @@ with Pipeline(project="Examples",
     )
     # Results:
     #   docking_conformers.tables.docking_results   — all poses with Vina & CNN scores
-    #   docking_conformers.tables.docking_summary   — per-conformer aggregated stats across runs
+    #   docking_conformers.tables.docking_summary   — per-conformer aggregated stats across runs, one NaN row per failed pair
     #   docking_conformers.streams.structures       — one file per protein+ligand pair (9RTM+TMR): the best conformer's best pose

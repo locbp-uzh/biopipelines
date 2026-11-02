@@ -43,7 +43,7 @@ from biopipelines.pdb_parser import field_atom_name, field_res_name
 from biopipelines.ligand_utils import ligand_chemistry, write_ligand_sdf
 from biopipelines.id_map_utils import get_mapped_ids
 from biopipelines.combinatorics import generate_multiplied_ids, predict_single_output_id
-from biopipelines.gnina import CONFORMER_PREFIX, CONFORMER_RANK_METRICS, refuse_shared_pair_ids
+from biopipelines.gnina import CONFORMER_PREFIX, CONFORMER_RANK_METRICS, docking_summary_columns, refuse_shared_pair_ids
 
 import pipe_vina_backend as vina_backend
 
@@ -1215,7 +1215,7 @@ def aggregate_results(all_poses, conformers, consistency, config, prepared_prote
                                  "structures.id": row["structures.id"],
                                  "compounds.id": row["compounds.id"]})
 
-    summary_df = pd.DataFrame(summary_rows)
+    summary_df = pd.DataFrame(summary_rows, columns=docking_summary_columns(is_vina))
     if not summary_df.empty and "mean_vina" in summary_df.columns:
         summary_df["_sort_key"] = pd.to_numeric(summary_df["mean_vina"], errors="coerce")
         summary_df = (summary_df.sort_values("_sort_key")
@@ -1254,20 +1254,39 @@ def unprepared_causes(protein_ids, ligand_ids, prepared_proteins, conformers, fa
     return dict(causes)
 
 
+def unwritten_pairs(protein_ids, ligand_ids, written_pairs):
+    """(protein id, ligand id, pair id) of every pair that has no entry in the structures stream."""
+    pairs = [(protein_id, ligand_id, _pair_id(protein_id, ligand_id))
+             for protein_id in protein_ids for ligand_id in ligand_ids]
+    return [pair for pair in pairs if pair[2] not in written_pairs]
+
+
 def local_failures(protein_ids, ligand_ids, written_pairs, causes, step_id):
     """One `failure` row, under the pair id, for every (protein, ligand) pair that has no entry in the structures stream.
 
     The cause is what the step recorded for the pair, else that no run of it gave an accepted pose.
     """
     rows = []
-    for protein_id in protein_ids:
-        for ligand_id in ligand_ids:
-            pair_id = _pair_id(protein_id, ligand_id)
-            if pair_id in written_pairs:
-                continue
-            cause = "; ".join(causes.get(pair_id, [])) or "no accepted pose"
-            rows.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": cause[:200]})
+    for _protein_id, _ligand_id, pair_id in unwritten_pairs(protein_ids, ligand_ids, written_pairs):
+        cause = "; ".join(causes.get(pair_id, [])) or "no accepted pose"
+        rows.append({"id": pair_id, "removed_by": step_id, "kind": "failure", "cause": cause[:200]})
     return rows
+
+
+def add_failed_pairs_to_summary(summary_csv, pairs, is_vina):
+    """Append one NaN row per failed pair to docking_summary: its pair id, its parents, no conformer_id and no score.
+
+    The table is read back as text so the rows already in it are written exactly as they were.
+    """
+    if not pairs:
+        return
+    rows = pd.DataFrame([{"id": pair_id, "structures.id": protein_id, "compounds.id": ligand_id}
+                         for protein_id, ligand_id, pair_id in pairs], columns=docking_summary_columns(is_vina))
+    written = pd.read_csv(summary_csv, dtype=str, keep_default_na=False) if os.path.exists(summary_csv) else rows[:0]
+    table = pd.concat([written, rows], ignore_index=True) if not written.empty else rows
+    os.makedirs(os.path.dirname(summary_csv), exist_ok=True)
+    table.to_csv(summary_csv, index=False)
+    print(f"Added {len(rows)} NaN rows of failed pairs to {summary_csv}")
 
 
 def write_local_missing(path, rows):
@@ -1724,6 +1743,8 @@ def main():
     step_id = step_id_from_table_path(config["local_missing_csv"])
     write_local_missing(config["local_missing_csv"],
                         local_failures(protein_ids, ligand_ids, written_pairs, causes, step_id))
+    add_failed_pairs_to_summary(config["docking_summary_csv"],
+                                unwritten_pairs(protein_ids, ligand_ids, written_pairs), config["backend"] == "vina")
 
     if not written_pairs:
         print(f"ERROR: no (protein, ligand) pair gave a structure; see {config['local_missing_csv']}",
