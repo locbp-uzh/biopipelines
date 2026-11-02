@@ -524,7 +524,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
   A pair that failed (a receptor that could not be prepared, a ligand with no conformer, a binary that failed or timed out, no accepted pose, or a `rank_conformers_by` metric that is absent) is a `failure` row of `missing`, under the pair id `<protein>+<ligand>`, and has **one NaN row** in `docking_summary`: `id` is that pair id (no `_conf<k>` suffix), `structures.id` and `compounds.id` name the two parents, `conformer_id` is empty and so is every other column (`best_vina`, `mean_vina`, `std_vina`, the CNN aggregates, `pose_consistency`, `conformer_energy`, `pseudo_binding_energy`, `best_pose_file`). Every pair that entered is therefore a row, and a `Panda` merge on `structures.id` and `compounds.id` does not shrink; pick the pairs that docked with `Panda.filter("best_vina < 0")` or sort on a score, both of which put a NaN row last and never select it. The NaN row is added after the conformers are ranked, so it never stands for a pair, and the table is written, header included, even when no pair docked (the step then exits non-zero). `docking_results` is keyed on poses, so a pair that gave no accepted pose has no row there. A conformer that did pose but whose pair could not be decided keeps its own `docking_summary` row, beside the pair's NaN row. With `top_only=False` a pair that has at least one posed conformer is not a failed pair and gets no NaN row; a conformer of it that gave no pose has no row.
 
   - `mean_vina` / `std_vina`: mean and std of the best Vina score per run (not all poses — just the top pose from each independent run). Robust metric for ranking.
-  - `mean_cnn_affinity` / `std_cnn_affinity`: same logic for CNN affinity.
+  - `mean_cnn_affinity` / `std_cnn_affinity`: same logic for CNN affinity, which is in pK units and **higher is stronger**, the opposite of the Vina columns (the GNINA 1.0 paper, Molecules 2021: a weak binder has a low predicted affinity).
   - `pose_consistency`: fraction of runs whose best pose clusters together by RMSD. Measures reproducibility (1.0 = all runs converge).
   - `conformer_energy`: MMFF94 relative strain energy (only with `generate_conformers=True`).
   - `pseudo_binding_energy`: `best_vina + conformer_energy`. Penalizes Vina score by conformer strain. Only populated when conformer generation is enabled.
@@ -538,7 +538,7 @@ In `"score"`/`"minimize"` mode the ligand is extracted from each complex's HETAT
 
   - `vina_affinity`: GNINA's `minimizedAffinity` (kcal/mol; lower = stronger).
   - `cnn_score`: CNN pose score (0-1).
-  - `cnn_affinity` / `cnn_affinity_variance`: CNN predicted affinity and its variance across the ensemble.
+  - `cnn_affinity` / `cnn_affinity_variance`: CNN predicted affinity (pK units, **higher is stronger**, the opposite of `vina_affinity`) and its variance across the ensemble.
   - `cnn_vs`: CNN virtual-screening score (`cnn_score × cnn_affinity`).
 
 **Tables** (all modes):

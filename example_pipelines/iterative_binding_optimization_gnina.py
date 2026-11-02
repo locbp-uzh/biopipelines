@@ -52,7 +52,7 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization_Gnina"):
         best_structure = Panda(tables=[current_best_structure.tables.result,
                                     docked.tables.docking_summary],
                             operations=[Panda.concat(),
-                                        Panda.sort("mean_cnn_affinity", ascending=True),
+                                        Panda.sort("mean_cnn_affinity", ascending=False),
                                         Panda.head(1)],
                             pool=[current_best_structure,
                                     docked])
@@ -60,7 +60,7 @@ with Pipeline(project="NocT", job=f"IterativeBindingOptimization_Gnina"):
         best_sequence = Panda(tables=[current_best_structure.tables.result,
                                       docked.tables.docking_summary],
                               operations=[Panda.concat(),
-                                          Panda.sort("mean_cnn_affinity", ascending=True),
+                                          Panda.sort("mean_cnn_affinity", ascending=False),
                                           Panda.head(1)],
                               pool=[current_best_sequence,
                                     docked_sequences])
