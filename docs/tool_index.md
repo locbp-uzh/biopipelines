@@ -46,7 +46,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 34 | Aggrescan3D | Analysis                       | 2.2 | `biopipelines/aggrescan3d.py` |
 | 35 | Angle                     | Analysis                       | 1.0 | `biopipelines/angle.py` |
 | 36 | APBS | Analysis                       | 2.0 | `biopipelines/apbs.py` |
-| 37 | BindingData               | Analysis                       | 1.2 | `biopipelines/binding_data.py` |
+| 37 | BindingData               | Analysis                       | 1.3 | `biopipelines/binding_data.py` |
 | 38 | BioEmu | Analysis                       | 2.0 | `biopipelines/bioemu.py` |
 | 39 | BioEmu2 | Analysis                       | 1.10 | `biopipelines/bioemu2.py` |
 | 40 | CABSflex | Analysis                       | 2.1 | `biopipelines/cabsflex.py` |

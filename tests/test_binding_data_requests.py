@@ -217,3 +217,24 @@ def test_genuinely_empty_bindingdb_answer_is_still_no_rows(mod, monkeypatch):
 
     config = {"match": "exact", "similarity": 1.0, "affinity_types": ["Ki"]}
     assert mod.bindingdb_rows("cmp_1", "CCO", config) == []
+
+
+def test_a_compound_with_no_smiles_is_a_failure_not_an_excused_filter(mod, monkeypatch, tmp_path):
+    """The compound was asked for and nothing dropped it on purpose, so it is flagged like REINVENT4's no-SMILES input."""
+    import json as _json
+    import pandas as pd
+
+    config = {"sources": ["chembl"], "max_affinity": None, "organism": "",
+              "compounds_json": "unused", "affinities_csv": str(tmp_path / "t" / "affinities.csv"),
+              "targets_csv": str(tmp_path / "t" / "targets.csv"), "local_missing_csv": str(tmp_path / "t" / "local_missing.csv")}
+    config_path = tmp_path / "config.json"
+    config_path.write_text(_json.dumps(config))
+    monkeypatch.setattr(mod, "load_datastream", lambda path: None)
+    monkeypatch.setattr(mod, "iterate_values", lambda ds, columns: [("c1", {"smiles": "CCO"}), ("c2", {"smiles": ""})])
+    monkeypatch.setattr(mod, "chembl_rows", lambda compound_id, smiles, cfg: [])
+    monkeypatch.setattr(mod, "chembl_release", lambda: "")
+    monkeypatch.setattr(mod.sys, "argv", ["pipe_binding_data.py", "--config", str(config_path)])
+    mod.main()
+    missing = pd.read_csv(config["local_missing_csv"]).set_index("id")
+    assert missing.loc["c2", "kind"] == "failure" and missing.loc["c2", "cause"] == "no smiles"
+    assert missing.loc["c1", "kind"] == "filter"

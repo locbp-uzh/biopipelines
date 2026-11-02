@@ -300,7 +300,7 @@ Every input id yields at least one row: a compound queried successfully with no 
 
   One row per distinct target and source. Grouping keys on `target_id` where the source supplies one — distinct ChEMBL targets share a `pref_name` (human and sheep COX-1 both read "Prostaglandin G/H synthase 1"), so keying on the name would merge them. BindingDB returns no target id, leaving the name as its only key.
 
-- `missing`: `id | removed_by | kind | cause` — compounds with no SMILES or no matching record, plus upstream-filtered ids.
+- `missing`: `id | removed_by | kind | cause` — compounds with no matching record (`kind="filter"`, the query's own outcome), compounds with no SMILES or that every source failed to answer for (`kind="failure"`, flagged), plus upstream-filtered ids.
 
 **Example**:
 ```python

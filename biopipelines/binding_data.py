@@ -75,7 +75,7 @@ class BindingData(BaseConfig):
     """
 
     TOOL_NAME = "BindingData"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -139,6 +139,7 @@ echo "=== BindingData ready ==="
                 targets: target_id | source | target_name | organism | n_compounds |
                     n_records | best_affinity_nm
                 missing: id | removed_by | kind | cause
+                         (a compound with no affinity record is kind="filter"; a compound with no SMILES, or that every source failed to answer for, is kind="failure")
         """
         # Resolve compounds input to DataStream
         if isinstance(compounds, StandardizedOutput):

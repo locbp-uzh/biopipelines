@@ -329,7 +329,7 @@ def main():
         if smiles is None or (isinstance(smiles, float) and pd.isna(smiles)) or not str(smiles).strip():
             print(f"WARNING: {compound_id} has no SMILES, skipping", file=sys.stderr)
             missing_rows.append({"id": compound_id, "removed_by": TOOL_NAME,
-                                 "kind": "filter", "cause": "no smiles"})
+                                 "kind": "failure", "cause": "no smiles"})
             continue
 
         smiles = str(smiles).strip()
