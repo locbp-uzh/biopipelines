@@ -809,6 +809,17 @@ def test_main_reports_a_target_the_cli_skipped_without_guessing(tmp_path, monkey
     assert list(read("tables/routes.csv")["compounds.id"]) == ["c1", "c3"]
 
 
+def test_main_a_target_with_no_smiles_is_a_failure_not_an_excused_filter(tmp_path, monkeypatch):
+    """The compound was asked for and nothing dropped it on purpose, so it is flagged like REINVENT4's no-SMILES input."""
+    pytest.importorskip("rdkit")
+    step, read = _run_helper(tmp_path, monkeypatch, ["CCO", "", "CCN"],
+                             lambda sent: [_good("CCO"), _good("CCN")])
+    missing = read("_execution/local_missing.csv")
+    assert list(missing["id"]) == ["c2"] and list(missing["kind"]) == ["failure"]
+    assert missing.loc[0, "cause"] == "no smiles in compounds stream"
+    assert list(read("tables/routes.csv")["compounds.id"]) == ["c1", "c3"]
+
+
 def test_main_default_run_keeps_the_2_1_tables(tmp_path, monkeypatch):
     pytest.importorskip("rdkit")
     step, read = _run_helper(tmp_path, monkeypatch, ["CCO", "CCN"],

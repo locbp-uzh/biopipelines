@@ -85,7 +85,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 73 | USalign                   | Analysis                       | 1.4 | `biopipelines/usalign.py` |
 | 74 | BFactor                   | Analysis                       | 1.2 | `biopipelines/bfactor.py` |
 | 75 | ESM2                      | Analysis                       | 1.1 | `biopipelines/esm2.py` |
-| 76 | AiZynthFinder | Cheminformatics                | 2.5 | `biopipelines/aizynthfinder.py` |
+| 76 | AiZynthFinder | Cheminformatics                | 2.6 | `biopipelines/aizynthfinder.py` |
 | 77 | OpenBabel                 | Cheminformatics                | 1.1 | `biopipelines/openbabel.py` |
 | 78 | RDKit                     | Cheminformatics                | 1.2 | `biopipelines/rdkit_descriptors.py` |
 | 79 | REINVENT4                 | Cheminformatics                | 1.2 | `biopipelines/reinvent4.py` |

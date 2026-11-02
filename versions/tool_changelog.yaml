@@ -39,8 +39,12 @@ AiZynthFinder:
   files:
   - biopipelines/aizynthfinder.py
   - pipe_scripts/pipe_aizynthfinder.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-11-02'
+    note: >-
+      A target with no SMILES is a `failure` row of `missing`, not a `filter` row: the compound was asked for and nothing was deliberately dropped, and `filter` is the kind that is excused and so counted as intended, as REINVENT4 1.2 already records it. A target for which no route was found stays `filter`, since that is the search's own outcome.
   - version: '2.5'
     date: '2026-10-29'
     note: >-

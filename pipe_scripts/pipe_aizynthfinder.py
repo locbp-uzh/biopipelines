@@ -388,7 +388,7 @@ def main():
 
     _validate_smarts(cfg.get("frozen_substructures"))
 
-    # No SMILES is a deliberate drop; one RDKit cannot sanitize is a failure that keeps an empty targets row.
+    # No SMILES is a failure (nothing dropped it on purpose); one RDKit cannot sanitize is a failure that keeps an empty targets row.
     targets, local_missing_rows, target_rows, stream_order = [], [], [], {}
     for comp_id, values in iterate_values(compounds_ds, columns=["smiles"]):
         stream_order[comp_id] = len(stream_order)
@@ -396,7 +396,7 @@ def main():
         if smiles is None or (isinstance(smiles, float) and pd.isna(smiles)) or not str(smiles).strip():
             print(f"WARNING: skipping {comp_id} (no smiles)", file=sys.stderr)
             local_missing_rows.append({
-                "id": comp_id, "removed_by": step_id, "kind": "filter",
+                "id": comp_id, "removed_by": step_id, "kind": "failure",
                 "cause": "no smiles in compounds stream",
             })
             continue

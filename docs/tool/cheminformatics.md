@@ -186,7 +186,7 @@ The `precursors` stream is a **compounds** stream with the canonical `id | forma
   `top_score` is the `route_scorer` score of the best route. `first_solution_time` and `first_solution_iteration` are 0 when the search never flagged a solution, as upstream reports them; `breadth_first` flags one only when every branch it expanded ends in stock, so it can report 0 for a target it does solve. A SMILES RDKit cannot sanitize is never searched but keeps its row, with everything but `id` and `smiles` empty.
 - `routes` — `id | compounds.id | route | score | is_solved | number_of_steps | number_of_precursors | number_of_precursors_in_stock`, then one column per extra scorer (`scorers`, plus `route_scorer` when it is not one of the four always-computed ones). `score` is the state score.
 - `precursors` — `id | format | smiles | ccd | compounds.id | route | precursor | in_stock`.
-- `missing` — `id | removed_by | kind | cause`. Targets with no route (and compounds with no SMILES) land here as `kind="filter"`; a SMILES that cannot be sanitized, or a target `aizynthcli` returned no row for, as `kind="failure"`.
+- `missing` — `id | removed_by | kind | cause`. Targets with no route land here as `kind="filter"`; a compound with no SMILES (the compound was asked for and nothing dropped it on purpose, so it is flagged, not excused), a SMILES that cannot be sanitized, and a target `aizynthcli` returned no row for land here as `kind="failure"`.
 
 **Example**:
 ```python

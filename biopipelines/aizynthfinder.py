@@ -157,6 +157,7 @@ class AiZynthFinder(BaseConfig):
                         and pass pool= to carry the stream along. A consumer reads the stream
                         called compounds, so hand it `azf.streams.precursors`)
             missing:    id | removed_by | kind | cause
+                        (a target with no route is kind="filter"; a target with no SMILES, with a SMILES RDKit cannot sanitize, or that aizynthcli returned no row for is kind="failure")
 
     Usage:
         with Pipeline(...):
@@ -171,7 +172,7 @@ class AiZynthFinder(BaseConfig):
     """
 
     TOOL_NAME = "AiZynthFinder"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     ENV_NAME = "aizynthfinder"
 
     @classmethod
