@@ -22,12 +22,14 @@ try:
     from .base_config import BaseConfig, StandardizedOutput, TableInfo
     from .file_paths import Path
     from .datastream import DataStream
+    from .config_manager import ConfigManager
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
     from base_config import BaseConfig, StandardizedOutput, TableInfo
     from file_paths import Path
     from datastream import DataStream
+    from config_manager import ConfigManager
 
 
 class ESMFold(BaseConfig):
@@ -70,7 +72,7 @@ class ESMFold(BaseConfig):
     """
 
     TOOL_NAME = "ESMFold"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "esmfold"
 
     @classmethod
@@ -93,20 +95,31 @@ fi
 """
         remove_block = cls._env_remove_block(env, env_manager) if force_reinstall else ""
         env_block = cls._env_install_block(env, env_manager, biopipelines)
+        colab = ConfigManager().get_variant() == "colab"
+        # Colab's image has nvcc 13 and gcc 13; the openfold fork compiles a CUDA kernel against torch's CUDA 12.1, so
+        # the env's own nvcc 12.1 and gcc 11 do the build (esmfold.colab.yaml).
+        toolchain = f"""# Build openfold with the env's own CUDA 12.1 toolchain, not the image's CUDA 13 and gcc 13.
+ESMFOLD_PREFIX="${{MAMBA_ROOT_PREFIX:-$HOME/.local/share/mamba}}/envs/{env}"
+export CUDA_HOME="$ESMFOLD_PREFIX"
+export PATH="$ESMFOLD_PREFIX/bin:$PATH"
+export CC="$ESMFOLD_PREFIX/bin/x86_64-conda-linux-gnu-gcc"
+export CXX="$ESMFOLD_PREFIX/bin/x86_64-conda-linux-gnu-g++"
+""" if colab else ""
+        check = "import esm, openfold" if colab else "import esm"
         return f"""echo "=== Installing ESMFold ==="
 {skip}{remove_block}
-{env_block}
+{toolchain}{env_block}
 if [ $? -ne 0 ]; then
     echo "ERROR: Failed to create {env} environment."
     exit 1
 fi
 
 # Verify installation
-if {cls._env_run(env, env_manager)}python -c "import esm" >/dev/null 2>&1; then
+if {cls._env_run(env, env_manager)}python -c "{check}" >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
     echo "=== ESMFold installation complete ==="
 else
-    echo "ERROR: ESMFold verification failed (cannot import esm)"
+    echo "ERROR: ESMFold verification failed (cannot import esm or openfold)"
     exit 1
 fi
 """

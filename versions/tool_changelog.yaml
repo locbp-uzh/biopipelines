@@ -739,8 +739,12 @@ ESMFold:
   - biopipelines/esmfold.py
   - pipe_scripts/pipe_esmfold_inference.py
   - pipe_scripts/pipe_esmfold_postprocessing.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-11-04'
+    note: >-
+      The Colab install builds again. Colab's image moved to nvcc 13.0 and gcc 13; the sokrypton openfold fork compiles a CUDA kernel whenever nvcc is visible, torch 2.1.2+cu121 accepts only a CUDA 12.1 nvcc, and gcc 13's headers then fail nvcc 12.1. `environments/esmfold.colab.yaml` carries nvcc 12.1 and gcc 11, `_install_script` exports `CUDA_HOME`, `CC` and `CXX` at them before the pip phases, and the check imports `openfold` as well as `esm`. The cluster install is unchanged. Found by running the tool on a Colab T4; the 3B model's inference was then OOM-killed at 11.4 GB on the 12.9 GB runtime. `tests/test_colab_cuda_installs.py` pins the script and the environment file.
   - version: '2.1'
     date: '2026-10-13'
     note: >-
@@ -997,8 +1001,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.11"
+  current: "2.12"
   history:
+  - version: '2.12'
+    date: '2026-11-04'
+    note: >-
+      On Colab the prebuilt binary did not load although `Gnina.install()` reported COMPLETED: it links libcudart.so.12, libcufft.so.11, libcublas.so.12, libnvrtc.so.12 and libnvToolsExt.so.1, which the CUDA 13 image lacks. The install adds the CUDA 12 wheels to the gnina env, the run script puts them on `LD_LIBRARY_PATH` through `_colab_ld_library_block`, and the install runs `gnina --version` before it succeeds. The cluster install is unchanged. Redocking of 1STP with biotin then gave best_vina -7.64 and a pose centroid 0.18 A from the crystal ligand. `tests/test_colab_cuda_installs.py` pins the script.
   - version: '2.11'
     date: '2026-11-02'
     note: >-
@@ -1085,8 +1093,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.11"
+  current: "2.12"
   history:
+  - version: '2.12'
+    date: '2026-11-04'
+    note: >-
+      No behavioural change. `Vina` inherits `Gnina.generate_script`, which now adds the Colab library-path block for the CUDA 12 wheels of the gnina env; the vina env has none, so the block finds nothing. The wrapper file changed, so the version follows it.
   - version: '2.11'
     date: '2026-11-02'
     note: >-

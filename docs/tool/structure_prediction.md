@@ -363,7 +363,7 @@ Predicts a protein's 3-D structure directly from its amino-acid sequence using a
 
 **Environment**: `esmfold`
 
-**Installation**: `ESMFold.install()` creates the env (mirrors the One-command-install-ESMfold recipe on the cluster; the ColabFold notebook recipe on Colab).
+**Installation**: `ESMFold.install()` creates the env (mirrors the One-command-install-ESMfold recipe on the cluster; the ColabFold notebook recipe on Colab, built with its own CUDA 12.1 nvcc and gcc 11 because the Colab image has CUDA 13 and gcc 13). The 3B model needs more than the 12.9 GB of RAM of a standard Colab runtime to load.
 
 **Parameters**:
 - `sequences`: DataStream | StandardizedOutput (required) — Input sequences.

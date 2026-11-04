@@ -135,7 +135,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.11"
+    TOOL_VERSION = "2.12"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -204,8 +204,32 @@ if [ -f "{binary}" ] && {env_check}; then
     exit 0
 fi
 """
+        # The prebuilt binary links CUDA 12 libraries (cudart, cufft, cublas, nvrtc, nvToolsExt) that Colab's CUDA 13 image
+        # lacks; they come as wheels in the gnina env and the run script puts them on LD_LIBRARY_PATH.
+        run = cls._env_run(env, env_manager)
+        wheels = ""
+        verify = f"""if [ -x "{binary}" ] && {env_check}; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== GNINA installation complete ==="
+else
+    echo "ERROR: GNINA verification failed (binary missing/not executable or {env} env absent)"
+    exit 1
+fi
+"""
+        if scheduler == "colab":
+            wheels = (f'{run}pip install -q nvidia-cuda-runtime-cu12 nvidia-cufft-cu12 nvidia-cublas-cu12 '
+                      f'nvidia-cuda-nvrtc-cu12 nvidia-nvtx-cu12\n')
+            verify = f"""CONDA_PREFIX="$({run}python -c 'import sys; print(sys.prefix)')"
+{cls._colab_ld_library_block()}if [ -x "{binary}" ] && {env_check} && "{binary}" --version >/dev/null 2>&1; then
+    touch "$INSTALL_SUCCESS"
+    echo "=== GNINA installation complete ==="
+else
+    echo "ERROR: GNINA verification failed (the binary does not load, or is missing, or the {env} env is absent)"
+    exit 1
+fi
+"""
         return f"""echo "=== Installing GNINA ==="
-{skip}{env_block}mkdir -p "{repo_dir}"
+{skip}{env_block}{wheels}mkdir -p "{repo_dir}"
 cd "{repo_dir}"
 # Download the prebuilt binary only if absent (it may persist on Drive while
 # the env was lost); -nc keeps a present file untouched.
@@ -216,14 +240,17 @@ fi
 ln -sf gnina.1.3.2 gnina
 
 # Verify installation
-if [ -x "{binary}" ] && {env_check}; then
-    touch "$INSTALL_SUCCESS"
-    echo "=== GNINA installation complete ==="
-else
-    echo "ERROR: GNINA verification failed (binary missing/not executable or {env} env absent)"
-    exit 1
-fi
-"""
+{verify}"""
+
+    @staticmethod
+    def _colab_ld_library_block() -> str:
+        """Bash that puts the CUDA 12 wheels of the active env on LD_LIBRARY_PATH (the gnina env carries them on Colab)."""
+        return (
+            '# Colab: the prebuilt GNINA links CUDA 12 libraries that the CUDA 13 image lacks; the gnina env holds them as wheels.\n'
+            'for d in "$CONDA_PREFIX"/lib/python*/site-packages/nvidia/*/lib; do\n'
+            '    if [ -d "$d" ]; then export LD_LIBRARY_PATH="$d:$LD_LIBRARY_PATH"; fi\n'
+            'done\n'
+        )
 
     # Lazy path descriptors — canonical sub-layout.
     #   configuration/  — gnina_config.json + input DataStream JSONs.
@@ -811,6 +838,8 @@ fi
         ld_path = self._get_gnina_ld_library_path()
         if ld_path:
             script_content += f'export LD_LIBRARY_PATH="{ld_path}:$LD_LIBRARY_PATH"\n'
+        if ConfigManager().get_scheduler() == "colab":
+            script_content += self._colab_ld_library_block()
 
         script_content += "\n"
         script_content += self._generate_script_run_gnina()
@@ -988,7 +1017,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.11"
+    TOOL_VERSION = "2.12"
     ENV_NAME = "vina"
     BACKEND = "vina"
 
