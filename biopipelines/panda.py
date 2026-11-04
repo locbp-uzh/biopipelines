@@ -98,7 +98,7 @@ class Panda(BaseConfig):
     """
 
     TOOL_NAME = "Panda"
-    TOOL_VERSION = "1.8"
+    TOOL_VERSION = "1.9"
 
     # Internal column name used to track which input table a row came from
     # when concat runs over multiple inputs. Auto-added before the operation
@@ -122,6 +122,7 @@ echo "=== Panda ready ==="
     config_file = Path(lambda self: self.configuration_path("panda_config.json"))
     panda_py = Path(lambda self: self.pipe_script_path("pipe_panda.py"))
     missing_csv = Path(lambda self: self.table_path("missing"))
+    not_carried_json = Path(lambda self: self.execution_path("not_carried.json"))
     sequences_csv = Path(lambda self: self.stream_path("sequences", "sequences.csv"))
 
     # ========== Static methods for creating operations ==========
@@ -967,6 +968,7 @@ echo "=== Panda ready ==="
             "stream_folders": stream_folders_map,
             "pool_table_targets": pool_table_targets,
             "missing_csv": self.missing_csv,
+            "not_carried_json": self.not_carried_json,
             "prune_redundant_provenance": self.prune_redundant_provenance,
         }
 

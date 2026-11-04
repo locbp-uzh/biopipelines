@@ -335,6 +335,15 @@ def _value_stream_map_table(value) -> Optional[str]:
     return str(mt) if mt else None
 
 
+def _load_not_carried(output_folder: str) -> Dict[str, set]:
+    """Per stream, the ids a step recorded as having no file because their source never carried that stream."""
+    path = os.path.join(output_folder, "_execution", "not_carried.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as handle:
+        return {stream: set(ids) for stream, ids in json.load(handle).items()}
+
+
 def check_expected_outputs(expected_outputs: Dict[str, Any],
                            tool_name: str,
                            output_folder: str = "") -> Tuple[bool, Dict[str, List[str]]]:
@@ -374,6 +383,7 @@ def check_expected_outputs(expected_outputs: Dict[str, Any],
               f"(upstream propagated or local filter)")
 
     excused = set(expected_missing_ids)
+    not_carried = _load_not_carried(output_folder)
 
     # Every non-reserved key whose value reduces to a file list is a stream.
     for category, value in expected_outputs.items():
@@ -393,6 +403,11 @@ def check_expected_outputs(expected_outputs: Dict[str, Any],
             continue
 
         pairs = extract_id_file_pairs(value)
+        absent = not_carried.get(category, set())
+        if absent:
+            pairs = [(owner, path) for owner, path in pairs if owner not in absent]
+            if not pairs:
+                continue
         if not pairs:
             # A value-based stream (files=[]) carries all its content in the
             # map_table, so it contributes no per-id path and every check above

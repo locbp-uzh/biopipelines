@@ -768,6 +768,17 @@ def lost_stream_rows(original_ids: List[List[str]], kept_ids: List[List[str]],
     return rows
 
 
+def streams_not_carried(result_df: pd.DataFrame, file_maps: List[Dict[str, Dict[str, str]]]) -> Dict[str, List[str]]:
+    """Per stream, the output ids whose source pool does not declare that stream at all."""
+    declared = {name for file_map in file_maps for name in file_map}
+    absent: Dict[str, List[str]] = {}
+    for _, row in result_df.iterrows():
+        pool_streams = file_maps[int(row.get(PANDA_SOURCE, 0))]
+        for name in sorted(declared - set(pool_streams)):
+            absent.setdefault(name, []).append(str(row.get('id', '')))
+    return absent
+
+
 def extract_pool_data_for_filtered_ids(filtered_ids: List[str], pool_folder: str,
                                         output_folder: str,
                                         rename_map: Optional[Dict[str, str]] = None,
@@ -1640,6 +1651,10 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                     stream_folders=stream_folders,
                     shared_maps=pool_shared_maps,
                 )
+                not_carried_json = config_data.get("not_carried_json")
+                if not_carried_json:
+                    with open(not_carried_json, "w") as handle:
+                        json.dump(streams_not_carried(result_df, pool_file_maps), handle)
             else:
                 # Single pool mode - use first pool
                 extracted = extract_pool_data_for_filtered_ids(
