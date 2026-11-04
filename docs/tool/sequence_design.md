@@ -172,7 +172,7 @@ Concatenates multiple sequences with flexible linkers. Creates fusion sequences 
 **Environment**: `biopipelines`
 
 **Parameters**:
-- `sequences`: Union[List[str], str] (required) - List of sequences or PDB file paths
+- `sequences`: List[str | DataStream | StandardizedOutput] (required) - One entry per fusion slot: a tool output or stream that has sequences (a `Sequence`, a `PDB`, a design step), or a bare string. A string is a sequence, promoted to an internal `Sequence(seq=...)` with the id `seq1`, the way `ligand="LIG"` is an internal `Ligand` elsewhere; give a slot its own `Sequence("...", ids="N")` to name it in the fusion ids. A list of strings in one slot is not accepted: a slot is one entry, and several sequences in it come from a stream.
 - `prefix`: str = "" - Label for the fused construct, used as the base of the output file names (default: `"fuse"`). **This was spelled `name=`, and there is no alias:** `name` is framework-reserved as the job name, so on `Fuse` it now means the job name exactly as it does on every other tool. A script still passing `name=` sets the job name and leaves the construct label at its default `"fuse"` — nothing raises, so the rename has to be made deliberately rather than discovered from a failure.
 - `linker`: str = "GGGGSGGGGSGGGGSGGGGS" - Linker sequence that will be cut based on `linker_lengths` if specified
 - `linker_lengths`: List[str] = None - List of length ranges for each junction to generate multiple variants by cutting the linker (e.g., ["1-6", "1-6"])
@@ -203,10 +203,11 @@ Concatenates multiple sequences with flexible linkers. Creates fusion sequences 
 ```python
 from biopipelines.fuse import Fuse
 from biopipelines.pdb import PDB
+from biopipelines.entities import Sequence
 
-N="GNH..."
-mid=PDB("...")
-C="EFT..."
+N="GNH..."                    # a string: an internal Sequence with the id seq1
+mid=PDB("...")                # a structure: its sequence is the slot
+C=Sequence("EFT...", ids="C")  # named, so the fusion ids read `seq1+3+<pdb id>+2+C`
 fused = Fuse(
     sequences=[N, mid, C],
     linker="GSGAG",

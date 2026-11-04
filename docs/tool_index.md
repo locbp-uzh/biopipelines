@@ -21,7 +21,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 9 | FLOWR | Structure Generation           | 1.3 | `biopipelines/flowr.py` |
 | 10 | DNAEncoder                | Sequence Design                | 1.3 | `biopipelines/dna_encoder.py` |
 | 11 | Frame2Seq | Sequence Design                | 2.1 | `biopipelines/frame2seq.py` |
-| 12 | Fuse | Sequence Design                | 1.7 | `biopipelines/fuse.py` |
+| 12 | Fuse | Sequence Design                | 1.8 | `biopipelines/fuse.py` |
 | 13 | LigandMPNN | Sequence Design                | 3.5 | `biopipelines/ligand_mpnn.py` |
 | 14 | LASErMPNN | Sequence Design                | 2.3 | `biopipelines/lasermpnn.py` |
 | 15 | Mutagenesis               | Sequence Design                | 1.4 | `biopipelines/mutagenesis.py` |

@@ -930,8 +930,12 @@ Fuse:
   files:
   - biopipelines/fuse.py
   - pipe_scripts/pipe_fuse_queries.py
-  current: "1.7"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-11-04'
+    note: >-
+      A slot can be a bare string. The documentation showed `Fuse(sequences=[N, mid, C])` with `N="GNH..."`, and the code accepted only streams and tool outputs, so the documented call raised `Slot 0: expected DataStream or StandardizedOutput, got <class 'str'>`. A string is now a sequence promoted to an internal `Sequence` through `resolve_basic_input`, as `ligand="LIG"` is an internal `Ligand` in other tools; its id is `seq1`. Anything else is still refused, and the message names the three things a slot can be.
   - version: '1.7'
     date: '2026-10-31'
     note: >-

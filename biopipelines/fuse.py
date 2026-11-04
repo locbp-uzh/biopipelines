@@ -23,6 +23,8 @@ try:
     from .file_paths import Path
     from .datastream import DataStream
     from .combinatorics import join_axis_ids
+    from .input_standardization import resolve_basic_input
+    from .sequence import Sequence
 except ImportError:
     import sys
     sys.path.append(os.path.dirname(__file__))
@@ -30,6 +32,8 @@ except ImportError:
     from file_paths import Path
     from datastream import DataStream
     from combinatorics import join_axis_ids
+    from input_standardization import resolve_basic_input
+    from sequence import Sequence
 
 
 def check_distinct_fusion_ids(combos: List[tuple]) -> None:
@@ -68,7 +72,7 @@ class Fuse(BaseConfig):
     """
 
     TOOL_NAME = "Fuse"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.8"
     # `name` is framework-reserved (BaseConfig reads it as the job name), so capturing it here silently dropped the job name of every Fuse step. The retired spelling still sets the label and now also reaches the framework.
 
     @classmethod
@@ -91,7 +95,7 @@ echo "=== Fuse ready ==="
     local_missing_csv = Path(lambda self: self.execution_path("local_missing.csv"))
 
     def __init__(self,
-                 sequences: List[Union[DataStream, StandardizedOutput]],
+                 sequences: List[Union[str, DataStream, StandardizedOutput]],
                  prefix: str = "",
                  linker: str = "GGGGSGGGGSGGGGSGGGGS",
                  linker_lengths: List[str] = None,
@@ -100,7 +104,8 @@ echo "=== Fuse ready ==="
         Initialize Fuse configuration.
 
         Args:
-            sequences: List of DataStreams or StandardizedOutputs, one per fusion slot.
+            sequences: List of strings, DataStreams or StandardizedOutputs, one per fusion slot.
+                      A string is a sequence, promoted to an internal Sequence(seq=...) whose id is seq1.
                       Each slot can contain multiple IDs — the output is the
                       cartesian product of all slot options × linker lengths.
             prefix: Label for the fused construct, used as the base of the output file names (default: "fuse"). Formerly spelled `name=`; there is deliberately no alias, because the framework reads `name` as the job name and Fuse capturing it made the job name vanish.
@@ -147,7 +152,7 @@ echo "=== Fuse ready ==="
         # Initialize base class
         super().__init__(**kwargs)
 
-    def _resolve_slots(self, sequences: List[Union[DataStream, StandardizedOutput]]) -> List[Dict[str, Any]]:
+    def _resolve_slots(self, sequences: List[Union[str, DataStream, StandardizedOutput]]) -> List[Dict[str, Any]]:
         """
         Resolve sequence inputs to per-slot info dicts.
 
@@ -180,8 +185,11 @@ echo "=== Fuse ready ==="
         elif isinstance(item, DataStream):
             return self._datastream_to_slot(item, index)
 
+        elif isinstance(item, str):
+            return self._datastream_to_slot(resolve_basic_input(item, Sequence, "sequences", "seq"), index)
+
         else:
-            raise ValueError(f"Slot {index}: expected DataStream or StandardizedOutput, got {type(item)}")
+            raise ValueError(f"Slot {index}: expected a sequence string, DataStream or StandardizedOutput, got {type(item)}")
 
     @staticmethod
     def _datastream_to_slot(ds: DataStream, index: int) -> Dict[str, Any]:
