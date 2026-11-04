@@ -10,6 +10,7 @@ at all, and the completion check does not demand them. A stream the pool does ca
 file of stays a failure, which is what the last case pins.
 """
 
+import json
 import os
 
 import pandas as pd
@@ -39,6 +40,30 @@ class TestWhatIsNotCarried:
         assert streams_not_carried(winner_rows(0), [BOLTZ_LIKE, REMAP_LIKE]) == {}
 
 
+class TestAbsenceIsInherited:
+    """A Panda pooled over another Panda: the first could not carry a stream for its winner, so the second cannot either."""
+
+    def pooled_panda(self, tmp_path, recorded):
+        pool = tmp_path / "014_Panda"
+        (pool / "_execution").mkdir(parents=True)
+        if recorded is not None:
+            (pool / "_execution" / "not_carried.json").write_text(json.dumps(recorded), encoding="utf-8")
+        carried = {"sequences": {"p_1": str(pool / "p_1.csv")}, "structures": {"p_1": str(pool / "p_1.pdb")}}
+        return str(pool), [carried, REMAP_LIKE]
+
+    def winner_from_the_first_pool(self):
+        return pd.DataFrame({"id": ["best_1"], "original_id": ["p_1"], PANDA_SOURCE: [0]})
+
+    def test_a_file_the_pools_own_step_recorded_as_not_carried_is_not_carried_here(self, tmp_path):
+        pool, file_maps = self.pooled_panda(tmp_path, {"structures": ["p_1"]})
+        absent = streams_not_carried(self.winner_from_the_first_pool(), file_maps, [pool, str(tmp_path)])
+        assert absent == {"structures": ["best_1"]}, "the sequences file was never recorded, so it is still demanded"
+
+    def test_a_declared_file_nobody_recorded_stays_demanded(self, tmp_path):
+        pool, file_maps = self.pooled_panda(tmp_path, None)
+        assert streams_not_carried(self.winner_from_the_first_pool(), file_maps, [pool, str(tmp_path)]) == {}
+
+
 def build_step(tmp_path, carried=None, write_structure=False):
     """A step declaring `best_1` in two streams, the structure of which its source never had."""
     step = tmp_path / "014_Panda"
@@ -51,7 +76,6 @@ def build_step(tmp_path, carried=None, write_structure=False):
         (step / "structures" / "best_1.pdb").write_text("ATOM\n", encoding="utf-8")
     (step / "tables" / "missing.csv").write_text("id,removed_by,kind,cause\n", encoding="utf-8")
     if carried is not None:
-        import json
         (step / "_execution" / "not_carried.json").write_text(json.dumps(carried), encoding="utf-8")
     expected = {
         "output_folder": str(step),

@@ -768,14 +768,36 @@ def lost_stream_rows(original_ids: List[List[str]], kept_ids: List[List[str]],
     return rows
 
 
-def streams_not_carried(result_df: pd.DataFrame, file_maps: List[Dict[str, Dict[str, str]]]) -> Dict[str, List[str]]:
-    """Per stream, the output ids whose source pool does not declare that stream at all."""
+def pool_not_carried(pool_folder: str) -> Dict[str, List[str]]:
+    """What the step that wrote this pool recorded as having no file, per stream."""
+    path = os.path.join(pool_folder, "_execution", "not_carried.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as handle:
+        return json.load(handle)
+
+
+def streams_not_carried(result_df: pd.DataFrame, file_maps: List[Dict[str, Dict[str, str]]],
+                        pool_folders: Optional[List[str]] = None) -> Dict[str, List[str]]:
+    """Per stream, the output ids whose source pool has no file for them by construction.
+
+    Either the pool does not declare the stream, or it declares it and the pool's own step recorded
+    that id as having none (a Panda pooled over another Panda that already could not carry it).
+    """
     declared = {name for file_map in file_maps for name in file_map}
+    recorded = [pool_not_carried(folder) for folder in (pool_folders or [])]
     absent: Dict[str, List[str]] = {}
     for _, row in result_df.iterrows():
-        pool_streams = file_maps[int(row.get(PANDA_SOURCE, 0))]
-        for name in sorted(declared - set(pool_streams)):
-            absent.setdefault(name, []).append(str(row.get('id', '')))
+        source = int(row.get(PANDA_SOURCE, 0))
+        output_id = str(row.get('id', ''))
+        lookup_id = str(row.get('original_id', output_id))
+        for name in sorted(declared - set(file_maps[source])):
+            absent.setdefault(name, []).append(output_id)
+        for name, id_to_file in file_maps[source].items():
+            matched = match_stream_id(lookup_id, id_to_file)
+            if (matched is not None and not os.path.exists(id_to_file[matched]) and source < len(recorded)
+                    and matched in recorded[source].get(name, [])):
+                absent.setdefault(name, []).append(output_id)
     return absent
 
 
@@ -1654,7 +1676,7 @@ def run_panda(config_data: Dict[str, Any]) -> None:
                 not_carried_json = config_data.get("not_carried_json")
                 if not_carried_json:
                     with open(not_carried_json, "w") as handle:
-                        json.dump(streams_not_carried(result_df, pool_file_maps), handle)
+                        json.dump(streams_not_carried(result_df, pool_file_maps, pool_folders), handle)
             else:
                 # Single pool mode - use first pool
                 extracted = extract_pool_data_for_filtered_ids(
