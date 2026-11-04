@@ -1242,8 +1242,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "3.5"
+  current: "3.6"
   history:
+  - version: '3.6'
+    date: '2026-11-04'
+    note: >-
+      `design_within` is described as what it is, the scoring cutoff of the ligand context (`--ligand_mpnn_cutoff_for_score`). The class docstring said "distance from ligand to redesign" and the position helper warned "Using design_within=5.0 around BTN", so a ligand without `redesigned` read as a 5 A shell, while the helper writes empty fixed and redesigned options and every position is redesigned (121 of 121 resolved residues on 1STP with biotin, seen on Colab). The warning now says every position is redesigned and that `design_within` selects no residue; `docs/tool/sequence_design.md` already said so. No command, id or output changes. `tests/test_ligandmpnn_design_within.py` pins the warning, the empty options and the docstring.
   - version: '3.5'
     date: '2026-10-31'
     note: >-

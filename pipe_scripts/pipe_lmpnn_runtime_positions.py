@@ -203,7 +203,9 @@ def process_ligand_source(ligand, design_within, design_entries):
     """
     # For now, implement a simple fallback - in practice this would need
     # structural analysis to find residues near the ligand
-    print(f"Warning: Ligand-based position determination not fully implemented. Using design_within={design_within}Å around {ligand}")
+    print("Warning: no fixed or redesigned positions were given, so every position is redesigned. "
+          f"design_within={design_within} A is only the scoring cutoff of the ligand context and does not select residues; "
+          "give `redesigned` (a DistanceSelector shell, for instance) to restrict the design.")
 
     positions_data = {}
     for design_id, pdb_file in design_entries:

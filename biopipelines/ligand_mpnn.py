@@ -40,7 +40,7 @@ class LigandMPNN(BaseConfig):
     """
 
     TOOL_NAME = "LigandMPNN"
-    TOOL_VERSION = "3.5"
+    TOOL_VERSION = "3.6"
     # `chain` and `chains` were one letter apart and meant different things, which is the
     # Ligand code/codes mistake again. `chains` now answers both.
     PARAMETER_ALIASES = {"chain": "chains"}
@@ -170,7 +170,7 @@ fi
             redesigned: Designed positions. Accepts:
                    - PyMOL selection string: "10-20+30-40"
                    - TableReference: table.column_name
-            design_within: Distance in Angstrom from ligand to redesign (fallback if positions not specified)
+            design_within: Distance in Angstrom of the ligand context used for scoring (`--ligand_mpnn_cutoff_for_score`). It does not select residues: with no `fixed` or `redesigned` every position is redesigned, so give `redesigned` (a DistanceSelector shell) to restrict it
             chain: Default chain ID for chainless position input (default "A")
             model: LigandMPNN model version to use
             num_batches: Number of batches to run
