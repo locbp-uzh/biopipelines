@@ -57,7 +57,7 @@ class LigandDdG(BaseConfig):
         ligand_chain: the chain carrying the ligand (default "B"). Exactly one residue named like the ligand code must sit on it, and it must be a chain of its own, as predictors write it: the ligand of a crystal file usually shares the protein chain and has to be moved to its own first. A ligand with no atom within 6 A of the binder chain (the ligand of another copy in a crystal, say) is a failure for that structure, since no pair of atoms is in range and the ddG would read as exactly zero.
         replicates: pack + score cycles for scoring="soft" (default 5), each from the input structure. Not accepted with scoring="hard". The number of repacks is `replicates`; each one first copies the pose, which adds no meaningful time.
         ph: pH for Dimorphite-DL protonation of a ligand the structure carries no hydrogens for (default 7.4). A ligand that already has hydrogens is used as it is. Ignored with `params_file`.
-        seed: base random seed (default 42). Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With scoring="soft" the seed did not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` was 0, and `replicates=1` gave the same number as 5). That was measured while the replicates were chained on one pose; each replicate now repacks the input structure, so whether the replicates still agree on those complexes has not been re-measured.
+        seed: base random seed (default 42). Each replicate of each structure is seeded from it with a distinct, fixed value, so a run repeats exactly; PyRosetta otherwise seeds itself from the system. With scoring="soft" the seed did not change the value on the five streptavidin complexes tried (ten seeds each gave one ddG to four decimals, so `ddg_soft_std` was 0, and `replicates=1` gave the same number as 5). That was measured while the replicates were chained on one pose; each replicate now repacks the input structure. Re-measured on the five complexes of that test that carry a ligand (1STP, 3RY2, 1SWE, 1DF8, 1MEP), the soft ddG is the same to every printed digit as before, with a standard deviation of at most 4e-15, so the replicates still agree on them.
         params_file: path to a pre-made Rosetta .params file. The ligand is then taken from the structure unchanged, so its atom names and hydrogens must already match the params; no SMILES is needed and no params are generated.
 
     Outputs:
@@ -70,7 +70,7 @@ class LigandDdG(BaseConfig):
     """
 
     TOOL_NAME = "LigandDdG"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "PyRosetta"
 
     @classmethod
