@@ -254,7 +254,7 @@ Each tool lists its references, the compute resources it uses, and the platforms
   <td><sub><b>ESMFold</b><br>Predict a protein structure from a single sequence, no MSA needed.</sub></td>
   <td width="100" align="center"><sub><a href="https://github.com/facebookresearch/esm"><img src="https://img.shields.io/badge/-181717?style=flat-square&logo=github&logoColor=white" alt="repo"></a> <a href="https://www.science.org/doi/10.1126/science.ade2574"><img src="https://img.shields.io/badge/-paper-B31B1B?style=flat-square&logo=readthedocs&logoColor=white" alt="paper"></a></sub></td>
   <td width="80" align="center"><sub><img src="https://img.shields.io/badge/GPU-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="GPU"></sub></td>
-  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span>&nbsp;<span style="white-space:nowrap"><img src="https://img.shields.io/badge/Colab-F9AB00?style=flat-square&logo=googlecolab&logoColor=white" alt="Colab ok"></span></sub></td>
+  <td width="115" align="center"><sub><span style="white-space:nowrap"><img src="https://img.shields.io/badge/HPC%20x86--64-2C3E50?style=flat-square&logo=intel&logoColor=white" alt="HPC x86-64 ok"></span></sub></td>
 </tr>
 <tr>
   <td><sub><b>ESMFold2</b><br>Predict all-atom protein / nucleic-acid / ligand complexes from sequence, with inference-time scaling.</sub></td>
