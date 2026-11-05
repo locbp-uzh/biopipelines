@@ -68,6 +68,7 @@ class TestGnina:
         with patch.object(ConfigManager, "get_scheduler", lambda self: "colab"),              patch.object(ConfigManager, "get_variant", lambda self: "colab"):
             env = Gnina._install_env("micromamba")
         assert f"micromamba run -n {env} pip install" in script, "the env the config maps Gnina to, not a fixed name"
+        assert "nvidia-nvtx-cu12==12.4.127" in script, "12.9 ships no libnvToolsExt.so.1, which the binary links"
 
     def test_the_colab_install_runs_the_binary_before_it_calls_the_install_good(self):
         script = _install(Gnina, "colab")

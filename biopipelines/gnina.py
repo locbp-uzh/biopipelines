@@ -135,7 +135,7 @@ class Gnina(BaseConfig):
     """
 
     TOOL_NAME = "Gnina"
-    TOOL_VERSION = "2.12"
+    TOOL_VERSION = "2.13"
     # gnina is a binary whose flag surface the wrapper types only part of.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "gnina"
@@ -217,8 +217,9 @@ else
 fi
 """
         if scheduler == "colab":
+            # nvidia-nvtx-cu12 12.9 ships only libnvtx3interop; the binary needs libnvToolsExt.so.1, which 12.4.127 still has.
             wheels = (f'{run}pip install -q nvidia-cuda-runtime-cu12 nvidia-cufft-cu12 nvidia-cublas-cu12 '
-                      f'nvidia-cuda-nvrtc-cu12 nvidia-nvtx-cu12\n')
+                      f'nvidia-cuda-nvrtc-cu12 "nvidia-nvtx-cu12==12.4.127"\n')
             verify = f"""CONDA_PREFIX="$({run}python -c 'import sys; print(sys.prefix)')"
 {cls._colab_ld_library_block()}if [ -x "{binary}" ] && {env_check} && "{binary}" --version >/dev/null 2>&1; then
     touch "$INSTALL_SUCCESS"
@@ -1017,7 +1018,7 @@ class Vina(Gnina):
     """
 
     TOOL_NAME = "Vina"
-    TOOL_VERSION = "2.12"
+    TOOL_VERSION = "2.13"
     ENV_NAME = "vina"
     BACKEND = "vina"
 

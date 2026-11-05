@@ -1001,8 +1001,12 @@ Gnina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.12"
+  current: "2.13"
   history:
+  - version: '2.13'
+    date: '2026-11-05'
+    note: >-
+      The `nvidia-nvtx-cu12` wheel of the Colab install is pinned to 12.4.127. Version 12.9 ships only `libnvtx3interop.so.1`, and the prebuilt binary links `libnvToolsExt.so.1`, which 12.4.127 and 12.1.105 still carry. The install check added in 2.12 caught it on the first clean run on a CUDA 13 Colab; with the pin the install passes and a redocking of 1STP with biotin gives best_vina -7.64476 and a pose centroid 0.18 A from the crystal ligand, as the manual run did. No change off Colab.
   - version: '2.12'
     date: '2026-11-04'
     note: >-
@@ -1093,8 +1097,12 @@ Vina:
   - biopipelines/gnina.py
   - pipe_scripts/pipe_gnina.py
   - pipe_scripts/pipe_vina_backend.py
-  current: "2.12"
+  current: "2.13"
   history:
+  - version: '2.13'
+    date: '2026-11-05'
+    note: >-
+      No behavioural change. The wrapper file it shares with Gnina changed (the Colab nvtx pin), so the version follows it.
   - version: '2.12'
     date: '2026-11-04'
     note: >-
