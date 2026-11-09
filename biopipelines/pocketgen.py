@@ -88,7 +88,7 @@ class PocketGen(BaseConfig):
     """
 
     TOOL_NAME = "PocketGen"
-    TOOL_VERSION = "2.5"
+    TOOL_VERSION = "2.6"
     RESOURCE_REQUIREMENTS = {"gpu": {"incompatible": ["H100", "H200", "GH200"], "use": "A100"}}
     ENV_NAME = "pocketgen"
 
@@ -364,12 +364,7 @@ fi
                 columns=["id", "structures.id", "compounds.id", "sample", "sequence"],
                 description="PocketGen designed pocket sequences (8 samples per pair)",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Pairs PocketGen could not process",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Pairs PocketGen could not process"),
         }
 
         return {

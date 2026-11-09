@@ -856,7 +856,7 @@ class TestTheRunner:
         return out, argv
 
     @staticmethod
-    def _fake(monkeypatch, fail=(), seen=None):
+    def _fake(monkeypatch, fail=(), seen=None, n_frames=3):
         def sample(command, env):
             out_dir = command[command.index("--out") + 1]
             run_id = os.path.basename(out_dir)
@@ -874,7 +874,7 @@ class TestTheRunner:
         def split(topology, xtc, run_id, structures_dir):
             os.makedirs(structures_dir, exist_ok=True)
             frames = []
-            for k in (1, 2, 3):
+            for k in range(1, n_frames + 1):
                 path = os.path.join(structures_dir, f"{run_id}_{k}.pdb")
                 open(path, "w").write("ATOM")
                 frames.append((f"{run_id}_{k}", path))
@@ -891,6 +891,25 @@ class TestTheRunner:
         except SystemExit as stop:
             return stop.code
         return 0
+
+    def test_a_run_that_returns_fewer_conformers_than_requested_names_each_id_it_owes(self, tmp_path, monkeypatch):
+        """The sampler under-delivering is an error, so the ids with no file are failures, which no excusal covers."""
+        out, argv = self._world(tmp_path)
+        self._fake(monkeypatch, n_frames=2)
+        assert self._main(monkeypatch, argv) == 0
+
+        assert list(pd.read_csv(out / "structures" / "m.csv")["id"]) == ["ok_1", "ok_2", "bad_1", "bad_2"]
+        missing = pd.read_csv(out / "005_BioEmu2" / "_execution" / "local_missing.csv")
+        assert list(missing["id"]) == ["ok_3", "bad_3"]
+        assert set(missing["kind"]) == {"failure"}
+        assert set(missing["removed_by"]) == {"005_BioEmu2"}
+        assert "2 of 3" in missing.loc[0, "cause"]
+
+    def test_a_run_that_returns_every_conformer_owes_nothing(self, tmp_path, monkeypatch):
+        out, argv = self._world(tmp_path)
+        self._fake(monkeypatch)
+        assert self._main(monkeypatch, argv) == 0
+        assert pd.read_csv(out / "005_BioEmu2" / "_execution" / "local_missing.csv").empty
 
     def test_a_failed_run_is_in_the_table_the_missing_file_and_absent_from_the_maps(self, tmp_path, monkeypatch):
         out, argv = self._world(tmp_path)

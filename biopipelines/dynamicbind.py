@@ -91,7 +91,7 @@ class DynamicBind(BaseConfig):
     """
 
     TOOL_NAME = "DynamicBind"
-    TOOL_VERSION = "2.7"
+    TOOL_VERSION = "2.8"
     RESOURCE_REQUIREMENTS = {"gpu": {"incompatible": ["H100", "H200", "GH200"], "use": "A100"}}
     # run_single_protein_inference.py is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
@@ -475,12 +475,7 @@ fi
                 columns=["id", "structures.id", "compounds.id", "rank", "lddt", "affinity"],
                 description="DynamicBind per-pose lDDT and predicted affinity",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Pairs DynamicBind could not dock, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Pairs DynamicBind could not dock, with reason"),
         }
 
         return {

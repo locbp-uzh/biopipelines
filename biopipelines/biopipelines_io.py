@@ -365,6 +365,15 @@ def _excused_ids_for(ds: DataStream) -> set:
     stamp; a tool that writes its manifest elsewhere has no file at the
     conventional path. A missing file is not an error — a step that dropped
     nothing writes none.
+
+    Every row excuses its id, whatever its ``kind``, and that is deliberate.
+    Both manifests belong to the *producer* of ``ds``, so a ``failure`` row
+    there means the upstream step tried, raised, and already marked itself
+    FAILED; the id has no map_table row for a recorded reason. This agrees with
+    ``pipe_check_completion._load_expected_missing_ids``, which likewise excuses
+    every row written by another step and discriminates on ``kind`` only for the
+    local step's own rows. Filtering on ``kind`` here would abort every consumer
+    of a stream whose producer lost a single id.
     """
     candidates = []
     stamped = (ds.metadata or {}).get("missing_table")
@@ -922,7 +931,7 @@ def write_skipped_queries(path: str, skipped: Dict[str, str]) -> None:
     """Write {query id: cause} for the queries a config step could not write, for the postprocess to turn into failure rows."""
     import csv
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", newline="") as handle:
+    with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["id", "cause"])
         writer.writerows(skipped.items())
@@ -933,7 +942,7 @@ def read_skipped_queries(path: Optional[str]) -> Dict[str, str]:
     import csv
     if not path or not os.path.exists(path):
         return {}
-    with open(path, newline="") as handle:
+    with open(path, newline="", encoding="utf-8") as handle:
         return {row["id"]: row["cause"] for row in csv.DictReader(handle)}
 
 

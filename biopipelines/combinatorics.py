@@ -998,7 +998,7 @@ def predict_single_provenance(
     """Provenance of one output row, one value per axis, as predict_output_ids_with_provenance records it.
 
     Takes the same (mode, all_ids, selected_idx, static_ids, static_first) tuples as predict_single_output_id, so a pipe script that composes a row's id from them gets that row's provenance from the same selections.
-    An iterated axis contributes the id it selected, without its static companions. A bundled axis contributes its ids joined by the axis separator and, when it holds more than one, each member under "<axis>.<position>" (1-based).
+    An iterated axis contributes the id it selected, without its static companions. A bundled axis contributes its ids joined by the axis separator and, when it holds more than one, each member under "<axis>.<position>" (1-based). A bundled axis with no ids left contributes an empty cell, since predict_single_output_id accepts it too.
 
     Example:
         predict_single_provenance(
@@ -1013,7 +1013,8 @@ def predict_single_provenance(
         if mode not in axis_modes:
             raise ValueError(f"Axis {name!r} has unknown mode {mode!r}; expected one of {axis_modes}")
         if mode == "bundle" and idx is None:
-            provenance[name] = join_axis_ids(all_ids)
+            # An axis whose members were all filtered upstream contributes an empty cell, as predict_single_output_id has it.
+            provenance[name] = join_axis_ids(all_ids) if all_ids else ""
             if len(all_ids) > 1:
                 for position, member in enumerate(all_ids, start=1):
                     provenance[f"{name}.{position}"] = member

@@ -5,7 +5,7 @@
 
 """Execution half of the Peppr tool: score each predicted structure against its reference with the peppr package.
 
-Every id that enters gets a row in the table, with NaN for a metric peppr cannot compute. An id that cannot be evaluated at all (no matching reference, an unreadable file, atoms that cannot be matched, every metric failing) also gets a row of NaN, plus a kind="failure" row in the local missing file.
+Every id that enters gets a row in the table, with NaN for a metric peppr cannot compute. An id that cannot be evaluated at all also gets a row of NaN plus a row in the local missing file: kind="unmatched" when no reference matched it, kind="failure" for an unreadable file, atoms that cannot be matched, or every metric failing.
 """
 
 import argparse
@@ -107,11 +107,12 @@ def evaluate_pair(system_id, reference_path, pose_path, keys):
                  for name, reason in ligands_without_typed_bonds(atoms).items()]
         raise ValueError("; ".join(hints + [unmatched[0]]) if hints else unmatched[0])
     failed = [str(w.message) for w in caught if issubclass(w.category, peppr.EvaluationWarning)]
-    if len(failed) >= len(keys):
-        raise ValueError(failed[0])
-
     results = evaluator.get_results()
-    return {key: float(results[i][0][0]) for i, key in enumerate(keys)}
+    values = {key: float(results[i][0][0]) for i, key in enumerate(keys)}
+    # One metric can warn several times, so the verdict is the values, not the warning count.
+    if failed and all(math.isnan(value) for value in values.values()):
+        raise ValueError(failed[0])
+    return values
 
 
 def pair_references(pose_ids, references, n_declared):
@@ -130,14 +131,17 @@ def pair_references(pose_ids, references, n_declared):
 def score_all(poses, references, n_declared, keys, step_id, evaluate):
     """Score every pose; return (table rows, missing rows). poses and references map id to file path."""
     pairing = pair_references(list(poses), references, n_declared)
+    # The one declared reference scoring every pose has no file: upstream removed it, which is not an id mismatch.
+    unmatched_cause = ("the single reference has no file in the references stream (removed upstream)"
+                       if n_declared == 1 and not references else "no reference with a matching id")
     rows, missing_rows = [], []
     for sid, pose_path in poses.items():
         row = {"id": sid, **{key: math.nan for key in keys}}
         reference_id = pairing.get(sid)
         if reference_id is None:
-            print(f"WARNING: {sid} not matched: no reference with a matching id", file=sys.stderr)
+            print(f"WARNING: {sid} not matched: {unmatched_cause}", file=sys.stderr)
             missing_rows.append({"id": sid, "removed_by": step_id,
-                                 "kind": "unmatched", "cause": "no reference with a matching id"})
+                                 "kind": "unmatched", "cause": unmatched_cause})
             rows.append(row)
             continue
         try:

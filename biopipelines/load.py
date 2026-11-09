@@ -124,7 +124,7 @@ class Load(BaseConfig):
 
     # Tool identification
     TOOL_NAME = "Load"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.8"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -638,7 +638,11 @@ echo "=== Load ready ==="
         map_ids = [str(i) for i in rows['id'].tolist()]
         try:
             declared = DataStream.from_dict(ds_dict).ids_expanded
-        except Exception:
+        except (ValueError, KeyError, id_patterns.LazyPatternError) as exc:
+            # A malformed pattern is the declaration's problem, not this stream's; say so instead of silently guessing.
+            self._warn_once(f"expand:{stream_name}",
+                            f"Warning: Load: cannot expand the declared ids of '{stream_name}' "
+                            f"({exc}); using them unexpanded")
             declared = list(declared_ids)
 
         if any(id_patterns.is_lazy(i) for i in declared_ids):

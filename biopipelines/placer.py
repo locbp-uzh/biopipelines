@@ -111,7 +111,7 @@ class PLACER(BaseConfig):
     """
 
     TOOL_NAME = "PLACER"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     ENV_NAME = "placer"
 
     RERANK_CHOICES = ("prmsd", "plddt", "plddt_pde")
@@ -468,12 +468,7 @@ fi
                 columns=score_columns,
                 description="PLACER per-sample scores",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Inputs PLACER could not process",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Inputs PLACER could not process"),
         }
 
         out: Dict[str, Any] = {

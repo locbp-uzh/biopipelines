@@ -96,11 +96,23 @@ def register_changelog(sha, renames):
         bullets = [re.sub(rf"({re.escape(tool)}\W+){re.escape(old[0])} → {re.escape(old[1])}", rf"\g<1>{new[0]} → {new[1]}", b) for b in bullets]
     text, nl = read("versions/CHANGELOG.md")
     head = text.index("## [unreleased]")
+    # The search stays inside [unreleased]; without the bound it would find a released section's heading.
+    tail = text.find("\n## [", head + 1)
+    end = tail if tail != -1 else len(text)
     for section, wanted in (("### Tools\n\n", [b for b in bullets if b.startswith("- **")]),
                             ("### Framework\n\n", [b for b in bullets if not b.startswith("- **")])):
-        anchor = text.index(section, head) + len(section)
+        at = text.find(section, head, end)
+        if at == -1:
+            sys.exit(f"no {section.strip()!r} heading under [unreleased] in versions/CHANGELOG.md: add it, then rerun with --continue")
+        anchor = at + len(section)
         text = text[:anchor] + "".join(b + "\n\n" for b in wanted) + text[anchor:]
     write("versions/CHANGELOG.md", text, nl)
+    # Only bullets are carried over, so anything else the commit added is lost; name it rather than drop it in silence.
+    dropped = [ln for ln in added if not ln.startswith("- ")]
+    if dropped:
+        print("CHANGELOG lines the commit added that were NOT carried over (replay by hand if they matter):")
+        for line in dropped:
+            print("   ", line)
 
 
 def sync_index(sha, tools):

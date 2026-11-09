@@ -70,7 +70,7 @@ class LigandDdG(BaseConfig):
     """
 
     TOOL_NAME = "LigandDdG"
-    TOOL_VERSION = "1.4"
+    TOOL_VERSION = "1.5"
     ENV_NAME = "PyRosetta"
 
     @classmethod

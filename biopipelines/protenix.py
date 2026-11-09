@@ -99,7 +99,7 @@ class Protenix(BaseConfig):
     """
 
     TOOL_NAME = "Protenix"
-    TOOL_VERSION = "1.7"
+    TOOL_VERSION = "1.9"
     ENV_NAME = "protenix"
 
     PREDICT_COMMAND = "protenix pred"
@@ -163,10 +163,10 @@ fi
     combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
     covalent_bonds_file = Path(lambda self: self.configuration_path("covalent_bonds.json"))
     msas_json_file = Path(lambda self: self.configuration_path("msas.json"))
-    # Written at execution time, one JSON per query: one model load, and a failure stays in its own file.
-    queries_folder = Path(lambda self: self.configuration_path("queries"))
-    query_ids_csv = Path(lambda self: self.configuration_path("query_ids.csv"))
-    skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
+    # Written at EXECUTION time, one JSON per query: one model load, and a failure stays in its own file.
+    queries_folder = Path(lambda self: self.execution_path("queries"))
+    query_ids_csv = Path(lambda self: self.execution_path("query_ids.csv"))
+    skipped_csv = Path(lambda self: self.execution_path("skipped_queries.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
 
@@ -432,7 +432,8 @@ python "{self.postprocess_py}" \\
     --structures-map-csv "{self.structures_map_csv}" \\
     --confidence-csv "{self.confidence_csv}" \\
 {pae_flags}    --local-missing-csv "{self.local_missing_csv}" \\
-    --top-only "{str(self.top_only)}"
+    --top-only "{str(self.top_only)}" \\
+    --structures-per-query {self._structures_per_query()}
 
 """
 

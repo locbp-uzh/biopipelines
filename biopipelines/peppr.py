@@ -58,7 +58,7 @@ class Peppr(BaseConfig):
     """
 
     TOOL_NAME = "Peppr"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "peppr"
 
     @classmethod

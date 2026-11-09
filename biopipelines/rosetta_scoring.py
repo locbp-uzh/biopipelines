@@ -124,8 +124,10 @@ def repack_around_chain(pose, lock_chain: str, scorefxn, radius: float = PACK_RA
 
 
 def mean_std(values: Sequence[float]) -> Tuple[float, float]:
-    """Mean and population standard deviation (ddof = 0, as numpy's default)."""
+    """Mean and population standard deviation (ddof = 0, as numpy's default); NaN for no values."""
     n = len(values)
+    if n == 0:
+        return math.nan, math.nan
     mean = sum(values) / n
     return mean, math.sqrt(sum((v - mean) ** 2 for v in values) / n)
 
@@ -136,10 +138,6 @@ def trimmed_mean_std(values: Sequence[float]) -> Tuple[float, float, int]:
     kept = ordered[1:-1] if len(ordered) >= 3 else ordered
     mean, std = mean_std(kept)
     return mean, std, len(kept)
-
-
-def is_missing(value) -> bool:
-    return value is None or (isinstance(value, float) and math.isnan(value))
 
 
 def collect_rows(items: Iterable[Tuple[str, str]], score: Callable[[str, str], Dict],

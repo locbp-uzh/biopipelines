@@ -187,9 +187,15 @@ def main():
             else:
                 source = lookup_table_value(table, rid, selection_cfg["column"], map_table_paths=ref_maps)
             source = "" if pd.isna(source) else str(source)
+            # sele_to_list warns and returns [] instead of raising, so an unreadable cell would pass silently.
+            if not source.strip():
+                raise ValueError("the selection is empty")
+            residues = sele_to_list(source)
+            if not residues:
+                raise ValueError(f"the selection '{source}' names no residue")
             if rid not in ref_cache:
                 ref_cache[rid] = read_chains(references[rid])
-            mapped, unmapped, identity = transfer(sele_to_list(source), ref_cache[rid],
+            mapped, unmapped, identity = transfer(residues, ref_cache[rid],
                                                   read_chains(tpath), aligner)
             selection = list_to_sele(mapped)
             rows.append({"id": tid, "selection": selection, "n_residues": len(mapped),

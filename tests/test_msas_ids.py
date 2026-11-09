@@ -247,7 +247,7 @@ class TestTheMsaToolKeepsTheInputId:
         tool.missing_csv = "/o/missing.csv"
         declared = tool.get_output_files()
         assert list(declared["msas"].ids) == ["p1", "p2_msa"]
-        assert declared["tables"]["msas"].info.columns == ["id", "sequence", "file"]
+        assert declared["tables"]["msas"].info.columns == ["id", "sequences.id", "sequence", "file"]
 
 
 class TestMutagenesisFindsItsParentThroughTheLookup:

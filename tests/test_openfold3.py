@@ -592,7 +592,8 @@ class TestProvenanceColumns:
         _tool, script = TestThePaeStream._declared(new_pipeline, isolated_cwd)
         paths = re.findall(r'--provenance-csv "([^"]+)"', script)
         assert len(paths) == 2 and paths[0] == paths[1]
-        assert paths[0].endswith(os.path.join("_configuration", "query_provenance.csv"))
+        # The pipe writes it at execution time, so it belongs beside local_missing.csv, not in _configuration.
+        assert paths[0].endswith(os.path.join("_execution", "query_provenance.csv"))
 
     def test_the_confidence_table_declares_the_columns(self, tool, monkeypatch):
         import biopipelines.openfold3 as module

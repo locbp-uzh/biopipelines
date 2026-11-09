@@ -269,7 +269,8 @@ class SchemaInterpreter:
     """Abstractly execute one class's `get_output_files()` and collect its return dicts."""
 
     def __init__(self, tool: str, cls: ast.ClassDef, module_consts: Dict[str, Any],
-                 self_attrs: Dict[str, Any], methods: Optional[Dict[str, ast.FunctionDef]] = None):
+                 self_attrs: Dict[str, Any], methods: Optional[Dict[str, ast.FunctionDef]] = None,
+                 module_funcs: Optional[Dict[str, ast.FunctionDef]] = None):
         self.tool = tool
         self.cls = cls
         self.consts = module_consts
@@ -277,6 +278,8 @@ class SchemaInterpreter:
         self.methods: Dict[str, ast.FunctionDef] = methods if methods is not None else {
             n.name: n for n in cls.body if isinstance(n, ast.FunctionDef)
         }
+        # Module-level helpers a declaration calls, so a column list factored out of the class still resolves.
+        self.module_funcs: Dict[str, ast.FunctionDef] = module_funcs or {}
         # (return value, the branch conditions that path was taken under)
         self.returns: List[Tuple[Any, Tuple[str, ...]]] = []
         self.notes: List[str] = []
@@ -670,6 +673,9 @@ class SchemaInterpreter:
                 for key, value in kwargs.items():
                     out.set(key, self.eval(value, env))
                 return out
+            helper = self.module_funcs.get(func.id)
+            if helper is not None:
+                return self._inline(f"{func.id}()", helper)
             return Unknown(f"{func.id}()")
 
         if isinstance(func, ast.Attribute):
@@ -697,12 +703,14 @@ class SchemaInterpreter:
     def _eval_self_call(self, name: str, node: ast.Call, env) -> Any:
         if name == "missing_table_info":
             return Table("missing", SymList(list(MISSING_COLUMNS)))
-        fn = self.methods.get(name)
+        return self._inline(f"self.{name}()", self.methods.get(name))
+
+    def _inline(self, label: str, fn: Optional[ast.FunctionDef]) -> Any:
+        """Only the helper's return value matters, and only insofar as it resolves without knowing the arguments."""
         if fn is None or self._depth >= 3:
-            return Unknown(f"self.{name}()")
-        # Inline the helper: only its return value matters, and only insofar as it resolves without knowing the arguments.
+            return Unknown(label)
         sub = SchemaInterpreter(self.tool, self.cls, self.consts, self.self_attrs,
-                                methods=self.methods)
+                                methods=self.methods, module_funcs=self.module_funcs)
         sub._depth = self._depth + 1
         sub_env: Dict[str, Any] = {a.arg: UNKNOWN for a in fn.args.args if a.arg != "self"}
         try:
@@ -712,7 +720,7 @@ class SchemaInterpreter:
         for msg in sub.notes:
             self.note(msg)
         if not sub.returns:
-            return Unknown(f"self.{name}() -> no static return")
+            return Unknown(f"{label} -> no static return")
         return _merge_values(*[value for value, _ in sub.returns])
 
 
@@ -921,7 +929,9 @@ def extract_tool_schema(tool: str, classes: Optional[Dict[str, Any]] = None) -> 
             if isinstance(node, ast.FunctionDef):
                 methods[node.name] = node
 
-    interp = SchemaInterpreter(tool, owner, consts, attrs, methods=methods)
+    module_funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+    interp = SchemaInterpreter(tool, owner, consts, attrs, methods=methods, module_funcs=module_funcs)
     returns = interp.run()
 
     streams: Dict[str, Dict[str, Any]] = {}

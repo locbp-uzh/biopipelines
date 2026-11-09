@@ -304,3 +304,41 @@ def test_the_footers_block_runs_in_the_biopipelines_env(sources):
     activation = _config(built).activate_environment(name="biopipelines").strip()
     assert activation and activation in footer
     assert footer.index(activation) < footer.index("pipe_propagate_missing.py")
+
+
+# ── the filtered map_table excuses what upstream dropped ─────────────────────
+
+def test_the_filtered_map_table_block_names_the_upstream_manifest(sources):
+    """`input_sources` was accepted, documented and then dropped on the floor.
+
+    Without `--excused` the materializer raises `ids absent from map_table` for every id the
+    upstream step filtered away, whenever the fallback inside `_excused_ids_for` cannot find the
+    manifest by itself — a `Load`ed stream, or a tool that writes it off the conventional path.
+    """
+    from biopipelines.dna_encoder import DNAEncoder
+
+    _generator, filtered = sources
+    built = DNAEncoder(sequences=filtered.streams.sequences)
+    cfg = _config(built)
+    script = cfg.generate_script("unused.sh")
+
+    manifests = cfg._collect_upstream_missing_paths(filtered.streams.sequences)
+    assert manifests, "the filtered input carries no upstream manifest to excuse against"
+
+    block = script[script.index("materialize_filtered_map_table.py"):]
+    block = block[:block.index("\n")]
+    assert "--excused" in block
+    for path in manifests:
+        assert path.replace("\\", "/") in block.replace("\\", "/")
+
+
+def test_an_unfiltered_input_adds_no_excused_flag(sources):
+    """No manifest upstream, no flag: the materializer must still raise on a genuinely absent id."""
+    from biopipelines.dna_encoder import DNAEncoder
+
+    generator, _filtered = sources
+    cfg = _config(DNAEncoder(sequences=generator.streams.sequences))
+    script = cfg.generate_script("unused.sh")
+
+    block = script[script.index("materialize_filtered_map_table.py"):]
+    assert "--excused" not in block[:block.index("\n")]

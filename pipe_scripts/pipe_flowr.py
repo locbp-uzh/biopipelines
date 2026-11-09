@@ -28,7 +28,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     container_argv_prefix,
 )
 from biopipelines.ligand_utils import resolve_ligand_code, resolve_ligand_smiles, write_ligand_sdf  # noqa: E402
-from biopipelines.pdb_parser import field_chain, field_res_name, field_res_seq  # noqa: E402
+from biopipelines.pdb_parser import field_chain, field_i_code, field_res_name, field_res_seq  # noqa: E402
 from biopipelines.sele_utils import sele_to_chains_and_list  # noqa: E402
 
 CONDITIONING_FLAGS = {
@@ -129,7 +129,7 @@ def stage_pocket_pdb(pdb_path: str, selection: str, out_pdb: str) -> int:
                 continue
             if chain in whole_chains or key in wanted:
                 kept.append(line.rstrip("\n"))
-                seen.add(key + (line[26:27],))
+                seen.add(key + (field_i_code(line),))
     if not kept:
         raise ValueError(f"no ATOM record of {os.path.basename(pdb_path)} lies in {selection!r}")
     with open(out_pdb, "w") as f:

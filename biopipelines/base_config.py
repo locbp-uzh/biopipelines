@@ -604,7 +604,7 @@ class BaseConfig(ABC):
             except OSError:
                 deps, channels = [], []
             extra = [d for d in deps if isinstance(d, str)
-                     and re.split(r"[=<>\s]", d, 1)[0] not in ("python", "pip")]
+                     and re.split(r"[=<>\s]", d, maxsplit=1)[0] not in ("python", "pip")]
             cm = ConfigManager()
             conda_for_venv = cm.get_conda_for_venv()
             if extra and not conda_for_venv:
@@ -629,7 +629,7 @@ class BaseConfig(ABC):
                 prefix = f"{cm.get_conda_env_root()}/{env_name}"
                 chan = " ".join(f"-c {c}" for c in channels) or "-c conda-forge"
                 pyspec = next((d for d in deps if isinstance(d, str)
-                               and re.split(r"[=<>\s]", d, 1)[0] == "python"), "python")
+                               and re.split(r"[=<>\s]", d, maxsplit=1)[0] == "python"), "python")
                 env_block = (
                     cpath +
                     f'if [ ! -x "{prefix}/bin/python" ]; then\n'
@@ -1166,7 +1166,8 @@ echo "=============================="
         block = "# Materialize filtered input CSV (biopipelines env)\n"
         block += self.activate_environment(name="biopipelines")
         block += Resolve.filtered_map_table(
-            ds_json, out_csv, columns=columns, required_columns=required_columns
+            ds_json, out_csv, columns=columns, required_columns=required_columns,
+            missing_paths=self._collect_upstream_missing_paths(*(input_sources or [])),
         ) + "\n"
         block += """if [ $? -ne 0 ]; then
     echo "Error: could not materialize filtered input CSV"
@@ -1933,19 +1934,26 @@ fi
             return ""
         return " " + flag + "".join(f' "{p}"' for p in paths)
 
-    def missing_table_info(self, missing_csv: Optional[str] = None) -> "TableInfo":
+    def missing_table_info(self, missing_csv: Optional[str] = None,
+                           description: Optional[str] = None) -> "TableInfo":
         """The standard `missing` TableInfo (schema id|removed_by|kind|cause).
 
         ``pipe_check_completion`` excuses an upstream-dropped id only through this
         table, and the completion footer declares it for any tool that does not.
         A tool declares it itself only when it owns the file — it writes rows of
         its own, or its path is not ``self.table_path("missing")``.
+
+        ``description`` names what this tool in particular drops ("Pairs
+        DiffDock could not dock, with reason"). It is user-visible — it reaches
+        the expected-outputs JSON, the printed listing and the HTML renderer —
+        so a tool with a more precise wording than the generic default passes
+        it here rather than hand-rolling the whole ``TableInfo``.
         """
         return TableInfo(
             name="missing",
             path=missing_csv or self.table_path("missing"),
             columns=["id", "removed_by", "kind", "cause"],
-            description="IDs removed by upstream tools (or local failures) with removal reason",
+            description=description or "IDs removed by upstream tools (or local failures) with removal reason",
         )
 
     def generate_missing_propagation(self, *input_sources, missing_csv: Optional[str] = None,

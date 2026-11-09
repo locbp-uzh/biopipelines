@@ -485,7 +485,8 @@ def _sample(pred, query, seed, sample, ranking, pae=True, n_token=3, layout="cur
         (folder / f"{prefix}_full_data_sample_{sample}.json").write_text(json.dumps(pae))
 
 
-def _postprocess(tmp_path, queries, *flags, skipped=None, with_pae=True, ids_text=None, step=None):
+def _postprocess(tmp_path, queries, *flags, skipped=None, with_pae=True, ids_text=None, step=None,
+                 per_query=1):
     """`step` puts the local missing file where a real run writes it, `<step>/execution/local_missing.csv`."""
     out = tmp_path / "out"
     missing = out / step / "execution" / "local_missing.csv" if step else out / "x.csv"
@@ -494,7 +495,8 @@ def _postprocess(tmp_path, queries, *flags, skipped=None, with_pae=True, ids_tex
             "--query-ids-csv", str(tmp_path / "ids.csv"),
             "--structures-dir", str(out / "structures"),
             "--structures-map-csv", str(out / "structures" / "m.csv"),
-            "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(missing)]
+            "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(missing),
+            "--structures-per-query", str(per_query)]
     if skipped is not None:
         (tmp_path / "skipped.csv").write_text("id,cause\n" + "".join(f"{k},{v}\n" for k, v in skipped.items()))
         args += ["--skipped-csv", str(tmp_path / "skipped.csv")]
@@ -631,6 +633,27 @@ class TestThePostprocess:
         row = pd.read_csv(out / "c.csv").iloc[0]
         assert row["id"] == "q" and pd.isna(row["plddt"]) and pd.isna(row["ranking_score"])
         assert (out / "structures" / "q.cif").exists()
+
+    def test_a_query_that_produced_fewer_samples_than_declared_names_each_id_it_owes(self, tmp_path):
+        """The declared ids are <query>_1..N; upstream writing fewer is an error, so the tail ids are failures."""
+        pred = tmp_path / "pred"
+        _sample(pred, "q", 101, 0, ranking=0.5)
+        out, done = _postprocess(tmp_path, ["q"], "--top-only", "False", per_query=3)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert pd.read_csv(out / "structures" / "m.csv")["id"].tolist() == ["q_1"]
+        missing = pd.read_csv(out / "x.csv")
+        assert missing["id"].tolist() == ["q_2", "q_3"]
+        assert set(missing["kind"]) == {"failure"}
+        assert "1 of 3" in missing.loc[0, "cause"]
+        assert pd.read_csv(out / "c.csv")["id"].tolist() == ["q_1", "q_2", "q_3"]
+
+    def test_a_query_that_produced_nothing_names_every_declared_sample_id(self, tmp_path):
+        """With top_only off the bare query id names none of the declared ids, so it would excuse nothing."""
+        out, done = _postprocess(tmp_path, ["q"], "--top-only", "False", per_query=2)
+        assert done.returncode == 1
+        missing = pd.read_csv(out / "x.csv")
+        assert missing["id"].tolist() == ["q_1", "q_2"]
+        assert set(missing["kind"]) == {"failure"}
 
     def test_a_query_whose_name_starts_another_does_not_take_its_files(self, tmp_path):
         pred = tmp_path / "pred"

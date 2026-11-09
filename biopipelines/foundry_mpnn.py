@@ -110,7 +110,7 @@ class FoundryMPNN(BaseConfig):
     """
 
     TOOL_NAME = "FoundryMPNN"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
     ENV_NAME = "foundry"
 

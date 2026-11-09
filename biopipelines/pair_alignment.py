@@ -251,7 +251,8 @@ def check_row_ids(pairs: List[Tuple[str, str]], modes: List[Dict[str, Any]]) -> 
             if earlier != row:
                 raise ValueError(
                     f"the alignments {earlier} and {row} both have the id {row_id(*row)!r}, because a mode name "
-                    f"contains '_'; rename the structure so that the row ids are distinct")
+                    f"contains '_'; the mode names are fixed, so rename structure {earlier[1]!r} or "
+                    f"{row[1]!r} so that the row ids are distinct")
 
 
 def align_pairs(pairs: List[Tuple[str, str]], files: Dict[str, str], declared: set,

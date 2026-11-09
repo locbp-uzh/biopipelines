@@ -3,7 +3,10 @@
 
     python versions/release_table.py                        # print the table
     python versions/release_table.py --write                # replace it in CHANGELOG.md, between its markers
-    python versions/release_table.py --base-ref origin/main --base-label 1.5.3 --label 1.6.0
+    python versions/release_table.py --label 1.6.0 --write  # at release time, once the number is chosen
+
+The previous release's column header is read from the newest released `## [x.y.z]` heading; this release's is
+"unreleased" until --label names it, so a run without flags can never stamp a stale release number.
 
 A row is a tool whose `current` in versions/tool_changelog.yaml differs from the one at the base ref ("—" before a tool that is new).
 A summary already in the table is kept, and a new row takes the first sentence of the tool's bullet under [unreleased] -> Tools, to be shortened by hand.
@@ -48,11 +51,19 @@ def unreleased(changelog: str) -> str:
     return changelog[start:end if end != -1 else len(changelog)]
 
 
+def latest_released(changelog: str) -> str:
+    """The version of the newest released entry, which is the column the table compares against."""
+    match = re.search(r"^## \[(\d[\w.]*)\]", changelog, re.MULTILINE)
+    if not match:
+        raise SystemExit("no released '## [x.y.z]' heading in versions/CHANGELOG.md: pass --base-label")
+    return match.group(1)
+
+
 def bullet_bodies(changelog: str) -> dict[str, str]:
     """{tool: text after the header} for the bullets of [unreleased] -> Tools."""
     block = unreleased(changelog)
     tools = block[block.index("### Tools"):] if "### Tools" in block else ""
-    return {m.group(1): m.group(2) for m in re.finditer(r"^- \*\*(\w+)\*\* (?:new|\d+\.\d+) → \d+\.\d+\. (.*)$", tools, re.MULTILINE)}
+    return {m.group(1): m.group(2) for m in re.finditer(r"^- \*\*(\w+)\*\* (?:new|[\d.]+) → [\d.]+\. (.*)$", tools, re.MULTILINE)}
 
 
 def kept_summaries(changelog: str) -> dict[str, str]:
@@ -92,16 +103,17 @@ def git_show(ref: str, path: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-ref", default="origin/main", help="ref whose tool_changelog.yaml is the previous release")
-    parser.add_argument("--base-label", default="1.5.3", help="column header of the previous release")
-    parser.add_argument("--label", default="1.6.0", help="column header of this release")
+    parser.add_argument("--base-label", default=None, help="column header of the previous release (default: the newest released heading in the changelog)")
+    parser.add_argument("--label", default="unreleased", help="column header of this release; the release number once it is chosen")
     parser.add_argument("--write", action="store_true", help="replace the table in versions/CHANGELOG.md")
     args = parser.parse_args()
 
     changelog = CHANGELOG.read_bytes().decode("utf-8")
     newline = "\r\n" if "\r\n" in changelog else "\n"
     changelog = changelog.replace("\r\n", "\n")
+    base_label = args.base_label or latest_released(changelog)
     table = build_table(git_show(args.base_ref, "versions/tool_changelog.yaml"),
-                        TOOL_CHANGELOG.read_text(encoding="utf-8"), changelog, args.base_label, args.label)
+                        TOOL_CHANGELOG.read_text(encoding="utf-8"), changelog, base_label, args.label)
     if not args.write:
         sys.stdout.reconfigure(encoding="utf-8")
         print(table)

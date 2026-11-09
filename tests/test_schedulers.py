@@ -89,6 +89,48 @@ def test_slurm_integer_gpu_spec_is_a_count(spec):
     assert warns == []
 
 
+@pytest.mark.parametrize("spec, expected", [(2, 2), ("3", 3), (1, 1)])
+def test_slurm_integer_gpu_count_survives_a_single_gpu_type_site(spec, expected):
+    # The single_gpu_type branch ran before the count branch and asked for one GPU however many were requested.
+    from biopipelines.schedulers import SlurmBackend
+    directive, warns = SlurmBackend().gpu_directive(spec, 1, single_gpu_type=True)
+    assert directive == f"#SBATCH --gres=gpu:{expected}"
+    assert warns == []
+
+
+def test_slurm_single_gpu_type_still_uses_the_gpus_argument_for_a_non_count():
+    from biopipelines.schedulers import SlurmBackend
+    assert SlurmBackend().gpu_directive("A100", 3, single_gpu_type=True)[0] == "#SBATCH --gres=gpu:3"
+
+
+def test_16gb_is_a_gpu_memory_constraint_not_a_model():
+    # "16GB" is in the Resources() docstring but was absent from MEMORY_SPECS, so it emitted `--gpus=16GB:1`.
+    from biopipelines.schedulers import SlurmBackend
+    directive, warns = SlurmBackend().gpu_directive("16GB", 1)
+    assert directive == '#SBATCH --gpus=1\n#SBATCH --constraint="GPUMEM16GB"'
+    assert warns == []
+
+
+def test_every_documented_gpu_memory_is_a_memory_spec():
+    """Resources() advertises these, so each must reach the memory branch rather than the typed one."""
+    import re
+    from biopipelines import pipeline as pipeline_module
+    from biopipelines.schedulers import SlurmBackend
+    # Only the gpu: line — the memory: line next to it is node RAM, a different quantity.
+    gpu_line = next(line for line in (pipeline_module.Resources.__doc__ or "").splitlines()
+                    if line.strip().startswith("gpu:"))
+    documented = set(re.findall(r'"(\d+GB)"', gpu_line))
+    assert documented, "the Resources() docstring no longer lists GPU memories"
+    assert documented <= set(SlurmBackend.MEMORY_SPECS)
+
+
+def test_the_memory_tokens_are_the_scheduler_memory_specs():
+    # Two copies of one list drift; resource_requirements now reads the scheduler's.
+    from biopipelines.resource_requirements import MEMORY_TOKENS
+    from biopipelines.schedulers import SchedulerBackend
+    assert MEMORY_TOKENS is SchedulerBackend.MEMORY_SPECS
+
+
 def test_slurm_gpu_spec_none_still_declines_and_a_model_is_still_typed():
     from biopipelines.schedulers import SlurmBackend
     b = SlurmBackend()

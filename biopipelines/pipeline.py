@@ -25,7 +25,7 @@ from .folders import FolderManager
 from .config_manager import ConfigManager
 from .contract_enforcement import ContractViolation
 from ._layout import INTERNAL_FOLDER
-from .schedulers import get_backend, BATCH_SCHEDULERS
+from .schedulers import get_backend, BATCH_SCHEDULERS, SchedulerBackend
 from .resource_requirements import gpu_warnings as requirement_warnings
 
 # `pip freeze` prints an editable install as the URL it was cloned from, so a clone made with a
@@ -1507,10 +1507,13 @@ class Pipeline:
         """What the tools of one batch declare in RESOURCE_REQUIREMENTS that the batch's GPU request does not meet, once per tool."""
         request = self.batch_resources[batch_idx]["gpu"]
         inventory = ConfigManager().get_gpu_models()
+        # A whole-node site is also the single-GPU-type case here: both mean the scheduler picks the model.
         single_gpu_type = ConfigManager().get_node_exclusive()
         messages: List[str] = []
-        for name in dict.fromkeys(tool.TOOL_NAME for tool in tools):
-            declared = getattr(next(tool for tool in tools if tool.TOOL_NAME == name), "RESOURCE_REQUIREMENTS", {})
+        declarations = {}
+        for tool in tools:
+            declarations.setdefault(tool.TOOL_NAME, getattr(tool, "RESOURCE_REQUIREMENTS", {}))
+        for name, declared in declarations.items():
             messages.extend(requirement_warnings(name, request, declared, inventory, single_gpu_type))
         return messages
 
@@ -1906,6 +1909,14 @@ umask 002
 
         if gpus is not None and (not isinstance(gpus, int) or gpus < 1):
             raise ValueError(f"gpus must be a positive integer, got {gpus!r}")
+
+        # An integer gpu= is a count, so zero or negative would emit a directive asking for no GPU.
+        gpu_as_count = SchedulerBackend.gpu_count(gpu) if gpu is not None else None
+        if gpu_as_count is not None and gpu_as_count < 1:
+            raise ValueError(
+                f"gpu must be a positive count when given as an integer, got {gpu!r}. "
+                f"Use gpu=None or gpu='none' for a CPU-only batch."
+            )
 
         # Start new batch
         self.current_batch += 1

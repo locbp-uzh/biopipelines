@@ -31,7 +31,6 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'biopipelines'))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 SEQUENCE_COLUMNS = ["id", "design", "structures.id", "source_pdb", "chain", "sequence", "sample", "T", "seed",
@@ -207,7 +206,7 @@ def select_chains(chains: Dict[str, str], requested) -> List[Tuple[Optional[str]
         return list(chains.items())
     missing = [chain for chain in requested if chain not in chains]
     if missing:
-        raise ValueError(f"none of the requested chains {missing} are in this backbone ({'+'.join(chains)})")
+        raise ValueError(f"requested chain(s) {missing} are not in this backbone ({'+'.join(chains)})")
     return [(chain, chains[chain]) for chain in requested]
 
 

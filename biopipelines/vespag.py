@@ -74,7 +74,7 @@ class VespaG(BaseConfig):
     """
 
     TOOL_NAME = "VespaG"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "vespag"
 
     # ------------------------------------------------------------------
@@ -249,12 +249,7 @@ fi
                          "wildtype", "mutation", "fitness"],
                 description="VespaG zero-shot single-substitution fitness score (higher = more tolerated/beneficial)",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Sequences VespaG could not score, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Sequences VespaG could not score, with reason"),
         }
         return {
             "tables": tables,

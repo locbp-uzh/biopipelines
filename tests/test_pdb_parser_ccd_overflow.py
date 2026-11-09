@@ -26,8 +26,8 @@ import tempfile
 import pytest
 
 from biopipelines.pdb_parser import (
-    _residue_shift, field_chain, field_coords, field_element, field_res_name,
-    field_res_seq, parse_pdb_file,
+    _residue_shift, field_b_factor, field_chain, field_coords, field_element,
+    field_i_code, field_res_name, field_res_seq, parse_pdb_file, residue_shift,
 )
 
 # Real record, RCSB 9RTM. Columns measured, not assumed: the 5-char code occupies
@@ -55,6 +55,23 @@ def test_every_field_reads_correctly(line, expected):
     got = (field_res_name(line), field_chain(line), field_res_seq(line),
            field_coords(line), field_element(line))
     assert got == expected
+
+
+@pytest.mark.parametrize("line,i_code,b_factor", [
+    (CANONICAL,   "",  20.00),
+    (REAL_5CHAR,  "",  37.79),
+    (BLANK_CHAIN, "",  35.99),
+    (INSERT_CODE, "A", 28.53),
+])
+def test_insertion_code_and_b_factor_absorb_the_shift(line, i_code, b_factor):
+    """Read by inlined offset, a shifted record gives the wrong icode and a ValueError on the B-factor."""
+    assert field_i_code(line) == i_code
+    assert field_b_factor(line) == b_factor
+
+
+def test_residue_shift_is_public_for_a_caller_that_rewrites_a_record():
+    """pipe_foldcomp renumbers residues in place and needs the shift, not a second copy of the rule."""
+    assert [residue_shift(line) for line in (CANONICAL, REAL_5CHAR)] == [0, 2]
 
 
 def test_blank_chain_does_not_shift_the_coordinates():

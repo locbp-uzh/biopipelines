@@ -60,9 +60,19 @@ site/
 *.swp
 *.swo
 
-# Claude Code
+# Claude Code. The agent-local state was in .git/info/exclude, which is per-clone:
+# a teammate running agent worktrees saw them as untracked noise.
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
+.claude/routines/.state/
+.claude/worktrees/
+.claude/checkpoints/
+.claude/mailbox/
+.claude/agent-registry.json
+.claude/agent-memory-local
+.claude/first-run
+.claude/assistant-daemon-state.json
 docs/.claude/
 CLAUDE.md
 

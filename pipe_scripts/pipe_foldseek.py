@@ -24,11 +24,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     step_id_from_table_path,
     container_argv_prefix,
 )
-
-
-def threshold_tag(tm: float) -> str:
-    """Column suffix of a TM-score threshold: 0.5 -> 'tm50'."""
-    return f"tm{int(round(tm * 100)):02d}"
+from biopipelines.foldseek import cluster_columns, threshold_tag  # noqa: E402
 
 
 def stage_structures(files: List[Tuple[str, str]], stage_dir: str) -> Dict[int, str]:
@@ -190,10 +186,7 @@ def main():
             causes[sid].append(f"TM {tm}: {cause}")
         print(f"  TM {tm}: {len(numbers)} cluster(s) over {len(assigned)}/{len(order)} structure(s)")
 
-    columns = ["id"]
-    for tm in thresholds:
-        tag = threshold_tag(tm)
-        columns += [f"cluster_{tag}", f"representative_{tag}", f"n_clusters_{tag}"]
+    columns = cluster_columns(thresholds)
     rows = []
     for sid in order:
         row = {"id": sid}

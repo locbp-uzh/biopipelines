@@ -226,6 +226,24 @@ def test_every_target_unmatched_is_a_step_failure_with_the_tables_written(tmp_pa
     assert out.exists() and len(pd.read_csv(folder / "_execution" / "local_missing.csv")) == 1
 
 
+def test_a_blank_or_unreadable_selection_cell_is_a_failure_not_an_empty_selection(tmp_path):
+    """sele_to_list warns and returns [] instead of raising, so these used to be written as a selection of no residues."""
+    import json
+    folder, config = _stage(tmp_path, references={"d1": REF, "d2": REF, "d3": REF},
+                            targets={"d1_1": REF[3:], "d2_1": REF[3:], "d3_1": REF[3:]})
+    table = folder / "_configuration" / "designed.csv"
+    table.write_text("id,designed\nd1,A8-9\nd2,\nd3,loop1\n")
+    config.write_text(json.dumps({"selection": {"table": str(table), "column": "designed"}}))
+    _, out = _run_pipe(folder, config)
+
+    df = pd.read_csv(out).set_index("id")
+    assert df.loc["d1_1", "selection"] == "A5-6"
+    assert pd.isna(df.loc["d2_1", "selection"]) and pd.isna(df.loc["d3_1", "selection"])
+    missing = pd.read_csv(folder / "_execution" / "local_missing.csv").set_index("id")
+    assert sorted(missing.index) == ["d2_1", "d3_1"] and set(missing["kind"]) == {"failure"}
+    assert "empty" in missing.loc["d2_1", "cause"] and "loop1" in missing.loc["d3_1", "cause"]
+
+
 def test_a_target_carrying_the_reference_twice_fails_and_says_why(st):
     """A tandem fusion aligns each reference residue twice across the doubled reference; the id fails instead of mapping one copy at random."""
     with pytest.raises(ValueError, match="aligned twice"):

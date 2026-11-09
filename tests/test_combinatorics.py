@@ -194,6 +194,46 @@ class TestPredictSingleOutputId:
         assert out == "only"
 
 
+# ── predict_single_provenance ─────────────────────────────────────────────────
+
+class TestPredictSingleProvenanceTakesTheSameSelections:
+    """The two predictors are contracted to take identical tuples; a pipe script calls both with one dict."""
+
+    SELECTIONS = [
+        {"sequences": ("each", ["p1", "p2"], 1, [], False),
+         "ligands": ("bundle", ["l1", "l2"], None, [], False)},
+        {"sequences": ("each", ["only"], 0, [], False)},
+        {"proteins": ("each", ["p1"], 0, [], False),
+         "ligands": ("bundle", [], None, [], False)},
+        {"ligands": ("bundle", [], None, [], False),
+         "proteins": ("bundle", ["p1"], None, [], False)},
+    ]
+
+    @pytest.mark.parametrize("selection", SELECTIONS)
+    def test_both_predictors_accept_it(self, selection):
+        # An axis whose members were all filtered upstream raised in the provenance predictor
+        # and killed the whole config step of RF3, Protenix and OpenFold3.
+        output_id = cb.predict_single_output_id(**selection)
+        provenance = cb.predict_single_provenance(**selection)
+        assert isinstance(output_id, str)
+        assert set(selection) <= set(provenance)
+
+    def test_an_emptied_bundle_contributes_an_empty_cell(self):
+        provenance = cb.predict_single_provenance(
+            proteins=("each", ["p1"], 0, [], False),
+            ligands=("bundle", [], None, [], False),
+        )
+        assert provenance == {"proteins": "p1", "ligands": ""}
+
+    def test_a_populated_bundle_is_unchanged(self):
+        provenance = cb.predict_single_provenance(
+            sequences=("each", ["p1", "p2"], 1, [], False),
+            ligands=("bundle", ["l1", "l2"], None, [], False),
+        )
+        assert provenance == {"sequences": "p2", "ligands": "l1+l2",
+                              "ligands.1": "l1", "ligands.2": "l2"}
+
+
 # ── Mock-driven combinatorics end-to-end ──────────────────────────────────────
 
 def test_combinatorics_each_each_via_mock(

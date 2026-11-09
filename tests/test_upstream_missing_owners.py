@@ -117,3 +117,48 @@ def test_the_merge_runs_after_the_pipe_and_before_the_footer(name, filtered, tmp
     if "pipe_propagate_missing.py" not in flat:
         pytest.skip("hands the manifest to its pipe instead")
     assert flat.index("BP_MAIN_RC=$?") < flat.index("pipe_propagate_missing.py") < flat.index("Checking outputs")
+
+
+# What each tool calls its own `missing` table. These reach the expected-outputs JSON, the
+# printed listing and the HTML renderer, and routing the declaration through the shared
+# helper must not flatten them to the generic default.
+DESCRIPTIONS = {
+    "DiffDock": "Pairs that DiffDock could not dock, with reason",
+    "DynamicBind": "Pairs DynamicBind could not dock, with reason",
+    "NeuralPLexer": "Pairs NeuralPLexer could not predict, with reason",
+    "PocketGen": "Pairs PocketGen could not process",
+    "PLACER": "Inputs PLACER could not process",
+    "Frame2Seq": "Structures Frame2Seq could not process, with reason",
+    "LASErMPNN": "Designs not produced (fewer valid designs than num_sequences)",
+    "ThermoMPNN": "Structures ThermoMPNN could not score, with reason",
+    "PLM_Sol": "Sequences PLM_Sol could not score, with reason",
+    "VespaG": "Sequences VespaG could not score, with reason",
+}
+
+
+@pytest.mark.parametrize("name", OWNERS)
+def test_the_declared_missing_table_keeps_the_canonical_schema_and_its_own_wording(
+        name, filtered, tmp_path):
+    _tool, _script, declared = _script_and_tables(_build(name, filtered, tmp_path))
+
+    assert declared["missing"]["columns"] == ["id", "removed_by", "kind", "cause"], (
+        f"{name} declares a `missing` table off the canonical schema")
+    assert declared["missing"]["description"] == DESCRIPTIONS[name], (
+        f"{name} lost the wording that says what it in particular drops")
+
+
+def test_the_helper_carries_a_description_and_falls_back_to_the_generic_one():
+    from biopipelines.base_config import BaseConfig
+
+    class _Stub(BaseConfig):
+        configure_inputs = generate_script = validate_params = lambda self, *a, **k: None
+        get_output_files = lambda self, *a, **k: {}
+
+    stub = _Stub.__new__(_Stub)
+    own = stub.missing_table_info("/o/tables/missing.csv", "Pairs PocketGen could not process").info
+    generic = stub.missing_table_info("/o/tables/missing.csv").info
+
+    assert own.description == "Pairs PocketGen could not process"
+    assert generic.description == "IDs removed by upstream tools (or local failures) with removal reason"
+    assert own.columns == generic.columns == ["id", "removed_by", "kind", "cause"]
+    assert own.path == generic.path == "/o/tables/missing.csv"

@@ -26,13 +26,19 @@ The result is a list of messages, never an error: the scheduler decides where th
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
+# base_config loads this module standalone via sys.path, where a relative import has no package.
+try:
+    from .schedulers import SchedulerBackend
+except ImportError:
+    from schedulers import SchedulerBackend
+
 GPU_KEYS = ("compatible", "incompatible", "use")
 
 # Models the Resources() documentation names; a request for one of them is a model, not an unknown token.
 KNOWN_GPU_MODELS = ("T4", "L4", "V100", "A100", "H100", "H200")
 
 # The memory tokens the SLURM backend turns into a GPUMEM constraint, and what "high-memory" stands for.
-MEMORY_TOKENS = ("24GB", "32GB", "80GB", "96GB", "140GB")
+MEMORY_TOKENS = SchedulerBackend.MEMORY_SPECS
 HIGH_MEMORY_TOKENS = ("32GB", "80GB", "96GB")
 
 ANY_REQUESTS = ("any", "gpu")

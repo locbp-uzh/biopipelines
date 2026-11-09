@@ -42,6 +42,15 @@ def threshold_tag(tm: float) -> str:
     return f"tm{int(round(tm * 100)):02d}"
 
 
+def cluster_columns(tm_thresholds) -> list:
+    """Columns of the tm_clusters table: the id, then three columns per threshold."""
+    columns = ["id"]
+    for tm in tm_thresholds:
+        tag = threshold_tag(tm)
+        columns += [f"cluster_{tag}", f"representative_{tag}", f"n_clusters_{tag}"]
+    return columns
+
+
 class Foldseek(BaseConfig):
     """
     Foldseek: cluster structures at TM-score thresholds.
@@ -99,7 +108,7 @@ class Foldseek(BaseConfig):
     """
 
     TOOL_NAME = "Foldseek"
-    TOOL_VERSION = "1.5"
+    TOOL_VERSION = "1.6"
     ENV_NAME = "foldseek"
 
     @classmethod
@@ -273,10 +282,7 @@ python "{self.helper_py}" \\
             }, f, sort_keys=False)
 
     def get_output_files(self) -> Dict[str, Any]:
-        columns = ["id"]
-        for t in self.tm_thresholds:
-            tag = threshold_tag(t)
-            columns += [f"cluster_{tag}", f"representative_{tag}", f"n_clusters_{tag}"]
+        columns = cluster_columns(self.tm_thresholds)
         tables = {
             "tm_clusters": TableInfo(
                 name="tm_clusters",

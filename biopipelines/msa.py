@@ -49,7 +49,7 @@ class MSA(BaseConfig):
     """
 
     TOOL_NAME = "MSA"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -82,7 +82,7 @@ echo "=== MSA ready ==="
         Output:
             Streams: msas (.a3m or .csv)
             Tables:
-                msas: id | sequence | file
+                msas: id | sequences.id | sequence | file
                       One row per input row, under the input row's id; `sequences.id` is carried only when the input had one that its id does not already spell.
                 missing: id | removed_by | kind | cause
                       A `failure` row for an id the input table lists whose alignment file is gone or whose `file` cell is empty, plus the upstream manifest forwarded.
@@ -173,7 +173,7 @@ python "{self.msa_py}" --config "{self.config_json}"
             "msas": TableInfo(
                 name="msas",
                 path=self.output_msas_csv,
-                columns=["id", "sequence", "file"],
+                columns=["id", "sequences.id", "sequence", "file"],
                 description="Converted MSA files"
             ),
             "missing": self.missing_table_info(self.missing_csv),

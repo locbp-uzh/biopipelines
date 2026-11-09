@@ -189,8 +189,8 @@ fi
 
     MISSING PROPAGATION - nothing to wire unless this tool records rows of its own. generate_completion_check_footer() discovers the upstream manifests from the instance's own attributes, emits the propagation block, and declares the `missing` table, so a tool that only consumes ids is covered with no code here.
     Write one of these only when the tool drops or fails ids itself:
-    (A) propagation step (shown below): the pipe writes only its OWN failures/drops to a separate local file (execution/local_missing.csv), then generate_missing_propagation(*inputs, local_missing=..., missing_csv=...) merges upstream manifests + that local file into tables/missing.csv. Modular; the pipe never touches upstream tables.
-    (B) all-in-one: the pipe itself reads the upstream missing table (passed as --upstream-missing, from upstream_missing_flag()) and writes the merged tables/missing.csv in one pass. Exemplars: dssp.py, gnina.py.
+    (A) propagation step (shown below): the pipe writes only its OWN failures/drops to a separate local file (execution/local_missing.csv), then generate_missing_propagation(*inputs, local_missing=..., missing_csv=...) merges upstream manifests + that local file into tables/missing.csv. Modular; the pipe never WRITES the merged table, though it may read an upstream one to skip ids (gnina.py).
+    (B) all-in-one: the pipe itself reads the upstream missing table (passed as --upstream-missing, from upstream_missing_flag()) and writes the merged tables/missing.csv in one pass. Exemplars: prolif.py, rtmscore.py (dssp.py builds the flag by hand).
     Either call claims the manifest, so the central block stands down — it would otherwise rewrite the file and erase this tool's own rows. Do NOT do both, and declare the `missing` TableInfo in get_output_files() whenever you pick one.
     """
     def generate_script(self, script_path: str) -> str:

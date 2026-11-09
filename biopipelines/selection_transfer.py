@@ -34,7 +34,8 @@ except ImportError:
     from biopipelines_io import TableReference
 
 
-_SPAN = re.compile(r"^[A-Z]?\d+(-\d+)?$")
+# Exactly what sele_utils._parse_sele_token accepts: an optional upper-case chain, or a bare negative number.
+_SPAN = re.compile(r"^([A-Z]?\d+(-\d+)?|-\d+)$")
 
 
 def _structures_stream(value, param: str) -> DataStream:
@@ -66,7 +67,7 @@ class SelectionTransfer(BaseConfig):
     """
 
     TOOL_NAME = "SelectionTransfer"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):

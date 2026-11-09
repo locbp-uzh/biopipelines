@@ -67,7 +67,7 @@ class DiffDock(BaseConfig):
     """
 
     TOOL_NAME = "DiffDock"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     ENV_NAME = "diffdock"
 
     # ------------------------------------------------------------------
@@ -442,12 +442,7 @@ fi
                 columns=["id", "structures.id", "compounds.id", "rank", "confidence"],
                 description="DiffDock per-pose confidence scores",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Pairs that DiffDock could not dock, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Pairs that DiffDock could not dock, with reason"),
         }
 
         return {

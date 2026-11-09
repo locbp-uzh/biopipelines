@@ -57,7 +57,7 @@ class PPIDdG(BaseConfig):
     """
 
     TOOL_NAME = "PPIDdG"
-    TOOL_VERSION = "1.1"
+    TOOL_VERSION = "1.2"
     ENV_NAME = "PyRosetta"
 
     @classmethod

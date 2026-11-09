@@ -96,7 +96,7 @@ class SchedulerBackend:
         raise NotImplementedError
 
     # The GPU memories a request may name instead of a model.
-    MEMORY_SPECS = ("24GB", "32GB", "80GB", "96GB", "140GB")
+    MEMORY_SPECS = ("16GB", "24GB", "32GB", "80GB", "96GB", "140GB")
 
     def gpu_directive(self, gpu_spec: Optional[str], gpus: int = 1,
                       single_gpu_type: bool = False) -> Tuple[str, List[str]]:
@@ -178,7 +178,8 @@ class SlurmBackend(SchedulerBackend):
         # A single-GPU-type site has no model to select on, and its GRES is the
         # untyped `gpu:N` — a typed request there is rejected outright.
         if single_gpu_type:
-            return f"#SBATCH --gres=gpu:{n}", []
+            # An integer request is a count here too; it used to be dropped and silently became one GPU.
+            return f"#SBATCH --gres=gpu:{self.gpu_count(gpu_spec) or n}", []
         # An integer is a count, not a model
         elif self.gpu_count(gpu_spec) is not None:
             return f"#SBATCH --gpus={self.gpu_count(gpu_spec)}", []

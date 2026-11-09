@@ -75,7 +75,7 @@ class BindingData(BaseConfig):
     """
 
     TOOL_NAME = "BindingData"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -288,12 +288,8 @@ python "{self.helper_py}" --config "{self.config_json}"
                          "queried_utc", "chembl_release"],
                 description="Protein targets aggregated over the returned records"
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Compounds with no affinity record, and upstream-filtered ids"
-            ),
+            "missing": self.missing_table_info(
+                self.missing_csv, "Compounds with no affinity record, and upstream-filtered ids"),
         }
 
         return {

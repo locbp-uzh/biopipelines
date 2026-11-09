@@ -78,7 +78,7 @@ class LASErMPNN(BaseConfig):
     """LASErMPNN: ligand-conditioned inverse folding + all-atom packing."""
 
     TOOL_NAME = "LASErMPNN"
-    TOOL_VERSION = "2.3"
+    TOOL_VERSION = "2.4"
     # run_batch_inference is argparse and takes far more flags than the wrapper types; an untyped kwarg joins the free-form --run-options string.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "lasermpnn"
@@ -519,12 +519,8 @@ python {self.run_py} \\
                 columns=["id", "structures.id", "sequence", "score"],
                 description="LASErMPNN designed sequences with log-probability score"
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Designs not produced (fewer valid designs than num_sequences)"
-            )
+            "missing": self.missing_table_info(
+                self.missing_csv, "Designs not produced (fewer valid designs than num_sequences)")
         }
 
         return {

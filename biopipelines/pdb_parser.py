@@ -89,6 +89,11 @@ def _overflows_residue_field(line: str) -> bool:
     return _residue_shift(line) > 0
 
 
+def residue_shift(line: str) -> int:
+    """Public form of the column shift, for a caller that rewrites a record in place."""
+    return _residue_shift(line)
+
+
 def field_atom_name(line: str) -> str:
     """Atom name (cols 13-16)."""
     return line[12:16].strip()
@@ -109,6 +114,18 @@ def field_res_seq(line: str) -> str:
     """Residue sequence number as a string (cols 23-26), icode excluded."""
     s = _residue_shift(line)
     return line[22 + s:26 + s].strip()
+
+
+def field_i_code(line: str) -> str:
+    """Residue insertion code (col 27). Empty when the record leaves it blank."""
+    s = _residue_shift(line)
+    return line[26 + s:27 + s].strip()
+
+
+def field_b_factor(line: str) -> float:
+    """Temperature factor (cols 61-66); pLDDT in a predicted model."""
+    s = _residue_shift(line)
+    return float(line[60 + s:66 + s])
 
 
 def field_coords(line: str) -> Tuple[float, float, float]:

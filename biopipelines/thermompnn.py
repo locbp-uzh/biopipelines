@@ -72,7 +72,7 @@ class ThermoMPNN(BaseConfig):
     """
 
     TOOL_NAME = "ThermoMPNN"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "thermompnn"
 
     # ------------------------------------------------------------------
@@ -269,12 +269,7 @@ fi
                          "wildtype", "mutation", "ddG_pred"],
                 description="ThermoMPNN predicted fold-stability change per point mutation (kcal/mol; negative = stabilising)",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Structures ThermoMPNN could not score, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Structures ThermoMPNN could not score, with reason"),
         }
         return {
             "tables": tables,

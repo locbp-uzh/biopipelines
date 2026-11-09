@@ -29,6 +29,7 @@ def main():
     parser.add_argument("out_csv")
     parser.add_argument("--columns", default=None, help="comma-separated column subset (id always kept)")
     parser.add_argument("--require", default=None, help="comma-separated columns that must exist")
+    # Every row excuses its id whatever its kind: these are upstream manifests, so a failure there already failed its own step.
     parser.add_argument("--excused", nargs="*", default=None,
                         help="upstream missing.csv path(s); ids listed there may be absent")
     args = parser.parse_args()

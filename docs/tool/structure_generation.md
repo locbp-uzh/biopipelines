@@ -315,6 +315,8 @@ Not implemented as a recipe, reachable only through `conditions` or forwarded ov
 
   Plus one column per upstream metric when `metrics_tags` is set, prefixed by the metric key (e.g. `clash_metrics.frac_atoms_clashing_1p5A`; see the upstream metrics reference). The run record (`seed`, `ckpt_path`, `ckpt_name`) is kept; the `generation.*` configuration dump and the path columns are dropped. A design that scoring did not reach has NaN.
 
+  **The two columns above are a minimum, not the full schema.** Which metrics upstream emits is known only once it has run, so the wrapper cannot declare them at configuration time: `rfd4proteina.tables.metrics` lists `id` and `structures.id` alone, while the written CSV carries every metric column as well. Read the file's header, not the declaration, to see what a given run produced.
+
 - `missing`:
 
   | id | removed_by | kind | cause |

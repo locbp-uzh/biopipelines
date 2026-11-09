@@ -62,6 +62,6 @@ version = {attr = "biopipelines.__version__"}
 testpaths = ["tests"]
 addopts = "-ra -m 'not tool_parameters and not network'"
 markers = [
-    "network: reaches a live external API (RCSB). Excluded from the default run so a local suite is hermetic and works offline; CI has connectivity and runs it explicitly.",
-    "tool_parameters: opt-in suite that drives every wrapped public-repo tool with a minimal pipeline and asserts each kwarg lands in the emitted artifacts. Needs no GPU or network (about 40 s), excluded from the default run and run explicitly by CI; run with 'pytest tests/tool_parameters -m tool_parameters -v'.",
+    "network: reaches a live external API (RCSB and GitHub). Excluded from the default run so a local suite is hermetic and works offline; CI has connectivity and runs it explicitly.",
+    "tool_parameters: opt-in suite that drives every wrapped public-repo tool with a minimal pipeline and asserts each kwarg lands in the emitted artifacts. Needs no GPU or network (1-2 min), excluded from the default run and run explicitly by CI; run with 'pytest tests/tool_parameters -m tool_parameters -v'.",
 ]

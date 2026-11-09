@@ -25,13 +25,19 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     container_argv_prefix,
 )
 from biopipelines.combinatorics import generate_multiplied_ids  # noqa: E402
+from biopipelines.foldcomp import DOMAIN_COLUMNS  # noqa: E402
+from biopipelines.pdb_parser import (  # noqa: E402
+    field_b_factor,
+    field_chain,
+    field_res_name,
+    field_res_seq,
+    residue_shift,
+)
 
 
 ENTRY_NAME = re.compile(r"^AF-[A-Z0-9]+-F[0-9]+-model_v[0-9]+$")
 ENTRY_NAME_ANYWHERE = re.compile(r"AF-[A-Z0-9]+-F[0-9]+-model_v[0-9]+")
 UNIPROT_ACCESSION = re.compile(r"^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})$")
-DOMAIN_COLUMNS = ["id", "entry", "database_name", "start", "end", "length", "offset",
-                  "entry_length", "plddt_mean", "found", "clipped"]
 INTEGER_COLUMNS = ["start", "end", "length", "offset", "entry_length"]
 
 
@@ -164,26 +170,29 @@ def cut_domain(atoms: List[str], start: int, end: int, title: str) -> Cut:
 
     Original number = new number + offset. Atom serials restart at 1. Raises when the range misses the model.
     """
-    chains = {line[21] for line in atoms}
+    chains = {field_chain(line) for line in atoms}
     if len(chains) != 1:
         raise ValueError(f"the model holds {len(chains)} chains; a residue range needs exactly one")
-    numbers = sorted({int(line[22:26]) for line in atoms})
+    numbers = sorted({int(field_res_seq(line)) for line in atoms})
     first, last = numbers[0], numbers[-1]
     if start > last or end < first:
         raise ValueError(f"range {start}-{end} lies outside the entry (residues {first}-{last}, length {len(numbers)})")
     low, high = max(start, first), min(end, last)
-    chosen = [line for line in atoms if low <= int(line[22:26]) <= high]
+    chosen = [line for line in atoms if low <= int(field_res_seq(line)) <= high]
     if not chosen:
         raise ValueError(f"no residue of the entry lies in range {start}-{end}")
     offset = low - 1
     lines = [f"TITLE     {title}"]
     plddt: Dict[int, float] = {}
     for serial, line in enumerate(chosen, 1):
-        number = int(line[22:26])
-        plddt.setdefault(number, float(line[60:66]))
-        lines.append(f"{line[:6]}{serial:5d}{line[11:22]}{number - offset:4d}{line[26:]}")
+        number = int(field_res_seq(line))
+        plddt.setdefault(number, field_b_factor(line))
+        # The serial and the residue number are rewritten in place, so these columns stay explicit.
+        shift = residue_shift(line)
+        lines.append(f"{line[:6]}{serial:5d}{line[11:22 + shift]}{number - offset:4d}{line[26 + shift:]}")
     final = chosen[-1]
-    lines.append(f"TER   {len(chosen) + 1:5d}      {final[17:20]} {final[21]}{int(final[22:26]) - offset:4d}")
+    lines.append(f"TER   {len(chosen) + 1:5d}      {field_res_name(final):>3} "
+                 f"{field_chain(final):1}{int(field_res_seq(final)) - offset:4d}")
     return Cut(
         text="\n".join(lines) + "\n",
         length=len(plddt),

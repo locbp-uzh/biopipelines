@@ -138,7 +138,7 @@ class Embedding(BaseConfig):
     """
 
     TOOL_NAME = "Embedding"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "Embedding"
 
     @classmethod

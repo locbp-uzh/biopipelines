@@ -37,7 +37,7 @@ Do not run a script in this repo, or a shell command, to do what one of these do
 
 ## Finding tools without the MCP server — read the index, not the prose docs
 
-**`references/tool_index.md` is your catalog.** It is generated from the source and its header states how many callable entries it holds, one line each: name, version, hardware (CPU/GPU), the platforms it is verified on, what it does, and a pointer to its full entry. It costs ~4k tokens; the prose docs it points into cost ~78k, and the README's badge table another ~32k.
+**`references/tool_index.md` is your catalog.** It is generated from the source and its header states how many callable entries it holds, one line each: name, version, hardware (CPU/GPU), the platforms it is verified on, what it does, and a pointer to its full entry. It costs ~8k tokens; the prose docs it points into cost ~128k, and the README's badge table another ~36k. (`skills/biopipelines/measure_doc_budgets.py` re-measures all three when the catalog grows.)
 
 The loop is: **read the index → pick your tools → read only those sections.** Each entry ends with `docs/tool/<file>.md#<anchor>` — read that section for the real signature before you write the stage.
 
@@ -45,10 +45,10 @@ Each index line ends with the tool's tags — a closed vocabulary in four facets
 
 Two rules, because both failure modes are silent:
 
-- **Never read a whole `docs/tool/*.md` file to find a tool.** `analysis.md` alone is 24k tokens for 33 tools, and a campaign typically uses three of them.
+- **Never read a whole `docs/tool/*.md` file to find a tool.** `analysis.md` alone is ~46k tokens for 45 tools, and a campaign typically uses three of them.
 - **Never guess a tool name or a parameter.** An unknown keyword is swallowed by `**kwargs` rather than rejected, so a typo becomes a silently ignored argument, not an error.
 
-The index lists 88 entries against 86 registered tools: `SolubleMPNN` and `LoadMultiple` are public classes that share a parent's identity (`ProteinMPNN` and `Load`), so they are callable but carry no separate registration.
+The index lists 108 entries against 106 registered tools: `SolubleMPNN` and `LoadMultiple` are public classes that share a parent's identity (`ProteinMPNN` and `Load`), so they are callable but carry no separate registration.
 
 ## The framework contract
 

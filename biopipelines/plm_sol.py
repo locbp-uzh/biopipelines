@@ -55,7 +55,7 @@ class PLM_Sol(BaseConfig):
     """
 
     TOOL_NAME = "PLM_Sol"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "plm_sol"
 
     # ------------------------------------------------------------------
@@ -218,12 +218,7 @@ fi
                 description="PLM_Sol sequence-based solubility (probability in [0,1]; "
                             "soluble = probability >= 0.5; higher = more soluble)",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Sequences PLM_Sol could not score, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Sequences PLM_Sol could not score, with reason"),
         }
         return {
             "tables": tables,

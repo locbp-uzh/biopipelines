@@ -157,6 +157,7 @@ def main():
     parser.add_argument("--pae-map-csv", default=None)
     parser.add_argument("--local-missing-csv", required=True)
     parser.add_argument("--top-only", default="True")
+    parser.add_argument("--structures-per-query", type=int, required=True)
     args = parser.parse_args()
 
     top_only = parse_bool(args.top_only)
@@ -179,8 +180,11 @@ def main():
     produced = 0
 
     def fail(query: str, cause: str) -> None:
-        confidence_rows.append({"id": query, **provenance.get(query, {})})
-        missing_rows.append({"id": query, "removed_by": step_id, "kind": "failure", "cause": cause})
+        # With top_only off the declared ids are <query>_1..N, so the bare query id would name none of them.
+        ids = [query] if top_only else [f"{query}_{i}" for i in range(1, args.structures_per_query + 1)]
+        for out_id in ids:
+            confidence_rows.append({"id": out_id, **provenance.get(query, {})})
+            missing_rows.append({"id": out_id, "removed_by": step_id, "kind": "failure", "cause": cause})
 
     for query in queries:
         if query in skipped:
@@ -218,6 +222,16 @@ def main():
             row.update({k: v for k, v in scores.items() if v is not None})
             confidence_rows.append(row)
             produced += 1
+
+        # Fewer samples than declared is protenix under-delivering, so each id it owes is named as a failure.
+        if not top_only and len(chosen) < args.structures_per_query:
+            shortfall = (f"protenix wrote {len(chosen)} of {args.structures_per_query} "
+                         f"requested samples for this query")
+            for index in range(len(chosen) + 1, args.structures_per_query + 1):
+                out_id = f"{query}_{index}"
+                confidence_rows.append({"id": out_id, **provenance.get(query, {})})
+                missing_rows.append({"id": out_id, "removed_by": step_id,
+                                     "kind": "failure", "cause": shortfall})
 
         if args.pae_dir:
             remove_full_data(args.prediction_folder, query)

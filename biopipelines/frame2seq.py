@@ -78,7 +78,7 @@ class Frame2Seq(BaseConfig):
     """
 
     TOOL_NAME = "Frame2Seq"
-    TOOL_VERSION = "2.1"
+    TOOL_VERSION = "2.2"
     ENV_NAME = "frame2seq"
 
     # ------------------------------------------------------------------
@@ -323,12 +323,7 @@ fi
                 columns=["id", "structures.id", "sequence", "score", "recovery"],
                 description="Frame2Seq designed sequences (content-bearing map_table)",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Structures Frame2Seq could not process, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Structures Frame2Seq could not process, with reason"),
         }
 
         return {

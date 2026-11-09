@@ -303,7 +303,8 @@ if args.missing_csv:
         except Exception as e:
             print(f"Warning: Could not read existing missing.csv: {e}")
 
-    all_missing = upstream_rows + local_rows + dropped
+    # This step's own verdict comes first: a local failure must not be shadowed by an excused upstream row.
+    all_missing = local_rows + dropped + upstream_rows
     if all_missing:
         missing_df = pd.DataFrame(all_missing).drop_duplicates(subset=['id'], keep='first')
     else:

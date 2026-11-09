@@ -91,7 +91,7 @@ class FLOWR(BaseConfig):
     """
 
     TOOL_NAME = "FLOWR"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
     ENV_NAME = "FLOWR"
 
     @classmethod

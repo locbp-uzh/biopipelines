@@ -193,6 +193,24 @@ class TestTheInputsJson:
         with pytest.raises(ValueError, match="'p9'"):
             pipe_rf3_config.build_component("protein", {"id": "p9", "sequence": float("nan")}, "A", None)
 
+    def test_one_empty_sequence_skips_its_example_and_the_batch_survives(self):
+        """The ValueError used to escape build_examples and lose every other example with it."""
+        elements = {"proteins": {"mode": "each", "entity_type": "protein", "static_first": False, "static": [],
+                                 "iterated": [{"id": "p1", "sequence": "MKT"},
+                                              {"id": "p2", "sequence": float("nan")},
+                                              {"id": "p3", "sequence": "MAA"}]}}
+        examples, skipped = pipe_rf3_config.build_examples(elements, None)
+        assert [e["name"] for e in examples] == ["p1", "p3"]
+        assert list(skipped) == ["p2"] and "empty sequence" in skipped["p2"]
+
+    def test_a_double_stranded_record_with_no_sequence_skips_only_its_example(self):
+        """The reverse-complement component sat outside the try and raised a second time, uncaught."""
+        elements = {"dsDNA": {"mode": "each", "entity_type": "dsdna", "static_first": False, "static": [],
+                              "iterated": [{"id": "d1", "sequence": "AAAG"}, {"id": "d2", "sequence": ""}]}}
+        examples, skipped = pipe_rf3_config.build_examples(elements, None)
+        assert [e["name"] for e in examples] == ["d1"]
+        assert list(skipped) == ["d2"]
+
     def test_an_iterating_axis_with_no_records_builds_no_example(self):
         elements = {"proteins": {"mode": "each", "entity_type": "protein", "iterated": [],
                                  "static": [], "static_first": False}}
@@ -531,7 +549,8 @@ class TestTheDeclaredOutputs:
         _tool, script = self._declared(new_pipeline)
         paths = re.findall(r'--provenance-csv "([^"]+)"', script)
         assert len(paths) == 2 and paths[0] == paths[1]
-        assert paths[0].endswith(os.path.join("_configuration", "query_provenance.csv"))
+        # The pipe writes it at execution time, so it belongs beside local_missing.csv, not in _configuration.
+        assert paths[0].endswith(os.path.join("_execution", "query_provenance.csv"))
 
     def test_the_config_flags_are_all_known_to_the_pipe_script(self, local_config, isolated_cwd, new_pipeline):
         import re

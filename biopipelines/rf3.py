@@ -91,7 +91,7 @@ class RF3(BaseConfig):
     """
 
     TOOL_NAME = "RF3"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
     # `rf3 fold` is a Hydra entry point: an untyped kwarg is rendered as one more `key=value` override.
     FORWARD_UNKNOWN_KWARGS = "hydra"
     # The foundry environment RFdiffusion3 already builds; the entry in each config's `environments:` names it.
@@ -156,9 +156,9 @@ fi
     combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
     msas_json = Path(lambda self: self.configuration_path("msas.json"))
     # Written at EXECUTION time: one JSON list of every example, so `rf3 fold` loads the model once.
-    queries_json = Path(lambda self: self.configuration_path("queries.json"))
-    skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
-    provenance_csv = Path(lambda self: self.configuration_path("query_provenance.csv"))
+    queries_json = Path(lambda self: self.execution_path("queries.json"))
+    skipped_csv = Path(lambda self: self.execution_path("skipped_queries.csv"))
+    provenance_csv = Path(lambda self: self.execution_path("query_provenance.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
     checkpoint_dir = Path(lambda self: self.folders["RF3"])

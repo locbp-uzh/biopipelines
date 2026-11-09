@@ -19,16 +19,16 @@ Before responding to the user's first task, load the framework's contract — th
 
 - `docs/user_manual.md`
 - `skills/biopipelines/references/tool_index.md` — the tool catalog, one line per tool
-  (~4k tokens). **This replaces reading `docs/tool_reference.md` and `docs/tool/*.md` up
-  front**, which together run to ~78k tokens. Read the index, pick the tools the task needs,
+  (~8k tokens). **This replaces reading `docs/tool_reference.md` and `docs/tool/*.md` up
+  front**, which together run to ~128k tokens. Read the index, pick the tools the task needs,
   then read only those sections: every entry ends with a `docs/tool/<file>.md#<anchor>`
   pointer to its authoritative entry, and that is where the real signature lives. Read a
   section before you write the stage that uses it — an unknown keyword is swallowed by
   `**kwargs` rather than rejected, so a guessed parameter is silently ignored instead of
   erroring. Never read a whole `docs/tool/*.md` file to find a tool: `analysis.md` alone is
-  ~24k tokens for 33 tools, and a campaign typically uses three of them.
+  ~46k tokens for 45 tools, and a campaign typically uses three of them.
 
-The index also carries, per tool, the hardware it needs (CPU/GPU) and the platforms it has been verified on, lifted from the README's badge table — so you never need to open `README.md`, which is ~32k tokens and written for people, not for you. Each line ends with the tool's tags, so a capability the one-line summary omits — `covalent`, `binder-design`, `symmetry` — is still greppable in the index alone.
+The index also carries, per tool, the hardware it needs (CPU/GPU) and the platforms it has been verified on, lifted from the README's badge table — so you never need to open `README.md`, which is ~36k tokens and written for people, not for you. Each line ends with the tool's tags, so a capability the one-line summary omits — `covalent`, `binder-design`, `symmetry` — is still greppable in the index alone.
 
 Do not announce that you've read them, do not summarise
 them, do not list what you found. Just have the context loaded so your

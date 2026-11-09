@@ -382,7 +382,7 @@ def read_physicality(path: str) -> Dict[int, Dict]:
 
 
 def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
-                msas: Optional[MsaLookup]) -> Dict:
+                msas: Optional[MsaLookup], step_id: str) -> Dict:
     """Sample one run and stage its outputs; the rows each output gets are in the returned dict."""
     run_id = run["id"]
     system, sources = build_system(run["records"], config.get("contacts"), config.get("covalent_linkage"))
@@ -408,8 +408,11 @@ def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
         raise RunError("bioemu2 wrote no samples.xtc and topology.cif")
 
     frames, n_residues = split_trajectory(topology_cif, samples_xtc, run_id, paths.structures_dir)
-    if len(frames) != config["num_samples"]:
-        print(f"WARNING: {run_id}: {len(frames)} conformers written, {config['num_samples']} requested",
+    # A short trajectory is the sampler under-delivering, so each id it owes is a failure, not an excused drop.
+    requested = config["num_samples"]
+    unproduced = frame_ids(run_id, requested)[len(frames):]
+    if unproduced:
+        print(f"WARNING: {run_id}: {len(frames)} conformers written, {requested} requested",
               file=sys.stderr)
 
     os.makedirs(paths.trajectories_dir, exist_ok=True)
@@ -421,7 +424,10 @@ def process_run(run: Dict, config: Dict, paths: argparse.Namespace,
     report = read_physicality(os.path.join(work, "physicality.json"))
     provenance = {"sequences.id": run["provenance"].get("sequences", ""),
                   "ligands.id": run["provenance"].get("ligands", "")}
+    shortfall = f"bioemu2 wrote {len(frames)} of {requested} requested conformers"
     return {
+        "missing": [{"id": fid, "removed_by": step_id, "kind": "failure",
+                     "cause": shortfall[:CAUSE_LIMIT]} for fid in unproduced],
         "structures": [{"id": fid, "file": path, "run.id": run_id, **provenance} for fid, path in frames],
         "trajectory": {"id": run_id, "file": destination_xtc, "topology": destination_top},
         "physicality": [{"id": fid, "run.id": run_id, "frame": index,
@@ -474,7 +480,7 @@ def main():
         attempted += 1
         print(f"Run {run['id']}")
         try:
-            outcome = process_run(run, config, args, msas)
+            outcome = process_run(run, config, args, msas, step_id)
         except Exception as exc:
             cause = str(exc) if isinstance(exc, RunError) else f"{type(exc).__name__}: {exc}"
             print(f"WARNING: {run['id']} failed: {cause}", file=sys.stderr)
@@ -485,6 +491,7 @@ def main():
                                  "cause": cause[:CAUSE_LIMIT]})
             continue
         structure_rows += outcome["structures"]
+        missing_rows += outcome["missing"]
         trajectory_rows.append(outcome["trajectory"])
         physicality_rows += outcome["physicality"]
         summary_rows.append(outcome["summary"])

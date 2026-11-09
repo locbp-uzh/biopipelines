@@ -77,7 +77,7 @@ class Foldcomp(BaseConfig):
     """
 
     TOOL_NAME = "Foldcomp"
-    TOOL_VERSION = "1.2"
+    TOOL_VERSION = "1.3"
     ENV_NAME = "foldcomp"
 
     @classmethod

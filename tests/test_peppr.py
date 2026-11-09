@@ -206,6 +206,67 @@ def test_a_prediction_with_only_a_sibling_reference_is_unmatched_not_scored(pipe
     assert math.isnan(rows[1]["rmsd"])
 
 
+def test_the_single_reference_removed_upstream_is_not_reported_as_an_id_mismatch(pipe):
+    """One declared reference broadcasts to every pose; with no file the cause is the upstream removal, not a mismatch."""
+    rows, missing = pipe.score_all({"a": "a.pdb", "b": "b.pdb"}, {}, 1, ["rmsd"], "003_Peppr", _fake({}))
+    assert [(m["id"], m["kind"]) for m in missing] == [("a", "unmatched"), ("b", "unmatched")]
+    for entry in missing:
+        assert "removed upstream" in entry["cause"]
+    assert all(math.isnan(row["rmsd"]) for row in rows)
+
+
+def _fake_peppr(warnings_emitted, results):
+    """A stand-in peppr module: `warnings_emitted` is [(category name, text)], `results` the per-metric values."""
+    import types
+
+    module = types.ModuleType("peppr")
+
+    class MatchWarning(UserWarning):
+        pass
+
+    class EvaluationWarning(UserWarning):
+        pass
+
+    class Evaluator:
+        def __init__(self, metrics, tolerate_exceptions=False):
+            self.metrics = metrics
+
+        def feed(self, system_id, reference, pose):
+            import warnings as warn
+            for category, text in warnings_emitted:
+                warn.warn(text, {"match": MatchWarning, "evaluation": EvaluationWarning}[category])
+
+        def get_results(self):
+            return [[[value]] for value in results]
+
+    module.MatchWarning = MatchWarning
+    module.EvaluationWarning = EvaluationWarning
+    module.Evaluator = Evaluator
+    for name in ("MonomerRMSD", "MonomerTMScore", "MonomerLDDTScore", "LDDTPLIScore",
+                 "ContactFraction", "InterfaceRMSD", "LigandRMSD", "DockQScore"):
+        setattr(module, name, lambda *a, **k: object())
+    return module
+
+
+def test_several_warnings_from_one_metric_do_not_discard_the_metrics_that_computed(pipe, monkeypatch):
+    """peppr can warn more than once per metric, so counting warnings against the metric count threw away good values."""
+    monkeypatch.setitem(sys.modules, "peppr",
+                        _fake_peppr([("evaluation", "interface absent"), ("evaluation", "interface absent"),
+                                     ("evaluation", "interface absent")],
+                                    [0.5, math.nan, 0.8]))
+    monkeypatch.setattr(pipe, "load_system", lambda path: object())
+    values = pipe.evaluate_pair("x", "ref.pdb", "pose.pdb", ["rmsd", "dockq", "lddt"])
+    assert values["rmsd"] == 0.5 and values["lddt"] == 0.8 and math.isnan(values["dockq"])
+
+
+def test_every_metric_failing_still_raises(pipe, monkeypatch):
+    monkeypatch.setitem(sys.modules, "peppr",
+                        _fake_peppr([("evaluation", "nothing to compare")], [math.nan, math.nan]))
+    monkeypatch.setattr(pipe, "load_system", lambda path: object())
+    with pytest.raises(ValueError, match="nothing to compare"):
+        pipe.evaluate_pair("x", "ref.pdb", "pose.pdb", ["rmsd", "dockq"])
+
+
 def test_a_metric_that_is_nan_for_one_id_is_not_a_failure(pipe):
     """A monomer has no interface; its dockq is NaN and the id is still evaluated."""
     evaluate = _fake({"a": {"rmsd": 0.1, "dockq": math.nan}})

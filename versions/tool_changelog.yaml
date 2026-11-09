@@ -230,8 +230,12 @@ BindingData:
   files:
   - biopipelines/binding_data.py
   - pipe_scripts/pipe_binding_data.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '1.3'
     date: '2026-11-02'
     note: >-
@@ -264,8 +268,13 @@ BioEmu2:
   files:
   - biopipelines/bioemu2.py
   - pipe_scripts/pipe_bioemu2.py
-  current: "1.10"
+  - pipe_scripts/pipe_bioemu2_weights.py
+  current: "1.11"
   history:
+  - version: '1.11'
+    date: '2026-11-06'
+    note: >-
+      A run that returns fewer conformers than `num_samples` names every id it owes with a `failure` row of `missing`, instead of warning and leaving the step FAILED with nothing naming the ids. The conformers the run did write are kept, and the step still fails, because a short trajectory means the sampler under-delivered.
   - version: '1.10'
     date: '2026-10-31'
     note: >-
@@ -593,8 +602,12 @@ DiffDock:
   - biopipelines/diffdock.py
   - pipe_scripts/pipe_diffdock_build_csv.py
   - pipe_scripts/pipe_diffdock_postprocess.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.4'
     date: '2026-10-30'
     note: >-
@@ -688,8 +701,12 @@ DynamicBind:
   - pipe_scripts/pipe_dynamicbind_build_csv.py
   - pipe_scripts/pipe_dynamicbind_movie.py
   - pipe_scripts/pipe_dynamicbind_postprocess.py
-  current: "2.7"
+  current: "2.8"
   history:
+  - version: '2.8'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.7'
     date: '2026-10-30'
     note: >-
@@ -865,8 +882,12 @@ Foldseek:
   files:
   - biopipelines/foldseek.py
   - pipe_scripts/pipe_foldseek.py
-  current: "1.5"
+  current: "1.6"
   history:
+  - version: '1.6'
+    date: '2026-11-06'
+    note: >-
+      The `tm_clusters` column names are built once by `cluster_columns()`, which the declaration and the pipe both call. The pipe kept its own copy of `threshold_tag` and of the construction, so a change to the tag format would have desynchronized the declaration from the file.
   - version: '1.5'
     date: '2026-10-31'
     note: >-
@@ -915,8 +936,12 @@ Frame2Seq:
   files:
   - biopipelines/frame2seq.py
   - pipe_scripts/pipe_frame2seq.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.1'
     date: '2026-10-30'
     note: >-
@@ -1189,8 +1214,12 @@ LASErMPNN:
   - biopipelines/lasermpnn.py
   - pipe_scripts/pipe_lasermpnn.py
   - pipe_scripts/pipe_lasermpnn_bfactor.py
-  current: "2.3"
+  current: "2.4"
   history:
+  - version: '2.4'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.3'
     date: '2026-10-30'
     note: >-
@@ -1262,8 +1291,12 @@ LigandMPNN:
   - pipe_scripts/pipe_lmpnn_runtime_positions.py
   - pipe_scripts/resolve_lmpnn_positions.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "3.6"
+  current: "3.7"
   history:
+  - version: '3.7'
+    date: '2026-11-06'
+    note: >-
+      A local `failure` row outranks an excused upstream row when the missing manifests are merged, so this step's own verdict is not discarded by a same-id row from upstream.
   - version: '3.6'
     date: '2026-11-04'
     note: >-
@@ -1349,8 +1382,12 @@ LigandMPNN:
 Load:
   files:
   - biopipelines/load.py
-  current: "1.7"
+  current: "1.8"
   history:
+  - version: '1.8'
+    date: '2026-11-06'
+    note: >-
+      The fallback for ids that cannot be expanded catches only the expansion's own errors and names the stream and the cause. A bare `except Exception` swallowed programming errors too and carried on silently with the unexpanded ids.
   - version: '1.7'
     date: '2026-10-29'
     note: >-
@@ -1531,8 +1568,12 @@ MSA:
   files:
   - biopipelines/msa.py
   - pipe_scripts/pipe_msa.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-11-06'
+    note: >-
+      The `msas` table declares the `sequences.id` column it writes whenever the row id does not already spell the source. The declaration named three columns while the pipe could write four, so `.tables` under-reported the schema and a consumer projecting onto the declared columns dropped the provenance. `docs/tool/msas.md` says the same.
   - version: '1.6'
     date: '2026-10-31'
     note: >-
@@ -1590,8 +1631,12 @@ MutationComposer:
   files:
   - biopipelines/mutation_composer.py
   - pipe_scripts/pipe_mutation_composer.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-11-06'
+    note: >-
+      The valid-mode list is derived from `DEFAULT_PREFIXES`, so a mode added to one and not the other cannot pass validation and then raise a `KeyError` on its prefix during script generation.
   - version: '1.3'
     date: '2026-10-31'
     note: >-
@@ -1621,8 +1666,12 @@ NeuralPLexer:
   - biopipelines/neuralplexer.py
   - pipe_scripts/pipe_neuralplexer_postprocess.py
   - pipe_scripts/pipe_neuralplexer_stage.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.4'
     date: '2026-10-30'
     note: >-
@@ -1772,8 +1821,13 @@ OpenFold3:
   - pipe_scripts/pipe_openfold3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.8"
+  - pipe_scripts/pipe_query_provenance.py
+  current: "1.9"
   history:
+  - version: '1.9'
+    date: '2026-11-09'
+    note: >-
+      The three artifacts the config step writes at execution time move from `_configuration` to `_execution`, beside `local_missing.csv`, where the Path Descriptors table of the developer manual puts a runtime artifact. The comment above them already said they were written at execution time. RF3 moved its three in the same round, so the three co-folders agree again.
   - version: '1.8'
     date: '2026-10-31'
     note: >-
@@ -1868,8 +1922,12 @@ PLACER:
   - biopipelines/placer.py
   - pipe_scripts/pipe_placer_driver.py
   - pipe_scripts/pipe_placer_postprocess.py
-  current: "2.4"
+  current: "2.5"
   history:
+  - version: '2.5'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.4'
     date: '2026-10-30'
     note: >-
@@ -1918,8 +1976,12 @@ PLM_Sol:
   files:
   - biopipelines/plm_sol.py
   - pipe_scripts/pipe_plm_sol.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.1'
     date: '2026-10-30'
     note: >-
@@ -1950,8 +2012,12 @@ PocketGen:
   - pipe_scripts/pipe_pocketgen_driver.py
   - pipe_scripts/pipe_pocketgen_postprocess.py
   - pipe_scripts/pipe_pocketgen_stage.py
-  current: "2.5"
+  current: "2.6"
   history:
+  - version: '2.6'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.5'
     date: '2026-10-30'
     note: >-
@@ -1985,8 +2051,12 @@ Pool:
   files:
   - biopipelines/pool.py
   - pipe_scripts/pipe_pool.py
-  current: "1.6"
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-11-06'
+    note: >-
+      The class docstring says what `original.id` holds over a pooled input: the id from before the first Pool, since a carried value is kept untouched in default mode. It claimed the id before this Pool renamed it, which is wrong for a Pool over a Pool; the module docstring was already right. The three lazy-id guards are consistent.
   - version: '1.6'
     date: '2026-10-31'
     note: >-
@@ -2106,8 +2176,12 @@ ProteinMPNN:
   - pipe_scripts/pipe_pmpnn_fixed_positions.py
   - pipe_scripts/pipe_pmpnn_table.py
   - pipe_scripts/pipe_fa_to_csv_fasta.py
-  current: "2.10"
+  current: "2.11"
   history:
+  - version: '2.11'
+    date: '2026-11-06'
+    note: >-
+      A local `failure` row outranks an excused upstream row when the missing manifests are merged, so this step's own verdict is not discarded by a same-id row from upstream.
   - version: '2.10'
     date: '2026-09-29'
     note: >-
@@ -2369,6 +2443,7 @@ RFdiffusion3:
   - pipe_scripts/pipe_rfdiffusion3_build_inputs.py
   - pipe_scripts/pipe_rfdiffusion3_postprocess.py
   - pipe_scripts/pipe_rfdiffusion3_table.py
+  - pipe_scripts/pipe_rfdiffusion3_pending.py
   current: "3.13"
   history:
   - version: '3.13'
@@ -2455,6 +2530,7 @@ RFdiffusion3:
 RFdiffusionAllAtom:
   files:
   - biopipelines/rfdiffusion_allatom.py
+  - pipe_scripts/resolve_rfdaa_ligand_code.py
   current: "2.8"
   history:
   - version: '2.8'
@@ -2563,8 +2639,12 @@ SelectionTransfer:
   files:
   - biopipelines/selection_transfer.py
   - pipe_scripts/pipe_selection_transfer.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-11-06'
+    note: >-
+      A selection cell that is blank or names no residue is a `failure` row naming the cell. `sele_to_list` returns an empty list for both and never raises, so the row was written with an empty selection and `n_residues=0`, the step succeeded, and a downstream redesign received nothing with no record of why; the literal check never saw a table-sourced selection, which is the documented primary usage. A literal selection may also name a negative residue number, which the parser already accepted.
   - version: '1.1'
     date: '2026-10-31'
     note: >-
@@ -2676,8 +2756,12 @@ ThermoMPNN:
   files:
   - biopipelines/thermompnn.py
   - pipe_scripts/pipe_thermompnn.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.1'
     date: '2026-10-30'
     note: >-
@@ -2706,8 +2790,12 @@ VespaG:
   files:
   - biopipelines/vespag.py
   - pipe_scripts/pipe_vespag.py
-  current: "2.1"
+  current: "2.2"
   history:
+  - version: '2.2'
+    date: '2026-11-06'
+    note: >-
+      The `missing` table is declared through `missing_table_info`, which now carries the tool's own description, so the canonical four-column schema has one definition instead of a literal per tool. The emitted declaration is unchanged: each wrapper's pre-change `TableInfo` was diffed field by field against what the helper builds.
   - version: '2.1'
     date: '2026-10-30'
     note: >-
@@ -2860,8 +2948,12 @@ Peppr:
   files:
   - biopipelines/peppr.py
   - pipe_scripts/pipe_peppr.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-11-06'
+    note: >-
+      A metric that warns several times no longer discards the metrics that computed. `evaluate_pair` counted `EvaluationWarning`s against the number of requested metrics, so two metrics warning three times each raised for a system where six others had values; it judges the results now and raises only when every one is NaN, the condition the docstring always described. The cause of a broadcast reference removed upstream says so instead of reporting an id mismatch, and the pipe docstring states the `unmatched` / `failure` split the code makes.
   - version: '1.3'
     date: '2026-10-31'
     note: >-
@@ -2913,8 +3005,12 @@ LigandDdG:
   - biopipelines/ligand_ddg.py
   - pipe_scripts/pipe_ligand_ddg.py
   - biopipelines/rosetta_scoring.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-11-06'
+    note: >-
+      `mean_std` returns a NaN pair for an empty input instead of dividing by zero, and the unused `is_missing` helper of `rosetta_scoring.py` is gone.
   - version: '1.4'
     date: '2026-11-04'
     note: >-
@@ -2951,8 +3047,12 @@ PPIDdG:
   - biopipelines/ppi_ddg.py
   - pipe_scripts/pipe_ppi_ddg.py
   - biopipelines/rosetta_scoring.py
-  current: "1.1"
+  current: "1.2"
   history:
+  - version: '1.2'
+    date: '2026-11-06'
+    note: >-
+      `mean_std` returns a NaN pair for an empty input instead of dividing by zero, and the unused `is_missing` helper of `rosetta_scoring.py` is gone.
   - version: '1.1'
     date: '2026-10-28'
     note: >-
@@ -2992,8 +3092,13 @@ RF3:
   - pipe_scripts/pipe_rf3_postprocess.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.6"
+  - pipe_scripts/pipe_query_provenance.py
+  current: "1.7"
   history:
+  - version: '1.7'
+    date: '2026-11-06'
+    note: >-
+      An example whose record carries an empty sequence is skipped with a cause instead of raising out of the configuration step. `polymer_sequence` raises `ValueError` for a blank sequence, a case it anticipates, and the guard caught only the two alignment errors, so one bad row lost every other example in the batch. The reverse-complement component of a double-stranded axis is built inside the same guard. `queries.json`, `skipped_queries.csv` and `query_provenance.csv` move to `_execution`, where the pipe writes them, instead of `_configuration`.
   - version: '1.6'
     date: '2026-10-31'
     note: >-
@@ -3028,8 +3133,12 @@ FoundryMPNN:
   - biopipelines/foundry_mpnn.py
   - biopipelines/chain_rows.py
   - pipe_scripts/pipe_foundry_mpnn.py
-  current: "1.2"
+  current: "1.3"
   history:
+  - version: '1.3'
+    date: '2026-11-06'
+    note: >-
+      The stray package directory is off `sys.path`, where it sat ahead of the standard library although nothing imported a bare module from it. A chain request naming an absent chain says which chains are missing and which are present, instead of claiming none of them matched.
   - version: '1.2'
     date: '2026-10-31'
     note: >-
@@ -3070,8 +3179,17 @@ Protenix:
   - pipe_scripts/pipe_protenix_weights.py
   - biopipelines/nucleic_acids.py
   - pipe_scripts/pipe_axis_data.py
-  current: "1.7"
+  - pipe_scripts/pipe_query_provenance.py
+  current: "1.9"
   history:
+  - version: '1.9'
+    date: '2026-11-09'
+    note: >-
+      The three artifacts the config step writes at execution time move from `_configuration` to `_execution`, beside `local_missing.csv`, where the Path Descriptors table of the developer manual puts a runtime artifact. The comment above them already said they were written at execution time. RF3 moved its three in the same round, so the three co-folders agree again.
+  - version: '1.8'
+    date: '2026-11-06'
+    note: >-
+      With `top_only=False`, a query that produced fewer samples than it declared names each unfilled `<query>_<n>` id with a `failure` row, and a query that produced nothing names all of them instead of the bare query id. The declared count is not derivable in the pipe, so the postprocess step takes `--structures-per-query`. Before, the tail ids had neither a file nor a row and the step was marked FAILED with nothing explaining it.
   - version: '1.7'
     date: '2026-10-31'
     note: >-
@@ -3109,8 +3227,12 @@ FLOWR:
   files:
   - biopipelines/flowr.py
   - pipe_scripts/pipe_flowr.py
-  current: "1.3"
+  current: "1.4"
   history:
+  - version: '1.4'
+    date: '2026-11-06'
+    note: >-
+      The pocket residue count reads the insertion code through the new `field_i_code` accessor instead of an inlined column slice, so a record shifted by a 5-character CCD code no longer collapses two residues into one.
   - version: '1.3'
     date: '2026-10-31'
     note: >-
@@ -3136,8 +3258,13 @@ Embedding:
   files:
   - biopipelines/embedding.py
   - pipe_scripts/pipe_embedding.py
-  current: "1.2"
+  - biopipelines/pair_alignment.py
+  current: "1.3"
   history:
+  - version: '1.3'
+    date: '2026-11-06'
+    note: >-
+      The row-id collision message states that the mode names are fixed and names both candidate structures to rename, instead of blaming the mode name and then advising a rename without saying what to rename.
   - version: '1.2'
     date: '2026-10-31'
     note: >-
@@ -3155,8 +3282,12 @@ Foldcomp:
   files:
   - biopipelines/foldcomp.py
   - pipe_scripts/pipe_foldcomp.py
-  current: "1.2"
+  current: "1.3"
   history:
+  - version: '1.3'
+    date: '2026-11-06'
+    note: >-
+      The pipe imports the declared column list from the wrapper instead of keeping a second copy, and `cut_domain` reads chain, residue number, residue name and B-factor through the shared PDB field accessors, so a 5-character CCD code no longer shifts them. The explicit columns stay only on the line that is rewritten.
   - version: '1.2'
     date: '2026-10-31'
     note: >-
@@ -3175,8 +3306,12 @@ USalign:
   - biopipelines/usalign.py
   - biopipelines/pair_alignment.py
   - pipe_scripts/pipe_pair_alignment.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-11-06'
+    note: >-
+      The row-id collision message states that the mode names are fixed and names both candidate structures to rename, instead of blaming the mode name and then advising a rename without saying what to rename.
   - version: '1.4'
     date: '2026-10-31'
     note: >-
@@ -3203,8 +3338,12 @@ TMalign:
   - biopipelines/tmalign.py
   - biopipelines/pair_alignment.py
   - pipe_scripts/pipe_pair_alignment.py
-  current: "1.4"
+  current: "1.5"
   history:
+  - version: '1.5'
+    date: '2026-11-06'
+    note: >-
+      The row-id collision message states that the mode names are fixed and names both candidate structures to rename, instead of blaming the mode name and then advising a rename without saying what to rename.
   - version: '1.4'
     date: '2026-10-31'
     note: >-

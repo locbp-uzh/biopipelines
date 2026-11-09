@@ -67,7 +67,7 @@ class NeuralPLexer(BaseConfig):
     """
 
     TOOL_NAME = "NeuralPLexer"
-    TOOL_VERSION = "2.4"
+    TOOL_VERSION = "2.5"
     # neuralplexer-inference is argparse and takes far more flags than the wrapper types; an untyped kwarg becomes one more `--flag value`.
     FORWARD_UNKNOWN_KWARGS = "argparse"
     ENV_NAME = "neuralplexer"
@@ -487,12 +487,7 @@ fi
                 columns=["id", "structures.id", "compounds.id", "rank", "confidence"],
                 description="NeuralPLexer per-rank confidence (re-ranked outputs)",
             ),
-            "missing": TableInfo(
-                name="missing",
-                path=self.missing_csv,
-                columns=["id", "removed_by", "kind", "cause"],
-                description="Pairs NeuralPLexer could not predict, with reason",
-            ),
+            "missing": self.missing_table_info(self.missing_csv, "Pairs NeuralPLexer could not predict, with reason"),
         }
 
         return {

@@ -165,15 +165,16 @@ def build_examples(elements: Dict[str, Dict], msas: Optional[MsaLookup],
             for member in record.get("__members__", [record]):
                 label = chain_ids(1, counter)[0]
                 counter += 1
+                # One example's bad record skips that example; a raise here would lose the whole batch.
                 try:
                     components.append(build_component(entity_type, member, label, msas))
-                except (MissingAlignment, UnreadableAlignment) as exc:
+                    if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
+                        label2 = chain_ids(1, counter)[0]
+                        counter += 1
+                        components.append(build_component(entity_type, member, label2, msas,
+                                                          rev_comp=True))
+                except (MissingAlignment, UnreadableAlignment, ValueError) as exc:
                     causes.append(str(exc))
-                if entity_type in DOUBLE_STRANDED_ENTITY_TYPES:
-                    label2 = chain_ids(1, counter)[0]
-                    counter += 1
-                    components.append(build_component(entity_type, member, label2, msas,
-                                                      rev_comp=True))
 
         # The id comes from the framework's helper so it matches what the wrapper predicted at configuration time.
         axis_selections = {}

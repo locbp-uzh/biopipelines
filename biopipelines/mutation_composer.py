@@ -50,7 +50,7 @@ class MutationComposer(BaseConfig):
     
     # Tool identification
     TOOL_NAME = "MutationComposer"
-    TOOL_VERSION = "1.3"
+    TOOL_VERSION = "1.4"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -132,7 +132,7 @@ echo "=== MutationComposer ready ==="
     def validate_params(self):
         """Validate MutationComposer parameters."""
         # Validate mode
-        valid_modes = ["single_point", "weighted_random", "hotspot_focused", "top_mutations"]
+        valid_modes = list(DEFAULT_PREFIXES)
         if self.mode not in valid_modes:
             raise ValueError(f"Invalid mode: {self.mode}. Valid options: {', '.join(valid_modes)}")
 

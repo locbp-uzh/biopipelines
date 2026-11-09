@@ -94,7 +94,9 @@ class Pool(BaseConfig):
     Concatenates every shared stream and table across the inputs with
     composite ids ``<orig_id>_<pool_idx>`` (1-based) and two provenance
     columns: ``pool.path`` (the source run) and ``original.id`` (the id before
-    this Pool renamed it).
+    this Pool renamed it; an ``original.id`` the input already carried is kept
+    as it was, so over a pooled input it still names the id before the FIRST
+    Pool, except under ``recount_prefix``).
 
     The suffix renames EVERY id, even when no two runs share one, so a
     pooled id is not the id the upstream tool produced. Matching pooled ids by
@@ -104,7 +106,7 @@ class Pool(BaseConfig):
     """
 
     TOOL_NAME = "Pool"
-    TOOL_VERSION = "1.6"
+    TOOL_VERSION = "1.7"
 
     @classmethod
     def _install_script(cls, folders, env_manager="mamba", force_reinstall=False, **kwargs):
@@ -374,12 +376,14 @@ echo "=== Pool ready ==="
         every stream and table again against the real ids.
         """
         for name in self._shared_streams:
-            streams = [r.streams.get(name) for r in self.runs]
-            if any(ds.is_lazy for ds in streams):
+            # Skipping an absent run matches _any_lazy_ids and _recount_numbering; a shared stream is present in every run.
+            streams = [(i, r.streams.get(name)) for i, r in enumerate(self.runs, start=1)]
+            streams = [(i, ds) for i, ds in streams if ds is not None]
+            if any(ds.is_lazy for _, ds in streams):
                 continue
             raise_on_id_collision(
                 f"stream '{name}'",
-                {i: list(ds.ids_expanded) for i, ds in enumerate(streams, start=1)},
+                {i: list(ds.ids_expanded) for i, ds in streams},
             )
 
     def _content_file_col(self, stream_name: str) -> Optional[str]:

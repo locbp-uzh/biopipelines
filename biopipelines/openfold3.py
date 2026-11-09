@@ -87,7 +87,7 @@ class OpenFold3(BaseConfig):
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.8"
+    TOOL_VERSION = "1.9"
     ENV_NAME = "openfold3"
 
     # Upstream spells its flags with underscores; the docs' option table renders them with dashes, but both worked examples use underscores.
@@ -132,10 +132,10 @@ fi
     # Configuration-time artifacts
     combinatorics_config_file = Path(lambda self: self.configuration_path("combinatorics_config.json"))
     runner_yaml_file = Path(lambda self: self.configuration_path("runner.yaml"))
-    # Written at execution time: one JSON holding every query, since run_openfold folds a whole batch in one process.
-    queries_json = Path(lambda self: self.configuration_path("queries.json"))
-    skipped_csv = Path(lambda self: self.configuration_path("skipped_queries.csv"))
-    provenance_csv = Path(lambda self: self.configuration_path("query_provenance.csv"))
+    # Written at EXECUTION time: one JSON holding every query, since run_openfold folds a whole batch in one process.
+    queries_json = Path(lambda self: self.execution_path("queries.json"))
+    skipped_csv = Path(lambda self: self.execution_path("skipped_queries.csv"))
+    provenance_csv = Path(lambda self: self.execution_path("query_provenance.csv"))
 
     prediction_folder = Path(lambda self: self.execution_folder)
 
