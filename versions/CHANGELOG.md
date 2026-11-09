@@ -14,10 +14,16 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ## [unreleased]
 
+### Framework
+
+### Tools
+
+## [1.6.0] — 2026-11-09
+
 ### Version changes
 
 <!-- release-table:start -->
-| Tool | 1.5.3 | unreleased | summary |
+| Tool | 1.5.3 | 1.6.0 | summary |
 |---|---|---|---|
 | Aggrescan3D | 2.1 | 2.2 | An id an upstream step filtered away is excused instead of flagged |
 | AiZynthFinder | 2.1 | 2.6 | AiZynthFinder 4.x options; unsanitizable targets become `failure` rows; numpy and pyarrow pins |
