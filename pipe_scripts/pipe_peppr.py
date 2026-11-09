@@ -115,22 +115,25 @@ def evaluate_pair(system_id, reference_path, pose_path, keys):
     return values
 
 
-def pair_references(pose_ids, references, n_declared):
+def pair_references(pose_ids, references, n_declared, map_table_paths=None):
     """Return {pose id: reference id or None}.
 
     A reference stream declaring one id scores every pose, the convention of ConformationalChange and PoseChange. Several are matched to each pose by id, so a refold finds the design it derives from. A sibling id (a common ancestor, nothing more) is not a match: its structure is another molecule's, and scoring against it would look plausible and be wrong.
+
+    ``map_table_paths`` is the poses' own map_table, which carries the provenance tier: without it a rename upstream (Panda_1 for design_3) leaves no string relationship to match on, and every pose comes back unmatched.
     """
     if n_declared == 1:
         only = next(iter(references), None)
         return {pose_id: only for pose_id in pose_ids}
-    matches = get_mapped_ids_with_tiers(source_ids=list(pose_ids), target_ids=list(references), unique=True)
+    matches = get_mapped_ids_with_tiers(source_ids=list(pose_ids), target_ids=list(references),
+                                        unique=True, map_table_paths=map_table_paths)
     return {pose_id: (None if tier == TIER_SIBLING else reference_id)
             for pose_id, (reference_id, tier) in matches.items()}
 
 
-def score_all(poses, references, n_declared, keys, step_id, evaluate):
+def score_all(poses, references, n_declared, keys, step_id, evaluate, map_table_paths=None):
     """Score every pose; return (table rows, missing rows). poses and references map id to file path."""
-    pairing = pair_references(list(poses), references, n_declared)
+    pairing = pair_references(list(poses), references, n_declared, map_table_paths)
     # The one declared reference scoring every pose has no file: upstream removed it, which is not an id mismatch.
     unmatched_cause = ("the single reference has no file in the references stream (removed upstream)"
                        if n_declared == 1 and not references else "no reference with a matching id")
@@ -178,8 +181,11 @@ def main():
     references = dict(iterate_files(references_ds))
     step_id = step_id_from_table_path(args.local_missing_csv)
 
+    # The poses' map is what the rename was recorded in, so the provenance tier needs it.
+    pose_maps = [poses_ds.map_table] if poses_ds.map_table else None
     rows, missing_rows = score_all(
-        poses, references, len(references_ds.ids_expanded), keys, step_id, evaluate=evaluate_pair)
+        poses, references, len(references_ds.ids_expanded), keys, step_id,
+        evaluate=evaluate_pair, map_table_paths=pose_maps)
 
     for path in (args.peppr_csv, args.local_missing_csv):
         os.makedirs(os.path.dirname(path), exist_ok=True)

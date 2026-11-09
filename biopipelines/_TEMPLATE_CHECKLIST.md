@@ -24,7 +24,7 @@ Before editing, classify the tool based on the following:
 - [ ] Kept / deleted / container per §1.
 - [ ] If kept: gated on `_env_exists_check`; honors `force_reinstall`; verifies the binary/imports and `touch "$INSTALL_SUCCESS"` on success.
 - [ ] The env name is **never** written into the install bash. Call `cls._install_env(env_manager)` and install into what it returns — that reads the same `environments:` entry `_load_environments` activates at run time, so install and runtime cannot diverge. With no entry under the active variant it raises, naming the tool, the variant and the config file; that is intended (29 tools have no `daint` entry because they do not work there), so do not add a fallback.
-- [ ] If the installation diverges between cluster and Colab, shipped both `environments/<TOOL_NAME>.yaml` **and** `<TOOL_NAME>.colab.yaml`. The `.colab` one drops conda-only deps with no PyPI build. Fork the YAML rather than branching Python on scheduler. 
+- [ ] If the installation diverges between cluster and Colab, shipped both `environments/<ENV_NAME>.yaml` **and** `<ENV_NAME>.colab.yaml`. The spec is named after the **env**, not the tool: RFdiffusion3 and FoundryMPNN both declare `ENV_NAME = "foundry"` and share one `foundry.yaml`, so a tool joining an existing env ships no YAML at all. The `.colab` one drops conda-only deps with no PyPI build. Fork the YAML rather than branching Python on scheduler. 
 
 ## 4. Path descriptors
 - [ ] Every input JSON, output stream map, and table has a `Path(lambda self: ...)` descriptor - no path strings built inline.

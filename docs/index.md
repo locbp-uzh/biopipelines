@@ -20,7 +20,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
 ## Key Features
 
-**86 integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
+**106 integrated tools** -- Structure generation (RFdiffusion, BoltzGen), sequence design (ProteinMPNN, LigandMPNN), structure prediction (AlphaFold, Boltz2), analysis, and more.
 
 **Three ways to run** -- Let an AI coding assistant author and run pipelines for you, submit to HPC clusters (SLURM, LSF, PBS) with `biopipelines-submit`, or run interactively in Jupyter/Colab notebooks with on-the-fly execution.
 
@@ -93,7 +93,7 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
 
     ```bash
     git clone https://github.com/locbp-uzh/biopipelines
-    cd biopipelines-locbp
+    cd biopipelines
     /usr/bin/python3.11 -m venv $SCRATCH/venvs/biopipelines
     source $SCRATCH/venvs/biopipelines/bin/activate
     pip install -r environments/biopipelines.pip.daint.txt
@@ -120,10 +120,11 @@ BioPipelines provides standardized interfaces to connect bioinformatics tools in
     # Cell 1: Install BioPipelines and micromamba
     !git clone https://github.com/locbp-uzh/biopipelines
     %cd biopipelines
-    !pip install -e ".[all]"
+    !pip install -e ".[colab]"
     !wget -q https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64 -O /usr/local/bin/micromamba && chmod +x /usr/local/bin/micromamba
-    !micromamba create -f environments/biopipelines.yaml -y
     ```
+
+    The `biopipelines` conda env is deliberately **not** created here: on Colab the tools mapped to it run in base Python, where the `colab` extra already put the deps. Creating it would download an environment that is never activated. See the [user manual](user_manual.md) for the rest.
 
     ```python
     # Cell 2: Install the tools you need (one-time per session)

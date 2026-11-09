@@ -5,15 +5,14 @@
 - [What is BioPipelines?](#what-is-biopipelines)
 - [Ways to run BioPipelines](#ways-to-run-biopipelines)
 - [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant)
-- [Installation](#installation)
-- [Google Colab](#google-colab)
-- [CSCS Alps / Daint](#installation-cscs-alps--daint)
-- [Local](#installation-local--linux--macos--windows)
-- [Quick Start](#quick-start)
+- [Installation (Slurm HPC)](#installation-slurm-hpc)
+- [Installation (Google Colab)](#installation-google-colab)
+- [Installation (CSCS Alps / Daint)](#installation-cscs-alps-daint)
+- [Installation (Local)](#installation-local-linux-macos-windows)
 - [Core Concepts](#core-concepts)
   - [Configuration and Execution Time](#configuration-and-execution-time)
-  - [Entity Types](#entity-types)
   - [DataStream vs Tables](#datastream-vs-tables)
+  - [Common inputs](#common-inputs)
   - [Combinatorics: Bundle and Each](#combinatorics-bundle-and-each)
   - [Table Column References](#table-column-references)
 - [Resources](#resources)
@@ -62,7 +61,7 @@ There are three ways to use BioPipelines, in increasing order of hands-on effort
 1. **With an AI coding assistant (recommended for non-programmers).** You clone the repo and on your computer and run an AI coding assistant (Claude Code, Codex, …) inside it. The assistant reads the framework's prompts under `llm/`, interviews you about your biological problem, and writes and runs the pipeline for you. You never write Python yourself — you describe the protocol you want in plain language. This is the easiest entry point and the one most users should start with. See [Usage with an AI coding assistant](#usage-with-an-ai-coding-assistant).
 2. **On an HPC cluster (SLURM, LSF, or PBS/Torque).** You write pipeline scripts yourself and submit them with `biopipelines-submit`. Best for large production runs on institutional compute. See [Installation (Slurm HPC)](#installation-slurm-hpc).
 3. **On Google Colab.** You write pipeline cells in a notebook and run them inline with a Colab GPU, no SLURM needed. Best for quick interactive prototyping. See [Installation (Google Colab)](#installation-google-colab).
-4. **Locally (Linux / macOS / Windows).** You run pipelines inline on your own machine if they only comprise lightweight base-environment tools. On Windows, use WSL. See [Installation (Local)](#installation-local--linux--macos--windows).
+4. **Locally (Linux / macOS / Windows).** You run pipelines inline on your own machine if they only comprise lightweight base-environment tools. On Windows, use WSL. See [Installation (Local)](#installation-local-linux-macos-windows).
 
 These are not mutually exclusive: a common pattern is to let an AI assistant author a pipeline (mode 1) and then submit the resulting script to a cluster (mode 2) or run it on Colab (mode 3).
 
@@ -138,7 +137,7 @@ After that, the assistant can push the pipeline, submit it, tail the logs, and r
 
 ## Installation (Slurm HPC)
 
-This section walks through a SLURM cluster as the worked example. LSF and PBS/Torque clusters install identically — only the `machine.scheduler` block differs (set `name` to `lsf` or `pbs`, or let `bp-config auto` detect it). See [Other batch schedulers (LSF, PBS/Torque)](#other-batch-schedulers-lsf-pbstorque) under Job Submission.
+This section walks through a SLURM cluster as the worked example. LSF and PBS/Torque clusters install identically — only the `machine.scheduler` block differs (set `name` to `lsf` or `pbs`, or let `bp-config auto` detect it). See [Other batch schedulers (LSF, PBS/Torque)](#notes-on-lsf-and-pbstorque-schedulers) under Job Submission.
 
 ### 1. Setting up BioPipelines
 
@@ -207,17 +206,27 @@ bp-config env <Tool>       # the conda env configured for a tool
 
 Each external tool (RFdiffusion, ProteinMPNN, AlphaFold, …) lives in its own conda env. Install them on demand:
 
+Save this as `install_tools.py`:
+
 ```python
 from biopipelines.pipeline import *
 from biopipelines import RFdiffusion, ProteinMPNN, AlphaFold
 
 with Pipeline("Setup", "install", description="Install tools"):
+    # On a batch scheduler every tool belongs to a resource batch, so this line comes first.
+    Resources(gpu="A100", time="8:00:00", memory="32GB")
     RFdiffusion.install()
     ProteinMPNN.install()
     AlphaFold.install()
 ```
 
-`.install()` clones the upstream repo (where applicable) and creates the per-tool conda env. Re-running is a no-op once the env exists; pass `force_reinstall=True` to rebuild.
+```bash
+bp-submit install_tools.py
+```
+
+`Resources()` is not optional here: with a batch scheduler and `on_the_fly=False`, adding a tool before it raises `RuntimeError: Resources() must be called before adding tools.` On Colab, or with `scheduler: none`, an empty batch is opened for you and the line can be left out.
+
+`.install()` clones the upstream repo (where applicable) and creates the per-tool conda env. Once an env is complete the install is reused rather than rebuilt — several tools still check their imports and weights on each run, and fetch what is missing — so re-running is cheap but not always a strict no-op; pass `force_reinstall=True` to rebuild from scratch. The tool's own page says what its installer verifies.
 
 *Note: installation was optimized on the S3IT UZH HPC (Ubuntu 24.04, SLURM 25.05) and might require adjusting e.g. due to CUDA version mismatch.*
 
@@ -321,7 +330,7 @@ Use a venv, not conda, and put it on `$SCRATCH`. `$STORE` is backed up and share
 
 ```bash
 git clone https://github.com/locbp-uzh/biopipelines
-cd biopipelines-locbp
+cd biopipelines
 
 # There is no `python` on the login nodes — only python3 (3.6) and python3.11.
 /usr/bin/python3.11 -m venv $SCRATCH/venvs/biopipelines
@@ -364,7 +373,7 @@ Every GPU partition is `OverSubscribe=EXCLUSIVE`, and every node is 4× GH200 / 
 
 You can run pipelines with only lightweight tools (input preparation, table transforms, and small analyses) locally. On Windows, do this inside [WSL](https://learn.microsoft.com/windows/wsl/) (`wsl --install -d Ubuntu`).
 
-Install into a virtualenv with Python `>=3.10,<3.13` (only the base deps — pandas, numpy, biopython, rdkit; no conda):
+Install into a virtualenv with Python `>=3.10` (3.13 is covered by CI; only the base deps — pandas, numpy, biopython, rdkit; no conda):
 
 ```bash
 cd /path/to/biopipelines
@@ -372,7 +381,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-The `local` config variant (`env_manager: pip`, `scheduler: none`) is the default when no batch scheduler is present; check with `bp-config machine`. Then run a script with `bp-run`:
+Name the variant once. Auto-detection matches a config by `machine.username`, and a fresh clone has nobody's name in `config.local.yaml`, so nothing claims the machine until you write your own overlay:
+
+```bash
+bp-config auto --variant local     # writes .config.local.yaml and claims this machine
+bp-config machine                  # shows the merged result
+```
+
+For a single shell, `export BIOPIPELINES_CONFIG_VARIANT=local` does the same without writing anything. The `local` variant is `env_manager: pip`, `scheduler: none`. Then run a script with `bp-run`:
 
 ```bash
 bp-run my_pipeline.py # or: BIOPIPELINES_OTF=1 python my_pipeline.py
@@ -663,15 +679,15 @@ Two properties are worth knowing. The output ids are the **group** ids, which ar
 
 **Output ID naming**: Output IDs are always the full cartesian product of all iterated axis IDs joined with `+`. For example, 1 protein (`prot1`) × 3 ligands (`lig1`, `lig2`, `lig3`) produces IDs `prot1+lig1`, `prot1+lig2`, `prot1+lig3`. There are no shortcuts — even with a single protein, the protein ID is always included. The `+` separator is deliberately distinct from `_`, which is reserved for parent→child suffixes (`protein_1`, `protein_2`), so a multi-axis ID is never mistaken for a suffixed one.
 
-**Provenance columns**: A tool's postprocessing step can append one `{stream_name}.id` column per input axis (e.g. `sequences.id`, `compounds.id`), tracking which input produced each output row. These are added at runtime, so they are not in the table's declared columns — and which tables get them is per-tool: Boltz2 adds them to `structures`, `confidence` and `affinity`, while ESMFold2 adds them to `structures` only. Check the tool's page. Where present they make filtering and joining direct:
+**Provenance columns**: A tool's postprocessing step can append one `{parameter_name}.id` column per input axis (e.g. `proteins.id`, `ligands.id`), tracking which input produced each output row. These are added at runtime, so they are not in the table's declared columns — and which tables get them is per-tool: Boltz2 adds them to `structures`, `confidence` and `affinity`, while ESMFold2 adds them to `structures` only. The column is named after the **parameter** that carries the axis, so Boltz2's are `proteins.id` and `ligands.id`, not the names of the upstream streams. Check the tool's page for both the names and the tables that get them. Where present they make filtering and joining direct:
 
 ```python
 # Filter Boltz2 results for a specific protein
 df = pd.read_csv(boltz.tables.confidence.info.path)
-prot1_results = df[df['sequences.id'] == 'prot1']
+prot1_results = df[df['proteins.id'] == 'prot1']
 
 # Filter for a specific ligand
-lig2_results = df[df['compounds.id'] == 'lig2']
+lig2_results = df[df['ligands.id'] == 'lig2']
 ```
 
 
@@ -1044,7 +1060,9 @@ if os.path.exists(path):                                 # absent when no step u
     print(lost[lost["kind"].isin(["failure", "unmatched"])])   # the ones that are actually errors
 ```
 
-**It is what keeps the completion check honest.** Without it, a tool that declared 300 outputs and wrote 260 files would be reported FAILED. The check reads `missing.csv` and excuses exactly the ids it accounts for: rows propagated from an upstream step, and rows this step marked `kind="filter"`. A row this step itself wrote with `kind="failure"` or `kind="unmatched"` is **not** excused — that is a genuine failure and the step is still reported FAILED. So a green run with a populated `missing.csv` means "these ids were deliberately dropped", not "these ids broke silently".
+**It is what keeps the completion check honest.** Without it, a tool that declared 300 outputs and wrote 260 files would be reported FAILED. The check reads `missing.csv` and excuses exactly the ids it accounts for: rows propagated from an upstream step, and rows this step marked `kind="filter"`. A row this step itself wrote with `kind="failure"` or `kind="unmatched"` is **not** excused — that is a genuine failure, and the step is reported FAILED.
+
+With one qualification worth knowing, because it decides how you read a result. The check asks whether each **declared output exists**, and the manifest is what excuses a file that does not. A tool whose outputs are files therefore turns its own `failure` row into a FAILED step, as described. A tool whose only output is a table declares one CSV, that CSV is written, and the step can be COMPLETED while the manifest records failures and the table carries NaN rows — a scorer that measured eight poses out of ten did run, and the two it could not measure are named rather than hidden. So a green run with a populated `missing.csv` means "every declared artifact arrived, and these ids are accounted for", not "nothing went wrong". Read the `kind` column: `filter` is a deliberate drop, `failure` and `unmatched` are errors whatever the step's verdict says.
 
 When you want to know where your ids went, read `missing.csv` first and the logs second.
 

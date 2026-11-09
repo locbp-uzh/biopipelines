@@ -222,33 +222,68 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
     print(f"  Wrote shared stream '{stream_key}' map: {out_map} ({len(out_df)} rows -> {dest})")
 
 
+def _id_columns(path: str) -> List[str]:
+    """Identifier columns of a CSV: `id`, `original.id` and every `<stream>.id` provenance column."""
+    try:
+        header = pd.read_csv(path, nrows=0).columns
+    except Exception:
+        return []
+    return [c for c in header if c == "id" or c == "original.id" or c.endswith(".id")]
+
+
+def _read_ids_as_text(path: str, **kwargs):
+    """``pd.read_csv`` with the identifier columns forced to text.
+
+    Left to its own inference pandas turns the id `007` into 7 and the id `NA` into a
+    missing value, and a later ``str()`` cannot undo either. Only the identifier columns
+    are coerced, so a result column stays the number it is.
+    """
+    converters = {c: str for c in _id_columns(path)}
+    return pd.read_csv(path, converters=converters, **kwargs)
+
+
 def _load_run_stream(match: dict):
-    """(ids, files, run_df) of one run's stream, preferring the run's own
-    map_table for the up-to-date id list (covers tools whose map is rewritten
-    at runtime, e.g. PDB). ``run_df`` is None when no readable map exists."""
-    ids = list(match["ids"])
+    """(ids, files, run_df) of one run's stream.
+
+    The payload ids are the VIEW the pipeline asked for; the run's map_table is the whole
+    warehouse behind it. The map is still read, because a tool that rewrites it at runtime
+    (PDB) is the only one that knows its real ids — but the view is intersected with it,
+    never replaced by it, or an explicit selection would silently take back every row it
+    was built to drop. ``run_df`` is None when no readable map exists.
+    """
+    from biopipelines.id_patterns import is_pattern
+
+    ids = [str(v) for v in match["ids"]]
     files = list(match["files"])
 
     run_map = match.get("map_table") or ""
     if run_map and os.path.exists(run_map):
         try:
-            run_df = pd.read_csv(run_map)
+            run_df = _read_ids_as_text(run_map)
         except Exception:
             run_df = None
     else:
         run_df = None
 
-    file_col = None
-    if run_df is not None and "file" in run_df.columns:
-        file_col = "file"
+    if run_df is None or "id" not in run_df.columns:
+        return ids, files, run_df
 
-    if run_df is not None and "id" in run_df.columns:
-        ids = [str(v) for v in run_df["id"].tolist()]
-        if file_col is not None:
-            files = [str(v) if pd.notna(v) else "" for v in run_df[file_col].tolist()]
-        elif files and len(files) == 1 and "<id>" in files[0]:
-            tmpl = files[0]
-            files = [tmpl.replace("<id>", oid) for oid in ids]
+    map_ids = [str(v) for v in run_df["id"].tolist()]
+    requested = set(ids)
+    # A view is lazy when it has no ids yet, or when its ids are still patterns: only the map can resolve it.
+    lazy = (not ids) or any(is_pattern(i) for i in ids)
+    keep = [True] * len(map_ids) if lazy else [i in requested for i in map_ids]
+    # No overlap at all means the tool renamed its ids at runtime, and the map is then the only truthful list.
+    if not lazy and not any(keep):
+        keep = [True] * len(map_ids)
+    run_df = run_df[pd.Series(keep, index=run_df.index)].reset_index(drop=True)
+    ids = [i for i, kept in zip(map_ids, keep) if kept]
+
+    if "file" in run_df.columns:
+        files = [str(v) if pd.notna(v) else "" for v in run_df["file"].tolist()]
+    elif files and len(files) == 1 and "<id>" in files[0]:
+        tmpl = files[0]
+        files = [tmpl.replace("<id>", oid) for oid in ids]
     return ids, files, run_df
 
 
@@ -387,7 +422,7 @@ def _gather_table(table_name: str, runs_tables: list, out_path: str,
             print(f"  Skip table '{table_name}' run #{pool_idx}: missing {path}")
             continue
         try:
-            df = pd.read_csv(path)
+            df = _read_ids_as_text(path)
         except Exception as exc:
             print(f"  Skip table '{table_name}' run #{pool_idx}: read failed ({exc})")
             continue

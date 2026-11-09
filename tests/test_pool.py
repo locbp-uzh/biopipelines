@@ -946,3 +946,82 @@ def test_recount_declares_the_ids_the_pipe_is_given(local_config, isolated_cwd, 
         numbering = json.load(handle)["recount_numbering"]
     assert numbering == [[1, "a", "rc_1"], [1, "b", "rc_2"], [2, "a", "rc_3"]]
     assert list(pooled.streams.sequences.ids) == ["rc_1", "rc_2", "rc_3"]
+
+
+class TestTheViewIsNotWidenedByTheMap:
+    """The payload ids are the view the pipeline asked for; the run's map_table is the
+    warehouse behind it. Reading the map is right — a tool that rewrites its ids at runtime
+    is the only one that knows them — but substituting it for the view hands back every row
+    an explicit selection was built to drop."""
+
+    @staticmethod
+    def _match(tmp_path, ids, rows, name="m.csv"):
+        import pandas as pd
+        path = tmp_path / name
+        pd.DataFrame(rows).to_csv(path, index=False)
+        return {"name": "structures", "stream_key": "structures", "format": "pdb",
+                "ids": list(ids), "files": [], "map_table": str(path),
+                "is_shared_file": False}
+
+    def test_a_selection_of_one_does_not_take_back_the_row_it_dropped(self, tmp_path):
+        import pipe_scripts.pipe_pool as pipe_pool
+        match = self._match(tmp_path, ["a"],
+                            [{"id": "a", "file": "a.pdb"}, {"id": "b", "file": "b.pdb"}])
+        ids, files, _df = pipe_pool._load_run_stream(match)
+        assert ids == ["a"]
+        assert files == ["a.pdb"]
+
+    def test_a_lazy_view_is_still_resolved_from_the_map(self, tmp_path):
+        """No ids yet, or ids that are still patterns: the map is the only list there is."""
+        import pipe_scripts.pipe_pool as pipe_pool
+        rows = [{"id": "a", "file": "a.pdb"}, {"id": "b", "file": "b.pdb"}]
+        assert pipe_pool._load_run_stream(self._match(tmp_path, [], rows))[0] == ["a", "b"]
+        assert pipe_pool._load_run_stream(
+            self._match(tmp_path, ["<1..2>"], rows, name="m2.csv"))[0] == ["a", "b"]
+
+    def test_a_runtime_rename_still_wins_over_a_stale_payload(self, tmp_path):
+        """PDB rewrites its map; the payload ids then match nothing, and the map is the truth."""
+        import pipe_scripts.pipe_pool as pipe_pool
+        match = self._match(tmp_path, ["guess"],
+                            [{"id": "1abc", "file": "1abc.pdb"}, {"id": "2def", "file": "2def.pdb"}])
+        ids, files, _df = pipe_pool._load_run_stream(match)
+        assert ids == ["1abc", "2def"]
+        assert files == ["1abc.pdb", "2def.pdb"]
+
+    def test_the_returned_frame_is_narrowed_with_the_ids(self, tmp_path):
+        """The caller reads columns off this frame, so a row the view dropped must be gone from it too."""
+        import pipe_scripts.pipe_pool as pipe_pool
+        match = self._match(tmp_path, ["b"],
+                            [{"id": "a", "file": "a.pdb"}, {"id": "b", "file": "b.pdb"}])
+        ids, _files, df = pipe_pool._load_run_stream(match)
+        assert ids == ["b"]
+        assert df["id"].tolist() == ["b"]
+
+
+class TestIdentifiersAreTextNotNumbers:
+    """pandas reads the id 007 as 7 and the id NA as a missing value; a later str() recovers
+    neither. An altered id travels into file names, provenance, collision checks and joins."""
+
+    def test_a_numeric_looking_id_survives_the_map_read(self, tmp_path):
+        import pandas as pd
+        import pipe_scripts.pipe_pool as pipe_pool
+        path = tmp_path / "m.csv"
+        pd.DataFrame([{"id": "007", "file": "007.pdb"},
+                      {"id": "NA", "file": "NA.pdb"}]).to_csv(path, index=False)
+        match = {"name": "structures", "stream_key": "structures", "format": "pdb",
+                 "ids": [], "files": [], "map_table": str(path), "is_shared_file": False}
+        ids, files, _df = pipe_pool._load_run_stream(match)
+        assert ids == ["007", "NA"]
+        assert files == ["007.pdb", "NA.pdb"]
+
+    def test_a_table_keeps_text_ids_and_numeric_results(self, tmp_path):
+        """Only the identifier columns are coerced: a score stays the number it is."""
+        import pandas as pd
+        import pipe_scripts.pipe_pool as pipe_pool
+        path = tmp_path / "t.csv"
+        pd.DataFrame([{"id": "007", "structures.id": "0012", "score": 1.5},
+                      {"id": "NA", "structures.id": "NA", "score": 2.5}]).to_csv(path, index=False)
+        df = pipe_pool._read_ids_as_text(str(path))
+        assert df["id"].tolist() == ["007", "NA"]
+        assert df["structures.id"].tolist() == ["0012", "NA"]
+        assert df["score"].tolist() == [1.5, 2.5]

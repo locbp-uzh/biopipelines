@@ -87,7 +87,7 @@ class OpenFold3(BaseConfig):
     """
 
     TOOL_NAME = "OpenFold3"
-    TOOL_VERSION = "1.9"
+    TOOL_VERSION = "1.10"
     ENV_NAME = "openfold3"
 
     # Upstream spells its flags with underscores; the docs' option table renders them with dashes, but both worked examples use underscores.
@@ -343,6 +343,10 @@ fi
             return len(named)
         return len(self.seeds) if self.seeds else (self.num_model_seeds or 1)
 
+    def _structures_per_query(self) -> int:
+        """Structures a query is declared to yield: every sample of every seed."""
+        return (self.num_diffusion_samples or 5) * self._seeds_per_query()
+
     def _writes_full_confidence_json(self) -> bool:
         """Whether run_openfold writes the `*_confidences.json` the pae stream is copied from.
 
@@ -464,6 +468,7 @@ python "{self.postprocess_py}" \\
     --confidence-csv "{self.confidence_csv}" \\
 {pae_flags}    --local-missing-csv "{self.local_missing_csv}" \\
     --output-format "{self.output_format}" \\
+    --structures-per-query {self._structures_per_query()} \\
     --top-only "{str(self.top_only)}"
 
 """
@@ -477,8 +482,8 @@ python "{self.postprocess_py}" \\
             structure_ids = predicted_ids
         else:
             # The postprocess numbers every sample of every seed, so the count is their product.
-            samples = (self.num_diffusion_samples or 5) * self._seeds_per_query()
-            structure_ids = generate_multiplied_ids_pattern(predicted_ids, f"<1..{samples}>")
+            structure_ids = generate_multiplied_ids_pattern(
+                predicted_ids, f"<1..{self._structures_per_query()}>")
 
         structures = DataStream(
             name="structures",

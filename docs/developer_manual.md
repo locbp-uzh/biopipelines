@@ -9,7 +9,7 @@
   - [Internal Conventions](#internal-conventions)
     - [Value-Based `csv` Streams](#value-based-csv-streams)
     - [`resi-csv` Streams](#resi-csv-streams)
-    - [The Ligand Contract: compounds = chemistry, structures = coordinates](#the-ligand-contract-compounds--chemistry-structures--coordinates)
+    - [The Ligand Contract: compounds = chemistry, structures = coordinates](#the-ligand-contract-compounds-chemistry-structures-coordinates)
     - [Contract Enforcement](#contract-enforcement)
     - [Internal Tools and Input Shorthands](#internal-tools-and-input-shorthands)
 - [IDs: Configuration Time vs Execution Time](#ids-configuration-time-vs-execution-time)
@@ -25,7 +25,7 @@
   - [Renaming a Parameter: `PARAMETER_ALIASES`](#renaming-a-parameter-parameter_aliases)
   - [Forwarding Untyped Kwargs: `FORWARD_UNKNOWN_KWARGS`](#forwarding-untyped-kwargs-forward_unknown_kwargs)
   - [Declaring What a Tool Needs: `RESOURCE_REQUIREMENTS`](#declaring-what-a-tool-needs-resource_requirements)
-  - [Path Descriptors](#path-descriptors)
+  - [Path Descriptors](#path-descriptors-and-the-canonical-layout)
   - [Script Generation](#script-generation)
   - [Output Prediction](#output-prediction)
     - [File Templates with \<id\>](#file-templates-with-id)
@@ -1019,7 +1019,7 @@ Calling `generate_missing_propagation`, `upstream_missing_flag` or `_get_upstrea
 
 **What `.tables` shows.** `.tables` lists what `get_output_files()` declares. The footer's declaration lives only in `.expected_outputs.json`, so the manifest of a tool that does not own one is read from `<step output folder>/tables/missing.csv`, which exists whenever some step upstream could drop an id.
 
-**`removed_by` and `kind`.** `removed_by` is the step id `<NNN>_<Tool>` (`biopipelines_io.step_id_from_table_path`), so a chain of the same tool keeps an upstream step's rows apart from this step's own. `kind` is controlled: `filter` (a deliberate drop, excused), `failure` (the tool tried and raised) and `unmatched` (a lookup found no partner). `pipe_check_completion` excuses every row propagated from an upstream step and the `filter` rows of this step; this step's `failure` and `unmatched` rows mark it FAILED. The reason goes in `cause`. Rows stay in the upstream id space; `pipe_check_completion` maps them onto this step's output ids (products, `_<N>` multipliers, group keys) when it excuses files.
+**`removed_by` and `kind`.** `removed_by` is the step id `<NNN>_<Tool>` (`biopipelines_io.step_id_from_table_path`), so a chain of the same tool keeps an upstream step's rows apart from this step's own. `kind` is controlled: `filter` (a deliberate drop, excused), `failure` (the tool tried and raised) and `unmatched` (a lookup found no partner). `pipe_check_completion` excuses every row propagated from an upstream step and the `filter` rows of this step; this step's `failure` and `unmatched` rows are not excused. What they mark FAILED is the **declared output that is absent** — the check verifies existence, file by file. For a stream that means the step fails, which is the intent. For a table it does not: the CSV was declared, written, and exists, so a tool whose only outputs are tables stays COMPLETED while naming its failures in the manifest and leaving NaN in the rows. That is deliberate — a long-format scorer that measured most of its input did its work — but it means a step's verdict is not by itself a statement that every id succeeded. The reason goes in `cause`. Rows stay in the upstream id space; `pipe_check_completion` maps them onto this step's output ids (products, `_<N>` multipliers, group keys) when it excuses files.
 
 ### Install Scripts and the `$INSTALL_SUCCESS` Contract
 
@@ -1424,43 +1424,53 @@ if __name__ == "__main__":
 
 ### Error Handling
 
-pipe scripts should handle per-item failures gracefully: skip failures, collect partial results, and report at the end.
+A per-item failure produces three artifacts, not one. Dropping the row is the mistake the first draft of every pipe script makes: the id then vanishes from the result table with nothing anywhere saying why.
 
-**Pattern:** wrap the per-item loop body in `try/except`, accumulate failures, write whatever succeeded, and exit with an error only if everything failed.
+- **Result table** — one row per id that entered, the unavailable measurement as NaN. A table is a matrix of results, never a filter.
+- **Stream map** — only the ids whose file was actually produced. This one *is* selective.
+- **`local_missing.csv`** — why an id has no stream entity: `failure` (raised), `unmatched` (a lookup found no partner) or `filter` (this tool deliberately dropped it; the only excused kind).
+
+**Pattern:** wrap the per-item loop body in `try/except`, write all three, and exit with an error only if everything failed. `_pipe_template.py` is the executable version of this and is the better thing to copy.
 
 ```python
 def main():
     ds = load_datastream(sys.argv[1])
-    output_csv = sys.argv[2]
+    step_id = step_id_from_table_path(args.local_missing_csv)
 
-    results = []
-    failed = []
+    rows, map_rows, missing_rows = [], [], []
 
     for struct_id, struct_file in iterate_files(ds):
         try:
-            result = process(struct_file)
-            results.append({"id": struct_id, "score": result})
+            score, out_path = process(struct_file)
         except Exception as e:
             print(f"WARNING: {struct_id} failed: {e}", file=sys.stderr)
-            failed.append(struct_id)
+            rows.append({"id": struct_id, "score": None})          # the id keeps its row
+            missing_rows.append({"id": struct_id, "removed_by": step_id,
+                                 "kind": "failure", "cause": str(e)[:200]})
+            continue
+        rows.append({"id": struct_id, "score": score})
+        map_rows.append({"id": struct_id, "file": out_path})       # only what exists
 
-    # Always write partial results (even if some items failed)
-    if results:
-        pd.DataFrame(results).to_csv(output_csv, index=False)
+    pd.DataFrame(rows, columns=["id", "score"]).to_csv(args.results_csv, index=False)
+    pd.DataFrame(map_rows, columns=["id", "file"]).to_csv(args.map_csv, index=False)
+    pd.DataFrame(missing_rows, columns=["id", "removed_by", "kind", "cause"]).to_csv(
+        args.local_missing_csv, index=False)
 
-    # Report summary
-    if failed:
-        print(f"Failed {len(failed)}/{len(failed)+len(results)}: {failed}", file=sys.stderr)
-
-    # Exit with error only if ALL items failed
-    if not results:
+    if not map_rows and not rows:
+        print("ERROR: no input entities to process", file=sys.stderr)
+        sys.exit(1)
+    if len(missing_rows) == len(rows):
+        print(f"ERROR: all {len(rows)} attempted id(s) failed", file=sys.stderr)
         sys.exit(1)
 ```
 
 Key points:
-- **Always write partial results** — downstream tools can work with a subset.
-- **Print failure summary to stderr** — it appears in SLURM logs for debugging.
-- **`sys.exit(1)` only if nothing succeeded** — partial success is still useful in a pipeline.
+- **Keep every id in the result table** — NaN says "not measured", an absent row says nothing at all.
+- **Write the manifest even when it is empty** — declaring a `missing` table that nothing writes makes the step FAILED behind a filter.
+- **Print the failure to stderr** — it appears in the step log for debugging.
+- **`sys.exit(1)` only if nothing succeeded** — partial results are still useful downstream.
+
+**Partial success is not the same as a clean step.** Exiting 0 means the computation ran, not that every declared id arrived. What decides the step's verdict is the completion check: it compares the *declared* outputs against what exists, and excuses an absence only when the manifest carries a `filter` row for that id. So a tool whose outputs are files leaves a `failure` row and a FAILED step, while a tool whose only output is a table can exit 0, write NaN rows, record `failure` rows, and still be COMPLETED — the CSV it declared does exist. Read `missing.csv` before trusting a table's completeness; the step's verdict alone does not carry that meaning.
 
 ---
 
@@ -1605,7 +1615,7 @@ config_id = predict_single_output_id(
 
 ## Testing
 
-The repository ships with an automated pytest suite under `tests/` and a GitHub Actions workflow (`.github/workflows/tests.yml`) that runs it on every push/PR across Python 3.10 / 3.11 / 3.12.
+The repository ships with an automated pytest suite under `tests/` and a GitHub Actions workflow (`.github/workflows/tests.yml`) that runs it on every push/PR across Python 3.10 / 3.11 / 3.12 / 3.13.
 
 ### Testing Scope
 
@@ -1636,7 +1646,7 @@ This makes it the right tool for testing framework plumbing end-to-end:
 
 - It exercises the same code paths a real tool does: config serialization to `mock_config.json`, script emission with `generate_completion_check_header`, activation, and the runtime reading of its own config.
 - Tests can compose it arbitrarily (Mock → Mock, Mock → Panda → Mock, multi-axis `Each(a) × Each(b)` into a fan-out Mock) without any external dependency.
-- Because the runtime is deterministic and cheap (~3 s for the whole suite), provenance and ID-expansion invariants can be asserted against real materialized `<stream>_map.csv` files rather than against mocked-in-memory state.
+- Because the runtime is deterministic and cheap (a Mock step runs in a few seconds; the whole suite is minutes, not hours), provenance and ID-expansion invariants can be asserted against real materialized `<stream>_map.csv` files rather than against mocked-in-memory state.
 
 When adding a framework-level feature (a new ID pattern, a new provenance column, a new cycle pattern), prefer writing the test against Mock rather than against a real tool. Only reach for a real tool when the behavior under test is specific to that tool's payload script.
 
@@ -1689,7 +1699,7 @@ def generate_script(self):
     another_csv = os.path.join(self.output_folder, "results.csv")  # Duplicate!
 
 # GOOD
-results_csv = Path(lambda self: os.path.join(self.output_folder, "results.csv"))
+results_csv = Path(lambda self: self.table_path("results.csv"))
 
 def generate_script(self):
     # Use self.results_csv consistently
@@ -1770,7 +1780,7 @@ git push origin feature/my-tool
 
 ### Start Sessions with Context
 
-Open biopipelines folder and start with `prompt.txt` to give Claude repository context.
+Open the biopipelines folder and point the assistant at `llm/pipelines.md` to write pipelines, or `llm/development.md` to work on the framework itself.
 
 ### Use Plan Mode
 

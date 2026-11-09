@@ -43,6 +43,7 @@ from biopipelines.biopipelines_io import (  # noqa: E402
     step_id_from_table_path,
     container_argv_prefix,
 )
+from biopipelines.pdb_parser import field_chain, field_res_seq, field_i_code  # noqa: E402
 
 def main():
     p = argparse.ArgumentParser()
@@ -96,9 +97,9 @@ def main():
 
             out_path = os.path.join(args.annotated_dir, f"{sid}.txt")
             with open(out_path, "w") as f:
-                f.write(f"{sid}\t{mode}\t{n_residues}\n")
+                f.write(f"{sid}\t{residue_scope}\t{n_residues}\n")
 
-            annotated_rows.append({"id": sid, "file": out_path})   
+            annotated_rows.append({"id": sid, "file": out_path})
             counts_rows.append({"id": sid, "n_residues": n_residues})
         except Exception as e:
             print(f"WARNING: {sid} failed: {e}", file=sys.stderr)
@@ -142,7 +143,8 @@ def _count_residues(pdb_path: str) -> int:
     with open(pdb_path) as f:
         for line in f:
             if line.startswith(("ATOM", "HETATM")):
-                seen.add((line[21], line[22:27]))  # (chain, resSeq+iCode)
+                # Never slice columns by hand: a 5-character CCD code shifts every field to its right.
+                seen.add((field_chain(line), field_res_seq(line), field_i_code(line)))
     return len(seen)
 
 

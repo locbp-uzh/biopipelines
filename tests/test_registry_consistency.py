@@ -115,6 +115,14 @@ def test_index_count_matches_the_table(tools):
         f"the index says {stated} tools; {len(tools)} define a TOOL_NAME")
 
 
+def test_the_homepage_count_matches_the_index(tools):
+    """The site homepage quotes a hand-written total; it drifted to 86 once."""
+    home = _read("docs/index.md")
+    stated = int(re.search(r'\*\*(\d+) integrated tools\*\*', home).group(1))
+    assert stated == len(tools), (
+        f"docs/index.md says {stated} tools; {len(tools)} define a TOOL_NAME")
+
+
 def test_every_tool_has_a_reference_entry(tools):
     ref = _read("docs/tool_reference.md")
     missing = [n for n in sorted(tools) if n not in ref]

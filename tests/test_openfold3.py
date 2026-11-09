@@ -263,6 +263,70 @@ def test_a_query_with_no_folder_is_reported_missing(tmp_path):
     assert "lost" in (out / "x.csv").read_text()
 
 
+class TestEveryDeclaredSampleSlotIsNamed:
+    """With top_only off the declared ids are <query>_1..N, so a slot upstream never filled
+    has to appear as a failure: the bare query id names none of them, and a silent gap
+    leaves the confidence table short of the rows the contract promises."""
+
+    POSTPROCESS = os.path.join(REPO_ROOT, "pipe_scripts", "pipe_openfold3_postprocess.py")
+
+    @staticmethod
+    def _sample(pred, query, sample):
+        folder = pred / query / "seed_1"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{query}_seed_1_sample_{sample}_model.cif").write_text(f"data_{query}_{sample}\n")
+
+    def _run(self, tmp_path, queries, per_query):
+        import subprocess
+        pred = tmp_path / "pred"
+        pred.mkdir(exist_ok=True)
+        queries_json = tmp_path / "queries.json"
+        queries_json.write_text(json.dumps({"queries": {q: {} for q in queries}}))
+        out = tmp_path / "out"
+        done = subprocess.run(
+            [sys.executable, self.POSTPROCESS, "--prediction-folder", str(pred),
+             "--combinatorics-config", str(tmp_path / "none.json"),
+             "--queries-json", str(queries_json),
+             "--structures-dir", str(out / "s"), "--structures-map-csv", str(out / "m.csv"),
+             "--confidence-csv", str(out / "c.csv"), "--local-missing-csv", str(out / "x.csv"),
+             "--top-only", "False", "--structures-per-query", str(per_query)],
+            capture_output=True, text=True)
+        return out, done
+
+    def test_a_query_that_produced_fewer_samples_than_declared_names_each_id_it_owes(self, tmp_path):
+        import pandas as pd
+        self._sample(tmp_path / "pred", "q", 1)
+        out, done = self._run(tmp_path, ["q"], per_query=3)
+        assert done.returncode == 0, done.stdout + done.stderr
+        assert pd.read_csv(out / "m.csv")["id"].tolist() == ["q_1"]
+        missing = pd.read_csv(out / "x.csv")
+        assert missing["id"].tolist() == ["q_2", "q_3"]
+        assert set(missing["kind"]) == {"failure"}
+        assert "1 of 3" in missing.loc[0, "cause"]
+        assert pd.read_csv(out / "c.csv")["id"].tolist() == ["q_1", "q_2", "q_3"]
+
+    def test_a_query_that_produced_nothing_names_every_declared_sample_id(self, tmp_path):
+        import pandas as pd
+        out, done = self._run(tmp_path, ["q"], per_query=2)
+        assert done.returncode == 1
+        missing = pd.read_csv(out / "x.csv")
+        assert missing["id"].tolist() == ["q_1", "q_2"]
+        assert set(missing["kind"]) == {"failure"}
+
+    def test_the_declared_count_and_the_flag_come_from_one_helper(self, local_config, isolated_cwd):
+        """The ids the wrapper declares and the number the postprocess is told must not drift apart."""
+        from biopipelines.mock import Mock
+        from biopipelines.pipeline import Pipeline
+        with Pipeline(project="TestSuite", job="of3", description="x", on_the_fly=False,
+                      local_output=True, config="local") as pipeline:
+            seqs = Mock(ids=["p"], streams={"sequences": {"format": "csv", "file": "<id>.csv"}})
+            OpenFold3(proteins=seqs.streams.sequences, top_only=False,
+                      num_diffusion_samples=3, seeds=[1, 2])
+            tool = pipeline.tools[-1]
+        assert tool._structures_per_query() == 6
+        assert "--structures-per-query 6" in tool._generate_postprocess_section()
+
+
 def test_an_iterating_axis_with_no_records_builds_no_query_instead_of_crashing():
     elements = {"proteins": {"mode": "each", "entity_type": "protein", "iterated": [],
                              "static": [], "static_first": False}}

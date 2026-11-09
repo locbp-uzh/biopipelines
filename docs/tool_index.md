@@ -38,7 +38,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 26 | Gnina | Structure Prediction & Docking | 2.13 | `biopipelines/gnina.py` |
 | 27 | Vina | Structure Prediction & Docking | 2.13 | `biopipelines/gnina.py` |
 | 28 | NeuralPLexer | Structure Prediction & Docking | 2.5 | `biopipelines/neuralplexer.py` |
-| 29 | OpenFold3 | Structure Prediction & Docking | 1.9 | `biopipelines/openfold3.py` |
+| 29 | OpenFold3 | Structure Prediction & Docking | 1.10 | `biopipelines/openfold3.py` |
 | 30 | PLACER | Structure Prediction & Docking | 2.5 | `biopipelines/placer.py` |
 | 31 | Protenix | Structure Prediction & Docking | 1.9 | `biopipelines/protenix.py` |
 | 32 | ADMETAI | Analysis                       | 2.0 | `biopipelines/admet_ai.py` |
@@ -70,7 +70,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 58 | PLM_Sol | Analysis | 2.2 | `biopipelines/plm_sol.py` |
 | 59 | PoseBusters | Analysis                       | 2.4 | `biopipelines/posebusters.py` |
 | 60 | PoseChange                | Analysis                       | 1.1 | `biopipelines/pose_change.py` |
-| 61 | Peppr                     | Analysis | 1.4 | `biopipelines/peppr.py` |
+| 61 | Peppr                     | Analysis | 1.5 | `biopipelines/peppr.py` |
 | 62 | Prodigy | Analysis                       | 2.0 | `biopipelines/prodigy.py` |
 | 63 | ProLIF | Analysis                       | 2.3 | `biopipelines/prolif.py` |
 | 64 | Reduce | Analysis                       | 2.0 | `biopipelines/reduce.py` |
@@ -94,7 +94,7 @@ and the 2 base-class scaffolding entries (`base`, `install`) are excluded.
 | 82 | SequenceMetricCorrelation | Sequence Statistics            | 1.0 | `biopipelines/sequence_metric_correlation.py` |
 | 83 | ExtractMetrics            | Data Management                | 1.1 | `biopipelines/extract_metrics.py` |
 | 84 | Panda                     | Data Management                | 1.10 | `biopipelines/panda.py` |
-| 85 | Pool                      | Data Management | 1.7 | `biopipelines/pool.py` |
+| 85 | Pool                      | Data Management | 1.8 | `biopipelines/pool.py` |
 | 86 | ReMap | Data Management                | 1.2 | `biopipelines/remap.py` |
 | 87 | Selection                 | Data Management                | 1.2 | `biopipelines/selection.py` |
 | 88 | SelectionTransfer | Data Management | 1.2 | `biopipelines/selection_transfer.py` |

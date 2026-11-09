@@ -162,6 +162,52 @@ def test_a_sibling_reference_is_not_a_match(pipe):
     assert pairing == {"d_1": "d_1", "d_2": None}
 
 
+def test_a_renamed_pose_finds_its_reference_through_the_provenance_column(pipe, tmp_path):
+    """Panda renames design_A to pose_1; no string relationship survives, so only the
+    poses' map_table can say which reference the pose derives from."""
+    poses_map = tmp_path / "structures_map.csv"
+    poses_map.write_text("id,file,structures.id\n"
+                         "pose_1,pose_1.pdb,design_A\n"
+                         "pose_2,pose_2.pdb,design_B\n")
+    references = {"design_A": "a.pdb", "design_B": "b.pdb"}
+
+    blind = pipe.pair_references(["pose_1", "pose_2"], references, n_declared=2)
+    assert blind == {"pose_1": None, "pose_2": None}, "without the map there is nothing to match on"
+
+    seeing = pipe.pair_references(["pose_1", "pose_2"], references, n_declared=2,
+                                  map_table_paths=[str(poses_map)])
+    assert seeing == {"pose_1": "design_A", "pose_2": "design_B"}
+
+
+def test_the_provenance_tier_does_not_resurrect_a_sibling_match(pipe, tmp_path):
+    """Adding the map must not loosen the sibling refusal: a common ancestor is still not a match."""
+    poses_map = tmp_path / "structures_map.csv"
+    poses_map.write_text("id,file,structures.id\n"
+                         "d_1,d_1.pdb,d_1\n"
+                         "d_2,d_2.pdb,d_2\n")
+    pairing = pipe.pair_references(["d_1", "d_2"], {"d_1": "1.pdb"}, n_declared=2,
+                                   map_table_paths=[str(poses_map)])
+    assert pairing == {"d_1": "d_1", "d_2": None}
+
+
+def test_score_all_hands_the_map_down_to_the_pairing(pipe, tmp_path):
+    """score_all is the only caller in the pipe, so a map it drops is a map nobody uses."""
+    poses_map = tmp_path / "structures_map.csv"
+    poses_map.write_text("id,file,structures.id\npose_1,pose_1.pdb,design_A\n")
+    seen = {}
+
+    def evaluate(sid, reference_path, pose_path, keys):
+        seen[sid] = reference_path
+        return {key: 1.0 for key in keys}
+
+    rows, missing = pipe.score_all({"pose_1": "p.pdb"}, {"design_A": "a.pdb", "design_B": "b.pdb"},
+                                   2, ["rmsd"], "003_Peppr", evaluate,
+                                   map_table_paths=[str(poses_map)])
+    assert seen == {"pose_1": "a.pdb"}
+    assert missing == []
+    assert rows[0]["rmsd"] == 1.0
+
+
 # -- one row per id, NaN for what could not be evaluated ----------------------
 
 def _fake(outcomes):
