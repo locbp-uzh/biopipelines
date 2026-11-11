@@ -222,13 +222,9 @@ def _gather_shared_stream(stream_key: str, runs_streams: list, out_spec: dict,
     print(f"  Wrote shared stream '{stream_key}' map: {out_map} ({len(out_df)} rows -> {dest})")
 
 
-def _id_columns(path: str) -> List[str]:
-    """Identifier columns of a CSV: `id`, `original.id` and every `<stream>.id` provenance column."""
-    try:
-        header = pd.read_csv(path, nrows=0).columns
-    except Exception:
-        return []
-    return [c for c in header if c == "id" or c == "original.id" or c.endswith(".id")]
+def _id_columns(columns) -> List[str]:
+    """Identifier columns: `id`, `original.id` and every `<stream>.id` provenance column."""
+    return [c for c in columns if c == "id" or c == "original.id" or c.endswith(".id")]
 
 
 def _read_ids_as_text(path: str, **kwargs):
@@ -237,9 +233,21 @@ def _read_ids_as_text(path: str, **kwargs):
     Left to its own inference pandas turns the id `007` into 7 and the id `NA` into a
     missing value, and a later ``str()`` cannot undo either. Only the identifier columns
     are coerced, so a result column stays the number it is.
+
+    They are re-read rather than handed a ``str`` converter: whether a converter sees the
+    cell before or after pandas decides it means "missing" has changed between pandas
+    versions, so on one of them `NA` arrives at the converter already nulled and comes
+    back as the text `nan`. ``dtype=str`` with ``keep_default_na=False`` asks for no
+    interpretation at all, which every version spells the same way. A blank cell is then
+    the empty string rather than NaN; the readers of these columns test for both.
     """
-    converters = {c: str for c in _id_columns(path)}
-    return pd.read_csv(path, converters=converters, **kwargs)
+    df = pd.read_csv(path, **kwargs)
+    id_columns = _id_columns(df.columns)
+    if id_columns:
+        text = pd.read_csv(path, usecols=id_columns, dtype=str, keep_default_na=False, **kwargs)
+        for column in id_columns:
+            df[column] = text[column]
+    return df
 
 
 def _load_run_stream(match: dict):

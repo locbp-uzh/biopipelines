@@ -334,8 +334,9 @@ def test_heavy_atom_coordinates_come_from_the_structure_not_from_rdkit(pipe, tmp
     pytest.importorskip("rdkit")
     lines = embedded_ligand("CC(=O)O")
     _, hetatm = pipe.prepare_ligand(lines, "LIG", "B", "CC(=O)O", 7.4, str(tmp_path))
-    original = [(float(l[30:38]), float(l[38:46]), float(l[46:54])) for l in lines]
-    written = [(float(l[30:38]), float(l[38:46]), float(l[46:54])) for l in hetatm[:4]]
+    # Flat, because pytest.approx refuses a list of tuples.
+    original = [float(l[c:c + 8]) for l in lines for c in (30, 38, 46)]
+    written = [float(l[c:c + 8]) for l in hetatm[:4] for c in (30, 38, 46)]
     assert written == pytest.approx(original, abs=1e-3)
 
 

@@ -1014,6 +1014,17 @@ class TestIdentifiersAreTextNotNumbers:
         assert ids == ["007", "NA"]
         assert files == ["007.pdb", "NA.pdb"]
 
+    def test_a_blank_identifier_cell_reads_back_blank_and_not_the_word_nan(self, tmp_path):
+        """A failed id leaves a blank provenance cell. Asking pandas for a `str` conversion
+        instead of asking it not to interpret turns that blank into the text `nan`, an id
+        that names nothing, and the suffixing downstream then writes `nan_1`."""
+        import pipe_scripts.pipe_pool as pipe_pool
+        path = tmp_path / "t.csv"
+        path.write_text("id,structures.id,score\na,,1.5\n")
+        df = pipe_pool._read_ids_as_text(str(path))
+        assert df.loc[0, "structures.id"] == ""
+        assert df.loc[0, "structures.id"] != "nan"
+
     def test_a_table_keeps_text_ids_and_numeric_results(self, tmp_path):
         """Only the identifier columns are coerced: a score stays the number it is."""
         import pandas as pd

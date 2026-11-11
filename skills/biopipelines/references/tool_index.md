@@ -67,7 +67,7 @@ Each line ends with the tool's tags — a closed 39-term vocabulary in four face
 
 - **ExtractMetrics** v1.1 · CPU · x86-64, aarch64, Colab — Creates separate CSV files per metric for statistical software (GraphPad Prism). `docs/tool/data_management.md#extractmetrics` · tags: data
 - **Panda** v1.10 · CPU · x86-64, aarch64, Colab — Unified pandas-style table transformations. `docs/tool/data_management.md#panda` · tags: data
-- **Pool** v1.8 · CPU · x86-64, aarch64, Colab — Gathers N StandardizedOutputs from parallel runs of the same upstream tool into one combined StandardizedOutput. `docs/tool/data_management.md#pool` · tags: data
+- **Pool** v1.9 · CPU · x86-64, aarch64, Colab — Gathers N StandardizedOutputs from parallel runs of the same upstream tool into one combined StandardizedOutput. `docs/tool/data_management.md#pool` · tags: data
 - **ReMap** v1.2 · CPU · x86-64, aarch64, Colab — Renames IDs across all streams and tables from a source tool output. `docs/tool/data_management.md#remap` · tags: data
 - **Selection** v1.2 · CPU · x86-64, aarch64 — Combines and modifies PyMOL-formatted selection strings using composable operations applied left-to-right. `docs/tool/data_management.md#selection` · tags: data, residues
 - **SelectionTransfer** v1.2 · CPU · x86-64 — Carries a residue selection from the structures it is numbered on onto structures from a later stage of the pipeline — after trimming, extending, shif `docs/tool/data_management.md#selectiontransfer` · tags: data, residues, protein

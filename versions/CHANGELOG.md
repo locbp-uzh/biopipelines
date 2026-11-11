@@ -18,6 +18,8 @@ The pre-commit hook (`versions/check_tool_edits.py`) refuses any commit that mod
 
 ### Tools
 
+- **Pool** 1.8 → 1.9. Identifier columns are re-read with `dtype=str` and `keep_default_na=False` instead of being handed a `str` converter. Whether a converter is called on a cell pandas has already judged missing differs between environments: where it is not, the id `NA` arrived as a null and the explicit `str()` downstream wrote it back as the text `nan`, an id that names nothing and that the suffixing would then turn into `nan_1` — the same corruption 1.6 had to repair once. Asking pandas not to interpret at all is the form every version spells the same way, and the one the rest of the repository already uses. Result columns keep their numbers, because only the identifier columns are re-read. A blank cell now reads back as the empty string rather than NaN; the readers of these columns already test for both, and a regression pins it.
+
 ## [1.6.0] — 2026-11-09
 
 ### Version changes
